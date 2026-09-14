@@ -121,6 +121,10 @@
   var btnSettingsClose = document.getElementById("grid-btn-settings-close");
   var settingsPanel = document.getElementById("grid-settings-panel");
   var btnResetTips = document.getElementById("grid-btn-reset-tips");
+  var btnStats = document.getElementById("grid-btn-stats");
+  var btnStatsClose = document.getElementById("grid-btn-stats-close");
+  var statsPanelEl = document.getElementById("grid-stats-panel");
+  var statsPanelBodyEl = document.getElementById("grid-stats-panel-body");
   var stepsSlider = document.getElementById("steps-slider");
   var stepsReadout = document.getElementById("steps-readout");
   var stepsHint = document.getElementById("steps-hint");
@@ -978,10 +982,13 @@
   // hueRangeMaxValue (the hover panel's own color formula) and for
   // superlative-finding's neighbor-distance metric (a genuinely circular
   // quantity needs a wraparound-aware distance, not a plain difference).
-  var isCircularOutput = (function () {
+  // Named rather than an inline IIFE so setScene() can re-run it for a
+  // scene arriving after boot (same reason as adoptSceneDuration above).
+  function computeIsCircularOutput() {
     var prop = scene.output.property;
     return prop === "angle" || ((prop === "x" || prop === "y") && scene.edgeMode === "wrap");
-  })();
+  }
+  var isCircularOutput = computeIsCircularOutput();
   var hueRangeMaxValue = isCircularOutput ? 360 : 300;
   quadBuffer = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
@@ -1086,7 +1093,11 @@
   // it also invalidates every partially-accumulated refinement level, since
   // those are samples of the OLD view and blending them into the new one
   // would composite two different pictures together.
-  function markDirty() { dirty = true; resetProgressive(); scheduleColorSpreadCheck(); }
+  // statsOnViewChanged is the third thing that means: a view change
+  // invalidates the rendered image, every partially-accumulated refinement
+  // level, and every Global Stats number - all three are measurements of
+  // the OLD view.
+  function markDirty() { dirty = true; resetProgressive(); scheduleColorSpreadCheck(); statsOnViewChanged(); }
 
   // ---- Choosing a precision ----
   //
@@ -1279,9 +1290,7 @@
   // the raw bounce count itself - which is exactly what findBounceMax needs
   // to work out what the divisor should be. Every other caller wants the
   // normalized t the grid is actually showing, so it leaves this off.
-  function sampleValueGrid(w, h, rawBounces) {
-    var sampler = samplerFor(getPass(pickPrecision()) || basePass);
-    if (!sampler) return null;
+  function createSampleTarget(w, h) {
     var texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, texture);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, w, h, 0, gl.RGBA, gl.FLOAT, null);
@@ -1290,11 +1299,35 @@
     var fbo = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return { texture: texture, fbo: fbo, width: w, height: h };
+  }
 
+  // Shades rows [rowStart, rowStart + rowCount) of a sample target and
+  // returns how many it actually drew.
+  //
+  // Split out of sampleValueGrid so Global Stats can fill a much larger
+  // target across several idle slices instead of in one call - the same
+  // reason (and the same scissor-a-band technique) the refinement ladder
+  // bands its own draws: one draw covering tens of thousands of full
+  // simulations is exactly the kind of long single dispatch that janks a
+  // frame, and on an unlucky machine trips the GPU watchdog.
+  //
+  // Leaves the viewport, framebuffer, scissor and bound program exactly as
+  // it found them, because unlike the ladder's own banding this can run
+  // BETWEEN two of the ladder's frames.
+  function drawSampleRows(target, rowStart, rowCount, rawBounces) {
+    var sampler = samplerFor(getPass(pickPrecision()) || basePass);
+    if (!sampler) return 0;
+    rowCount = Math.min(rowCount, target.height - rowStart);
+    if (rowCount <= 0) return 0;
     var prevViewport = gl.getParameter(gl.VIEWPORT);
-    gl.viewport(0, 0, w, h);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
+    gl.viewport(0, 0, target.width, target.height);
+    gl.enable(gl.SCISSOR_TEST);
+    gl.scissor(0, rowStart, target.width, rowCount);
     gl.useProgram(sampler.program);
-    gl.uniform2f(sampler.uniforms.resolution, w, h);
+    gl.uniform2f(sampler.uniforms.resolution, target.width, target.height);
     // The identity sub-lattice: this sampler renders the whole view into
     // its own w×h target, so "full-res grid" here just means that target.
     gl.uniform1f(sampler.uniforms.gridStride, 1);
@@ -1305,17 +1338,34 @@
     gl.uniform1f(sampler.uniforms.bounceMax, rawBounces ? 1 : bounceMaxValue);
     bindQuad(sampler.posLoc);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
-
-    var values = new Float32Array(w * h * 4);
-    gl.readPixels(0, 0, w, h, gl.RGBA, gl.FLOAT, values);
-
+    gl.disable(gl.SCISSOR_TEST);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(prevViewport[0], prevViewport[1], prevViewport[2], prevViewport[3]);
     useCurrentPass(); // render() assumes its own program/attribute state is already bound
-    gl.deleteFramebuffer(fbo);
-    gl.deleteTexture(texture);
+    return rowCount;
+  }
 
-    return { width: w, height: h, values: values };
+  function readSampleTarget(target) {
+    var values = new Float32Array(target.width * target.height * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
+    gl.readPixels(0, 0, target.width, target.height, gl.RGBA, gl.FLOAT, values);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return { width: target.width, height: target.height, values: values };
+  }
+
+  function freeSampleTarget(target) {
+    if (!target) return;
+    gl.deleteFramebuffer(target.fbo);
+    gl.deleteTexture(target.texture);
+  }
+
+  function sampleValueGrid(w, h, rawBounces) {
+    if (!samplerFor(getPass(pickPrecision()) || basePass)) return null;
+    var target = createSampleTarget(w, h);
+    drawSampleRows(target, 0, h, rawBounces);
+    var grid = readSampleTarget(target);
+    freeSampleTarget(target);
+    return grid;
   }
 
   // ---- Superlatives: find the largest/smallest/rarest/sharpest-edge point
@@ -3139,6 +3189,11 @@
     progressive.sublattice = 1; // so presentFrame shows the accumulator, not a preview
     presentFrame();
     updateResolutionBoundsUI();
+    // The one moment the view is genuinely finished - full resolution (or
+    // whatever the resolution slider stops at) AND every antialiasing
+    // sample averaged in. Global Stats waits for exactly this and then a
+    // further beat on top, being the lowest-priority work on the page.
+    statsOnRenderSettled();
   }
 
   // The canvas backing store is now always the full device-pixel
@@ -4844,6 +4899,522 @@
     if (inspectedGroups.length > 0) { beginInspectOnlySession(); } else { showHoverEmpty(); }
   });
 
+  // ---- Global Stats ----
+  //
+  // The card under the gear button measures the fractal CURRENTLY ON
+  // SCREEN: not the scene, not the whole fractal, just whichever rectangle
+  // of it the view is framing right now. Every number in it therefore stops
+  // being true the moment the user pans or zooms, which shapes everything
+  // below.
+  //
+  // Three rules, all of them the user's own: nothing is measured unless the
+  // card is open AND that section's switch is on; every section starts off;
+  // and the whole thing is the lowest-priority work on the page. The last
+  // one is why this never runs on the render path. It waits for the
+  // refinement ladder (and its antialiasing pass) to finish completely,
+  // waits a further beat on top of that, and only then works through the
+  // measurement in requestIdleCallback slices - the GPU sampling banded
+  // against the same adaptive pixel budget the ladder uses, and the
+  // arithmetic split into steps by fractal-stats.js. Any view change at all
+  // abandons whatever is in flight, mid-slice, and the card dims to say the
+  // numbers on it are about somewhere else now.
+  //
+  // What gets measured is a re-render of the view into an offscreen float
+  // target (the same drawSampleRows the superlative buttons use), NOT a
+  // readback of the canvas. The canvas is 8-bit colour that has already
+  // been through a hue ramp; turning that back into values would be lossy
+  // where the ramp is steep, ambiguous under Color Zoom's repeats, and
+  // wrong wherever antialiasing averaged two hues into a third that no
+  // pixel actually holds. Sampling t directly avoids all three.
+
+  // The long side of the sample block. Bigger than the superlative buttons'
+  // 200 (this is a whole-view analysis, and the spectrum in particular
+  // wants resolution) but far below the canvas's own pixel count: at 16:9
+  // this is ~37k simulations against a full-res frame's several million, so
+  // one measurement costs a fraction of one rendered frame.
+  var STATS_SAMPLE_LONG_SIDE = 256;
+  // How long after the ladder settles before measuring. Long enough that a
+  // pan which pauses briefly and resumes never triggers a run at all.
+  var STATS_SETTLE_DELAY_MS = 400;
+  // requestIdleCallback's own deadline. Reached, it fires anyway on a busy
+  // page - which is handled by doing a single step in that case (see
+  // runStatsSlice) rather than a whole slice, so progress continues without
+  // competing with whatever is keeping the page busy.
+  var STATS_IDLE_TIMEOUT_MS = 2000;
+  // One degree per bin, as asked - the rose smooths for display but the
+  // reported peak direction comes from these.
+  var STATS_ORIENTATION_BINS = 180;
+  var STATS_HISTOGRAM_BUCKETS = 96;
+
+  var statsPanel = null;        // the FractalStatsPanel instance, once built
+  var statsOpen = false;
+  var statsRun = null;          // the measurement in flight, if any
+  // Bumped by every view change. A slice belonging to an older generation
+  // is measuring a view that no longer exists and stops immediately - which
+  // is what makes abandoning a run mid-slice safe without any other state.
+  var statsGeneration = 0;
+  var statsSliceHandle = null;
+  var statsSettleTimer = null;
+  var statsHasResult = false;
+  // Whether that result describes the view currently on screen, as opposed
+  // to one the user has since panned away from.
+  var statsResultIsCurrent = false;
+  // The "here is what was measured" line, kept so a switch moved after the
+  // fact can restore it rather than leaving the card reading "measuring…"
+  // when nothing is being measured.
+  var statsLastStatus = "";
+  // Remembered rather than read from statsRun: the panel re-renders its
+  // sections (a chart redraw, the histogram's own log/linear switch) long
+  // after the run that produced them has been torn down, and those renders
+  // still have to turn a sample's column/row back into world coordinates.
+  var statsLastWidth = 1, statsLastHeight = 1;
+
+  var hasIdleCallback = typeof window.requestIdleCallback === "function";
+  function requestStatsSlice(fn) {
+    if (hasIdleCallback) return window.requestIdleCallback(fn, { timeout: STATS_IDLE_TIMEOUT_MS });
+    // Safari before 16.4 has no idle callback at all. A plain timeout on a
+    // frame-ish cadence is the honest fallback: it can't know whether the
+    // page is busy, so each slice is kept short instead.
+    return setTimeout(function () { fn(null); }, 32);
+  }
+  function cancelStatsSlice(handle) {
+    if (handle === null) return;
+    if (hasIdleCallback) window.cancelIdleCallback(handle);
+    else clearTimeout(handle);
+  }
+
+  function outputPropertyLabel() {
+    var prop = scene.output.property;
+    if (prop === "x") return "Center X";
+    if (prop === "y") return "Center Y";
+    if (prop === "angle") return "Rotation";
+    if (prop === "distance") return "Distance Apart";
+    if (prop === "lifespan") return "Scene lifespan";
+    if (prop === "bounces") return "Bounce Count";
+    return prop;
+  }
+
+  // How many Output units one whole unit of t is worth. Exact for every
+  // property whose t is a plain division; for Infinite Space (where t comes
+  // out of a sigmoid) it is the frame dimension, which is the right scale
+  // but not a constant ratio - the one place this is used says so.
+  function statsValueSpan() {
+    return isBouncesOutput ? bounceMaxValue : currentOutputRangeMax();
+  }
+
+  // The inverse of outputColorT: a sampled t back into the Output's own
+  // units. Every branch mirrors one of that function's, in the same order.
+  function statsValueForT(t) {
+    if (isBouncesOutput) return t * bounceMaxValue;
+    var rangeMax = currentOutputRangeMax();
+    if (scene.output.property === "lifespan") return t * rangeMax;
+    if (isInfinitePositionOutput) {
+      // frameSigmoid's own inverse. Clamped off both ends first: the
+      // sigmoid only reaches 0 and 1 at infinity, so a t that has rounded
+      // onto either would come back as one.
+      var clamped = Math.min(1 - 1e-6, Math.max(1e-6, t));
+      return rangeMax * (0.5 - Math.log(1 / clamped - 1) / PhysicsEngine.OUTPUT_SIGMOID_STEEPNESS);
+    }
+    return t * rangeMax;
+  }
+
+  function statsFormatValue(v) {
+    if (v === null || v === undefined || !isFinite(v)) return "-";
+    var prop = scene.output.property;
+    // Rotation is stored in radians and read in degrees everywhere a human
+    // sees it, same as the editor's own rotation readouts.
+    if (prop === "angle") return (v * 180 / Math.PI).toFixed(1) + "°";
+    if (prop === "lifespan") return Math.round(v).toLocaleString() + " steps";
+    if (prop === "bounces") return (Math.round(v * 10) / 10).toLocaleString() + " bounces";
+    var a = Math.abs(v);
+    if (a !== 0 && (a < 1e-3 || a >= 1e6)) return v.toExponential(2);
+    return (Math.round(v * 100) / 100).toLocaleString();
+  }
+
+  // ---- Finding the input seam, cheaply ----
+  //
+  // See inputStateCrossesSeam: whatever body property X/Y Input is linked
+  // to gets settled back into the frame before the simulation starts, and
+  // that settle is a sawtooth in world coordinates. Its reset points are
+  // false edges - perfectly straight ones - which would otherwise put a
+  // spurious spike into the orientation rose at exactly 0 and 90 degrees,
+  // inflate every roughness number, and add a phantom peak to the spectrum.
+  //
+  // The superlative buttons handle this by computing the starting scene for
+  // every sample and comparing neighbours, which at their sample count is
+  // affordable and at this one is not. It doesn't need to be: the X input
+  // offsets its target by worldX alone and the Y input by worldY alone, so
+  // every seam is a line of CONSTANT world X or constant world Y. Scanning
+  // one row and one column therefore finds all of them, for W + H starting
+  // scenes instead of W * H.
+  function createSeamScan(width, height) {
+    var grid = { width: width, height: height };
+    return {
+      cols: new Uint8Array(Math.max(0, width - 1)),
+      rows: new Uint8Array(Math.max(0, height - 1)),
+      // Nothing is settled into the frame under Infinite Space, so there is
+      // no seam to find and the whole scan is skipped.
+      needed: PhysicsEngine.wrapsAtEdges(scene),
+      axis: 0,      // 0 = scanning columns, 1 = scanning rows, 2 = finished
+      index: 0,
+      prev: null,
+      total: width + height,
+      done: 0,
+      step: function (count) {
+        if (!this.needed) { this.axis = 2; return true; }
+        while (count-- > 0) {
+          if (this.axis === 0) {
+            if (this.index >= width) { this.axis = 1; this.index = 0; this.prev = null; continue; }
+            // The middle row and middle column: any row would do, and the
+            // middle one is furthest from whatever the view's own edges
+            // happen to be doing.
+            var wc = sampleCoordToWorld(grid, this.index, (height / 2) | 0);
+            var sc = initialStateAt(wc.x, wc.y);
+            if (this.index > 0 && inputStateCrossesSeam(this.prev, sc)) this.cols[this.index - 1] = 1;
+            this.prev = sc;
+            this.index++;
+            this.done++;
+          } else if (this.axis === 1) {
+            if (this.index >= height) { this.axis = 2; return true; }
+            var wr = sampleCoordToWorld(grid, (width / 2) | 0, this.index);
+            var sr = initialStateAt(wr.x, wr.y);
+            if (this.index > 0 && inputStateCrossesSeam(this.prev, sr)) this.rows[this.index - 1] = 1;
+            this.prev = sr;
+            this.index++;
+            this.done++;
+          } else {
+            return true;
+          }
+        }
+        return this.axis === 2;
+      },
+    };
+  }
+
+  function statsWantsWork() {
+    return statsOpen && statsPanel !== null && statsPanel.anyEnabled();
+  }
+
+  // Whether the measurement currently in flight will produce every section
+  // that is switched on right now.
+  function statsRunCoversEnabled() {
+    if (!statsRun) return false;
+    var wanted = statsPanel.enabledGroups();
+    for (var key in wanted) {
+      if (Object.prototype.hasOwnProperty.call(wanted, key) && !statsRun.groups[key]) return false;
+    }
+    return true;
+  }
+
+  function abandonStatsRun() {
+    cancelStatsSlice(statsSliceHandle);
+    statsSliceHandle = null;
+    if (statsSettleTimer) { clearTimeout(statsSettleTimer); statsSettleTimer = null; }
+    if (statsRun) { freeSampleTarget(statsRun.target); statsRun = null; }
+  }
+
+  // Called from markDirty, i.e. from every pan tick, every zoom, every
+  // resize and every settings change that invalidates the picture - so it
+  // stays cheap and does nothing at all while the card is closed.
+  function statsOnViewChanged() {
+    if (!statsPanel) return;
+    statsGeneration++;
+    statsResultIsCurrent = false;
+    abandonStatsRun();
+    if (!statsWantsWork()) return;
+    // Only dim what is actually stale: before the first measurement there
+    // is nothing on the card but its own explanations, and dimming those
+    // reads as the panel being disabled.
+    if (statsHasResult) statsPanel.markStale();
+    statsPanel.setStatus(statsHasResult
+      ? "The view moved - these numbers describe the previous one. Re-measuring once the fractal has finished rendering."
+      : "Waiting for the fractal to finish rendering.", "stale");
+  }
+
+  // Called from finishRun - the one place that knows the ladder has reached
+  // the end of its resolution range AND finished averaging its antialiasing
+  // samples, which together is the whole of "the view is done."
+  function statsOnRenderSettled() {
+    if (!statsWantsWork() || statsRun) return;
+    if (statsSettleTimer) clearTimeout(statsSettleTimer);
+    statsSettleTimer = setTimeout(function () {
+      statsSettleTimer = null;
+      beginStatsRun();
+    }, STATS_SETTLE_DELAY_MS);
+  }
+
+  function beginStatsRun() {
+    if (!statsWantsWork() || statsRun) return;
+    // The settle delay is long enough that the view can have moved again
+    // while it ran; starting anyway would measure one view and label it
+    // with another's.
+    if (dirty || !progressive.complete) return;
+    if (!samplerFor(getPass(pickPrecision()) || basePass)) {
+      statsPanel.setStatus("This browser can't read floating-point values back from the GPU, so Global Stats can't measure anything here.", "stale");
+      return;
+    }
+    // Matched to the view's aspect ratio, exactly as runSuperlative does,
+    // so the sampled rectangle is the one on screen rather than a stretched
+    // version of it - which matters far more here, where whole sections are
+    // about direction and scale.
+    var aspect = canvasArea.clientHeight > 0 ? canvasArea.clientWidth / canvasArea.clientHeight : 1;
+    var w = aspect >= 1 ? STATS_SAMPLE_LONG_SIDE : Math.max(8, Math.round(STATS_SAMPLE_LONG_SIDE * aspect));
+    var h = aspect >= 1 ? Math.max(8, Math.round(STATS_SAMPLE_LONG_SIDE / aspect)) : STATS_SAMPLE_LONG_SIDE;
+
+    statsRun = {
+      generation: statsGeneration,
+      width: w,
+      height: h,
+      target: createSampleTarget(w, h),
+      row: 0,
+      phase: "sample",
+      groups: statsPanel.enabledGroups(),
+      seam: null,
+      job: null,
+    };
+    statsPanel.setStatus("Measuring the view on screen…", "working");
+    scheduleStatsSlice();
+  }
+
+  function scheduleStatsSlice() {
+    if (!statsRun) return;
+    statsSliceHandle = requestStatsSlice(function (deadline) {
+      statsSliceHandle = null;
+      runStatsSlice(deadline);
+    });
+  }
+
+  function runStatsSlice(deadline) {
+    var run = statsRun;
+    if (!run) return;
+    // The generation check is the only thing standing between a run and the
+    // view it was started for; `dirty` catches a change that arrived after
+    // the last markDirty was already accounted for.
+    if (run.generation !== statsGeneration || dirty) { abandonStatsRun(); return; }
+
+    // A timed-out idle callback means the page is NOT idle - the browser
+    // fired this only because the deadline elapsed. Do the smallest useful
+    // amount and come back rather than taking a full slice out of whatever
+    // is keeping it busy.
+    var pressed = !!(deadline && deadline.didTimeout);
+    var sliceStart = performance.now();
+    function hasTimeLeft() {
+      if (pressed) return false;
+      if (deadline && deadline.timeRemaining) return deadline.timeRemaining() > 3;
+      return performance.now() - sliceStart < 6;
+    }
+
+    if (run.phase === "sample") {
+      // Banded against the refinement ladder's own adaptive budget, which
+      // is already a measurement of how many simulated pixels this machine
+      // fits in one refresh period - exactly the question being asked here.
+      // One band per slice, so the GPU gets a frame to actually run it
+      // before the next is queued (a CPU-time budget would be no use: the
+      // draw call returns long before the work behind it does).
+      var rows = drawSampleRows(run.target, run.row, Math.max(1, Math.floor(pixelBudget / run.width)), false);
+      run.row += rows;
+      // Nothing drawn on the very first band means the sampler went away
+      // between beginStatsRun's check and here (a precision switch dropping
+      // its program, say). Reading the target back now would analyse an
+      // untouched texture - all zeros - and present it as a measurement.
+      if (rows === 0 && run.row === 0) {
+        abandonStatsRun();
+        statsPanel.setStatus("Couldn't sample the view - nothing measured.", "stale");
+        return;
+      }
+      if (rows === 0 || run.row >= run.height) {
+        var sampled = readSampleTarget(run.target);
+        freeSampleTarget(run.target);
+        run.target = null;
+        run.t = new Float32Array(run.width * run.height);
+        for (var i = 0; i < run.t.length; i++) run.t[i] = sampled.values[i * 4];
+        run.seam = createSeamScan(run.width, run.height);
+        run.phase = "seams";
+      } else {
+        statsPanel.setStatus("Measuring the view on screen… sampling " +
+          Math.round(100 * run.row / run.height) + "%", "working");
+        scheduleStatsSlice();
+        return;
+      }
+    }
+
+    if (run.phase === "seams") {
+      // Each starting scene is a full cloneScene plus the hinge-preserving
+      // edits, so this is the one genuinely CPU-heavy stretch - hence a
+      // handful at a time against the real deadline.
+      while (!run.seam.step(pressed ? 1 : 8) && hasTimeLeft()) { /* keep going while the slice lasts */ }
+      if (run.seam.axis !== 2) {
+        statsPanel.setStatus("Measuring the view on screen… mapping input seams " +
+          Math.round(100 * run.seam.done / run.seam.total) + "%", "working");
+        scheduleStatsSlice();
+        return;
+      }
+      run.job = FractalStats.createJob({
+        width: run.width,
+        height: run.height,
+        t: run.t,
+        circular: isCircularOutput,
+        groups: run.groups,
+        colSeam: run.seam.needed ? run.seam.cols : null,
+        rowSeam: run.seam.needed ? run.seam.rows : null,
+        histogramBuckets: STATS_HISTOGRAM_BUCKETS,
+        orientationBins: STATS_ORIENTATION_BINS,
+      });
+      run.phase = "analyze";
+    }
+
+    if (run.phase === "analyze") {
+      var more = true;
+      do { more = run.job.step(); } while (more && hasTimeLeft());
+      if (more) {
+        statsPanel.setStatus("Measuring the view on screen… analysing " +
+          Math.round(100 * run.job.doneSteps / run.job.totalSteps) + "%", "working");
+        scheduleStatsSlice();
+        return;
+      }
+      finishStatsRun(run);
+    }
+  }
+
+  function finishStatsRun(run) {
+    var result = run.job.result;
+    var sampleHeight = run.height;
+    // How much of the world, and how much of the screen, one sample step
+    // covers. sampleCoordToWorld normalises by the block's HEIGHT on both
+    // axes (mirroring the shader's own uv), so both of these are height
+    // ratios and the sample block is square in world terms.
+    var worldPerSample = view.scale / sampleHeight;
+    var cssHeight = Math.max(1, canvasArea.clientHeight);
+    var screenPixelsPerSample = cssHeight / sampleHeight;
+    var info = {
+      circular: isCircularOutput,
+      resultantLength: result.resultantLength,
+      circularStd: result.circularStd,
+      sampleWidth: run.width,
+      sampleHeight: sampleHeight,
+      worldPerSample: worldPerSample,
+      screenPixelsPerSample: screenPixelsPerSample,
+      screenPixelsPerSampleRecip: 1 / screenPixelsPerSample,
+      valuePerT: statsValueSpan(),
+      outputLabel: outputPropertyLabel(),
+      seamsFound: run.seam.needed
+        ? countSeams(run.seam.cols) + countSeams(run.seam.rows)
+        : 0,
+    };
+    statsLastWidth = run.width;
+    statsLastHeight = sampleHeight;
+    statsRun = null;
+    statsHasResult = true;
+    statsResultIsCurrent = true;
+    statsPanel.markFresh();
+    statsPanel.showResult(result, info);
+    statsLastStatus =
+      "Measured " + run.width + "×" + sampleHeight + " samples of the view on screen. Output: " +
+      info.outputLabel + (info.seamsFound > 0
+        ? ". " + info.seamsFound + " input-seam line" + (info.seamsFound === 1 ? "" : "s") +
+          " excluded (see the X/Y Input mapping - those are where a starting position wraps back into the frame, not real edges)."
+        : ".");
+    statsPanel.setStatus(statsLastStatus);
+  }
+
+  function countSeams(mask) {
+    var n = 0;
+    for (var i = 0; i < mask.length; i++) if (mask[i]) n++;
+    return n;
+  }
+
+  if (btnStats && statsPanelBodyEl && global.FractalStatsPanel && global.FractalStats) {
+    statsPanel = FractalStatsPanel.create({
+      body: statsPanelBodyEl,
+      host: {
+        valueForT: statsValueForT,
+        formatValue: statsFormatValue,
+        // The grid's own colour for this value - hoverOutputColorFinal is
+        // already an exact JS copy of the shader's colorMap, Color Zoom
+        // included, so a swatch here is the colour on screen and not an
+        // approximation of it. Bounce Count's t can exceed 1 (the divisor
+        // comes from a coarser sample than this one), which would run the
+        // hue past the end of the ramp.
+        colorForT: function (t) { return hoverOutputColorFinal(Math.min(1, Math.max(0, t))); },
+        labelForT: function (t) { return statsFormatValue(statsValueForT(t)); },
+        worldAt: function (col, row) {
+          return sampleCoordToWorld({ width: statsLastWidth, height: statsLastHeight }, col, row);
+        },
+      },
+      onEnabledChange: function () {
+        if (!statsWantsWork()) {
+          abandonStatsRun();
+          statsPanel.setStatus("Every measurement below is off. Switch one on to analyse the view currently on screen.");
+          return;
+        }
+        // Switching a section OFF invalidates nothing, so it neither starts
+        // a run nor disturbs one in flight.
+        if (statsResultIsCurrent && !statsPanel.needsMeasurement()) {
+          if (!statsRun) statsPanel.setStatus(statsLastStatus);
+          return;
+        }
+        // Switching one ON while a run is in flight is different: which
+        // sections to compute is fixed when the job is built, so a run that
+        // doesn't already cover the new section never will. Restarting is
+        // the only way it gets measured, and it costs only the slices
+        // already spent.
+        if (statsRun) {
+          if (statsRunCoversEnabled()) return;
+          abandonStatsRun();
+        }
+        if (progressive.complete && !dirty) {
+          statsPanel.setStatus("Measuring the view on screen…", "working");
+          statsOnRenderSettled();
+        } else {
+          statsPanel.setStatus("Waiting for the fractal to finish rendering.", "stale");
+        }
+      },
+    });
+    statsPanel.setStatus("Every measurement below is off. Switch one on to analyse the view currently on screen.");
+
+    btnStats.addEventListener("click", function () {
+      setStatsPanelOpen(!statsOpen);
+    });
+    btnStatsClose.addEventListener("click", function () { setStatsPanelOpen(false); });
+    // Both cards anchor to the same corner and would overlap, so opening
+    // one closes the other - the same thing a single panel with two tabs
+    // would do, without making Settings and Stats share a lifetime.
+    btnSettings.addEventListener("click", function () {
+      if (settingsPanel.classList.contains("open")) setStatsPanelOpen(false);
+    });
+    // A chart sizes itself to the card's width, which only exists once the
+    // card is laid out - and changes when a portrait window is resized.
+    var statsRelayoutTimer = null;
+    window.addEventListener("resize", function () {
+      if (!statsOpen) return;
+      if (statsRelayoutTimer) clearTimeout(statsRelayoutTimer);
+      statsRelayoutTimer = setTimeout(function () {
+        statsRelayoutTimer = null;
+        statsPanel.relayout();
+      }, 150);
+    });
+  }
+
+  function setStatsPanelOpen(open) {
+    if (!statsPanel) return;
+    statsOpen = open;
+    statsPanelEl.classList.toggle("open", open);
+    btnStats.setAttribute("aria-expanded", open ? "true" : "false");
+    if (!open) { abandonStatsRun(); return; }
+    setSettingsPanelOpen(false);
+    statsPanel.relayout();
+    if (!statsPanel.anyEnabled()) {
+      statsPanel.setStatus("Every measurement below is off. Switch one on to analyse the view currently on screen.");
+    } else if (statsResultIsCurrent && !statsPanel.needsMeasurement()) {
+      statsPanel.setStatus(statsLastStatus);
+    } else if (progressive.complete && !dirty) {
+      statsPanel.setStatus("Measuring the view on screen…", "working");
+      statsOnRenderSettled();
+    } else {
+      statsPanel.setStatus("Waiting for the fractal to finish rendering.", "stale");
+    }
+  }
+
   // Drag #panel-resizer to resize the left sidebar. #canvas-area's own
   // ResizeObserver (below) picks up the resulting width change and re-renders
   // the grid at the new size - no separate hook needed here.
@@ -4984,6 +5555,14 @@
     isBouncesOutput = scene.output.property === "bounces";
     isInfinitePositionOutput = scene.edgeMode === "infinite" &&
       (scene.output.property === "x" || scene.output.property === "y");
+    // Alongside the two flags above, and for the same reason: a re-sent
+    // scene can map Output to a different property (or change Edge
+    // Handling), and whether that property WRAPS decides the hover panel's
+    // hue range, the superlatives' neighbour distance, and every circular
+    // statistic on the Global Stats card. Left at the first scene's value
+    // these three disagree with the shader the grid is actually running.
+    isCircularOutput = computeIsCircularOutput();
+    hueRangeMaxValue = isCircularOutput ? 360 : 300;
     relabelSuperlativeExtremeButtons();
     sceneCoordinateSpan = computeSceneCoordinateSpan();
     // Compiled against the OLD scene - dropped, not reused. buildPass and
@@ -5001,6 +5580,9 @@
     canvas.hidden = false;
     emptyState.hidden = true;
     setStatus(true, "Ready");
+    // Measured against the old scene, in the old scene's units - dropped
+    // rather than dimmed, unlike an ordinary view change (see markStale).
+    if (statsPanel) { statsHasResult = false; statsResultIsCurrent = false; statsPanel.clearResult(); }
     resizeCanvas();
     markDirty();
   };
