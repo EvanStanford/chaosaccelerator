@@ -1,0 +1,69 @@
+{
+  "gravity": 800,
+  "friction": 0,
+  "restitution": 1,
+  "bodies": [
+    {
+      "type": "line",
+      "x": 409,
+      "y": 288,
+      "angle": -1.5708,
+      "isStatic": false,
+      "length": 140,
+      "vx": 0,
+      "vy": 0,
+      "w": 0
+    },
+    {
+      "type": "line",
+      "x": 480,
+      "y": 217,
+      "angle": 0,
+      "isStatic": false,
+      "length": 140,
+      "vx": 0,
+      "vy": 0,
+      "w": 0
+    }
+  ],
+  "hinges": [
+    {
+      "bodyA": null,
+      "bodyB": 0,
+      "localAnchorA": {
+        "x": 408,
+        "y": 358
+      },
+      "localAnchorB": {
+        "x": -70,
+        "y": -1
+      }
+    },
+    {
+      "bodyA": 0,
+      "bodyB": 1,
+      "localAnchorA": {
+        "x": 70,
+        "y": 0
+      },
+      "localAnchorB": {
+        "x": -71,
+        "y": -1
+      }
+    }
+  ],
+  "xInput": {
+    "body": 0,
+    "property": "angle"
+  },
+  "yInput": {
+    "body": 1,
+    "property": "angle"
+  },
+  "output": {
+    "body": 1,
+    "property": "angle"
+  },
+  "frameWidth": 1192,
+  "frameHeight": 819
+}

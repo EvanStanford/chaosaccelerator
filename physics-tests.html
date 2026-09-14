@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<!-- This file is part of Chaos Accelerator, licensed under the Common
+     Public Attribution License, Version 1.0 (CPAL-1.0) - see LICENSE in
+     the project root, or https://chaosaccelerator.com/license for a
+     hosted copy. -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Physics Regression Tests</title>
+<link rel="stylesheet" href="physics.css">
+<style>
+  body { display: block; height: auto; min-height: 100%; }
+  #app { height: auto; display: block; max-width: 900px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 20px; margin: 0 0 6px 0; }
+  .hint { margin-bottom: 18px; }
+  #summary {
+    display: inline-block;
+    font-size: 13px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    margin-bottom: 14px;
+  }
+  #summary.summary-ok { background: #163a25; color: #7ee0a0; }
+  #summary.summary-fail { background: #3a1418; color: #ff9a9a; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 14px; }
+  th { text-align: left; color: var(--text-dim); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  td:first-child { width: 40%; }
+  td:nth-child(2) { width: 70px; }
+  .bug-ref { color: var(--text-dim); font-size: 11.5px; margin-top: 2px; }
+  .status-cell { font-weight: 700; }
+  tr.row-pass .status-cell { color: #7ee0a0; }
+  tr.row-fail .status-cell { color: #ff9a9a; }
+  tr.row-fail td:nth-child(3) { color: #ff9a9a; }
+  #manual-section { font-size: 13px; color: var(--text-dim); }
+  #manual-section h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); }
+  #manual-section li { margin-bottom: 6px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>Physics Regression Tests</h1>
+  <p class="hint">
+    Every row below reproduces a bug that was found and fixed during
+    development. Re-run this page after any change to the physics engine,
+    the GPU compiler, or the hinge-editing logic in physics-ui.js, to make
+    sure none of them came back.
+  </p>
+  <div id="summary">running&hellip;</div>
+  <div class="field-row" style="margin-bottom: 14px;">
+    <button id="btn-rerun" class="secondary">Re-run tests</button>
+  </div>
+  <table id="results">
+    <thead><tr><th>Test</th><th>Status</th><th>Details</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <div id="manual-section">
+    <h2>Not automated</h2>
+    <ul>
+      <li>
+        <b>Any editing control used while a run is playing/paused resets the
+        scene to its pre-play state first, then applies that action -
+        never requires a manual Reset first.</b>
+        This is a DOM/interaction-state behavior (see
+        resetBeforeLockedControlAction and lockedDuringPlaybackControls in
+        physics-ui.js), not a numeric one, so it doesn't fit this page's
+        scene-in/scene-out style of test. Check by hand in #editor-view: let
+        a run finish (or Pause it, or drag the progress slider mid-run),
+        then click a tool, a sample, Clear All, or change a mapping/
+        simulation setting - confirm the scene visibly resets to what
+        was authored before Play, and the action you just took (the new
+        tool armed, the new sample loaded, the new setting applied) takes
+        effect immediately, with no separate Reset click needed. Try it for
+        a select/slider too (e.g. Edge Handling, Output property) and
+        confirm the value you just picked is what's applied, not whatever
+        it was before Play.
+      </li>
+      <li>
+        <b>A paused-or-finished run freezes on its own frame, but Play (fresh),
+        Reset, and Fractal-ize all still act on the true starting state.</b>
+        Playback writes each displayed frame straight into scene.bodies, so a
+        run left where it stopped would otherwise make that moment look like the
+        authored scene. initialScene is the fix: it's untouched by playback
+        (only scene.bodies gets written to), so tick()'s completion branch can
+        just pausePlayback() and leave the display frozen, while Fractal-ize
+        calls resetToInitialScene() first - silently restoring the true
+        start before it acts, without that restore itself being visible if the
+        user was just looking at the frozen frame a moment before. (Reset already
+        worked this way.) Check by hand after touching tick()/
+        resetToInitialScene()/togglePlayPause(): note a body's position, let a
+        run finish, confirm the display stays on the final frame (not snapping
+        back), then confirm Reset followed by a fresh Play replays from the
+        noted starting position rather than from wherever the frozen run ended.
+        Also drag the progress slider mid-run and confirm it pauses and scrubs
+        to the dragged frame (holding on the real final frame if dragged past an
+        early stop) without disturbing that same starting state.
+      </li>
+    </ul>
+  </div>
+</div>
+
+<script src="physics-engine.js"></script>
+<script src="physics-hinge-geometry.js"></script>
+<script src="physics-df.js"></script>
+<script src="physics-gpu.js"></script>
+<script src="physics-gpu-df.js"></script>
+<script src="physics-grid-codegen.js"></script>
+<script src="physics-tests.js"></script>
+<script>
+  // physics-hinge-geometry.js is plain scene math with no DOM dependency,
+  // so (unlike when this logic lived inside physics-ui.js) there's no need
+  // to load a whole hidden copy of #editor-view in an iframe just to reach
+  // it - a direct <script> tag above is enough.
+  window.__physicsTests.runAll();
+  document.getElementById("btn-rerun").addEventListener("click", function () {
+    window.__physicsTests.runAll();
+  });
+</script>
+</body>
+</html>

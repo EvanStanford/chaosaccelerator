@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<!-- This file is part of Chaos Accelerator, licensed under the Common
+     Public Attribution License, Version 1.0 (CPAL-1.0) - see LICENSE in
+     the project root, or https://chaosaccelerator.com/license for a
+     hosted copy. -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Double-float precision probe</title>
+<style>
+  body { font-family: ui-monospace, Menlo, monospace; background: #14161a; color: #dfe3ea; padding: 24px; font-size: 13px; }
+  h1 { font-size: 16px; margin: 0 0 4px 0; }
+  p { max-width: 78ch; color: #98a0ad; line-height: 1.5; }
+  table { border-collapse: collapse; font-size: 12px; margin: 14px 0 22px 0; }
+  td, th { border-bottom: 1px solid #2a2f38; padding: 5px 12px; text-align: left; white-space: nowrap; }
+  th { color: #98a0ad; font-weight: 600; }
+  .ok { color: #7ee0a0; font-weight: 700; } .bad { color: #ff9a9a; font-weight: 700; }
+  #verdict { display: inline-block; padding: 7px 14px; border-radius: 999px; font-weight: 700; margin: 6px 0 10px 0; }
+  #verdict.ok { background: #163a25; color: #7ee0a0; } #verdict.bad { background: #3a1418; color: #ff9a9a; }
+  canvas { image-rendering: pixelated; border: 1px solid #2a2f38; display: block; }
+  code { background: #21252c; padding: 1px 4px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<h1>Double-float (df) precision probe</h1>
+<p>
+  Double-float arithmetic depends on compensation steps
+  (<code>(a+b)-a</code>-style round-off recovery) that are algebraically
+  redundant and only work because IEEE rounding makes them <em>not</em>
+  redundant. GLSL ES 3.00 has no <code>precise</code> qualifier, so a
+  shader compiler that reassociates float math is free to fold them to
+  nothing - silently. This page measures whether that happens on
+  <em>this</em> machine/driver, both for raw arithmetic and for
+  <code>physics-df.js</code>'s veiled version of it.
+</p>
+<div id="renderer"></div>
+<div id="verdict">running&hellip;</div>
+
+<h2 style="font-size:13px">1. Is the compiler reassociating at all?</h2>
+<table id="raw"><thead><tr><th>Expression (runtime operands)</th><th>Got</th><th>IEEE-correct</th><th></th></tr></thead><tbody></tbody></table>
+
+<h2 style="font-size:13px">2. physics-df.js accuracy vs. float64</h2>
+<table id="lib"><thead><tr><th>Check</th><th>GPU (hi + lo)</th><th>Exact (float64)</th><th>Rel. err</th><th>float32 alone</th><th></th></tr></thead><tbody></tbody></table>
+
+<h2 style="font-size:13px">3. A deep-zoom sweep of <code>worldX</code></h2>
+<p style="margin-top:0">
+  512 samples across one screen row at scale 1e-9 about a center of
+  1234.5678901234 - exactly what <code>fractal-grid.js</code> feeds the
+  per-pixel simulation. The low word is drawn below: a clean ramp means
+  every pixel got a distinct world coordinate; flat blocks mean they
+  aliased onto each other.
+</p>
+<canvas id="sweep" width="512" height="48" style="width:100%;max-width:1024px;height:96px"></canvas>
+<table id="sweepstats"><tbody></tbody></table>
+
+<h2 style="font-size:13px">4. What that actually buys, zoom by zoom</h2>
+<p style="margin-top:0">
+  The same scene - a ball dropped between two angled deflectors in a
+  wrapped frame, 500 steps, colored by where it ends up - rendered by
+  both shaders as the view zooms in.
+</p>
+<p>
+  <b>The number that matters is the correlation against the float64 JS
+  engine</b>, which is the answer both shaders are approximating. An earlier
+  version of this page instead measured how many neighbouring pixel pairs
+  came out byte-identical, and that flattered the df pass by about three
+  decades: a pair differing by pure quantization noise counts as "resolved"
+  under that metric, so it credits detail that isn't there. Correlation
+  against the truth can't be fooled that way - noise decorrelates.
+  It's sampled along a row of 24 points, each re-run in float64 on the CPU.
+</p>
+<table id="zoomtable"><thead><tr><th>View width (world units)</th><th>float32 vs truth</th><th>double-float vs truth</th><th></th></tr></thead><tbody></tbody></table>
+<p style="font-size:12px">
+  The tiles below are the same two shaders drawn as pictures, each
+  normalized to its own value range. Read them alongside the table: past
+  the point where correlation collapses, df's extra "detail" is noise, not
+  physics.
+</p>
+<div id="tiles" style="display:flex;flex-wrap:wrap;gap:14px"></div>
+
+<script src="physics-engine.js"></script>
+<script src="physics-hinge-geometry.js"></script>
+<script src="physics-df.js"></script>
+<script src="physics-gpu.js"></script>
+<script src="physics-gpu-df.js"></script>
+<script src="physics-grid-codegen.js"></script>
+<script>
+(function () {
+  "use strict";
+  var verdictEl = document.getElementById("verdict");
+  var failures = 0;
+
+  function makeGL(width) {
+    var g = new OffscreenCanvas(width, 1).getContext("webgl2");
+    if (!g || !g.getExtension("EXT_color_buffer_float")) return null;
+    return g;
+  }
+  // Compiles fsSource, draws one width x 1 row into RGBA32F, reads it back.
+  function run(fsSource, width) {
+    var g = makeGL(width);
+    if (!g) throw new Error("WebGL2 + EXT_color_buffer_float required");
+    function sh(type, src) {
+      var s = g.createShader(type); g.shaderSource(s, src); g.compileShader(s);
+      if (!g.getShaderParameter(s, g.COMPILE_STATUS)) throw new Error(g.getShaderInfoLog(s));
+      return s;
+    }
+    var p = g.createProgram();
+    g.attachShader(p, sh(g.VERTEX_SHADER, "#version 300 es\nin vec2 a_position;\nvoid main(){gl_Position=vec4(a_position,0.0,1.0);}"));
+    g.attachShader(p, sh(g.FRAGMENT_SHADER, fsSource));
+    g.linkProgram(p);
+    if (!g.getProgramParameter(p, g.LINK_STATUS)) throw new Error(g.getProgramInfoLog(p));
+    g.useProgram(p);
+    var b = g.createBuffer(); g.bindBuffer(g.ARRAY_BUFFER, b);
+    g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), g.STATIC_DRAW);
+    var loc = g.getAttribLocation(p, "a_position");
+    g.enableVertexAttribArray(loc); g.vertexAttribPointer(loc, 2, g.FLOAT, false, 0, 0);
+    var t = g.createTexture(); g.bindTexture(g.TEXTURE_2D, t);
+    g.texImage2D(g.TEXTURE_2D, 0, g.RGBA32F, width, 1, 0, g.RGBA, g.FLOAT, null);
+    g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MIN_FILTER, g.NEAREST);
+    g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MAG_FILTER, g.NEAREST);
+    var f = g.createFramebuffer(); g.bindFramebuffer(g.FRAMEBUFFER, f);
+    g.framebufferTexture2D(g.FRAMEBUFFER, g.COLOR_ATTACHMENT0, g.TEXTURE_2D, t, 0);
+    g.viewport(0, 0, width, 1);
+    g.drawArrays(g.TRIANGLES, 0, 6);
+    var px = new Float32Array(width * 4);
+    g.readPixels(0, 0, width, 1, g.RGBA, g.FLOAT, px);
+    var lose = g.getExtension("WEBGL_lose_context"); if (lose) lose.loseContext();
+    return px;
+  }
+
+  var probe = makeGL(1);
+  if (!probe) { verdictEl.className = "bad"; verdictEl.textContent = "WebGL2 + EXT_color_buffer_float unavailable"; return; }
+  var dbg = probe.getExtension("WEBGL_debug_renderer_info");
+  document.getElementById("renderer").textContent =
+    "RENDERER  " + (dbg ? probe.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : probe.getParameter(probe.RENDERER));
+
+  // ---- 1. Raw reassociation check. Operands arrive as uniforms so nothing
+  // is a compile-time constant the front end can fold in float64. ----
+  var A = 1000000.0, B = 1e-7;   // fl(A+B) == A exactly, so (A+B)-A must be 0
+  var rawSrc = ["#version 300 es", "precision highp float;",
+    "uniform float u_a; uniform float u_b;", PhysicsDF.UNIFORM_DECL,
+    "out vec4 fragColor;",
+    "float dfv(float x) { return uintBitsToFloat(floatBitsToUint(x) ^ u_dfVeil); }",
+    "void main() {",
+    "  float a = u_a, b = u_b;",
+    "  float bare = (a + b) - a;",
+    "  float veiled = dfv(dfv(a + b) - a);",
+    "  fragColor = vec4(bare, veiled, 0.0, 1.0);",
+    "}"].join("\n");
+  var rawTb = document.querySelector("#raw tbody");
+  var rawPx;
+  try {
+    // run() needs the uniforms set, so inline a bespoke draw here.
+    var g = makeGL(1);
+    function sh2(type, src) { var s = g.createShader(type); g.shaderSource(s, src); g.compileShader(s);
+      if (!g.getShaderParameter(s, g.COMPILE_STATUS)) throw new Error(g.getShaderInfoLog(s)); return s; }
+    var pr = g.createProgram();
+    g.attachShader(pr, sh2(g.VERTEX_SHADER, "#version 300 es\nin vec2 a_position;\nvoid main(){gl_Position=vec4(a_position,0.0,1.0);}"));
+    g.attachShader(pr, sh2(g.FRAGMENT_SHADER, rawSrc)); g.linkProgram(pr); g.useProgram(pr);
+    g.uniform1f(g.getUniformLocation(pr, "u_a"), A);
+    g.uniform1f(g.getUniformLocation(pr, "u_b"), B);
+    var bb = g.createBuffer(); g.bindBuffer(g.ARRAY_BUFFER, bb);
+    g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), g.STATIC_DRAW);
+    var lc = g.getAttribLocation(pr, "a_position"); g.enableVertexAttribArray(lc); g.vertexAttribPointer(lc, 2, g.FLOAT, false, 0, 0);
+    var tx = g.createTexture(); g.bindTexture(g.TEXTURE_2D, tx);
+    g.texImage2D(g.TEXTURE_2D, 0, g.RGBA32F, 1, 1, 0, g.RGBA, g.FLOAT, null);
+    g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MIN_FILTER, g.NEAREST); g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MAG_FILTER, g.NEAREST);
+    var fb = g.createFramebuffer(); g.bindFramebuffer(g.FRAMEBUFFER, fb);
+    g.framebufferTexture2D(g.FRAMEBUFFER, g.COLOR_ATTACHMENT0, g.TEXTURE_2D, tx, 0);
+    g.viewport(0, 0, 1, 1); g.drawArrays(g.TRIANGLES, 0, 6);
+    rawPx = new Float32Array(4); g.readPixels(0, 0, 1, 1, g.RGBA, g.FLOAT, rawPx);
+  } catch (err) {
+    rawTb.insertAdjacentHTML("beforeend", "<tr><td colspan=4 class='bad'>" + err.message + "</td></tr>");
+    rawPx = [NaN, NaN];
+  }
+  var bareOk = rawPx[0] === 0, veiledOk = rawPx[1] === 0;
+  rawTb.insertAdjacentHTML("beforeend",
+    "<tr><td>(a + b) - a &nbsp;<i>unprotected</i></td><td>" + rawPx[0] + "</td><td>0</td><td class='" +
+    (bareOk ? "ok" : "bad") + "'>" + (bareOk ? "IEEE-conservative" : "REASSOCIATED") + "</td></tr>" +
+    "<tr><td>dfv(dfv(a + b) - a) &nbsp;<i>veiled</i></td><td>" + rawPx[1] + "</td><td>0</td><td class='" +
+    (veiledOk ? "ok" : "bad") + "'>" + (veiledOk ? "veil holds" : "VEIL DEFEATED") + "</td></tr>");
+  if (!veiledOk) failures++;
+
+  // ---- 2. Library accuracy vs. float64 ----
+  var CENTER = 1234.5678901234, TINY = 3.7e-10;
+  var c1 = PhysicsDF.split(CENTER);
+  var big = 8388608.0000000019, bs = PhysicsDF.split(big), bs0 = PhysicsDF.split(8388608);
+  var CASES = [
+    { name: "dfAddFloat(center, 3.7e-10)", exact: CENTER + TINY,
+      glsl: "dfAddFloat(vec2(" + c1[0] + ", " + c1[1] + "), " + TINY + ")",
+      f32: Math.fround(Math.fround(CENTER) + Math.fround(TINY)) },
+    { name: "dfMul(2pi, 1e5)", exact: 2 * Math.PI * 1e5,
+      glsl: "dfMul(DF_TWO_PI, vec2(100000.0, 0.0))",
+      f32: Math.fround(Math.fround(2 * Math.PI) * 1e5) },
+    { name: "dfDiv(1, 3)", exact: 1 / 3, glsl: "dfDiv(vec2(1.0, 0.0), vec2(3.0, 0.0))", f32: Math.fround(1 / 3) },
+    { name: "dfSub of two near-equal 2^23 values", exact: big - 8388608,
+      glsl: "dfSub(vec2(" + bs[0] + ", " + bs[1] + "), vec2(" + bs0[0] + ", " + bs0[1] + "))",
+      f32: Math.fround(Math.fround(big) - 8388608) },
+    { name: "dfCos(1e4 + 1e-9)", exact: Math.cos(10000.000000001),
+      glsl: "dfCos(" + PhysicsDF.num(10000.000000001) + ")", f32: Math.fround(Math.cos(Math.fround(10000.000000001))) },
+    { name: "dfSin(-3217.9876543)", exact: Math.sin(-3217.9876543),
+      glsl: "dfSin(" + PhysicsDF.num(-3217.9876543) + ")", f32: Math.fround(Math.sin(Math.fround(-3217.9876543))) },
+    { name: "dfReduceAngle(1e4 + 1e-9)", exact: 10000.000000001 % (2 * Math.PI),
+      glsl: "dfReduceAngle(" + PhysicsDF.num(10000.000000001) + ")",
+      f32: Math.fround(Math.fround(10000.000000001) % Math.fround(2 * Math.PI)) },
+    { name: "dfMod(1234.5678901234, 800)", exact: 1234.5678901234 % 800,
+      glsl: "dfMod(" + PhysicsDF.num(1234.5678901234) + ", 800.0)", f32: Math.fround(Math.fround(1234.5678901234) % 800) },
+  ];
+  var libLines = ["#version 300 es", "precision highp float;", PhysicsDF.UNIFORM_DECL, "out vec4 fragColor;", "",
+    PhysicsDF.GLSL_LIBRARY, "", "void main() {", "  int i = int(gl_FragCoord.x);", "  vec2 v = vec2(0.0);"];
+  CASES.forEach(function (cs, i) { libLines.push("  " + (i === 0 ? "if" : "else if") + " (i == " + i + ") v = " + cs.glsl + ";"); });
+  libLines.push("  fragColor = vec4(v.x, v.y, 0.0, 1.0);", "}");
+  var libTb = document.querySelector("#lib tbody");
+  try {
+    var px = run(libLines.join("\n"), CASES.length);
+    CASES.forEach(function (cs, i) {
+      var got = px[i * 4] + px[i * 4 + 1];
+      var rel = Math.abs(got - cs.exact) / (Math.abs(cs.exact) || 1);
+      var relF32 = Math.abs(cs.f32 - cs.exact) / (Math.abs(cs.exact) || 1);
+      // float32 alone is ~6e-8 relative; df should reach ~1e-14.
+      var pass = rel < 1e-12;
+      if (!pass) failures++;
+      libTb.insertAdjacentHTML("beforeend",
+        "<tr><td>" + cs.name + "</td><td>" + got.toPrecision(17) + "</td><td>" + cs.exact.toPrecision(17) +
+        "</td><td>" + rel.toExponential(2) + "</td><td>" + relF32.toExponential(2) + "</td><td class='" +
+        (pass ? "ok" : "bad") + "'>" + (pass ? "PASS" : "FAIL") + "</td></tr>");
+    });
+  } catch (err) {
+    libTb.insertAdjacentHTML("beforeend", "<tr><td colspan=6 class='bad'>" + err.message + "</td></tr>");
+    failures++;
+  }
+
+  // ---- 3. Deep-zoom sweep ----
+  var SCALE = 1e-9, N = 512;
+  var sweepSrc = ["#version 300 es", "precision highp float;", PhysicsDF.UNIFORM_DECL, "out vec4 fragColor;", "",
+    PhysicsDF.GLSL_LIBRARY, "", "void main() {",
+    "  float u = (gl_FragCoord.x - " + (N / 2) + ".0) / " + N + ".0;",
+    "  vec2 worldX = dfAddFloat(vec2(" + c1[0] + ", " + c1[1] + "), u * " + SCALE + ");",
+    "  fragColor = vec4(worldX.x, worldX.y, 0.0, 1.0);",
+    "}"].join("\n");
+  var stats = document.querySelector("#sweepstats tbody");
+  try {
+    var sweep = run(sweepSrc, N);
+    var vals = [], distinct = new Set();
+    for (var x = 0; x < N; x++) { vals.push(sweep[x * 4] + sweep[x * 4 + 1]); distinct.add(sweep[x * 4] + "|" + sweep[x * 4 + 1]); }
+    var f32set = new Set();
+    for (var k = 0; k < N; k++) f32set.add(Math.fround(Math.fround(CENTER) + Math.fround((k - N / 2) / N * SCALE)));
+    var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+    var ctx = document.getElementById("sweep").getContext("2d");
+    var img = ctx.createImageData(N, 48);
+    for (var xx = 0; xx < N; xx++) {
+      var t = hi > lo ? (vals[xx] - lo) / (hi - lo) : 0;
+      var v = Math.round(255 * t);
+      for (var y = 0; y < 48; y++) { var o = (y * N + xx) * 4; img.data[o] = img.data[o+1] = img.data[o+2] = v; img.data[o+3] = 255; }
+    }
+    ctx.putImageData(img, 0, 0);
+    var sweepOk = distinct.size > N * 0.9;
+    if (!sweepOk) failures++;
+    stats.insertAdjacentHTML("beforeend",
+      "<tr><td>distinct worldX values across " + N + " pixels</td><td><b>" + distinct.size + "</b> with df</td><td>" +
+      f32set.size + " with float32 alone</td><td class='" + (sweepOk ? "ok" : "bad") + "'>" + (sweepOk ? "PASS" : "FAIL") + "</td></tr>");
+  } catch (err) {
+    stats.insertAdjacentHTML("beforeend", "<tr><td class='bad'>" + err.message + "</td></tr>");
+    failures++;
+  }
+
+  // ---- 4. The two shaders side by side, at increasing zoom ----
+  //
+  // A deliberately minimal stand-in for fractal-grid.js's real shader:
+  // same offset cascade, same step loop, same "mod the output into its own
+  // range" coloring, minus the parts (sticky-edges, Color Zoom) that have
+  // nothing to do with precision. Assembled from the same exported codegen
+  // the grid itself calls, so the precision seam under test is the real one.
+  // Two long angled deflectors in a Pac-Man-wrapped frame, so the ball
+  // cannot fall past them without being turned: it hits something every
+  // lap, which is what makes the outcome after 500 steps a genuinely
+  // sensitive function of where it started. A scene that merely falls
+  // would be a poor test - its answer is nearly linear in the starting
+  // position, so it looks smooth at any zoom and any precision.
+  var DEMO_SCENE = {
+    gravity: 800, friction: 0, restitution: 1,
+    bodies: [
+      PhysicsEngine.createCircle(596, 120, 30, false),
+      PhysicsEngine.createLine(430, 430, 620, 0.32, true),
+      PhysicsEngine.createLine(830, 660, 560, -0.47, true),
+    ],
+    hinges: [],
+    xInput: { body: 0, property: "x" },
+    yInput: { body: 0, property: "y" },
+    output: { body: 0, property: "y" },
+    frameWidth: 1192, frameHeight: 819,
+  };
+  // Deliberately modest. A df step now costs roughly an order of
+  // magnitude more than a float32 one (the whole solver is df, not
+  // just the accumulators), so the tile counts that were free before
+  // are not. This section is an illustration; the numbers that matter
+  // are in the correlation table above it.
+  var DEMO_STEPS = 200, DEMO_CENTER = { x: 0, y: 0 }, TILE = 72;
+
+  function demoShader(precision) {
+    var B = PhysicsGridCodegen.backendFor(precision);
+    var initial = PhysicsGridCodegen.generateGridInitialStateGLSL(DEMO_SCENE, precision);
+    var frame = { width: DEMO_SCENE.frameWidth, height: DEMO_SCENE.frameHeight };
+    var dv = precision === "df" ? "dbody" : "body";
+    return ["#version 300 es", "precision highp float;",
+      "uniform vec2 u_resolution; uniform vec2 u_centerHi; uniform vec2 u_centerLo; uniform float u_scale;",
+      "out vec4 fragColor;", "",
+      PhysicsGPU.libraryGLSL(precision), "",
+      "const float GRAVITY = " + PhysicsGPU.fnum(DEMO_SCENE.gravity) + ";",
+      "const float FRICTION = " + PhysicsGPU.fnum(DEMO_SCENE.friction) + ";",
+      "const float RESTITUTION = " + PhysicsGPU.fnum(DEMO_SCENE.restitution) + ";",
+      "const float RANGE = " + PhysicsGPU.fnum(DEMO_SCENE.frameHeight) + ";", "",
+      PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision), "",
+      "void main() {",
+      "  vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution) / u_resolution.y;",
+      precision === "df"
+        ? "  vec2 worldX = dfAddFloat(vec2(u_centerHi.x, u_centerLo.x), uv.x * u_scale);"
+        : "  float worldX = u_centerHi.x + uv.x * u_scale;",
+      precision === "df"
+        ? "  vec2 worldY = dfAddFloat(vec2(u_centerHi.y, u_centerLo.y), uv.y * u_scale);"
+        : "  float worldY = u_centerHi.y + uv.y * u_scale;",
+      "  " + initial.declarationLines.join("\n  "),
+      "  " + PhysicsGridCodegen.generateCanonicalBodyDeclarationsGLSL(initial).split("\n").join("\n  "),
+      "  " + PhysicsGPU.generateHingeAnchorLocalsGLSL(initial.hingeAnchors, precision).split("\n").join("\n  "),
+      "  for (int i = 0; i < " + DEMO_STEPS + "; i++) { stepOnce(" +
+        PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, precision) + "); }",
+      // The raw pre-color value, straight into a float target. Comparing
+      // 8-bit COLOR instead would report both shaders as equally flat at
+      // any deep zoom, since the value's whole spread across a small tile
+      // is narrower than one 8-bit step long before precision is the
+      // reason.
+      "  fragColor = vec4(" + B.toFloat(B.div(B.mod(dv + "0.y", "RANGE"), B.fromFloat("RANGE"))) + ", 0.0, 0.0, 1.0);",
+      "}"].join("\n");
+  }
+
+  var demoSources = {};
+  function renderDemo(precision, scale) {
+    if (!demoSources[precision]) demoSources[precision] = demoShader(precision);
+    var off = new OffscreenCanvas(TILE, TILE);
+    var g = off.getContext("webgl2");
+    g.getExtension("EXT_color_buffer_float");
+    var prog = PhysicsGPU.linkProgram(g,
+      PhysicsGPU.compileShader(g, g.VERTEX_SHADER, PhysicsGPU.VERTEX_SOURCE),
+      PhysicsGPU.compileShader(g, g.FRAGMENT_SHADER, demoSources[precision]));
+    g.useProgram(prog);
+    var buf = g.createBuffer(); g.bindBuffer(g.ARRAY_BUFFER, buf);
+    g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), g.STATIC_DRAW);
+    var lc = g.getAttribLocation(prog, "a_position");
+    g.enableVertexAttribArray(lc); g.vertexAttribPointer(lc, 2, g.FLOAT, false, 0, 0);
+    var hx = PhysicsDF.split(DEMO_CENTER.x), hy = PhysicsDF.split(DEMO_CENTER.y);
+    g.uniform2f(g.getUniformLocation(prog, "u_resolution"), TILE, TILE);
+    g.uniform2f(g.getUniformLocation(prog, "u_centerHi"), hx[0], hy[0]);
+    g.uniform2f(g.getUniformLocation(prog, "u_centerLo"), hx[1], hy[1]);
+    g.uniform1f(g.getUniformLocation(prog, "u_scale"), scale);
+    var tex = g.createTexture(); g.bindTexture(g.TEXTURE_2D, tex);
+    g.texImage2D(g.TEXTURE_2D, 0, g.RGBA32F, TILE, TILE, 0, g.RGBA, g.FLOAT, null);
+    g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MIN_FILTER, g.NEAREST);
+    g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MAG_FILTER, g.NEAREST);
+    var fbo = g.createFramebuffer(); g.bindFramebuffer(g.FRAMEBUFFER, fbo);
+    g.framebufferTexture2D(g.FRAMEBUFFER, g.COLOR_ATTACHMENT0, g.TEXTURE_2D, tex, 0);
+    g.viewport(0, 0, TILE, TILE);
+    g.drawArrays(g.TRIANGLES, 0, 6);
+    var px = new Float32Array(TILE * TILE * 4);
+    g.readPixels(0, 0, TILE, TILE, g.RGBA, g.FLOAT, px);
+    var lose = g.getExtension("WEBGL_lose_context"); if (lose) lose.loseContext();
+
+    var vals = new Float64Array(TILE * TILE);
+    var lo = Infinity, hi = -Infinity;
+    for (var i = 0; i < vals.length; i++) { vals[i] = px[i * 4]; if (vals[i] < lo) lo = vals[i]; if (vals[i] > hi) hi = vals[i]; }
+    // Each tile is normalized to its OWN value range before coloring.
+    // Zooming into a smooth patch legitimately narrows that range, and a
+    // fixed ramp would render every deep tile as one flat color whether or
+    // not there was structure in it - which is the question being asked.
+    var cv = document.createElement("canvas");
+    cv.width = cv.height = TILE;
+    var ctx = cv.getContext("2d");
+    var img = ctx.createImageData(TILE, TILE);
+    var span = hi - lo;
+    for (var yy = 0; yy < TILE; yy++) for (var xx = 0; xx < TILE; xx++) {
+      var t = span > 0 ? (vals[yy * TILE + xx] - lo) / span : 0.5;
+      var h = 6 * (1 - t);
+      var o = ((TILE - 1 - yy) * TILE + xx) * 4;   // readPixels is bottom-up
+      img.data[o] = 255 * Math.min(1, Math.max(0, Math.abs(((h + 0) % 6) - 3) - 1));
+      img.data[o + 1] = 255 * Math.min(1, Math.max(0, Math.abs(((h + 4) % 6) - 3) - 1));
+      img.data[o + 2] = 255 * Math.min(1, Math.max(0, Math.abs(((h + 2) % 6) - 3) - 1));
+      img.data[o + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+    return { canvas: cv };
+  }
+
+  // Samples one row of the same view at both precisions AND in float64 on
+  // the CPU, then correlates. A 24-point row keeps the CPU side (24 full
+  // 500-step simulations per zoom level) instant, and correlation needs
+  // only the shape of the curve, not many points.
+  var SAMPLES = 16;
+  // The Output property here is circular (a frame-wrapped y), so two samples
+  // straddling the wrap point look maximally far apart while being
+  // physically adjacent. Re-express every sample as the representative
+  // nearest the first one before correlating, or the metric reports noise
+  // wherever a view happens to sit on the seam.
+  function unwrap(series, period) {
+    var out = [series[0]];
+    for (var i = 1; i < series.length; i++) {
+      var v = series[i];
+      while (v - out[0] > period / 2) v -= period;
+      while (out[0] - v > period / 2) v += period;
+      out.push(v);
+    }
+    return out;
+  }
+  function correlation(a, b) {
+    var n = a.length, ma = 0, mb = 0, i;
+    for (i = 0; i < n; i++) { ma += a[i]; mb += b[i]; }
+    ma /= n; mb /= n;
+    var num = 0, da = 0, db = 0;
+    for (i = 0; i < n; i++) {
+      var x = a[i] - ma, y = b[i] - mb;
+      num += x * y; da += x * x; db += y * y;
+    }
+    return (da > 0 && db > 0) ? num / Math.sqrt(da * db) : NaN;
+  }
+  // Renders one SAMPLES x 1 strip. u_resolution stays square so the uv
+  // formula matches the real grid's exactly; the JS side below reproduces
+  // the same world coordinates for the CPU runs.
+  function sampleRow(precision, scale) {
+    if (!demoSources[precision]) demoSources[precision] = demoShader(precision);
+    var g = new OffscreenCanvas(SAMPLES, 1).getContext("webgl2");
+    g.getExtension("EXT_color_buffer_float");
+    var prog = PhysicsGPU.linkProgram(g,
+      PhysicsGPU.compileShader(g, g.VERTEX_SHADER, PhysicsGPU.VERTEX_SOURCE),
+      PhysicsGPU.compileShader(g, g.FRAGMENT_SHADER, demoSources[precision]));
+    g.useProgram(prog);
+    var buf = g.createBuffer(); g.bindBuffer(g.ARRAY_BUFFER, buf);
+    g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), g.STATIC_DRAW);
+    var lc = g.getAttribLocation(prog, "a_position");
+    g.enableVertexAttribArray(lc); g.vertexAttribPointer(lc, 2, g.FLOAT, false, 0, 0);
+    var hx = PhysicsDF.split(DEMO_CENTER.x), hy = PhysicsDF.split(DEMO_CENTER.y);
+    g.uniform2f(g.getUniformLocation(prog, "u_resolution"), SAMPLES, SAMPLES);
+    g.uniform2f(g.getUniformLocation(prog, "u_centerHi"), hx[0], hy[0]);
+    g.uniform2f(g.getUniformLocation(prog, "u_centerLo"), hx[1], hy[1]);
+    g.uniform1f(g.getUniformLocation(prog, "u_scale"), scale);
+    var tex = g.createTexture(); g.bindTexture(g.TEXTURE_2D, tex);
+    g.texImage2D(g.TEXTURE_2D, 0, g.RGBA32F, SAMPLES, 1, 0, g.RGBA, g.FLOAT, null);
+    g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MIN_FILTER, g.NEAREST);
+    g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MAG_FILTER, g.NEAREST);
+    var fbo = g.createFramebuffer(); g.bindFramebuffer(g.FRAMEBUFFER, fbo);
+    g.framebufferTexture2D(g.FRAMEBUFFER, g.COLOR_ATTACHMENT0, g.TEXTURE_2D, tex, 0);
+    g.viewport(0, 0, SAMPLES, 1);
+    g.drawArrays(g.TRIANGLES, 0, 6);
+    var px = new Float32Array(SAMPLES * 4);
+    g.readPixels(0, 0, SAMPLES, 1, g.RGBA, g.FLOAT, px);
+    var lose = g.getExtension("WEBGL_lose_context"); if (lose) lose.loseContext();
+    var out = [];
+    for (var i = 0; i < SAMPLES; i++) out.push(px[i * 4]);
+    return out;
+  }
+  function cpuRow(scale) {
+    var out = [];
+    for (var i = 0; i < SAMPLES; i++) {
+      // Mirrors the shader's own uv -> world formula for a SAMPLES x SAMPLES
+      // resolution sampled along row 0.
+      var uvx = (i + 0.5 - SAMPLES / 2) / SAMPLES;
+      var uvy = (0.5 - SAMPLES / 2) / SAMPLES;
+      var s = PhysicsGridCodegen.computeOffsetSceneNumeric(
+        DEMO_SCENE, DEMO_CENTER.x + uvx * scale, DEMO_CENTER.y + uvy * scale);
+      for (var k = 0; k < DEMO_STEPS; k++) PhysicsEngine.step(s, PhysicsGPU.FIXED_DT);
+      var y = s.bodies[0].y;
+      out.push(((y % DEMO_SCENE.frameHeight) + DEMO_SCENE.frameHeight) % DEMO_SCENE.frameHeight);
+    }
+    return out;
+  }
+
+  var zoomBody = document.querySelector("#zoomtable tbody");
+  var tiles = document.getElementById("tiles");
+  try {
+    [2e-1, 2e-2, 2e-3, 2e-5].forEach(function (scale) {
+      var truth = unwrap(cpuRow(scale), DEMO_SCENE.frameHeight);
+      var cf = correlation(unwrap(sampleRow("f32", scale), 1), truth);
+      var cd = correlation(unwrap(sampleRow("df", scale), 1), truth);
+      function cell(c) { return isNaN(c) ? "<i>no variance</i>" : c.toFixed(3); }
+      // Correlation below ~0.5 means most of what's on screen is no longer
+      // tracking the real answer.
+      var verdict = (cd > 0.5 && !(cf > 0.5)) ? "df still tracking the truth"
+        : (cf > 0.5 && cd > 0.5) ? "both faithful"
+        : "both past their limit - this detail is noise";
+      zoomBody.insertAdjacentHTML("beforeend",
+        "<tr><td>" + scale.toExponential(0) + "</td><td>" + cell(cf) + "</td><td>" + cell(cd) +
+        "</td><td class='" + (cd > 0.5 && !(cf > 0.5) ? "ok" : "") + "'>" + verdict + "</td></tr>");
+      var a = renderDemo("f32", scale), b = renderDemo("df", scale);
+      var wrap = document.createElement("div");
+      wrap.innerHTML = "<div style='font-size:11px;color:#98a0ad;margin-bottom:4px'>scale " + scale.toExponential(0) + "</div>";
+      [["float32", a], ["double-float", b]].forEach(function (pair) {
+        var d = document.createElement("div");
+        d.style.cssText = "display:inline-block;margin-right:8px;text-align:center";
+        d.innerHTML = "<div style='font-size:10.5px;color:#98a0ad'>" + pair[0] + "</div>";
+        d.appendChild(pair[1].canvas);
+        wrap.appendChild(d);
+      });
+      tiles.appendChild(wrap);
+    });
+  } catch (err) {
+    zoomBody.insertAdjacentHTML("beforeend", "<tr><td colspan=4 class='bad'>" + err.message + "</td></tr>");
+  }
+
+  verdictEl.className = failures === 0 ? "ok" : "bad";
+  verdictEl.textContent = failures === 0
+    ? "df arithmetic is sound on this driver - the deep-zoom path is safe to use"
+    : failures + " check(s) FAILED - df arithmetic is NOT reliable on this driver";
+})();
+</script>
+</body>
+</html>

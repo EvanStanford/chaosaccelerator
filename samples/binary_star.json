@@ -1,0 +1,57 @@
+{
+  "gravity": 800,
+  "mutualGravity": true,
+  "friction": 0,
+  "restitution": 1,
+  "bodies": [
+    {
+      "type": "circle",
+      "x": 651,
+      "y": 318,
+      "angle": 0,
+      "isAnchored": false,
+      "radius": 30,
+      "vx": 87,
+      "vy": 49,
+      "w": 0
+    },
+    {
+      "type": "circle",
+      "x": 489,
+      "y": 521,
+      "angle": 0,
+      "isAnchored": false,
+      "radius": 30,
+      "vx": -87,
+      "vy": -57,
+      "w": 0
+    },
+    {
+      "type": "circle",
+      "x": 202,
+      "y": 165,
+      "angle": 0,
+      "isAnchored": false,
+      "radius": 5,
+      "vx": 34,
+      "vy": -28,
+      "w": 0
+    }
+  ],
+  "hinges": [],
+  "xInput": {
+    "body": 2,
+    "property": "x"
+  },
+  "yInput": {
+    "body": 2,
+    "property": "y"
+  },
+  "output": {
+    "body": 2,
+    "property": "y"
+  },
+  "frameWidth": 1192,
+  "frameHeight": 809,
+  "edgeMode": "infinite"
+}
