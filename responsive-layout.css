@@ -1,0 +1,67 @@
+/* This file is part of Chaos Accelerator, licensed under the Common Public
+   Attribution License, Version 1.0 (CPAL-1.0) - see LICENSE in the project
+   root, or https://chaosaccelerator.com/license for a hosted copy. */
+
+/* Shared narrow/tall layout for BOTH views (the editor's #panel/#main/
+   #canvas-area and the grid's #grid-panel/#grid-main/#grid-canvas-area):
+   move the side panel from the left to the bottom of the page whenever the
+   viewport itself is taller than it is wide.
+
+   The grid's ids are namespaced because both shells now live in one
+   document (see index.html) - same layout, two selector lists.
+
+   Deliberately keyed on orientation:portrait - a pure aspect-ratio media
+   feature - rather than any device/UA check, so a desktop window resized
+   into a tall shape gets exactly the same layout a phone does, and is
+   exactly as easy to test. Both pages already share the #main/#panel/
+   #canvas-area structure this depends on, so one shared rule set covers
+   both instead of two hand-kept copies of the same layout.
+
+   Loaded after both views' own stylesheets (see the <link> order in
+   index.html) so these rules win the cascade over the base (landscape)
+   #panel/#main/#canvas-area rules without needing higher specificity or
+   !important. */
+@media (orientation: portrait) {
+  #main,
+  #grid-main {
+    flex-direction: column;
+  }
+  #panel,
+  #grid-panel {
+    order: 2;
+    width: 100%;
+    max-height: 45vh;
+    border: 0;
+    border-top: 1px solid var(--border);
+  }
+  #canvas-area,
+  #grid-canvas-area {
+    order: 1;
+    min-height: 0;
+  }
+  /* #grid-view only - #editor-view has no matching element, so this
+     is a no-op there. The drag handle only makes sense for resizing a
+     horizontal (left) panel; hidden here rather than building a second,
+     vertical resize interaction that hasn't been asked for. */
+  #panel-resizer {
+    display: none;
+  }
+
+  /* #grid-view only. Its #panel is a floating inlay over the grid
+     (absolutely positioned - see fractal-grid.css), so the docked rules
+     above don't describe it: instead of moving to the bottom of a column
+     flow, it detaches from the top inset and pins to the bottom one,
+     staying an inlay the grid runs behind. Scoped by the body's own
+     class so both views keep sharing this one file. */
+  .page-grid #grid-panel {
+    order: initial;
+    top: auto;
+    bottom: var(--panel-inset);
+    left: var(--panel-inset);
+    right: var(--panel-inset);
+    width: auto;
+    max-height: 45vh;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+}
