@@ -4062,6 +4062,260 @@
     }
   );
 
+  // ---- Global Stats analysis math (fractal-stats.js) ----
+  //
+  // Unlike everything above, these don't reproduce a shipped bug: they pin
+  // the analysis math to answers that can be worked out in advance. That is
+  // a different job from the rest of this file and it is here for a
+  // different reason - a structure tensor, an FFT or a circular mean will
+  // happily return a plausible-looking wrong number for as long as nobody
+  // feeds it a picture whose answer is already known, and by the time one
+  // of them is wrong on a real fractal there is nothing to compare against.
+  // So each of these builds a picture with a known answer (a ramp, stripes
+  // at a known angle and period, white noise, a value sweeping through the
+  // colour wheel's wrap point) and checks the number that comes back.
+  //
+  // FractalStats is DOM-free and WebGL-free by design, precisely so it can
+  // be loaded straight into this page - see its own header.
+
+  // Runs a job to completion. The real caller (see runStatsSlice in
+  // fractal-grid.js) spreads these same steps across idle callbacks; from
+  // the maths' point of view that changes nothing, so the tests drive them
+  // back to back.
+  function runStatsJob(spec) {
+    var job = FractalStats.createJob(spec);
+    var guard = 0;
+    while (job.step()) {
+      if (++guard > 100000) throw new Error("stats job never finished");
+    }
+    return job.result;
+  }
+
+  var ALL_STAT_GROUPS = {
+    extremes: true, distribution: true, roughness: true, orientation: true,
+    spectrum: true, correlation: true, features: true,
+  };
+
+  function statsField(w, h, fn) {
+    var t = new Float32Array(w * h);
+    for (var r = 0; r < h; r++) {
+      for (var c = 0; c < w; c++) t[r * w + c] = fn(c, r);
+    }
+    return { width: w, height: h, t: t };
+  }
+
+  // mulberry32 - a real generator, not a one-line LCG. Written out because
+  // the spectral-slope test below genuinely depends on the input being
+  // white: an LCG whose low bits are correlated has a sloped spectrum of
+  // its own, and would fail this test for a reason that has nothing to do
+  // with the code under test.
+  function mulberry32(seed) {
+    return function () {
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  addTest(
+    "FFT finds the frequency and amplitude of a known sinusoid",
+    "Everything in Spatial Scale rests on this transform being right",
+    function () {
+      var n = 64, re = new Float64Array(n), im = new Float64Array(n);
+      for (var i = 0; i < n; i++) re[i] = Math.cos(2 * Math.PI * 5 * i / n);
+      FractalStats.fftInPlace(re, im, n);
+      var peak = 0, peakK = 0;
+      for (var k = 0; k <= n / 2; k++) {
+        var p = re[k] * re[k] + im[k] * im[k];
+        if (p > peak) { peak = p; peakK = k; }
+      }
+      var amplitude = Math.sqrt(peak);
+      return {
+        pass: peakK === 5 && Math.abs(amplitude - n / 2) < 1e-8,
+        detail: "peak bin=" + peakK + " (expected 5), magnitude=" + amplitude.toFixed(4) + " (expected " + (n / 2) + ")",
+      };
+    }
+  );
+
+  addTest(
+    "A plain left-to-right ramp reads as one vertical-lined, perfectly coherent plane",
+    "Gradient, structure tensor, plane fit and extrema all have exact answers here",
+    function () {
+      var W = 64, H = 64;
+      var f = statsField(W, H, function (c) { return c / (W - 1); });
+      var res = runStatsJob({ width: W, height: H, t: f.t, circular: false, groups: ALL_STAT_GROUPS });
+      var ex = res.groups.extremes, ro = res.groups.roughness, or = res.groups.orientation, co = res.groups.correlation;
+      var checks = [
+        ["min at the left edge", ex.min.col === 0 && ex.min.t === 0],
+        ["max at the right edge", ex.max.col === W - 1 && Math.abs(ex.max.t - 1) < 1e-6],
+        ["range = 1", Math.abs(ex.range - 1) < 1e-6],
+        ["mean gradient = 1/(W-1)", Math.abs(ro.meanGradient - 1 / (W - 1)) < 1e-7],
+        ["no vertical variation", ro.meanAbsDy < 1e-9],
+        // The gradient points along +x, so the EDGES run at 90 degrees.
+        // Getting this backwards is the single easiest mistake in the
+        // whole rose, and it looks entirely reasonable on a real fractal.
+        ["edges read as vertical (90 degrees)", Math.abs(or.dominantEdgeDegrees - 90) < 0.01],
+        ["coherence = 1", Math.abs(or.coherence - 1) < 1e-6],
+        ["plane fit R^2 = 1", Math.abs(co.planeR2 - 1) < 1e-6],
+        ["no local extrema", res.groups.features.peaks === 0 && res.groups.features.pits === 0],
+      ];
+      var failed = checks.filter(function (c) { return !c[1]; });
+      return {
+        pass: failed.length === 0,
+        detail: failed.length ? "failed: " + failed.map(function (c) { return c[0]; }).join(", ")
+          : "gradient=" + ro.meanGradient.toFixed(6) + ", edge angle=" + or.dominantEdgeDegrees.toFixed(2) + " degrees, R^2=" + co.planeR2.toFixed(4),
+      };
+    }
+  );
+
+  addTest(
+    "Stripes are found at the angle and the spacing they were drawn at",
+    "The rose, the structure tensor and the spectrum must agree with each other and with the picture",
+    function () {
+      // Three orientations, one period. Row 0 is the BOTTOM row (see
+      // fractal-stats.js's own header), so lines of constant (c + r) run
+      // up to the LEFT - 135 degrees, not 45.
+      // The diagonal's own wavelength is NOT 8: the pattern repeats every 8
+      // along (c + r), and the distance between two lines measured
+      // PERPENDICULAR to them - which is what a spatial wavelength means -
+      // is that over root two.
+      var cases = [
+        { name: "horizontal", fn: function (c, r) { return (r % 8 < 4) ? 0.2 : 0.8; }, degrees: 0, wavelength: 8 },
+        { name: "vertical", fn: function (c) { return (c % 8 < 4) ? 0.2 : 0.8; }, degrees: 90, wavelength: 8 },
+        { name: "diagonal", fn: function (c, r) { return ((c + r) % 8 < 4) ? 0.2 : 0.8; }, degrees: 135, wavelength: 8 / Math.SQRT2 },
+      ];
+      var W = 64, H = 64, problems = [], detail = [];
+      cases.forEach(function (one) {
+        var f = statsField(W, H, one.fn);
+        var res = runStatsJob({ width: W, height: H, t: f.t, circular: false, groups: { orientation: true, spectrum: true } });
+        var o = res.groups.orientation, s = res.groups.spectrum;
+        // 0 degrees and 180 degrees are the same heading.
+        var off = Math.min(Math.abs(o.peakBinDegrees - one.degrees), 180 - Math.abs(o.peakBinDegrees - one.degrees));
+        if (off > 1.5) problems.push(one.name + " rose peak " + o.peakBinDegrees.toFixed(1));
+        if (o.coherence < 0.95) problems.push(one.name + " coherence " + o.coherence.toFixed(3));
+        if (Math.abs(s.dominantWavelength - one.wavelength) > 0.6) {
+          problems.push(one.name + " wavelength " + s.dominantWavelength.toFixed(2) + " (expected " + one.wavelength.toFixed(2) + ")");
+        }
+        detail.push(one.name + ": " + o.peakBinDegrees.toFixed(1) + " degrees, " + s.dominantWavelength.toFixed(2) + " samples");
+      });
+      return { pass: problems.length === 0, detail: problems.length ? problems.join("; ") : detail.join("; ") };
+    }
+  );
+
+  addTest(
+    "White noise reads as structureless, and has no dominant scale",
+    "Every 'how structured is this' number must sit at its own zero for an unstructured picture",
+    function () {
+      var W = 96, H = 96, rnd = mulberry32(1);
+      var f = statsField(W, H, function () { return rnd(); });
+      var res = runStatsJob({ width: W, height: H, t: f.t, circular: false, groups: ALL_STAT_GROUPS });
+      var d = res.groups.distribution, o = res.groups.orientation, c = res.groups.correlation, s = res.groups.spectrum;
+      var checks = [
+        ["coherence near 0", o.coherence < 0.1],
+        ["Moran's I near 0", Math.abs(c.moransI) < 0.05],
+        ["correlation length under 1.5 samples", c.correlationLength !== null && c.correlationLength < 1.5],
+        ["plane R^2 near 0", c.planeR2 < 0.02],
+        // A uniform distribution's own exact moments, which is what makes
+        // this a test of the moment code rather than of the generator.
+        ["mean ~ 0.5", Math.abs(d.mean - 0.5) < 0.02],
+        ["std ~ 1/sqrt(12)", Math.abs(d.std - Math.sqrt(1 / 12)) < 0.01],
+        ["excess kurtosis ~ -1.2", Math.abs(d.kurtosisExcess + 1.2) < 0.1],
+        ["entropy near 100%", d.entropyNormalized > 0.99],
+        ["spectrum flat", Math.abs(s.slope) < 0.3],
+        ["no dominant scale", s.dominantWavelength === null],
+      ];
+      var failed = checks.filter(function (x) { return !x[1]; });
+      return {
+        pass: failed.length === 0,
+        detail: failed.length ? "failed: " + failed.map(function (x) { return x[0]; }).join(", ")
+          : "coherence=" + o.coherence.toFixed(3) + ", I=" + c.moransI.toFixed(3) + ", slope=" + s.slope.toFixed(3) + ", kurtosis=" + d.kurtosisExcess.toFixed(2),
+      };
+    }
+  );
+
+  addTest(
+    "A wrapping Output's seam is not mistaken for an edge",
+    "mod() cutting the colour wheel would otherwise read as the sharpest feature in the view",
+    function () {
+      // A smooth ramp that passes through t = 1 -> t = 0 twice. The real
+      // slope between neighbours is 2/W everywhere; a naive difference sees
+      // a near-1.0 cliff at each wrap.
+      var W = 64, H = 64;
+      var f = statsField(W, H, function (c) { return (0.4 + 2 * c / W) % 1; });
+      var wrapped = runStatsJob({ width: W, height: H, t: f.t, circular: true, groups: { roughness: true, features: true, distribution: true } });
+      var naive = runStatsJob({ width: W, height: H, t: f.t, circular: false, groups: { roughness: true } });
+      var trueSlope = 2 / W;
+      var ok = Math.abs(wrapped.groups.roughness.maxGradient - trueSlope) < 1e-5 &&
+        naive.groups.roughness.maxGradient > 0.9 &&
+        wrapped.groups.features.peaks === 0 && wrapped.groups.features.pits === 0;
+      return {
+        pass: ok,
+        detail: "circular max step=" + wrapped.groups.roughness.maxGradient.toFixed(6) +
+          " (true slope " + trueSlope.toFixed(6) + "), same data read linearly=" +
+          naive.groups.roughness.maxGradient.toFixed(4) + ", false extrema=" +
+          (wrapped.groups.features.peaks + wrapped.groups.features.pits),
+      };
+    }
+  );
+
+  addTest(
+    "A wrapping Output averages round the wheel, not across it",
+    "The mean of 0.98 and 0.02 is 0, not 0.5 - a plain average lands on the opposite side",
+    function () {
+      var W = 8, H = 8;
+      var f = statsField(W, H, function (c, r) { return ((c + r) % 2 === 0) ? 0.98 : 0.02; });
+      var res = runStatsJob({ width: W, height: H, t: f.t, circular: true, groups: { distribution: true } });
+      var distanceFromZero = Math.min(res.circularMean, 1 - res.circularMean);
+      return {
+        pass: distanceFromZero < 0.01 && res.resultantLength > 0.99 && res.groups.distribution.circularSpread < 0.05,
+        detail: "circular mean=" + res.circularMean.toFixed(4) + " (should be ~0 or ~1), concentration=" +
+          res.resultantLength.toFixed(4) + ", spread=" + res.groups.distribution.circularSpread.toFixed(4),
+      };
+    }
+  );
+
+  addTest(
+    "A masked input seam contributes no gradient at all",
+    "Where X/Y Input wraps back into the frame there is a straight false edge, and it is axis-aligned",
+    function () {
+      // Two flat halves with one step between them, marked as a seam. The
+      // whole point of the mask is that the step then counts for nothing:
+      // left in, three of these lines would dominate the orientation rose
+      // at exactly 0 and 90 degrees.
+      var W = 32, H = 16;
+      var f = statsField(W, H, function (c) { return c < 16 ? 0.1 : 0.9; });
+      var colSeam = new Uint8Array(W - 1);
+      colSeam[15] = 1;
+      var masked = runStatsJob({ width: W, height: H, t: f.t, circular: false, colSeam: colSeam, groups: { roughness: true } });
+      var unmasked = runStatsJob({ width: W, height: H, t: f.t, circular: false, groups: { roughness: true } });
+      return {
+        pass: masked.groups.roughness.maxGradient < 1e-9 && Math.abs(unmasked.groups.roughness.maxGradient - 0.8) < 1e-5,
+        detail: "masked max step=" + masked.groups.roughness.maxGradient.toExponential(2) +
+          ", unmasked=" + unmasked.groups.roughness.maxGradient.toFixed(4),
+      };
+    }
+  );
+
+  addTest(
+    "A simulation that produced NaN is excluded rather than averaged in",
+    "One non-finite sample would otherwise make every mean, min and max on the card NaN",
+    function () {
+      var W = 16, H = 16;
+      var f = statsField(W, H, function () { return 0.5; });
+      f.t[0] = NaN;
+      f.t[5] = Infinity;
+      var res = runStatsJob({ width: W, height: H, t: f.t, circular: false, groups: { extremes: true, distribution: true } });
+      return {
+        pass: res.invalidCount === 2 && res.validCount === W * H - 2 &&
+          Math.abs(res.groups.distribution.mean - 0.5) < 1e-7 &&
+          Math.abs(res.groups.extremes.max.t - 0.5) < 1e-7,
+        detail: "valid=" + res.validCount + ", invalid=" + res.invalidCount +
+          ", mean=" + res.groups.distribution.mean + ", max=" + res.groups.extremes.max.t,
+      };
+    }
+  );
+
   // ---- Runner / report rendering ----
 
   function renderRow(tbody, name, bugRef, outcome) {

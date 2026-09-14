@@ -45,7 +45,10 @@
     Every row below reproduces a bug that was found and fixed during
     development. Re-run this page after any change to the physics engine,
     the GPU compiler, or the hinge-editing logic in physics-ui.js, to make
-    sure none of them came back.
+    sure none of them came back. The last group is the exception: those
+    rows check the Global Stats analysis math (fractal-stats.js) against
+    pictures whose answers are known in advance, which is the only way to
+    tell a right structure tensor or FFT from a plausible one.
   </p>
   <div id="summary">running&hellip;</div>
   <div class="field-row" style="margin-bottom: 14px;">
@@ -107,6 +110,7 @@
 <script src="physics-gpu.js"></script>
 <script src="physics-gpu-df.js"></script>
 <script src="physics-grid-codegen.js"></script>
+<script src="fractal-stats.js"></script>
 <script src="physics-tests.js"></script>
 <script>
   // physics-hinge-geometry.js is plain scene math with no DOM dependency,
