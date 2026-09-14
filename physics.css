@@ -48,29 +48,14 @@ html, body {
 /* ---- Panel head: all the chrome there is ----
    The old #topbar (page title, status chip, settings/back buttons) is gone
    from both pages so the canvas can run edge to edge. What survived lives
-   in this row at the top of #panel. */
+   in this row at the top of #panel. (#editor-view only - the fractal page
+   keeps its own chrome in a menu column instead; see #grid-menu-column in
+   fractal-grid.css.) */
 .panel-head {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
-}
-.panel-head #back-link {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 6px;
-  font-size: 16px;
-  line-height: 1;
-  text-decoration: none;
-  color: var(--text-dim);
-  background: var(--bg-input, #21273a);
-}
-.panel-head #back-link:hover {
-  color: var(--text);
-  background: var(--accent);
 }
 /* Errors only. "Editing", "Playing", "Ready" were the whole reason the old
    status chip needed permanent space, and none of them told anyone

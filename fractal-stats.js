@@ -220,15 +220,17 @@
   // about the same per sample, so this is the whole of what keeps a step's
   // cost independent of the sample block - a few milliseconds at the top of
   // the resolution slider just as at the bottom.
-  var SAMPLES_PER_STEP = 120000;
+  var SAMPLES_PER_STEP = 60000;
 
   // The transform runs on blocks of this size at most, however large the
-  // sample block is. Past 512 the extra frequency bins are finer than the
-  // plot can show, while the cost and the memory keep doubling; covering a
-  // large block is done by averaging over MANY such blocks instead (see the
-  // spectrum section), which costs the same per sample and gives a cleaner
-  // spectrum than one enormous transform would.
-  var FFT_BLOCK_MAX = 512;
+  // sample block is. Past this the extra frequency bins are finer than a
+  // 300-pixel-wide plot can show, while the cost of one transform keeps
+  // quadrupling - and one transform is one step, so it is also what sets
+  // how long the longest step in the whole analysis takes. Covering a large
+  // sample block is done by averaging over MANY of these instead (see the
+  // spectrum section): the same cost per sample, spread over four times as
+  // many steps, and a cleaner spectrum at the end of it.
+  var FFT_BLOCK_MAX = 256;
 
   function createJob(spec) {
     var W = spec.width | 0, H = spec.height | 0;
@@ -638,7 +640,7 @@
       var tilesX = S >= 8 ? Math.max(1, Math.floor(W / S)) : 0;
       var tilesY = S >= 8 ? Math.max(1, Math.floor(H / S)) : 0;
       var tileCount = tilesX * tilesY;
-      var spec = null;
+      var fftState = null;
 
       if (tileCount > 0) {
         steps.push(function spectrumPrepare() {
@@ -648,7 +650,7 @@
           // the origin) would swamp the picture's.
           var win = new Float64Array(S);
           for (var k = 0; k < S; k++) win[k] = 0.5 - 0.5 * Math.cos(TAU * k / (S - 1));
-          spec = {
+          fftState = {
             win: win,
             power: new Float64Array(S * S),
             re: new Float64Array(S * S),
@@ -667,12 +669,12 @@
         for (var tile = 0; tile < tileCount; tile++) {
           steps.push((function (index) {
             return function spectrumTile() {
-              if (!spec || out.empty) return;
+              if (!fftState || out.empty) return;
               var tx = index % tilesX, ty = (index / tilesX) | 0;
-              var c0 = spec.originX + tx * S, r0 = spec.originY + ty * S;
+              var c0 = fftState.originX + tx * S, r0 = fftState.originY + ty * S;
               var channels = circular ? 2 : 1;
               for (var ch = 0; ch < channels; ch++) {
-                var re = spec.re, im = spec.im, k, rr, cc, v;
+                var re = fftState.re, im = fftState.im, k, rr, cc, v;
                 var sum = 0;
                 for (rr = 0; rr < S; rr++) {
                   for (cc = 0; cc < S; cc++) {
@@ -690,20 +692,20 @@
                 for (rr = 0; rr < S; rr++) {
                   for (cc = 0; cc < S; cc++) {
                     k = rr * S + cc;
-                    re[k] = (re[k] - avg) * spec.win[rr] * spec.win[cc];
+                    re[k] = (re[k] - avg) * fftState.win[rr] * fftState.win[cc];
                     im[k] = 0;
                   }
                 }
                 fft2dInPlace(re, im, S);
-                for (k = 0; k < S * S; k++) spec.power[k] += re[k] * re[k] + im[k] * im[k];
+                for (k = 0; k < S * S; k++) fftState.power[k] += re[k] * re[k] + im[k] * im[k];
               }
-              spec.blocks++;
+              fftState.blocks++;
             };
           })(tile));
         }
 
         steps.push(function spectrumReduce() {
-          if (!spec || out.empty || spec.blocks === 0) return;
+          if (!fftState || out.empty || fftState.blocks === 0) return;
           var half = S / 2, maxK = half;
           var radial = new Float64Array(maxK + 1), radialN = new Float64Array(maxK + 1);
           var ry, rx, ky, kx, kr, bin, b;
@@ -716,12 +718,12 @@
               kr = Math.sqrt(kx * kx + ky * ky);
               bin = Math.round(kr);
               if (bin > maxK) continue;
-              radial[bin] += spec.power[ry * S + rx];
+              radial[bin] += fftState.power[ry * S + rx];
               radialN[bin]++;
             }
           }
           var meanPower = new Float64Array(maxK + 1);
-          for (b = 0; b <= maxK; b++) meanPower[b] = radialN[b] > 0 ? radial[b] / radialN[b] / spec.blocks : 0;
+          for (b = 0; b <= maxK; b++) meanPower[b] = radialN[b] > 0 ? radial[b] / radialN[b] / fftState.blocks : 0;
 
           // Slope of log(mean power) against log(k), fitted away from both
           // ends: k < 2 is a handful of bins dominated by the window, and
@@ -800,7 +802,7 @@
               kr = Math.sqrt(kx * kx + ky * ky);
               bin = Math.round(kr);
               if (bin < loK || bin > hiK || meanPower[bin] <= 0) continue;
-              var w = spec.power[ry * S + rx] / spec.blocks / meanPower[bin];
+              var w = fftState.power[ry * S + rx] / fftState.blocks / meanPower[bin];
               // The structure a frequency describes runs PERPENDICULAR to
               // that frequency's own direction, so this is rotated 90
               // degrees to match the orientation rose above and share its
@@ -825,7 +827,7 @@
 
           out.groups.spectrum = {
             size: S,
-            blocks: spec.blocks,
+            blocks: fftState.blocks,
             radialPower: meanPower,
             maxK: maxK,
             slope: fit ? -fit.slope : null,      // P ~ k^-slope
@@ -845,7 +847,7 @@
             // way.
             angularAnisotropy: anisotropy,
           };
-          spec = null;
+          fftState = null;
         });
       }
     }
@@ -856,8 +858,11 @@
       // screen pixels at the old sample resolution and rather less than
       // that at a finer one, so the range it covers now scales with the
       // block - a correlation length is only meaningful against a distance
-      // the reader can see.
-      var lags = clamp(spec.maxLag || Math.round(Math.min(W, H) / 5), 8, 64);
+      // the reader can see, and at one sample per pixel a 64-sample ceiling
+      // puts most real ones out of reach. The ceiling can afford to be this
+      // high because each lag's cost is already held flat by the scan-line
+      // stride below, not by the number of lags.
+      var lags = clamp(spec.maxLag || Math.round(Math.min(W, H) / 5), 8, 256);
       lags = Math.max(1, Math.min(lags, Math.floor(Math.min(W, H) / 2) - 1));
       var corr = new Float64Array(lags + 1);
       // Running seam totals, so "is there a seam anywhere between column c

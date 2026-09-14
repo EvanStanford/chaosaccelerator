@@ -18,6 +18,11 @@
      reads as sitting ON the fractal rather than being cut out of it. */
   --panel-inset: 14px;
   --bg-panel-float: rgba(27, 30, 39, 0.86);
+  /* What the menu column keeps clear for the back link and the three menu
+     buttons, so an open card can never push the other menus off the bottom
+     of the screen. Named because two rules have to agree on it - the card's
+     own max-height, and the portrait override of it. */
+  --menu-reserved: calc((var(--settings-btn-size) + 8px) * 3 + 20px);
 }
 
 * { box-sizing: border-box; }
@@ -38,16 +43,6 @@ html, body {
 }
 
 
-#back-link {
-  color: var(--text-dim);
-  text-decoration: none;
-  font-size: 13px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 10px;
-  white-space: nowrap;
-}
-#back-link:hover { color: var(--text); background: var(--bg-input); }
 
 
 .status-ok {
@@ -59,33 +54,6 @@ html, body {
 .status-ok { background: #21273a; color: #9db0e8; }
 .status-error { background: #3a1418; color: #ff9a9a; }
 
-/* ---- Panel head: all the chrome there is ----
-   The old #topbar (page title, status chip, settings/back buttons) is gone
-   from both pages so the canvas can run edge to edge. What survived lives
-   in this row at the top of #grid-panel. */
-.panel-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-.panel-head #back-link {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 6px;
-  font-size: 16px;
-  line-height: 1;
-  text-decoration: none;
-  color: var(--text-dim);
-  background: var(--bg-input, #21273a);
-}
-.panel-head #back-link:hover {
-  color: var(--text);
-  background: var(--accent);
-}
 /* Errors only. "Editing", "Playing", "Ready" were the whole reason the old
    status chip needed permanent space, and none of them told anyone
    anything they couldn't see; a compile failure or an unreadable scene
@@ -94,8 +62,7 @@ html, body {
   display: none;
 }
 #grid-status.status-error {
-  flex: 1;
-  min-width: 0;
+  width: 100%;
 }
 
 #grid-main {
@@ -105,50 +72,212 @@ html, body {
   min-height: 0;
 }
 
-/* A floating inlay over the fractal, not a docked column - the grid runs
-   edge to edge behind it. Absolutely positioned rather than flexed, so
-   #grid-canvas-area below takes the full area and needs no width accounting;
-   the only thing that has to stay in sync is #panel-resizer, which lives
-   INSIDE the panel now (see below) and so follows it for free. */
-#grid-panel {
+/* ---- The menu column ----
+   Everything on this page that is not the fractal, in one upper-left
+   stack: the way back, and three menus that are a square icon button
+   until opened, at which point that button becomes the card and pushes
+   whatever is below it down. Absolutely positioned rather than flexed, so
+   #grid-canvas-area takes the full area and needs no width accounting.
+
+   pointer-events: none, with it turned back on per item. The column is
+   --panel-width wide whether or not anything is open, and that width sits
+   over the fractal: without this, a drag or a wheel-zoom aimed at the
+   picture beside a collapsed button would land on empty column instead.
+   Two elements rather than one because the stack scrolls and the resize
+   handle beside it must not. */
+#grid-menu-column {
   position: absolute;
   z-index: 3;
   top: var(--panel-inset);
   left: var(--panel-inset);
   width: var(--panel-width);
-  max-height: calc(100% - var(--panel-inset) * 2);
+  max-width: calc(100% - var(--panel-inset) * 2);
+  pointer-events: none;
+}
+#grid-menu-stack {
+  display: flex;
+  flex-direction: column;
+  /* Every card is --panel-width; the collapsed buttons and the back link
+     are their own size and must not stretch to match. */
+  align-items: flex-start;
+  gap: 8px;
+  /* Viewport units, not a percentage: the column's own height is auto (it
+     shrinks to this stack), and a percentage max-height against an
+     auto-height parent resolves to none - so the stack would never
+     scroll, it would just run off the bottom of the screen. */
+  max-height: calc(100vh - var(--panel-inset) * 2);
+  overflow-y: auto;
+  /* overflow-y: auto would otherwise also compute overflow-x to auto (per
+     the CSS Overflow spec, a non-visible value on one axis pulls the
+     visible other axis to auto) - a long unbroken hover readout (see
+     #grid-view #hover-readout below) was enough to grow a horizontal
+     scrollbar this never needs. */
+  overflow-x: hidden;
+}
+#grid-menu-stack > * {
+  pointer-events: auto;
+  flex-shrink: 0;
+}
+
+/* The shared look of every control in the column: a translucent card
+   sitting ON the fractal rather than cut out of it. */
+.menu-back,
+.menu-toggle,
+.menu-card {
   background: var(--bg-panel-float);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border);
-  border-radius: 12px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
-  overflow-y: auto;
-  /* overflow-y: auto here would otherwise also compute overflow-x to auto
-     (per the CSS Overflow spec, a non-visible value on one axis pulls the
-     visible other axis to auto) - a long unbroken hover readout (see
-     #grid-view #hover-readout below) was enough to grow a horizontal
-     scrollbar the panel never needs; it only ever scrolls vertically. */
-  overflow-x: hidden;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
 }
 
-/* Pinned to the floating panel's own right edge rather than sitting
-   between two flex children, so it tracks the panel without a second copy
-   of its position. The drag handler only reads panel.getBoundingClientRect()
-   and writes --panel-width, so it needs no change. */
+/* Wider than the three below it because it carries its own label - the
+   only one of the four whose destination isn't obvious from an icon. */
+.menu-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--settings-btn-size);
+  padding: 0 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  color: var(--text);
+}
+.menu-back:hover {
+  background: var(--bg-input);
+  border-color: var(--accent);
+}
+
+.menu-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+/* The collapsed state of a menu. Square, and the same size as the others,
+   so the four form one column whatever is open. */
+.menu-toggle {
+  width: var(--settings-btn-size);
+  height: var(--settings-btn-size);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--text);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.menu-toggle:hover {
+  background: var(--bg-input);
+  border-color: var(--accent);
+}
+/* Exactly one of the button and the card is in the layout at a time -
+   never both, and never a hidden-but-present one taking up space in a
+   column whose whole job is to push what's below it down. */
+.menu-item.is-open > .menu-toggle {
+  display: none;
+}
+
+.menu-card {
+  width: var(--panel-width);
+  max-width: 100%;
+  /* Leave room for the back link and the three menu buttons, so opening a
+     tall card never pushes the other menus off the bottom of the screen -
+     the card scrolls inside itself instead. The column scrolls too (see
+     #grid-menu-stack), which is what catches the case of several open at
+     once; this is what stops ONE of them swallowing the column. */
+  max-height: calc(100vh - var(--panel-inset) * 2 - var(--menu-reserved));
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  /* The card is what the button turned into, so it grows out of the
+     button's own corner. Not a transition: the card is display:none when
+     shut (it has to leave the layout), and there is nothing to transition
+     from. */
+  transform-origin: top left;
+  animation: menu-card-open 0.14s ease-out;
+}
+.menu-card[hidden] {
+  display: none;
+}
+@keyframes menu-card-open {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.menu-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 10px 10px 14px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.menu-card-header h2 {
+  font-size: 14px;
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+}
+/* The same glyph as the collapsed button, so an open card still reads as
+   that button rather than as an unrelated panel. */
+.menu-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: 15px;
+  line-height: 1;
+}
+/* Sits after the name, which is where the eye goes to put a menu away. */
+.menu-collapse {
+  flex-shrink: 0;
+  font-size: 16px;
+}
+
+.menu-card-body {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  overflow-y: auto;
+  /* Same reason as #grid-menu-stack's: overflow-y alone would pull
+     overflow-x to auto and let a long unbroken readout grow a horizontal
+     scrollbar this never needs. */
+  overflow-x: hidden;
+}
+/* Inspect's three groups want more air between them than a settings card's
+   fields do - the extra 8px on top of the gap above is what the old
+   floating panel's own 20px worked out to. */
+.menu-card-body > .panel-section + .panel-section {
+  margin-top: 8px;
+}
+
+/* Pinned to the column's own right edge, outside the scrolling stack, so
+   it stays put while the stack scrolls under it. The drag handler reads
+   the stack's rect and writes --panel-width, which every open card is
+   sized from. Nothing to resize with every menu shut, so it isn't there. */
 #panel-resizer {
   position: absolute;
   top: 0;
-  bottom: 0;
   right: 0;
+  height: 100%;
   width: 6px;
   cursor: col-resize;
   background: transparent;
   border-radius: 0 12px 12px 0;
+  pointer-events: auto;
+  display: none;
+}
+#grid-menu-column.has-open-menu > #panel-resizer {
+  display: block;
 }
 #panel-resizer:hover,
 #panel-resizer.dragging {
@@ -398,7 +527,7 @@ input[type="range"] {
 /* #hover-readout is the one .readout in this panel that's actually long
    (coordinates plus a step count) rather than a short fixed label like the
    zoom readout - nowrap on it was what needed a horizontal scrollbar
-   before #grid-panel gained overflow-x: hidden above. Higher specificity
+   before .menu-card-body gained overflow-x: hidden above. Higher specificity
    than #grid-view .readout (two ID selectors beat one ID + one class) so
    this wins regardless of source order. */
 #grid-view #hover-readout {
@@ -449,10 +578,10 @@ input[type="range"] {
   background: #0c0d11;
   /* Without this, an .inspect-marker for a point currently panned outside
      the visible grid (negative left/top relative to this box) would still
-     paint on top of everything. (#grid-panel used to be unpositioned, which put
-     this element above it in stacking order whatever the DOM order; the
-     panel floats with its own z-index now, so that half no longer
-     applies - the clipping still does.) */
+     paint on top of everything. (The old left panel used to be
+     unpositioned, which put this element above it in stacking order
+     whatever the DOM order; the menu column has its own z-index now, so
+     that half no longer applies - the clipping still does.) */
   overflow: hidden;
   /* Hand every touch gesture here to fractal-grid.js's own pan/pinch-zoom
      handlers instead of the browser's default scroll/pinch-zoom - without
@@ -644,8 +773,9 @@ input[type="range"] {
 
 /* Reusable tip popover (see showTip in fractal-grid.js) - one shared
    instance, positioned in JS against whatever element it's currently
-   pointing at. Fixed positioning so it isn't clipped by #grid-panel's own
-   overflow-y: auto. */
+   pointing at. Fixed positioning so it isn't clipped by the menu column's
+   own overflow-y: auto - see #grid-menu-stack and .menu-card-body, both of
+   which scroll and both of which hold tip anchors. */
 .tip-popover {
   position: fixed;
   z-index: 1000;

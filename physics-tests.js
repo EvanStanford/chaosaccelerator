@@ -4316,6 +4316,64 @@
     }
   );
 
+  addTest(
+    "A block too tall for one step is still counted exactly once, all of it",
+    "Every pass is split by rows so a full-resolution block never hitches a frame - a split that skipped or repeated a row would be invisible in the numbers",
+    function () {
+      // Tall enough to force the row splitting to actually split (see
+      // addRowPass and SAMPLES_PER_STEP in fractal-stats.js). Each row
+      // carries its own distinct value, so a dropped or double-counted row
+      // moves the mean and the test fails rather than merely looking odd.
+      var W = 64, H = 2000;
+      var f = statsField(W, H, function (c, r) { return r / (H - 1); });
+      var res = runStatsJob({ width: W, height: H, t: f.t, circular: false, groups: ALL_STAT_GROUPS });
+      var d = res.groups.distribution, ex = res.groups.extremes;
+      var checks = [
+        ["every sample counted", res.validCount === W * H],
+        ["mean is the ramp's own midpoint", Math.abs(d.mean - 0.5) < 1e-6],
+        ["min on the bottom row", ex.min.row === 0 && ex.min.t === 0],
+        ["max on the top row", ex.max.row === H - 1 && Math.abs(ex.max.t - 1) < 1e-6],
+        // A ramp up the screen has horizontal edges: 0 degrees.
+        ["edges read as horizontal", Math.abs(res.groups.orientation.dominantEdgeDegrees % 180) < 0.01],
+        ["plane fit R^2 = 1", Math.abs(res.groups.correlation.planeR2 - 1) < 1e-6],
+        ["the pass really was split", res.width * res.height > 60000],
+      ];
+      var failed = checks.filter(function (c) { return !c[1]; });
+      return {
+        pass: failed.length === 0,
+        detail: failed.length ? "failed: " + failed.map(function (c) { return c[0]; }).join(", ")
+          : W + "x" + H + " counted " + res.validCount + " samples, mean=" + d.mean.toFixed(6),
+      };
+    }
+  );
+
+  addTest(
+    "The spectrum of a block bigger than one transform is averaged over several",
+    "Past a few hundred samples a side the transform runs on tiles (Welch's method) - tiled wrongly it would report the wrong scale, or the wrong direction",
+    function () {
+      // Wider than one transform block, so this genuinely tiles: at 300
+      // rows the block size is 256, giving two tiles across and one down.
+      var W = 600, H = 300;
+      var f = statsField(W, H, function (c, r) { return (r % 8 < 4) ? 0.2 : 0.8; });
+      var res = runStatsJob({ width: W, height: H, t: f.t, circular: false, groups: { spectrum: true } });
+      var s = res.groups.spectrum;
+      var offBy = Math.min(Math.abs(s.angularPeakDegrees), 180 - Math.abs(s.angularPeakDegrees));
+      // Anisotropy is judged loosely on purpose. It is an average over
+      // scales, and a pure stripe pattern has power at only a couple of
+      // them - so the many empty rings in a 256-wide transform, each
+      // contributing a directionless share, hold the figure well below the
+      // 1.0 the pattern looks like it deserves. The wavelength and the
+      // direction are the claims worth pinning exactly.
+      return {
+        pass: s.blocks > 1 && Math.abs(s.dominantWavelength - 8) < 0.6 && offBy < 3 && s.angularAnisotropy > 0.6,
+        detail: s.blocks + " blocks of " + s.size + "x" + s.size + ", wavelength=" +
+          (s.dominantWavelength === null ? "none" : s.dominantWavelength.toFixed(2)) +
+          " (expected 8), direction=" + s.angularPeakDegrees.toFixed(1) +
+          " degrees (expected 0), anisotropy=" + s.angularAnisotropy.toFixed(3),
+      };
+    }
+  );
+
   // ---- Runner / report rendering ----
 
   function renderRow(tbody, name, bugRef, outcome) {
