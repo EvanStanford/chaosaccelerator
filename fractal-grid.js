@@ -90,7 +90,8 @@
   var SIMULATION_STEPS_PER_NOTCH = 100;
   var simulationSteps = DEFAULT_SIMULATION_STEPS;
 
-  var panel = document.getElementById("grid-panel");
+  var menuColumn = document.getElementById("grid-menu-column");
+  var menuStack = document.getElementById("grid-menu-stack");
   var panelResizer = document.getElementById("panel-resizer");
   var canvasArea = document.getElementById("grid-canvas-area");
   var canvas = document.getElementById("grid-canvas");
@@ -117,13 +118,7 @@
   var tipPopoverText = document.getElementById("tip-popover-text");
   var tipPopoverOk = document.getElementById("tip-popover-ok");
   var tipPopoverDismiss = document.getElementById("tip-popover-dismiss");
-  var btnSettings = document.getElementById("grid-btn-settings");
-  var btnSettingsClose = document.getElementById("grid-btn-settings-close");
-  var settingsPanel = document.getElementById("grid-settings-panel");
   var btnResetTips = document.getElementById("grid-btn-reset-tips");
-  var btnStats = document.getElementById("grid-btn-stats");
-  var btnStatsClose = document.getElementById("grid-btn-stats-close");
-  var statsPanelEl = document.getElementById("grid-stats-panel");
   var statsPanelBodyEl = document.getElementById("grid-stats-panel-body");
   var stepsSlider = document.getElementById("steps-slider");
   var stepsReadout = document.getElementById("steps-readout");
@@ -203,11 +198,28 @@
   // again whenever the anchor itself might have moved (dragging the panel
   // resizer changes where every sidebar element sits, without the anchor
   // element ever firing an event of its own about it).
+  // Whether a tip's anchor is actually on screen to be pointed at. Every
+  // anchor now lives inside the menu column, where it can be in a collapsed
+  // card (no box at all) or scrolled out of the stack - and a popover
+  // pointing at either is a popover parked in a corner, explaining
+  // something the user cannot see.
+  function tipAnchorVisible(anchorEl) {
+    if (!anchorEl) return false;
+    var rect = anchorEl.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    return rect.bottom > 0 && rect.top < window.innerHeight;
+  }
+
   function positionTip(anchorEl) {
     var rect = anchorEl.getBoundingClientRect();
     var width = tipPopover.offsetWidth;
+    var height = tipPopover.offsetHeight;
     var left = clamp(rect.left, 12, window.innerWidth - width - 12);
-    tipPopover.style.top = (rect.bottom + 10) + "px";
+    // Vertically clamped for the same reason the horizontal clamp exists,
+    // and newly necessary: an anchor part-way out of the scrolling menu
+    // column would otherwise put the whole popover above the top of the
+    // window.
+    tipPopover.style.top = clamp(rect.bottom + 10, 12, Math.max(12, window.innerHeight - height - 12)) + "px";
     tipPopover.style.left = left + "px";
     // Aim the arrow at the middle of the anchor rather than leaving it at a
     // fixed spot on the popover: the clamp above can push the body far from
@@ -231,6 +243,10 @@
   // hideTip to finish) is its own job. Without it, OK just closes.
   function showTip(id, anchorEl, text, opts) {
     if (isTipDismissed(id) || activeTipId === id) return false;
+    // Nothing to point at - don't burn the tip's one showing on a card the
+    // user has collapsed. It offers itself again next time the view
+    // settles, by which point the card may well be open.
+    if (!bringTipAnchorIntoView(anchorEl)) return false;
     activeTipId = id;
     activeTipAnchor = anchorEl;
     activeTipOnOk = (opts && opts.onOk) || null;
@@ -245,8 +261,28 @@
   // what lets a multi-step tip keep ONE dismissal id across all its steps, so
   // "Don't tell me again" means the whole sequence rather than just the step
   // the user happened to be looking at.
+  // Scrolls an anchor back into the menu column if it has drifted out of
+  // it, and reports whether it is pointable-at afterwards. Only called when
+  // a tip first appears or changes target - NOT from repositionActiveTip,
+  // which runs on every panel resize and would otherwise yank the column's
+  // scroll out from under the user while they read.
+  function bringTipAnchorIntoView(anchorEl) {
+    if (!anchorEl) return false;
+    var rect = anchorEl.getBoundingClientRect();
+    // A zero box means a collapsed card, which scrolling cannot fix.
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    if (!tipAnchorVisible(anchorEl) && anchorEl.scrollIntoView) {
+      anchorEl.scrollIntoView({ block: "nearest" });
+    }
+    return tipAnchorVisible(anchorEl);
+  }
+
   function retargetTip(anchorEl, text, opts) {
     if (!activeTipId) return;
+    // The new target is somewhere else in the column and may need scrolling
+    // to - step 2 of the deep-zoom sequence points at a dropdown inside a
+    // card that was shut a moment ago.
+    bringTipAnchorIntoView(anchorEl);
     activeTipAnchor = anchorEl;
     activeTipOnOk = (opts && opts.onOk) || null;
     tipPopoverText.textContent = text;
@@ -272,34 +308,102 @@
     hideTip();
   });
 
-  // ---- Settings panel (gear button, upper right) ----
+  // ---- The menu column (upper left) ----
   //
-  // The only setting today is resetting tip dismissals; more can just be
-  // added into #settings-panel-body (see #grid-view in index.html) without
-  // needing anything else here to change.
-  function setSettingsPanelOpen(open) {
-    settingsPanel.classList.toggle("open", open);
-    // Opening Settings IS the "yes, show me" that step 1's OK asks for, so
-    // getting there by hand skips straight ahead rather than leaving the tip
-    // pointing at a button the user has already pressed.
-    if (open && deepZoomTipStage === 1) showDeepZoomPrecisionStep2();
-    // Step 2 points at a control that has just slid off-screen - there's
-    // nothing left to point at, so end the sequence rather than leave the
-    // popover stranded against the window edge.
-    else if (!open && deepZoomTipStage === 2) hideTip();
+  // Three menus - Settings, Inspect, Analysis - each a square icon button
+  // until it is opened, at which point the button leaves the layout and its
+  // card takes the space. Any number can be open at once: they are a flow
+  // down the column, each pushing whatever is below it further down, not a
+  // stack of panels overlapping in one corner, so there is nothing for them
+  // to fight over and nothing to close on another's behalf.
+  //
+  // The open/shut state lives HERE rather than being read back off a class,
+  // so the one thing that can vary (which of the button and the card is in
+  // the layout) has exactly one owner.
+  function makeMenu(itemId, toggleId, closeId, onChange) {
+    var item = document.getElementById(itemId);
+    var toggle = document.getElementById(toggleId);
+    var closeBtn = document.getElementById(closeId);
+    var card = item.querySelector(".menu-card");
+    var open = false;
+    function set(next) {
+      next = !!next;
+      if (next === open) return;
+      open = next;
+      item.classList.toggle("is-open", open);
+      card.hidden = !open;
+      toggle.setAttribute("aria-expanded", open ? "true" : "false");
+      // Nothing to drag when every menu is shut - see #panel-resizer.
+      menuColumn.classList.toggle("has-open-menu",
+        !!document.querySelector("#grid-menu-stack .menu-item.is-open"));
+      // A tip anchored to something inside a card that has just appeared or
+      // vanished is pointing at a rect that no longer describes anything.
+      repositionActiveTip();
+      if (onChange) onChange(open);
+    }
+    toggle.addEventListener("click", function () { set(true); });
+    closeBtn.addEventListener("click", function () { set(false); });
+    return {
+      isOpen: function () { return open; },
+      set: set,
+      // Whichever of the button and the card is actually on screen, for a
+      // tip to point at - the other one has display: none and a rect of
+      // zeros, which would park the popover in the corner.
+      anchor: function () { return open ? card : toggle; },
+    };
   }
 
-  btnSettings.addEventListener("click", function () {
-    setSettingsPanelOpen(!settingsPanel.classList.contains("open"));
-  });
-  btnSettingsClose.addEventListener("click", function () {
-    setSettingsPanelOpen(false);
-  });
-  // The panel slides in over 0.2s, so a tip anchored to something inside it
-  // is first positioned against a rect that's still mid-flight. Re-running
-  // the placement once the slide finishes lands it on the real position
-  // without this needing to know the duration.
-  settingsPanel.addEventListener("transitionend", repositionActiveTip);
+  var settingsMenu = makeMenu("menu-settings", "grid-btn-settings", "grid-btn-settings-close",
+    function (open) {
+      // Opening Settings IS the "yes, show me" that the deep-zoom tip's
+      // step 1 asks for, so getting there by hand skips straight ahead
+      // rather than leaving the tip pointing at a button the user has
+      // already pressed.
+      if (open && deepZoomTipStage === 1) showDeepZoomPrecisionStep2();
+      // Step 2 points at a control that has just left the layout - there's
+      // nothing to point at any more, so end the sequence rather than leave
+      // the popover stranded.
+      else if (!open && deepZoomTipStage === 2) hideTip();
+    });
+
+  // Kept as a named function because the deep-zoom tip sequence above opens
+  // Settings on the user's behalf.
+  function setSettingsPanelOpen(open) {
+    settingsMenu.set(open);
+  }
+
+  // Inspect holds the hover preview, its transport, the view controls and
+  // the locked-point list - the workspace for reading the fractal rather
+  // than for configuring it, which is why it is the one that starts open
+  // (see the setInspectOpen call at the end of this file).
+  //
+  // Collapsing it genuinely stops the work, rather than only hiding it. The
+  // preview is an animation with SOUND: left running behind a shut card it
+  // would keep computing a trajectory per hovered cell and keep playing
+  // bounce tones from a panel nobody can see, which on a page whose whole
+  // point is an unobstructed fractal is the wrong way round.
+  var inspectMenu = makeMenu("menu-inspect", "grid-btn-inspect", "grid-btn-inspect-close",
+    function (open) {
+      if (open) {
+        // Pick up whatever should be on screen now - the locked points if
+        // there are any, the placeholder otherwise. Not the last hovered
+        // cell: the cursor has been elsewhere since.
+        if (inspectedGroups.length > 0) beginInspectOnlySession();
+        else showHoverEmpty();
+      } else {
+        pausePlayback();
+        stopHoverReplay();
+        hoverKey = null; // so re-entering the same cell later still previews it
+      }
+    });
+  function setInspectOpen(open) {
+    inspectMenu.set(open);
+  }
+
+  var statsMenu = makeMenu("menu-stats", "grid-btn-stats", "grid-btn-stats-close",
+    function (open) {
+      setStatsPanelOpen(open);
+    });
   btnResetTips.addEventListener("click", function () {
     try {
       localStorage.removeItem(TIP_DISMISSED_KEY);
@@ -1220,7 +1324,7 @@
 
   function showDeepZoomPrecisionStep2() {
     deepZoomTipStage = 2;
-    settingsPanel.classList.add("open");
+    settingsMenu.set(true);
     retargetTip(precisionSelect,
       "Set this to Auto and the grid uses double precision only where the zoom needs it. Click OK to switch it.",
       { onOk: function () {
@@ -1241,7 +1345,7 @@
     // is also what stops it reappearing after they've accepted it.
     if (precisionMode !== "f32") return false;
     if (view.scale >= DEEP_ZOOM_TIP_MAX_SCALE) return false;
-    var shown = showTip(DEEP_ZOOM_TIP_ID, btnSettings,
+    var shown = showTip(DEEP_ZOOM_TIP_ID, settingsMenu.anchor(),
       "Try enabling double precision to unlock more zoom, but at slower render speed",
       { onOk: showDeepZoomPrecisionStep2 });
     if (shown) deepZoomTipStage = 1;
@@ -1303,35 +1407,55 @@
     return { texture: texture, fbo: fbo, width: w, height: h };
   }
 
-  // Shades rows [rowStart, rowStart + rowCount) of a sample target and
-  // returns how many it actually drew.
+  // Shades rows [rowStart, rowStart + rowCount) of a blockWidth x
+  // blockHeight sampling grid into the FIRST rowCount rows of `target`, and
+  // returns how many it drew. `target` only has to be as tall as one band.
   //
-  // Split out of sampleValueGrid so Global Stats can fill a much larger
-  // target across several idle slices instead of in one call - the same
-  // reason (and the same scissor-a-band technique) the refinement ladder
-  // bands its own draws: one draw covering tens of thousands of full
-  // simulations is exactly the kind of long single dispatch that janks a
-  // frame, and on an unlucky machine trips the GPU watchdog.
+  // Split out of sampleValueGrid so Global Stats can cover a block far
+  // larger than the screen across several idle slices - the same reason the
+  // refinement ladder bands its own draws: one draw covering millions of
+  // full simulations is exactly the kind of long single dispatch that janks
+  // a frame, and on an unlucky machine trips the GPU watchdog.
+  //
+  // The band is selected with u_gridOrigin - the very same uniform the
+  // ladder uses to place its sub-lattices - rather than by scissoring a
+  // block-sized target, so a full-resolution block never has to EXIST as a
+  // texture. At one sample per rendered pixel that texture would be several
+  // million pixels of RGBA32F, which is a lot of video memory to hold only
+  // to read straight back; only one band is ever allocated.
   //
   // Leaves the viewport, framebuffer, scissor and bound program exactly as
   // it found them, because unlike the ladder's own banding this can run
   // BETWEEN two of the ladder's frames.
-  function drawSampleRows(target, rowStart, rowCount, rawBounces) {
+  function drawSampleBand(target, blockWidth, blockHeight, rowStart, rowCount, rawBounces) {
     var sampler = samplerFor(getPass(pickPrecision()) || basePass);
     if (!sampler) return 0;
-    rowCount = Math.min(rowCount, target.height - rowStart);
+    rowCount = Math.min(rowCount, target.height, blockHeight - rowStart);
     if (rowCount <= 0) return 0;
-    var prevViewport = gl.getParameter(gl.VIEWPORT);
+    // Every gl.getParameter returns null once the context is lost, and this
+    // is the one call site reached from a timer rather than from the render
+    // loop - so without this a lost context surfaces as an uncaught
+    // TypeError on prevViewport[0] rather than as the caller's own "nothing
+    // sampled" path. Nothing here attempts to RECOVER a lost context (the
+    // page has never had a handler for that); it just declines to be the
+    // thing that throws.
+    var prevViewport = gl.isContextLost() ? null : gl.getParameter(gl.VIEWPORT);
+    if (!prevViewport) return 0;
     gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
     gl.viewport(0, 0, target.width, target.height);
+    // Only the rows actually wanted: the quad covers the whole target, and
+    // on the last (short) band the rows past the end would otherwise run a
+    // full simulation each for values nothing reads.
     gl.enable(gl.SCISSOR_TEST);
-    gl.scissor(0, rowStart, target.width, rowCount);
+    gl.scissor(0, 0, blockWidth, rowCount);
     gl.useProgram(sampler.program);
-    gl.uniform2f(sampler.uniforms.resolution, target.width, target.height);
-    // The identity sub-lattice: this sampler renders the whole view into
-    // its own w×h target, so "full-res grid" here just means that target.
+    // The FULL block, not the band - this is what the shader divides by to
+    // get uv, so it has to describe the grid being sampled rather than the
+    // slice of it being drawn (exactly as u_resolution is always the
+    // full-res canvas for the ladder's own sub-lattice draws).
+    gl.uniform2f(sampler.uniforms.resolution, blockWidth, blockHeight);
     gl.uniform1f(sampler.uniforms.gridStride, 1);
-    gl.uniform2f(sampler.uniforms.gridOrigin, 0, 0);
+    gl.uniform2f(sampler.uniforms.gridOrigin, 0, rowStart);
     setCenterUniforms(sampler.uniforms);
     gl.uniform1f(sampler.uniforms.scale, view.scale);
     gl.uniform1i(sampler.uniforms.maxSteps, simulationSteps);
@@ -1345,12 +1469,20 @@
     return rowCount;
   }
 
-  function readSampleTarget(target) {
-    var values = new Float32Array(target.width * target.height * 4);
+  // Reads the first rowCount rows of a drawn band into `into` (RGBA, four
+  // floats per sample). The caller owns the buffer and reuses it across
+  // bands, which is what keeps a full-resolution measurement from
+  // allocating the whole block twice over.
+  //
+  // gl.readPixels is a hard CPU-waits-for-GPU sync. That is a cost, but it
+  // is also the thing that makes banding here self-regulating: the wall
+  // clock after this call has genuinely absorbed the band's GPU work, so an
+  // idle deadline measured around it means something (a draw call on its
+  // own returns long before the work behind it does).
+  function readSampleBand(target, rowCount, into) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
-    gl.readPixels(0, 0, target.width, target.height, gl.RGBA, gl.FLOAT, values);
+    gl.readPixels(0, 0, target.width, rowCount, gl.RGBA, gl.FLOAT, into);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    return { width: target.width, height: target.height, values: values };
   }
 
   function freeSampleTarget(target) {
@@ -1359,13 +1491,24 @@
     gl.deleteTexture(target.texture);
   }
 
+  // One shot, for the small fixed-size scans (the Color Zoom suggestion,
+  // the bounce-count divisor, the superlative buttons). Global Stats, whose
+  // block can be orders of magnitude larger, drives drawSampleBand itself.
   function sampleValueGrid(w, h, rawBounces) {
     if (!samplerFor(getPass(pickPrecision()) || basePass)) return null;
     var target = createSampleTarget(w, h);
-    drawSampleRows(target, 0, h, rawBounces);
-    var grid = readSampleTarget(target);
+    // A refused draw would leave the target untouched, and reading it back
+    // would hand every caller a grid of zeros as though it were a
+    // measurement - so it takes the same "no sampler here" path they all
+    // already handle.
+    if (drawSampleBand(target, w, h, 0, h, rawBounces) === 0) {
+      freeSampleTarget(target);
+      return null;
+    }
+    var values = new Float32Array(w * h * 4);
+    readSampleBand(target, h, values);
     freeSampleTarget(target);
-    return grid;
+    return { width: w, height: h, values: values };
   }
 
   // ---- Superlatives: find the largest/smallest/rarest/sharpest-edge point
@@ -1718,11 +1861,11 @@
   // just a bump, or the biggest grid the settings allow would silently
   // refuse to ever complete.
   var MAX_INSPECT_POINTS = 300;
-  // Grid Settings (settings panel) - how many lines Inspect (Grid) draws per
-  // axis, and whether each one gets a midpoint to kink at. Read fresh by
-  // lockGridOfPoints on every drag (see computeGridLayout); their own change
-  // listeners live down by the rest of the settings-panel wiring, next to
-  // stepsSlider/colorZoomCheckbox.
+  // Grid Settings (the Settings card in the menu column) - how many lines
+  // Inspect (Grid) draws per axis, and whether each one gets a midpoint to
+  // kink at. Read fresh by lockGridOfPoints on every drag (see
+  // computeGridLayout); their own change listeners live down by the rest of
+  // the Settings wiring, next to stepsSlider/colorZoomCheckbox.
   var inspectGridSize = 3;
   var inspectGridTwoPart = true;
   var inspectedGroups = []; // each: { type, points: [...], startWorld, endWorld (line/grid), cols, rows, segments, meshLineEls, outputBodyIndex (grid only) }
@@ -3217,6 +3360,15 @@
       canvas.height = h;
       gl.viewport(0, 0, w, h);
       markDirty();
+      // Global Stats' resolution slider is expressed against this size -
+      // its top stop is one sample per rendered pixel - so the card has to
+      // be told, whether or not anyone is looking at it. (The measurement
+      // itself reads the canvas when it runs and is never stale; it is the
+      // readout, and how many stops the slider has, that would be.)
+      if (statsPanel) {
+        if (statsOpen) statsPanel.relayout();
+        else statsPanel.refreshSampleReadout();
+      }
     }
   }
 
@@ -4860,6 +5012,10 @@
   canvas.addEventListener("mousemove", function (e) {
     isHoveringGrid = true;
     if (dragging) return; // don't fight panning - only preview while not dragging the view
+    // Nowhere to draw a preview, and nobody to hear its bounce tones - see
+    // the Inspect menu's own comment on why a shut card stops the work
+    // instead of hiding it.
+    if (!inspectMenu.isOpen()) return;
     var uv = pixelToUV(e.clientX, e.clientY);
     // Snap to the nearest backing-store pixel's world size so tiny cursor
     // jitter within the same rendered grid cell doesn't trigger redundant
@@ -4927,12 +5083,82 @@
   // wrong wherever antialiasing averaged two hues into a third that no
   // pixel actually holds. Sampling t directly avoids all three.
 
-  // The long side of the sample block. Bigger than the superlative buttons'
-  // 200 (this is a whole-view analysis, and the spectrum in particular
-  // wants resolution) but far below the canvas's own pixel count: at 16:9
-  // this is ~37k simulations against a full-res frame's several million, so
-  // one measurement costs a fraction of one rendered frame.
-  var STATS_SAMPLE_LONG_SIDE = 256;
+  // ---- How finely to sample the view ----
+  //
+  // The block the whole card is measured from is a re-render of the view at
+  // its own resolution, which is NOT the screen's. Sampling coarsely is
+  // cheap and describes the broad shape of the picture; sampling at one
+  // simulation per rendered pixel measures exactly what is on screen, at
+  // several million simulations a go. Which of those the user wants depends
+  // entirely on what they are looking for, so it is a slider at the top of
+  // the card rather than a constant here.
+  //
+  // Long-side sample counts, in the same doubling-ish progression as the
+  // resolution ladder: each notch is roughly twice the work of the one
+  // before it. 0 is the top notch and means "match the grid" - one sample
+  // per rendered pixel, whatever that is on this screen.
+  var STATS_SAMPLE_STOPS = [96, 128, 192, 256, 384, 512, 768, 1024, 1536, 2048, 3072, 4096, 6144];
+  // 256, which is what this was fixed at before the slider existed: about
+  // 40k simulations at 16:9, a small fraction of one rendered frame.
+  var STATS_DEFAULT_SAMPLE_LONG_SIDE = 256;
+  var statsSampleLongSide = STATS_DEFAULT_SAMPLE_LONG_SIDE;
+
+  // The stops the slider actually offers on THIS screen: everything below
+  // one sample per rendered pixel, then that. Trimmed rather than fixed,
+  // because every stop past the screen's own resolution would measure the
+  // identical block - several indistinguishable notches at the top of a
+  // slider, all of them the most expensive setting there is.
+  function statsSampleLadder() {
+    var cap = Math.min(MAX_TEXTURE_SIZE, Math.max(canvas.width, canvas.height, 1));
+    var list = [];
+    for (var i = 0; i < STATS_SAMPLE_STOPS.length; i++) {
+      if (STATS_SAMPLE_STOPS[i] < cap) list.push(STATS_SAMPLE_STOPS[i]);
+    }
+    list.push(0); // one sample per rendered pixel, whatever that is here
+    return list;
+  }
+
+  // The block a given ladder entry asks for, in samples, proportioned to
+  // the canvas so the sampled rectangle is the one on screen rather than a
+  // stretched version of it - which matters far more here than it does for
+  // the superlative buttons, since whole sections of this card are about
+  // direction and scale.
+  function statsSampleBlock(longSide) {
+    var cw = Math.max(1, canvas.width), ch = Math.max(1, canvas.height);
+    // One sample per rendered pixel is the finest that means anything: past
+    // it, two samples would run the same simulation the grid ran once.
+    var cap = Math.min(MAX_TEXTURE_SIZE, Math.max(cw, ch));
+    var side = longSide > 0 ? Math.min(longSide, cap) : cap;
+    if (side >= cap) {
+      return {
+        width: Math.min(cw, MAX_TEXTURE_SIZE),
+        height: Math.min(ch, MAX_TEXTURE_SIZE),
+        full: true,
+      };
+    }
+    var scale = side / Math.max(cw, ch);
+    return {
+      width: Math.max(8, Math.round(cw * scale)),
+      height: Math.max(8, Math.round(ch * scale)),
+      full: false,
+    };
+  }
+
+  // Everything the slider's own readout needs, in the units the rest of
+  // this page already speaks (see describeStride: "px" is a rendered pixel,
+  // "1 sim/px" is one simulation per one of them).
+  function statsDescribeSample(longSide) {
+    var block = statsSampleBlock(longSide);
+    var stride = block.height > 0 ? canvas.height / block.height : 1;
+    return {
+      width: block.width,
+      height: block.height,
+      full: block.full,
+      samples: block.width * block.height,
+      stride: stride,
+      strideLabel: block.full ? "1 sim/px" : "1 sim per " + stride.toFixed(stride < 10 ? 1 : 0) + "px",
+    };
+  }
   // How long after the ladder settles before measuring. Long enough that a
   // pan which pauses briefly and resumes never triggers a run at all.
   var STATS_SETTLE_DELAY_MS = 400;
@@ -4945,6 +5171,10 @@
   // reported peak direction comes from these.
   var STATS_ORIENTATION_BINS = 180;
   var STATS_HISTOGRAM_BUCKETS = 96;
+  // Ceiling on one band's readback buffer, in samples - four floats each,
+  // so this is a 4MB Float32Array however far the resolution slider is
+  // pushed.
+  var STATS_MAX_BAND_SAMPLES = 262144;
 
   var statsPanel = null;        // the FractalStatsPanel instance, once built
   var statsOpen = false;
@@ -5047,38 +5277,63 @@
   // every seam is a line of CONSTANT world X or constant world Y. Scanning
   // one row and one column therefore finds all of them, for W + H starting
   // scenes instead of W * H.
+  // A seam is a line at a fixed world X or Y. It does not get finer when
+  // the samples do - so the scan runs at a FIXED number of probes per axis
+  // however far the resolution slider is pushed, and its cost (which is the
+  // expensive JS part of a measurement, a whole starting scene per probe)
+  // stays flat. A seam is then located to within one probe spacing rather
+  // than to one exact column, and that whole spacing's worth of columns is
+  // excluded - a handful out of thousands at the resolutions where the
+  // spacing is bigger than one.
+  var STATS_SEAM_PROBES = 512;
+
   function createSeamScan(width, height) {
     var grid = { width: width, height: height };
+    var colStride = Math.max(1, Math.ceil(width / STATS_SEAM_PROBES));
+    var rowStride = Math.max(1, Math.ceil(height / STATS_SEAM_PROBES));
+    var colProbes = Math.ceil(width / colStride);
+    var rowProbes = Math.ceil(height / rowStride);
+    var cols = new Uint8Array(Math.max(0, width - 1));
+    var rows = new Uint8Array(Math.max(0, height - 1));
+    function mark(mask, from, to) {
+      for (var i = Math.max(0, from); i < Math.min(to, mask.length); i++) mask[i] = 1;
+    }
     return {
-      cols: new Uint8Array(Math.max(0, width - 1)),
-      rows: new Uint8Array(Math.max(0, height - 1)),
+      cols: cols,
+      rows: rows,
       // Nothing is settled into the frame under Infinite Space, so there is
       // no seam to find and the whole scan is skipped.
       needed: PhysicsEngine.wrapsAtEdges(scene),
-      axis: 0,      // 0 = scanning columns, 1 = scanning rows, 2 = finished
+      axis: 0,      // 0 = probing columns, 1 = probing rows, 2 = finished
       index: 0,
       prev: null,
-      total: width + height,
+      total: colProbes + rowProbes,
       done: 0,
       step: function (count) {
         if (!this.needed) { this.axis = 2; return true; }
         while (count-- > 0) {
           if (this.axis === 0) {
-            if (this.index >= width) { this.axis = 1; this.index = 0; this.prev = null; continue; }
-            // The middle row and middle column: any row would do, and the
+            if (this.index >= colProbes) { this.axis = 1; this.index = 0; this.prev = null; continue; }
+            // The middle row and middle column: any would do, and the
             // middle one is furthest from whatever the view's own edges
             // happen to be doing.
-            var wc = sampleCoordToWorld(grid, this.index, (height / 2) | 0);
+            var col = Math.min(width - 1, this.index * colStride);
+            var wc = sampleCoordToWorld(grid, col, (height / 2) | 0);
             var sc = initialStateAt(wc.x, wc.y);
-            if (this.index > 0 && inputStateCrossesSeam(this.prev, sc)) this.cols[this.index - 1] = 1;
+            if (this.index > 0 && inputStateCrossesSeam(this.prev, sc)) {
+              mark(cols, (this.index - 1) * colStride, col);
+            }
             this.prev = sc;
             this.index++;
             this.done++;
           } else if (this.axis === 1) {
-            if (this.index >= height) { this.axis = 2; return true; }
-            var wr = sampleCoordToWorld(grid, (width / 2) | 0, this.index);
+            if (this.index >= rowProbes) { this.axis = 2; return true; }
+            var row = Math.min(height - 1, this.index * rowStride);
+            var wr = sampleCoordToWorld(grid, (width / 2) | 0, row);
             var sr = initialStateAt(wr.x, wr.y);
-            if (this.index > 0 && inputStateCrossesSeam(this.prev, sr)) this.rows[this.index - 1] = 1;
+            if (this.index > 0 && inputStateCrossesSeam(this.prev, sr)) {
+              mark(rows, (this.index - 1) * rowStride, row);
+            }
             this.prev = sr;
             this.index++;
             this.done++;
@@ -5153,19 +5408,26 @@
       statsPanel.setStatus("This browser can't read floating-point values back from the GPU, so Global Stats can't measure anything here.", "stale");
       return;
     }
-    // Matched to the view's aspect ratio, exactly as runSuperlative does,
-    // so the sampled rectangle is the one on screen rather than a stretched
-    // version of it - which matters far more here, where whole sections are
-    // about direction and scale.
-    var aspect = canvasArea.clientHeight > 0 ? canvasArea.clientWidth / canvasArea.clientHeight : 1;
-    var w = aspect >= 1 ? STATS_SAMPLE_LONG_SIDE : Math.max(8, Math.round(STATS_SAMPLE_LONG_SIDE * aspect));
-    var h = aspect >= 1 ? Math.max(8, Math.round(STATS_SAMPLE_LONG_SIDE / aspect)) : STATS_SAMPLE_LONG_SIDE;
+    var block = statsSampleBlock(statsSampleLongSide);
+    var w = block.width, h = block.height;
+    // How tall one band is. Half the refinement ladder's own adaptive pixel
+    // budget - which is already a measurement of how many simulated pixels
+    // this machine fits in one refresh period, so half of it is comfortably
+    // inside one idle slice. STATS_MAX_BAND_SAMPLES is a second, flat
+    // ceiling on the readback buffer, so the memory this holds does not
+    // grow with the slider even though the block does.
+    var bandRows = clamp(Math.floor(pixelBudget / 2 / w), 1,
+      Math.min(h, Math.max(1, Math.floor(STATS_MAX_BAND_SAMPLES / w))));
 
     statsRun = {
       generation: statsGeneration,
       width: w,
       height: h,
-      target: createSampleTarget(w, h),
+      full: block.full,
+      target: createSampleTarget(w, bandRows),
+      bandRows: bandRows,
+      bandBuffer: new Float32Array(w * bandRows * 4),
+      t: new Float32Array(w * h),
       row: 0,
       phase: "sample",
       groups: statsPanel.enabledGroups(),
@@ -5205,37 +5467,43 @@
     }
 
     if (run.phase === "sample") {
-      // Banded against the refinement ladder's own adaptive budget, which
-      // is already a measurement of how many simulated pixels this machine
-      // fits in one refresh period - exactly the question being asked here.
-      // One band per slice, so the GPU gets a frame to actually run it
-      // before the next is queued (a CPU-time budget would be no use: the
-      // draw call returns long before the work behind it does).
-      var rows = drawSampleRows(run.target, run.row, Math.max(1, Math.floor(pixelBudget / run.width)), false);
-      run.row += rows;
-      // Nothing drawn on the very first band means the sampler went away
-      // between beginStatsRun's check and here (a precision switch dropping
-      // its program, say). Reading the target back now would analyse an
-      // untouched texture - all zeros - and present it as a measurement.
-      if (rows === 0 && run.row === 0) {
-        abandonStatsRun();
-        statsPanel.setStatus("Couldn't sample the view - nothing measured.", "stale");
-        return;
+      // Each band is drawn, read back, and its red channel copied into the
+      // block. Reading back per band rather than once at the end is what
+      // caps the memory a full-resolution measurement needs - and, since
+      // readSampleBand blocks on the GPU, what makes hasTimeLeft() below a
+      // real measurement of how much of this slice the GPU has eaten rather
+      // than of how fast the draw calls were queued.
+      while (run.row < run.height) {
+        var drawn = drawSampleBand(run.target, run.width, run.height, run.row, run.bandRows, false);
+        // Nothing drawn on the very first band means the sampler went away
+        // between beginStatsRun's check and here (a precision switch
+        // dropping its program, say). Reading the target back now would
+        // analyse an untouched texture - all zeros - and present that as a
+        // measurement.
+        if (drawn === 0) {
+          abandonStatsRun();
+          statsPanel.setStatus("Couldn't sample the view - nothing measured.", "stale");
+          return;
+        }
+        readSampleBand(run.target, drawn, run.bandBuffer);
+        for (var j = 0; j < drawn; j++) {
+          var srcRow = j * run.width * 4;
+          var dstRow = (run.row + j) * run.width;
+          for (var i = 0; i < run.width; i++) run.t[dstRow + i] = run.bandBuffer[srcRow + i * 4];
+        }
+        run.row += drawn;
+        if (run.row < run.height && !hasTimeLeft()) {
+          statsPanel.setStatus("Measuring the view on screen… sampling " +
+            Math.round(100 * run.row / run.height) + "%", "working");
+          scheduleStatsSlice();
+          return;
+        }
       }
-      if (rows === 0 || run.row >= run.height) {
-        var sampled = readSampleTarget(run.target);
-        freeSampleTarget(run.target);
-        run.target = null;
-        run.t = new Float32Array(run.width * run.height);
-        for (var i = 0; i < run.t.length; i++) run.t[i] = sampled.values[i * 4];
-        run.seam = createSeamScan(run.width, run.height);
-        run.phase = "seams";
-      } else {
-        statsPanel.setStatus("Measuring the view on screen… sampling " +
-          Math.round(100 * run.row / run.height) + "%", "working");
-        scheduleStatsSlice();
-        return;
-      }
+      freeSampleTarget(run.target);
+      run.target = null;
+      run.bandBuffer = null;
+      run.seam = createSeamScan(run.width, run.height);
+      run.phase = "seams";
     }
 
     if (run.phase === "seams") {
@@ -5309,7 +5577,8 @@
     statsPanel.markFresh();
     statsPanel.showResult(result, info);
     statsLastStatus =
-      "Measured " + run.width + "×" + sampleHeight + " samples of the view on screen. Output: " +
+      "Measured " + run.width + "×" + sampleHeight + " samples of the view on screen" +
+      (run.full ? " - one per rendered pixel" : "") + ". Output: " +
       info.outputLabel + (info.seamsFound > 0
         ? ". " + info.seamsFound + " input-seam line" + (info.seamsFound === 1 ? "" : "s") +
           " excluded (see the X/Y Input mapping - those are where a starting position wraps back into the frame, not real edges)."
@@ -5317,13 +5586,16 @@
     statsPanel.setStatus(statsLastStatus);
   }
 
+  // How many seam LINES, not how many excluded columns - at a coarse probe
+  // spacing one seam marks a whole span of them (see createSeamScan), and
+  // the status line is telling the user how many real lines were found.
   function countSeams(mask) {
     var n = 0;
-    for (var i = 0; i < mask.length; i++) if (mask[i]) n++;
+    for (var i = 0; i < mask.length; i++) if (mask[i] && !mask[i - 1]) n++;
     return n;
   }
 
-  if (btnStats && statsPanelBodyEl && global.FractalStatsPanel && global.FractalStats) {
+  if (statsPanelBodyEl && global.FractalStatsPanel && global.FractalStats) {
     statsPanel = FractalStatsPanel.create({
       body: statsPanelBodyEl,
       host: {
@@ -5340,6 +5612,25 @@
         worldAt: function (col, row) {
           return sampleCoordToWorld({ width: statsLastWidth, height: statsLastHeight }, col, row);
         },
+        sampleLadder: statsSampleLadder,
+        sampleLongSide: function () { return statsSampleLongSide; },
+        describeSample: statsDescribeSample,
+      },
+      onSampleResolutionChange: function (longSide) {
+        statsSampleLongSide = longSide | 0;
+        // A different block size makes every number on the card a
+        // measurement of something else, so this invalidates a finished run
+        // exactly as a pan does - and abandons one in flight, which is
+        // measuring at the old resolution.
+        statsResultIsCurrent = false;
+        abandonStatsRun();
+        if (!statsWantsWork()) return;
+        if (progressive.complete && !dirty) {
+          statsPanel.setStatus("Measuring the view on screen…", "working");
+          statsOnRenderSettled();
+        } else {
+          statsPanel.setStatus("Waiting for the fractal to finish rendering.", "stale");
+        }
       },
       onEnabledChange: function () {
         if (!statsWantsWork()) {
@@ -5372,16 +5663,6 @@
     });
     statsPanel.setStatus("Every measurement below is off. Switch one on to analyse the view currently on screen.");
 
-    btnStats.addEventListener("click", function () {
-      setStatsPanelOpen(!statsOpen);
-    });
-    btnStatsClose.addEventListener("click", function () { setStatsPanelOpen(false); });
-    // Both cards anchor to the same corner and would overlap, so opening
-    // one closes the other - the same thing a single panel with two tabs
-    // would do, without making Settings and Stats share a lifetime.
-    btnSettings.addEventListener("click", function () {
-      if (settingsPanel.classList.contains("open")) setStatsPanelOpen(false);
-    });
     // A chart sizes itself to the card's width, which only exists once the
     // card is laid out - and changes when a portrait window is resized.
     var statsRelayoutTimer = null;
@@ -5395,13 +5676,12 @@
     });
   }
 
+  // The Analysis card opening and closing, as far as MEASURING is
+  // concerned - wired to the menu's own state change below.
   function setStatsPanelOpen(open) {
     if (!statsPanel) return;
     statsOpen = open;
-    statsPanelEl.classList.toggle("open", open);
-    btnStats.setAttribute("aria-expanded", open ? "true" : "false");
     if (!open) { abandonStatsRun(); return; }
-    setSettingsPanelOpen(false);
     statsPanel.relayout();
     if (!statsPanel.anyEnabled()) {
       statsPanel.setStatus("Every measurement below is off. Switch one on to analyse the view currently on screen.");
@@ -5415,7 +5695,7 @@
     }
   }
 
-  // Drag #panel-resizer to resize the left sidebar. #canvas-area's own
+  // Drag #panel-resizer to resize the menu column's open cards. #canvas-area's own
   // ResizeObserver (below) picks up the resulting width change and re-renders
   // the grid at the new size - no separate hook needed here.
   var PANEL_MIN_WIDTH = 220;
@@ -5439,7 +5719,7 @@
     }
     panelResizer.addEventListener("mousedown", function (e) {
       dragStartX = e.clientX;
-      dragStartWidth = panel.getBoundingClientRect().width;
+      dragStartWidth = menuStack.getBoundingClientRect().width;
       panelResizer.classList.add("dragging");
       document.body.style.cursor = "col-resize";
       document.body.style.userSelect = "none";
@@ -5477,6 +5757,12 @@
   updateZoomReadout();
   updateSpeedUI();
   showHoverEmpty(); // sets the X: 0, Y: 0 placeholder before the cursor ever touches the grid
+  // Inspect is the one menu open on arrival. The other two configure and
+  // measure the fractal; this one is how you read it, and landing on a page
+  // of nothing but icons would hide the preview that explains what the
+  // colours mean. Deliberately here rather than in the markup, so the
+  // opening runs through the same path a click does.
+  setInspectOpen(true);
   scheduleColorSpreadCheck(); // the default view (before any pan/zoom) can already qualify
 
   // Unlike the old loop, this runs work on most frames rather than only

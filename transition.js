@@ -254,8 +254,8 @@
   // both cw AND the derived ch land on canvasArea's real dimensions; seed it
   // from the height (as this used to) and only ch would.
   //
-  // The grid has no such offset - its own panel FLOATS over its canvas
-  // (see #grid-panel in fractal-grid.css), so the grid always fills the
+  // The grid has no such offset - its own menu column FLOATS over its
+  // canvas (see #grid-menu-column in fractal-grid.css), so it always fills the
   // full viewport, and it never pans (transition.js only ever calls
   // setScale, never touches centre) - world (0, 0) sits at the viewport's
   // own centre for the ENTIRE run, start to finish. That's the far end

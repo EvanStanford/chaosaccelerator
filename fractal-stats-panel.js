@@ -74,6 +74,13 @@
     if (v === null || v === undefined || !isFinite(v)) return "-";
     return (v * 100).toFixed(places === undefined ? 1 : places) + "%";
   }
+  // Sample counts run from tens of thousands to several million, and the
+  // reader only ever wants the order of magnitude.
+  function countLabel(n) {
+    if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + "M";
+    if (n >= 1e3) return Math.round(n / 1e3) + "k";
+    return String(n);
+  }
   function compact(v) {
     if (v === null || v === undefined || !isFinite(v)) return "-";
     var a = Math.abs(v);
@@ -597,7 +604,7 @@
     row(body, "Peaks / pits", g.peaks.toLocaleString() + " / " + g.pits.toLocaleString(),
       "Samples that are strictly higher (or lower) than all eight of their neighbours - one count of how many distinct features are on screen.");
     row(body, "Local extrema", fixed(g.extremaPerThousand, 1) + " per 1,000 samples",
-      "The same count, as a density, so it is comparable between views and zoom levels.");
+      "The same count as a density, so it is comparable between views at the same sample resolution. It falls as that resolution rises: a coarse pass reads a whole cluster of nearby features as one.");
     note(body, "The four figures below classify the surface's shape at every sample, from the signs of its curvature.");
     row(body, "Ridges", percent(g.ridgeFraction, 1), "Curving down in every direction - the crests of the picture.");
     row(body, "Valleys", percent(g.valleyFraction, 1), "Curving up in every direction - the troughs.");
@@ -621,6 +628,7 @@
     var bodyEl = options.body;
     var host = options.host;
     var onEnabledChange = options.onEnabledChange || function () {};
+    var onSampleResolutionChange = options.onSampleResolutionChange || function () {};
 
     var enabled = {};       // key -> bool; every section starts off, deliberately
     var sections = {};      // key -> { wrap, body, input }
@@ -634,6 +642,65 @@
 
     var statusEl = el("p", "stats-status", "");
     bodyEl.appendChild(statusEl);
+
+    // ---- How finely to sample the view ----
+    //
+    // First control on the card, because it sets what every number below it
+    // is a measurement OF. The block is a re-render of the view at its own
+    // resolution rather than the screen's, so without this the card would
+    // silently be describing a 256-wide thumbnail of a multi-megapixel
+    // picture - and a reader looking at the gradient numbers has no way to
+    // tell. The readout says the block size and the cost outright.
+    // Rebuilt on every relayout, not captured once: its top stop is "one
+    // sample per rendered pixel", so resizing the window changes both what
+    // that means and how many stops sit below it.
+    var ladder = host.sampleLadder();
+    var resField = el("label", "stats-field");
+    var resLabel = el("span", "stats-field-label", "");
+    resField.appendChild(resLabel);
+    var resInput = document.createElement("input");
+    resInput.type = "range";
+    resInput.min = "0";
+    resInput.step = "1";
+    resInput.setAttribute("aria-label", "Sample resolution");
+    resField.appendChild(resInput);
+    var resHint = el("span", "stats-field-hint", "");
+    resField.appendChild(resHint);
+    resField.appendChild(el("span", "stats-field-hint",
+      "Coarser is quicker and still describes the broad shape. Finer counts detail a coarse pass misses - the gradient and feature numbers grow with it - and costs about twice as much at every notch."));
+    bodyEl.appendChild(resField);
+
+    // Snaps the slider to whichever stop the host is currently set to,
+    // against a freshly read ladder. 0 (one per rendered pixel) is always
+    // the last stop, so a setting whose own stop has disappeared under a
+    // smaller window lands there - which is what it now resolves to anyway,
+    // since statsSampleBlock clamps it to the same place.
+    function syncSampleSlider() {
+      ladder = host.sampleLadder();
+      resInput.max = String(ladder.length - 1);
+      var want = host.sampleLongSide();
+      var best = ladder.length - 1;
+      for (var i = 0; i < ladder.length; i++) {
+        if (ladder[i] === want) { best = i; break; }
+      }
+      resInput.value = String(best);
+    }
+
+    function updateSampleReadout() {
+      var d = host.describeSample(ladder[Number(resInput.value)]);
+      resLabel.textContent = "Sample resolution: " + d.width + " × " + d.height;
+      resHint.textContent = d.strideLabel + " · " + countLabel(d.samples) + " simulations per measurement" +
+        (d.full ? ", one for every pixel the grid renders - the finest there is." : ".");
+    }
+    syncSampleSlider();
+    updateSampleReadout();
+    // Dragging only re-labels; the measurement restarts on release, so
+    // sweeping the slider doesn't start (and abandon) a run per notch.
+    resInput.addEventListener("input", updateSampleReadout);
+    resInput.addEventListener("change", function () {
+      updateSampleReadout();
+      onSampleResolutionChange(ladder[Number(resInput.value)]);
+    });
 
     var actions = el("div", "stats-actions");
     var allOn = el("button", "secondary stat-mini-btn", "Turn all on");
@@ -791,9 +858,22 @@
         redrawCharts();
       },
       // The panel's own size changed (it opened, or the window resized), so
-      // every canvas needs re-measuring against its parent.
+      // every canvas needs re-measuring against its parent - and the top
+      // notch of the resolution slider is "match the grid", which a resize
+      // has just changed the meaning of.
       relayout: function () {
+        syncSampleSlider();
+        updateSampleReadout();
         redrawCharts();
+      },
+      // The slider alone. Separate from relayout because the canvas can
+      // resize while the card is CLOSED - the top stop is "one sample per
+      // rendered pixel", so what it means and how many stops sit below it
+      // have both just changed - and redrawing charts into a card with no
+      // laid-out width would only have to be undone when it opens.
+      refreshSampleReadout: function () {
+        syncSampleSlider();
+        updateSampleReadout();
       },
       sections: SECTIONS,
     };

@@ -43,8 +43,8 @@
    are un-hidden (see the comment above) - normally invisible since grid-view
    starts hidden, but during a transition it means the editor's own toolbar
    would be buried under the grid from the first frame, with no chance to be
-   seen fading away. Lifted above that (and above #grid-panel's own
-   z-index: 3, so the grid's floating panel doesn't show through it in the
+   seen fading away. Lifted above that (and above #grid-menu-column's own
+   z-index: 3, so the grid's menu column doesn't show through it in the
    same corner) only while transitioning; transition.js's own clip rect is
    what keeps the tiles/fade off this same strip - see runTransition's
    `clip`. */
@@ -89,7 +89,7 @@
 }
 
 /* ---- Watermark ----
-   A direct child of #app (not of .view/#panel/#grid-panel), so it stays put
+   A direct child of #app (not of .view/#panel/#grid-menu-column), so it stays put
    across both views and the transition between them. Fixed, not absolute,
    so it stays anchored to the viewport corner rather than scrolling or
    resizing with any container. pointer-events: none so it never blocks a
@@ -109,17 +109,19 @@
 }
 
 /* ---- The floating settings button ----
-   Same top-right corner on both views - a direct child of .view (not of
-   #panel/#grid-panel), positioned absolute against it, so it's independent
-   of whichever one is docked (editor) vs already-floating (grid) and of
-   backdrop-filter's containing-block quirk (#grid-panel has one, which
-   would have hijacked position:fixed here - absolute against .view
-   sidesteps that instead of fighting it). The right corner specifically:
-   both #panel and #grid-panel live on the LEFT, so this needs no extra
-   space carved out of either one to avoid overlapping it. Same translucent-
-   card look as #grid-panel, since it's meant to read as a matching,
-   permanently-visible sibling of whatever floating/docked panel is
-   currently showing, not a different design language. */
+   #editor-view ONLY now. The fractal page used to have a matching one in
+   the same corner; it has since moved into that page's own menu column,
+   where it is a .menu-toggle (see fractal-grid.css). The editor keeps this
+   because its #panel is a docked column with no such stack to join.
+
+   A direct child of .view rather than of #panel, positioned absolute
+   against it, so it's independent of the panel's layout and of
+   backdrop-filter's containing-block quirk (a filtered ancestor would have
+   hijacked position:fixed here - absolute against .view sidesteps that
+   instead of fighting it). The right corner specifically: #panel lives on
+   the LEFT, so this needs no space carved out of it to avoid overlapping.
+   Same translucent-card look as the grid's own cards, since the two pages
+   are meant to read as one app. */
 .floating-settings-btn {
   position: absolute;
   top: var(--panel-inset);
@@ -149,8 +151,8 @@
    A floating card anchored at the exact same corner the button sits at
    (see .floating-settings-btn above) rather than a full-height drawer
    sliding in from the screen edge - it reads as the button EXPANDING into
-   a panel, in the same translucent-card language as #grid-panel, instead
-   of an unrelated modal. Always in the DOM (not [hidden]) so the
+   a panel, in the same translucent-card language as the grid page's own
+   menu cards, instead of an unrelated modal. Always in the DOM (not [hidden]) so the
    opacity/transform transition below has something to animate; pointer-
    events keeps the closed (invisible) card from intercepting clicks meant
    for the page underneath. */
