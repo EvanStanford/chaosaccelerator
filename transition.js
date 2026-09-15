@@ -555,14 +555,18 @@
   });
 
   // Both Settings panels carry the same reset, since either view can be the
-  // one you are looking at when you decide you want the explainer back.
+  // one you are looking at when you decide you want the explainer back. The
+  // two buttons don't necessarily share a label (the grid page's reads
+  // "Reset Intro Animation"; the editor's own copy may not) - each restores
+  // its OWN original text rather than a string shared between them.
   ["btn-replay-intro", "grid-btn-replay-intro"].forEach(function (id) {
     var btn = document.getElementById(id);
     if (!btn) return;
+    var original = btn.textContent;
     btn.addEventListener("click", function () {
       forgetIntro();
       btn.textContent = "Intro will replay next time";
-      setTimeout(function () { btn.textContent = "Replay Intro Animation"; }, 2200);
+      setTimeout(function () { btn.textContent = original; }, 2200);
     });
   });
 })(window);

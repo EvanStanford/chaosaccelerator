@@ -119,13 +119,14 @@
   var tipPopoverOk = document.getElementById("tip-popover-ok");
   var tipPopoverDismiss = document.getElementById("tip-popover-dismiss");
   var btnResetTips = document.getElementById("grid-btn-reset-tips");
+  var btnResetAll = document.getElementById("grid-btn-reset-all");
   var statsPanelBodyEl = document.getElementById("grid-stats-panel-body");
   var stepsSlider = document.getElementById("steps-slider");
   var stepsReadout = document.getElementById("steps-readout");
-  var stepsHint = document.getElementById("steps-hint");
   var precisionReadout = document.getElementById("precision-readout");
   var precisionSelect = document.getElementById("precision-select");
-  var precisionHint = document.getElementById("precision-hint");
+  var inspectLineSampleCountSlider = document.getElementById("inspect-line-sample-count-slider");
+  var inspectLineSampleCountReadout = document.getElementById("inspect-line-sample-count-readout");
   var inspectGridSizeSlider = document.getElementById("inspect-grid-size-slider");
   var inspectGridSizeReadout = document.getElementById("inspect-grid-size-readout");
   var inspectGridTwoPartCheckbox = document.getElementById("inspect-grid-two-part-checkbox");
@@ -312,24 +313,36 @@
   //
   // Three menus - Settings, Inspect, Analysis - each a square icon button
   // until it is opened, at which point the button leaves the layout and its
-  // card takes the space. Any number can be open at once: they are a flow
-  // down the column, each pushing whatever is below it further down, not a
-  // stack of panels overlapping in one corner, so there is nothing for them
-  // to fight over and nothing to close on another's behalf.
+  // card takes the space. Accordion, not independent: opening one closes
+  // whichever of the other two was open (see menuGroup below), so the
+  // column never has to show more than one card's worth of controls at
+  // once. Zero open is still fine - closing the last one just leaves the
+  // three collapsed buttons.
   //
   // The open/shut state lives HERE rather than being read back off a class,
   // so the one thing that can vary (which of the button and the card is in
   // the layout) has exactly one owner.
-  function makeMenu(itemId, toggleId, closeId, onChange) {
+  //
+  // Every menu this factory builds registers itself here, so opening one
+  // can close the others without each menu having to know the other two by
+  // name at its own construction time (settingsMenu/inspectMenu/statsMenu
+  // are still being built when the first of them runs this).
+  var menuGroup = [];
+  function makeMenu(itemId, toggleId, onChange) {
     var item = document.getElementById(itemId);
     var toggle = document.getElementById(toggleId);
-    var closeBtn = document.getElementById(closeId);
     var card = item.querySelector(".menu-card");
+    var header = card.querySelector(".menu-card-header");
     var open = false;
     function set(next) {
       next = !!next;
       if (next === open) return;
       open = next;
+      if (open) {
+        menuGroup.forEach(function (other) {
+          if (other !== api && other.isOpen()) other.set(false);
+        });
+      }
       item.classList.toggle("is-open", open);
       card.hidden = !open;
       toggle.setAttribute("aria-expanded", open ? "true" : "false");
@@ -342,8 +355,12 @@
       if (onChange) onChange(open);
     }
     toggle.addEventListener("click", function () { set(true); });
-    closeBtn.addEventListener("click", function () { set(false); });
-    return {
+    // The whole header line collapses the card, not just the caret button -
+    // the button (.menu-collapse) is still its own focusable element inside
+    // the header, so Tab/Enter/Space keep working, and the click it
+    // produces just bubbles up to this same listener.
+    header.addEventListener("click", function () { set(false); });
+    var api = {
       isOpen: function () { return open; },
       set: set,
       // Whichever of the button and the card is actually on screen, for a
@@ -351,9 +368,11 @@
       // zeros, which would park the popover in the corner.
       anchor: function () { return open ? card : toggle; },
     };
+    menuGroup.push(api);
+    return api;
   }
 
-  var settingsMenu = makeMenu("menu-settings", "grid-btn-settings", "grid-btn-settings-close",
+  var settingsMenu = makeMenu("menu-settings", "grid-btn-settings",
     function (open) {
       // Opening Settings IS the "yes, show me" that the deep-zoom tip's
       // step 1 asks for, so getting there by hand skips straight ahead
@@ -382,7 +401,16 @@
   // would keep computing a trajectory per hovered cell and keep playing
   // bounce tones from a panel nobody can see, which on a page whose whole
   // point is an unobstructed fractal is the wrong way round.
-  var inspectMenu = makeMenu("menu-inspect", "grid-btn-inspect", "grid-btn-inspect-close",
+  //
+  // The locked points themselves are a different story: collapsing the card
+  // hides their on-grid markers/mesh (updateInspectMarkers reads
+  // inspectMenu.isOpen() itself - see its own comment) but never touches
+  // inspectedGroups, so reopening brings back exactly what was there before.
+  // disarmInspect matters here too - without it, Line/Grid left armed when
+  // the card closes would still turn the next click or drag on the grid
+  // into a new inspection, which is exactly what a collapsed Inspect card
+  // is supposed to mean "not right now" to.
+  var inspectMenu = makeMenu("menu-inspect", "grid-btn-inspect",
     function (open) {
       if (open) {
         // Pick up whatever should be on screen now - the locked points if
@@ -394,13 +422,15 @@
         pausePlayback();
         stopHoverReplay();
         hoverKey = null; // so re-entering the same cell later still previews it
+        disarmInspect();
       }
+      updateInspectMarkers();
     });
   function setInspectOpen(open) {
     inspectMenu.set(open);
   }
 
-  var statsMenu = makeMenu("menu-stats", "grid-btn-stats", "grid-btn-stats-close",
+  var statsMenu = makeMenu("menu-stats", "grid-btn-stats",
     function (open) {
       setStatsPanelOpen(open);
     });
@@ -414,6 +444,31 @@
     btnResetTips.textContent = "Tips reset";
     setTimeout(function () { btnResetTips.textContent = original; }, 1500);
   });
+  // "Deletes all cookies for the page" per the user's ask - this app keeps
+  // its state in localStorage, not cookies, so that (plus any cookies this
+  // origin might still pick up some day) is what actually needs clearing.
+  // A hard reload after wiping is the simplest way to put every module back
+  // in its true first-run state, rather than hand-resetting each one here.
+  if (btnResetAll) {
+    btnResetAll.addEventListener("click", function () {
+      if (!global.confirm("Reset all saved data for this page? This clears your saved scene, dismissed tips, and intro animation state, then reloads.")) return;
+      try {
+        localStorage.clear();
+      } catch (err) {
+        // Nothing to clean up if storage was never reachable to begin with.
+      }
+      try {
+        document.cookie.split(";").forEach(function (pair) {
+          var name = pair.split("=")[0].trim();
+          if (!name) return;
+          document.cookie = name + "=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/";
+        });
+      } catch (err) {
+        // Same - nothing to clean up if cookies aren't reachable.
+      }
+      global.location.reload();
+    });
+  }
 
   // The Output property's own exact range, used to color the whole [0, max]
   // span across the full rainbow rather than guessing at one: a non-anchored
@@ -494,6 +549,11 @@
     if (!isFinite(v) || v <= 0) return;
     simulationSteps = Math.min(50 * SIMULATION_STEPS_PER_NOTCH, Math.max(SIMULATION_STEPS_PER_NOTCH,
       Math.round(v / SIMULATION_STEPS_PER_NOTCH) * SIMULATION_STEPS_PER_NOTCH));
+    // The Settings card has a slider on this exact value. Adopting a
+    // duration without moving it is what used to leave this page rendering
+    // at the scene's duration while its own panel still showed the one from
+    // the visit before.
+    syncStepsUI();
   }
   adoptSceneDuration();
 
@@ -1268,26 +1328,10 @@
     return precisionMode === "auto" ? autoPrecision() : precisionMode;
   }
 
-  // How many distinct starting positions one pixel step can still be told
-  // apart by, at the currently-bound precision - under about 1 and the
-  // image is aliasing (neighbouring pixels running identical simulations),
-  // which is the whole thing the df pass exists to push back.
-  function resolvableStepsPerPixel(precision) {
-    var magnitude = Math.max(Math.abs(view.center.x), Math.abs(view.center.y), sceneCoordinateSpan);
-    // df carries ~2x float32's significand, minus a couple of bits of slack
-    // for the renormalisations.
-    var ulp = float32UlpAt(magnitude) * (precision === "df" ? Math.pow(2, -22) : 1);
-    return worldPixelSpacing() / ulp;
-  }
   function updatePrecisionReadout() {
     if (!precisionReadout) return;
     var active = activePass.precision;
     precisionReadout.textContent = active === "df" ? "double-float (~15 digits)" : "float32 (~7 digits)";
-    var steps = resolvableStepsPerPixel(active);
-    precisionHint.textContent = steps < 1
-      ? "Past this precision's limit - neighbouring pixels now round to the same starting scene."
-      : "About " + (steps >= 1e4 ? Math.round(steps).toExponential(1) : Math.round(steps).toLocaleString()) +
-        " distinguishable starting positions per pixel.";
   }
   if (precisionSelect) {
     // Explicit, rather than trusting the markup's own `selected`: browsers
@@ -1839,7 +1883,7 @@
   // special-case "how many points is this really":
   //   "point" - one point-entry: a plain click/tap (see endDrag), or one of
   //             the superlative buttons below.
-  //   "line"  - INSPECT_LINE_POINT_COUNT point-entries evenly spaced along a
+  //   "line"  - inspectLineSampleCount point-entries evenly spaced along a
   //             dragged segment (Inspect (Line) armed - see
   //             lockLineOfPoints), each still drawn as its own full set of
   //             bodies, hue-cycled the same way a "point" is.
@@ -1912,13 +1956,19 @@
   // spaced in between - colored as an even split across
   // [0, INSPECT_LINE_MAX_HUE] rather than continuing the golden-angle
   // sequence above, so a dragged line reads as its own connected group.
-  var INSPECT_LINE_POINT_COUNT = 40;
+  // Settings-controlled (Inspection Line Sample Count, 5-60) - see its own
+  // wiring down by the rest of the Settings controls. The preview/locked-dot
+  // pool below is still built once at INSPECT_LINE_SAMPLE_MAX, the slider's
+  // own ceiling, so changing this never has to grow or shrink that pool -
+  // only how many of it are shown.
+  var INSPECT_LINE_SAMPLE_MAX = 60;
+  var inspectLineSampleCount = 30;
   // Stops short of 360 (== 0 on the hue wheel) so the last point never ends
   // up looking near-identical to the first - the interval is [0, 324], not
-  // [0, 360), regardless of INSPECT_LINE_POINT_COUNT.
+  // [0, 360), regardless of inspectLineSampleCount.
   var INSPECT_LINE_MAX_HUE = 324;
   function inspectLinePointColor(i) {
-    var hue = INSPECT_LINE_POINT_COUNT > 1 ? i * (INSPECT_LINE_MAX_HUE / (INSPECT_LINE_POINT_COUNT - 1)) : 0;
+    var hue = inspectLineSampleCount > 1 ? i * (INSPECT_LINE_MAX_HUE / (inspectLineSampleCount - 1)) : 0;
     return { fill: "hsl(" + hue + ", 100%, 50%)", stroke: "#000000" };
   }
   function evenlySpacedPoints(start, end, count) {
@@ -2072,15 +2122,42 @@
   // created once in lockGridOfPoints) just get repositioned below, same
   // "recompute screen position on every pan/zoom" need as the dots, for a
   // fixed set of line endpoints instead of a fixed set of points.
+  //
+  // Clicking a marker removes its WHOLE group - the same thing the list's
+  // own × button does (see updateInspectList/removeInspectedGroup) - rather
+  // than trying to pull just that one point out of a locked line, which
+  // nothing else in this file (colors, hue spacing, segment indices) is
+  // built to do. inspectMarkerGroupIndex is the parallel array a marker's
+  // click handler reads its own group index back out of; it has to be a
+  // variable the closure below can see fresh on every click (not a value
+  // baked in when the element was created), since which group a given pool
+  // slot belongs to changes as points are added and removed.
   var inspectMarkerEls = [];
+  var inspectMarkerGroupIndex = [];
   function updateInspectMarkers() {
+    // Collapsing Inspect stops the work (see its own makeMenu comment) but
+    // never touches inspectedGroups - so a still-open card's worth of
+    // points is sitting right there, just not drawn, ready to reappear
+    // exactly as it was the moment the card reopens.
+    var visible = inspectMenu.isOpen();
     var flatPoints = [];
-    inspectedGroups.forEach(function (group) {
-      if (group.type !== "grid") flatPoints = flatPoints.concat(group.points);
+    inspectMarkerGroupIndex = [];
+    inspectedGroups.forEach(function (group, groupIndex) {
+      if (group.type === "grid") return;
+      group.points.forEach(function (point) {
+        flatPoints.push(point);
+        inspectMarkerGroupIndex.push(groupIndex);
+      });
     });
     while (inspectMarkerEls.length < flatPoints.length) {
       var el = document.createElement("div");
       el.className = "inspect-marker";
+      el.title = "Click to remove";
+      el.addEventListener("click", function () {
+        var slot = inspectMarkerEls.indexOf(el);
+        if (slot === -1) return;
+        removeInspectedGroup(inspectMarkerGroupIndex[slot]);
+      });
       canvasArea.appendChild(el);
       inspectMarkerEls.push(el);
     }
@@ -2092,7 +2169,13 @@
       var el = inspectMarkerEls[i];
       el.style.left = p.x + "px";
       el.style.top = p.y + "px";
-      el.style.background = entry.color.fill;
+      // A custom property, not el.style.background directly - background
+      // itself is set in CSS from var(--marker-color), which is what lets
+      // .inspect-marker:hover's own plain background rule (see
+      // fractal-grid.css) win on hover without an !important fight against
+      // an inline style set here on every update.
+      el.style.setProperty("--marker-color", entry.color.fill);
+      el.hidden = !visible;
     });
 
     inspectedGroups.forEach(function (group) {
@@ -2103,18 +2186,24 @@
         var lineEl = group.meshLineEls[i];
         lineEl.setAttribute("x1", a.x); lineEl.setAttribute("y1", a.y);
         lineEl.setAttribute("x2", b.x); lineEl.setAttribute("y2", b.y);
+        if (visible) lineEl.removeAttribute("hidden");
+        else lineEl.setAttribute("hidden", "");
       });
     });
   }
 
-  // The dashed connecting line plus INSPECT_LINE_POINT_COUNT dots shown
-  // while dragging Inspect (Line) - built once here and just repositioned
-  // on every update rather than recreated, same pooling idea as
-  // inspectMarkerEls. Colored with inspectLinePointColor so the preview
-  // matches exactly what lockLineOfPoints will actually place. Hidden/shown
-  // on its own (not via #inspect-preview's own hidden attribute, which - now
-  // that the same SVG also permanently hosts completed grids' mesh lines -
-  // must stay unhidden regardless of whether a preview is active).
+  // The dashed connecting line plus up to INSPECT_LINE_SAMPLE_MAX dots shown
+  // while dragging Inspect (Line) - built once here, at the slider's own
+  // ceiling, and just repositioned on every update rather than recreated,
+  // same pooling idea as inspectMarkerEls. Only the first
+  // inspectLineSampleCount of the pool are ever shown at once (see
+  // updateInspectLinePreview) - that is what lets the Settings slider change
+  // the count without growing or shrinking this pool. Colored with
+  // inspectLinePointColor so the preview matches exactly what
+  // lockLineOfPoints will actually place. Hidden/shown on its own (not via
+  // #inspect-preview's own hidden attribute, which - now that the same SVG
+  // also permanently hosts completed grids' mesh lines - must stay unhidden
+  // regardless of whether a preview is active).
   var SVG_NS = "http://www.w3.org/2000/svg";
   var inspectLinePreviewLine = document.createElementNS(SVG_NS, "line");
   inspectLinePreviewLine.setAttribute("stroke", "rgba(255,255,255,0.7)");
@@ -2123,12 +2212,11 @@
   inspectLinePreviewLine.setAttribute("hidden", "");
   inspectPreviewSvg.appendChild(inspectLinePreviewLine);
   var inspectLinePreviewDots = [];
-  for (var cli = 0; cli < INSPECT_LINE_POINT_COUNT; cli++) {
+  for (var cli = 0; cli < INSPECT_LINE_SAMPLE_MAX; cli++) {
     var dot = document.createElementNS(SVG_NS, "circle");
     dot.setAttribute("r", "6");
     dot.setAttribute("stroke", "#000000");
     dot.setAttribute("stroke-width", "2");
-    dot.setAttribute("fill", inspectLinePointColor(cli).fill);
     dot.setAttribute("hidden", "");
     inspectPreviewSvg.appendChild(dot);
     inspectLinePreviewDots.push(dot);
@@ -2141,18 +2229,22 @@
     inspectLinePreviewLine.setAttribute("y1", startPx.y);
     inspectLinePreviewLine.setAttribute("x2", endPx.x);
     inspectLinePreviewLine.setAttribute("y2", endPx.y);
-    var points = evenlySpacedPoints(startWorld, endWorld, INSPECT_LINE_POINT_COUNT);
+    var points = evenlySpacedPoints(startWorld, endWorld, inspectLineSampleCount);
     points.forEach(function (worldPoint, i) {
       var px = worldToCanvasAreaPixel(worldPoint.x, worldPoint.y);
       inspectLinePreviewDots[i].setAttribute("cx", px.x);
       inspectLinePreviewDots[i].setAttribute("cy", px.y);
+      inspectLinePreviewDots[i].setAttribute("fill", inspectLinePointColor(i).fill);
     });
     // Not `.hidden = false` - the hidden IDL property is reliably defined on
     // HTMLElement but not consistently on SVGElement, so setting it can
     // silently no-op instead of touching the actual attribute. The
     // attribute methods work identically regardless of element/namespace.
     inspectLinePreviewLine.removeAttribute("hidden");
-    inspectLinePreviewDots.forEach(function (d) { d.removeAttribute("hidden"); });
+    for (var i = 0; i < inspectLinePreviewDots.length; i++) {
+      if (i < points.length) inspectLinePreviewDots[i].removeAttribute("hidden");
+      else inspectLinePreviewDots[i].setAttribute("hidden", "");
+    }
   }
   function hideInspectLinePreview() {
     inspectLinePreviewLine.setAttribute("hidden", "");
@@ -2213,19 +2305,28 @@
     }, INSPECT_TOAST_VISIBLE_MS);
   }
 
+  // "line"/"grid" rows lead with this instead of the small .inspect-dot a
+  // "point" row uses - large enough to stand as its own column beside the
+  // two-line start/end coordinates, and shaped like what it represents (a
+  // dashed line for "line", a grid square for "grid") so that shape is
+  // what says "this is a line/grid entry" now, freeing the two coordinate
+  // rows beside it to just be the raw numbers instead of needing their own
+  // "Line start:"/"Line end:" labels to say the same thing in words.
+  var INSPECT_ROW_GROUP_GLYPH = { line: "┊", grid: "⊞" };
+
   function updateInspectList() {
     inspectListEl.innerHTML = "";
     inspectedGroups.forEach(function (group, i) {
       var li = document.createElement("li");
       li.className = "inspect-row";
-      var swatch = document.createElement("span");
-      swatch.className = "inspect-dot";
       var removeBtn = document.createElement("button");
       removeBtn.className = "inspect-row-remove";
       removeBtn.textContent = "×";
       removeBtn.addEventListener("click", function () { removeInspectedGroup(i); });
 
       if (group.type === "point") {
+        var swatch = document.createElement("span");
+        swatch.className = "inspect-dot";
         swatch.style.background = group.points[0].color.fill;
         removeBtn.title = "Remove this point";
         var coords = document.createElement("span");
@@ -2235,23 +2336,20 @@
         li.appendChild(coords);
         li.appendChild(removeBtn);
       } else {
-        // A diagonal preview of the color range/spread inside, rather than
-        // one flat color - a "point" row's dot IS that point's actual
-        // color, so this keeps the same dot meaning "what this group looks
-        // like" instead of just picking one arbitrary member to represent
-        // a whole line or grid.
-        swatch.style.background = "linear-gradient(135deg, " + group.points[0].color.fill + ", " + group.points[group.points.length - 1].color.fill + ")";
+        var icon = document.createElement("span");
+        icon.className = "inspect-row-icon";
+        icon.textContent = INSPECT_ROW_GROUP_GLYPH[group.type];
+        icon.setAttribute("aria-hidden", "true");
         removeBtn.title = "Remove this " + group.type;
-        var label = group.type === "line" ? "Line" : "Grid";
         var coordsGroup = document.createElement("div");
         coordsGroup.className = "inspect-coords-group";
         var startLine = document.createElement("div");
-        startLine.textContent = label + " start: " + group.startWorld.x.toFixed(6) + ", " + group.startWorld.y.toFixed(6);
+        startLine.textContent = group.startWorld.x.toFixed(6) + ", " + group.startWorld.y.toFixed(6);
         var endLine = document.createElement("div");
-        endLine.textContent = label + " end: " + group.endWorld.x.toFixed(6) + ", " + group.endWorld.y.toFixed(6);
+        endLine.textContent = group.endWorld.x.toFixed(6) + ", " + group.endWorld.y.toFixed(6);
         coordsGroup.appendChild(startLine);
         coordsGroup.appendChild(endLine);
-        li.appendChild(swatch);
+        li.appendChild(icon);
         li.appendChild(coordsGroup);
         li.appendChild(removeBtn);
       }
@@ -2267,10 +2365,15 @@
   // it's ready - restarting is what guarantees everyone starts at step 0
   // together, "fully loaded" by construction rather than by timing it.
   function restartCurrentPreview() {
-    if (isHoveringGrid && hoverWorldPoint) {
-      runHoverAt(hoverWorldPoint);
-    } else if (inspectedGroups.length > 0) {
+    // inspectedGroups wins over a live hover, not the other way round - once
+    // at least one point/line/grid is locked, the panel is showing THEM
+    // (see the mousemove handler's own comment on why hovering elsewhere no
+    // longer swaps in a preview of its own trajectory alongside them), so
+    // there is nothing left for a hover to interrupt here either.
+    if (inspectedGroups.length > 0) {
       beginInspectOnlySession();
+    } else if (isHoveringGrid && hoverWorldPoint) {
+      runHoverAt(hoverWorldPoint);
     } else {
       showHoverEmpty();
     }
@@ -2347,14 +2450,14 @@
 
   // Dragging while Inspect (Line) is armed calls this instead of
   // lockPointAt - see evenlySpacedPoints/inspectLinePointColor above. If
-  // fewer than INSPECT_LINE_POINT_COUNT slots remain before
-  // MAX_INSPECT_POINTS, only the first `available` of the 40 (start-ward)
-  // get added rather than re-spacing/re-coloring a smaller set - simpler,
-  // and the cap is high enough (100) that this only bites right at the edge.
+  // fewer than inspectLineSampleCount slots remain before
+  // MAX_INSPECT_POINTS, only the first `available` (start-ward) get added
+  // rather than re-spacing/re-coloring a smaller set - simpler, and the cap
+  // is high enough (300) that this only bites right at the edge.
   function lockLineOfPoints(startWorld, endWorld) {
     var available = MAX_INSPECT_POINTS - totalInspectedPointCount();
     if (available <= 0) return; // stays armed - Clear All (or removing a point) might free up room to retry
-    var worldPoints = evenlySpacedPoints(startWorld, endWorld, INSPECT_LINE_POINT_COUNT);
+    var worldPoints = evenlySpacedPoints(startWorld, endWorld, inspectLineSampleCount);
     var count = Math.min(worldPoints.length, available);
     var points = [];
     for (var i = 0; i < count; i++) {
@@ -2451,10 +2554,11 @@
   // Clicking the already-armed button cancels it (a plain toggle) rather
   // than just re-arming a no-op state - otherwise there'd be no way back to
   // "neither armed" short of dragging one to completion or clearing
-  // everything. Blue means "idle, click me"; the plain outlined
-  // .inspect-armed look (see fractal-grid.css) means "now go drag the
-  // grid," so the color itself signals which button (if either) is waiting,
-  // rather than the more common (but here backwards) blue == "active."
+  // everything. Grey means "idle, click me"; the blue .inspect-armed look
+  // (see fractal-grid.css) means "now go drag the grid" - the same
+  // grey-idle/blue-active convention the first page's own .tool-btn uses,
+  // so the color signals which button (if either) is waiting the same way
+  // it does everywhere else in the app.
   function armInspect(mode) {
     if (inspectArmMode === mode) { disarmInspect(); return; }
     inspectArmMode = mode;
@@ -3510,7 +3614,14 @@
         // the drag it's actually waiting for.
         if (inspectArmMode === "line") showInspectToast("Drag to inspect a line");
         else if (inspectArmMode === "grid") showInspectToast("Drag to inspect a grid");
-        else lockPointAt(current);
+        // Neither arms without the Inspect card open (their buttons live
+        // inside it), so a collapsed card always reaches this branch with
+        // nothing armed - exactly where a plain click otherwise locks a new
+        // point. Collapsed means "not right now" (see makeMenu's own
+        // comment), so this is the one thing that has to check for it
+        // explicitly rather than relying on disarmInspect leaving nothing
+        // else to do.
+        else if (inspectMenu.isOpen()) lockPointAt(current);
       } else if (inspectArmMode === "line") {
         lockLineOfPoints(inspectDragStartWorld, current);
       } else if (inspectArmMode === "grid") {
@@ -3704,16 +3815,15 @@
   // rendered (and, with Inspect points locked, would recompile a trajectory
   // shader per point). Releasing applies it.
   function stepsFromSlider() { return Number(stepsSlider.value) * SIMULATION_STEPS_PER_NOTCH; }
+  // Slider position, readout and hint, all from whatever simulationSteps
+  // currently is - so there is one way to put this control back in step with
+  // the value behind it, used both at boot and on every scene adoption.
+  function syncStepsUI() {
+    stepsSlider.value = String(simulationSteps / SIMULATION_STEPS_PER_NOTCH);
+    updateStepsUI(simulationSteps);
+  }
   function updateStepsUI(value) {
     stepsReadout.textContent = value.toLocaleString();
-    // Render cost is exactly linear in this, and it is paid in how long
-    // the picture takes to refine - so the honest thing to report is the
-    // trade, not just the number.
-    var ratio = value / DEFAULT_SIMULATION_STEPS;
-    stepsHint.textContent = value === DEFAULT_SIMULATION_STEPS
-      ? "The default. Every pixel is simulated this far, then colored by where it ended up."
-      : "About " + (ratio % 1 ? ratio.toFixed(1) : ratio.toFixed(0)) + "× the default's work per pixel" +
-        (value > DEFAULT_SIMULATION_STEPS ? " - the picture takes proportionally longer to sharpen." : ".");
   }
   // Every inspected point cached a trajectory of the OLD length, so after a
   // change they'd replay against a grid that no longer agrees with them.
@@ -3745,14 +3855,22 @@
     }
     updateInspectUI();
   }
-  stepsSlider.value = String(simulationSteps / SIMULATION_STEPS_PER_NOTCH);
-  updateStepsUI(simulationSteps);
+  syncStepsUI();
   stepsSlider.addEventListener("input", function () { updateStepsUI(stepsFromSlider()); });
   stepsSlider.addEventListener("change", function () {
     var next = stepsFromSlider();
     if (next === simulationSteps) return;
     simulationSteps = next;
     updateStepsUI(simulationSteps);
+    // Duration is a property of the SCENE, not of this page's view of it,
+    // and the editor has the same slider on the same value. Writing it into
+    // both is what keeps the two from drifting: without this the change
+    // lived only in this module, so the editor still showed the old number
+    // and the next Fractal-ize handed it straight back.
+    scene.simulationSteps = next;
+    if (global.PhysicsUI && global.PhysicsUI.setSimulationSteps) {
+      global.PhysicsUI.setSimulationSteps(next);
+    }
     // The per-pixel cost just changed by up to 10x. Nothing has to be told:
     // markDirty restarts refinement from the coarsest level, and the
     // per-frame budget re-converges on its own within a few frames.
@@ -3765,6 +3883,18 @@
     colorZoomEnabled = colorZoomCheckbox.checked;
     if (colorZoomEnabled && activeTipId === "color-zoom") hideTip(); // they took the suggestion (or just found the checkbox themselves) - either way it's moot now
     markDirty();
+  });
+
+  // ---- Inspection Line Sample Count ----
+  //
+  // Just updates the plain state evenlySpacedPoints reads on the NEXT
+  // Inspect (Line) drag - same "settings change, nothing already on screen
+  // is touched" rule as Grid Settings just below.
+  inspectLineSampleCountSlider.value = String(inspectLineSampleCount);
+  inspectLineSampleCountReadout.textContent = String(inspectLineSampleCount);
+  inspectLineSampleCountSlider.addEventListener("input", function () {
+    inspectLineSampleCount = Number(inspectLineSampleCountSlider.value);
+    inspectLineSampleCountReadout.textContent = String(inspectLineSampleCount);
   });
 
   // ---- Grid Settings (Grid Size, Two Part Line) ----
@@ -5030,6 +5160,14 @@
     if (key === hoverKey) return; // already showing (or about to show) this exact cell
     hoverKey = key;
     hoverWorldPoint = world;
+    // Kept updating above regardless - so that removing the last inspected
+    // point (which itself calls restartCurrentPreview) can fall straight
+    // back to previewing whatever cell the cursor is already sitting over,
+    // no extra move needed - but once at least one point/line/grid is
+    // locked, the panel belongs to THEM: it no longer swaps in a preview of
+    // the currently-hovered cell's own trajectory alongside whatever is
+    // already playing back.
+    if (inspectedGroups.length > 0) return;
     stopHoverReplay(); // a previous cell's replay may still be animating - don't let it keep drawing over the new cell's preview
     if (hoverUpgradeTimer) clearTimeout(hoverUpgradeTimer);
     showHoverInstant(world);
@@ -5576,13 +5714,14 @@
     statsResultIsCurrent = true;
     statsPanel.markFresh();
     statsPanel.showResult(result, info);
-    statsLastStatus =
-      "Measured " + run.width + "×" + sampleHeight + " samples of the view on screen" +
-      (run.full ? " - one per rendered pixel" : "") + ". Output: " +
-      info.outputLabel + (info.seamsFound > 0
-        ? ". " + info.seamsFound + " input-seam line" + (info.seamsFound === 1 ? "" : "s") +
-          " excluded (see the X/Y Input mapping - those are where a starting position wraps back into the frame, not real edges)."
-        : ".");
+    // Just the seam warning, if there is one - the sample size and Output
+    // are already right there in the Sampling resolution slider and the
+    // scene's own X/Y Input mapping, so restating them here was pure
+    // repetition.
+    statsLastStatus = info.seamsFound > 0
+      ? info.seamsFound + " input-seam line" + (info.seamsFound === 1 ? "" : "s") +
+        " excluded (see the X/Y Input mapping - those are where a starting position wraps back into the frame, not real edges)."
+      : "";
     statsPanel.setStatus(statsLastStatus);
   }
 
