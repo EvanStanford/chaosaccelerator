@@ -34,6 +34,10 @@
   var canvas = document.getElementById("physics-canvas");
   var ctx = canvas.getContext("2d");
   var canvasArea = document.getElementById("canvas-area");
+  // Floats over the canvas at top centre - read for its RECT, not grabbed
+  // for hiding: it is what decides how far down the drag-to-delete zone has
+  // to sit. See deleteZoneCenter.
+  var playbackToolbar = document.getElementById("playback-toolbar");
   var panelEl = document.getElementById("panel");
   var btnSettings = document.getElementById("btn-settings");
   var btnSettingsClose = document.getElementById("btn-settings-close");
@@ -993,11 +997,44 @@
   // where the drag itself is, same as the "drag an icon up to X" gesture on
   // an Android or iOS home screen.
   var DELETE_ZONE_RADIUS = 20;
-  var DELETE_ZONE_TOP_MARGIN = 44; // distance from the frame's own top edge to the zone's center
+  var DELETE_ZONE_TOP_MARGIN = 44; // distance from the frame's own top edge to the zone's center, with nothing in the way
   var DELETE_ZONE_ARMED_SCALE = 1.3; // drawn this much bigger once the dragged body actually overlaps it
+  var DELETE_ZONE_TOOLBAR_GAP = 14; // clear air between the transport's bottom edge and the zone's
+
+  // Top centre of the frame is also where the playback transport floats, and
+  // that is a DOM element painted over the canvas - so the zone was drawn
+  // underneath it and the user had nothing to drop onto. This drops below
+  // the transport instead.
+  //
+  // Measured rather than moved down by a constant: the transport's height
+  // changes with the step readout under it (which carries text after a run
+  // and none before one) and with how wide the speed button's own label
+  // gets, so a constant picked against any one of those states is wrong in
+  // the others. Falling back to the bare margin keeps this working if the
+  // transport is ever absent or unmeasurable.
+  //
+  // Everything here is in frame units, which while editing are CSS pixels
+  // from the canvas's top-left corner - the same units canvasPoint hands
+  // the hit test, so the two agree without either converting.
+  function deleteZoneTop() {
+    var y = DELETE_ZONE_TOP_MARGIN;
+    if (playbackToolbar) {
+      var bar = playbackToolbar.getBoundingClientRect();
+      if (bar.height > 0) {
+        y = Math.max(y, bar.bottom - canvas.getBoundingClientRect().top +
+          DELETE_ZONE_TOOLBAR_GAP + DELETE_ZONE_RADIUS * DELETE_ZONE_ARMED_SCALE);
+      }
+    }
+    // On a frame too short to hold both, the zone stays inside it rather
+    // than being pushed off the bottom edge by a transport that fills the
+    // top - a zone that can't be reached is worse than one drawn close to
+    // the transport.
+    var armed = DELETE_ZONE_RADIUS * DELETE_ZONE_ARMED_SCALE;
+    return Math.min(y, Math.max(armed, (scene.frameHeight || 0) - armed));
+  }
 
   function deleteZoneCenter() {
-    return { x: (scene.frameWidth || 0) / 2, y: DELETE_ZONE_TOP_MARGIN };
+    return { x: (scene.frameWidth || 0) / 2, y: deleteZoneTop() };
   }
 
   // Checked against the cursor, not the body's own center or size: a body
@@ -3051,5 +3088,39 @@
     // draw. A copy, so the animation stepping it forward can't disturb what
     // the editor is holding.
     currentScene: function () { return PhysicsEngine.cloneScene(scene); },
+    // ---- The one setting that exists on both pages ----
+    //
+    // Simulation Duration is scene.simulationSteps, and the fractal grid
+    // has its own slider on the same value. That page calls this when its
+    // slider moves, so the number the user set there is the one still
+    // showing here when they come back - and, since the handoff is built
+    // from this scene, the one a later Fractal-ize sends back over.
+    //
+    // Without it the grid's change lived only in that module: the editor
+    // kept showing the old duration and the next Fractal-ize overwrote the
+    // user's choice with it.
+    //
+    // Snapped to the slider's own notches (and clamped to its range) rather
+    // than trusted: this is a setter reachable from another module, and a
+    // value between notches would leave the slider unable to represent what
+    // the scene says.
+    setSimulationSteps: function (steps) {
+      var v = Number(steps);
+      if (!isFinite(v) || v <= 0) return;
+      var notches = Math.min(SIMULATION_STEPS_MAX_NOTCHES,
+        Math.max(1, Math.round(v / SIMULATION_STEPS_PER_NOTCH)));
+      var next = notches * SIMULATION_STEPS_PER_NOTCH;
+      if (next === scene.simulationSteps) return;
+      scene.simulationSteps = next;
+      simulationStepsSlider.value = String(notches);
+      updateSimulationStepsReadout(next);
+      // The same guard the slider's own handler uses: during a run the
+      // progress slider's range belongs to the run, not to the setting.
+      if (!isPlaying) playbackProgressSlider.max = String(next);
+      // render() is what normally sweeps a change into the autosave, and
+      // nothing is rendering here - the editor isn't the visible view when
+      // this is called.
+      saveEditorAutosave();
+    },
   };
 })(window);

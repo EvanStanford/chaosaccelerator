@@ -25,14 +25,19 @@
   // enabledGroups() below is a direct copy of whatever is switched on.
   var SECTIONS = [
     {
-      key: "extremes",
-      title: "Extremes & Range",
-      hint: "The highest and lowest Output value anywhere in the current view, where each one is, and how far apart they are.",
-    },
-    {
       key: "distribution",
       title: "Value Distribution",
       hint: "How the visible Output values are spread across the colour range - the shape of the picture's histogram, and the summary numbers that describe that shape.",
+    },
+    {
+      key: "orientation",
+      title: "Polar Plot",
+      hint: "Which way the sharp lines in this view run. The rose shows how much edge there is pointing in each direction; a long spike means many lines share that heading.",
+    },
+    {
+      key: "extremes",
+      title: "Extremes & Range",
+      hint: "The highest and lowest Output value anywhere in the current view, where each one is, and how far apart they are.",
     },
     {
       key: "roughness",
@@ -40,9 +45,9 @@
       hint: "How fast the picture changes from one place to the next: the average slope, and three standard measures of how much fine detail there is.",
     },
     {
-      key: "orientation",
-      title: "Direction of Lines",
-      hint: "Which way the sharp lines in this view run. The rose shows how much edge there is pointing in each direction; a long spike means many lines share that heading.",
+      key: "features",
+      title: "Feature Census",
+      hint: "How many distinct peaks and pits there are, and what shape the surface takes around a typical point.",
     },
     {
       key: "spectrum",
@@ -53,11 +58,6 @@
       key: "correlation",
       title: "Spatial Correlation",
       hint: "How far one sample's value tells you about its neighbours, and how much of the whole view is explained by a single smooth ramp.",
-    },
-    {
-      key: "features",
-      title: "Feature Census",
-      hint: "How many distinct peaks and pits there are, and what shape the surface takes around a typical point.",
     },
   ];
 
@@ -73,13 +73,6 @@
   function percent(v, places) {
     if (v === null || v === undefined || !isFinite(v)) return "-";
     return (v * 100).toFixed(places === undefined ? 1 : places) + "%";
-  }
-  // Sample counts run from tens of thousands to several million, and the
-  // reader only ever wants the order of magnitude.
-  function countLabel(n) {
-    if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + "M";
-    if (n >= 1e3) return Math.round(n / 1e3) + "k";
-    return String(n);
   }
   function compact(v) {
     if (v === null || v === undefined || !isFinite(v)) return "-";
@@ -662,12 +655,8 @@
     resInput.type = "range";
     resInput.min = "0";
     resInput.step = "1";
-    resInput.setAttribute("aria-label", "Sample resolution");
+    resInput.setAttribute("aria-label", "Sampling resolution");
     resField.appendChild(resInput);
-    var resHint = el("span", "stats-field-hint", "");
-    resField.appendChild(resHint);
-    resField.appendChild(el("span", "stats-field-hint",
-      "Coarser is quicker and still describes the broad shape. Finer counts detail a coarse pass misses - the gradient and feature numbers grow with it - and costs about twice as much at every notch."));
     bodyEl.appendChild(resField);
 
     // Snaps the slider to whichever stop the host is currently set to,
@@ -688,9 +677,7 @@
 
     function updateSampleReadout() {
       var d = host.describeSample(ladder[Number(resInput.value)]);
-      resLabel.textContent = "Sample resolution: " + d.width + " × " + d.height;
-      resHint.textContent = d.strideLabel + " · " + countLabel(d.samples) + " simulations per measurement" +
-        (d.full ? ", one for every pixel the grid renders - the finest there is." : ".");
+      resLabel.textContent = "Sampling resolution: " + d.width + " × " + d.height;
     }
     syncSampleSlider();
     updateSampleReadout();
@@ -701,14 +688,6 @@
       updateSampleReadout();
       onSampleResolutionChange(ladder[Number(resInput.value)]);
     });
-
-    var actions = el("div", "stats-actions");
-    var allOn = el("button", "secondary stat-mini-btn", "Turn all on");
-    var allOff = el("button", "secondary stat-mini-btn", "Turn all off");
-    allOn.type = "button"; allOff.type = "button";
-    actions.appendChild(allOn);
-    actions.appendChild(allOff);
-    bodyEl.appendChild(actions);
 
     SECTIONS.forEach(function (section) {
       var wrap = el("section", "stats-section");
@@ -745,28 +724,6 @@
       sections[section.key] = { wrap: wrap, body: body, hint: hint, input: input };
       bodyEl.appendChild(wrap);
     });
-
-    function setAll(on) {
-      var changed = false;
-      SECTIONS.forEach(function (section) {
-        var s = sections[section.key];
-        if (s.input.checked === on) return;
-        s.input.checked = on;
-        enabled[section.key] = on;
-        s.hint.hidden = !on;
-        s.body.hidden = !on;
-        if (!on) s.body.innerHTML = "";
-        changed = true;
-      });
-      if (!changed) return;
-      if (on) {
-        SECTIONS.forEach(function (section) { renderSection(section.key); });
-        flushDraws();
-      }
-      onEnabledChange();
-    }
-    allOn.addEventListener("click", function () { setAll(true); });
-    allOff.addEventListener("click", function () { setAll(false); });
 
     // Declared after the switches that call them: both are function
     // declarations, so they are hoisted to the top of create() and the
@@ -831,6 +788,10 @@
       setStatus: function (text, kind) {
         statusEl.textContent = text;
         statusEl.className = "stats-status" + (kind ? " stats-status-" + kind : "");
+        // A finished, seam-free measurement passes "" - nothing wrong to
+        // report - and an empty <p> would otherwise still sit there as a
+        // blank gap above Sampling resolution.
+        statusEl.hidden = !text;
       },
       // A fresh measurement: keep it, and redraw every switched-on section
       // against it.

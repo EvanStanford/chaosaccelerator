@@ -119,8 +119,48 @@ html, body {
   flex-shrink: 0;
 }
 
+/* Both the column itself and an open card's own body (see .menu-card-body
+   below) can grow a vertical scrollbar - most visibly on Analysis, whose
+   body is the tallest once more than a couple of sections are switched on.
+   Unstyled, that scrollbar is whatever light/system default the browser
+   ships, sitting on top of this page's own dark floating-card look. Firefox
+   reads the two scrollbar-* properties; everything else reads the
+   ::-webkit-scrollbar rules below them - painting the same thumb/track
+   twice, not painting it differently, so it never needs a browser check. */
+#grid-menu-stack,
+.menu-card-body {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+#grid-menu-stack::-webkit-scrollbar,
+.menu-card-body::-webkit-scrollbar {
+  width: 10px;
+}
+#grid-menu-stack::-webkit-scrollbar-track,
+.menu-card-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+#grid-menu-stack::-webkit-scrollbar-thumb,
+.menu-card-body::-webkit-scrollbar-thumb {
+  background-color: var(--border);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+#grid-menu-stack::-webkit-scrollbar-thumb:hover,
+.menu-card-body::-webkit-scrollbar-thumb:hover {
+  background-color: var(--accent);
+  background-clip: padding-box;
+}
+
 /* The shared look of every control in the column: a translucent card
-   sitting ON the fractal rather than cut out of it. */
+   sitting ON the fractal rather than cut out of it. Two shadows, not one:
+   the wide 10/30 one alone is almost all bottom - at that offset, blur
+   alone leaves the top and left edges too faint to read against the
+   fractal, so the shadow looks like it's been cut off there rather than
+   just fading out. The tight 2/6 shadow is close enough to the edge to
+   stay visible on every side and reads as a contact shadow hugging the
+   card, with the wide one still doing the actual "floating" depth below. */
 .menu-back,
 .menu-toggle,
 .menu-card {
@@ -128,7 +168,7 @@ html, body {
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5), 0 10px 30px rgba(0, 0, 0, 0.45);
 }
 
 /* Wider than the three below it because it carries its own label - the
@@ -211,6 +251,10 @@ html, body {
   to { opacity: 1; transform: scale(1); }
 }
 
+/* The whole header line is the collapse control (see makeMenu in
+   fractal-grid.js), not just the caret at its end - cursor and a hover fill
+   are what tell the pointer that clicking anywhere on this row, not just
+   the button, shuts the card. */
 .menu-card-header {
   display: flex;
   align-items: center;
@@ -218,6 +262,10 @@ html, body {
   padding: 10px 10px 10px 14px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  cursor: pointer;
+}
+.menu-card-header:hover {
+  background: var(--bg-input);
 }
 .menu-card-header h2 {
   font-size: 14px;
@@ -318,17 +366,39 @@ button:hover { background: var(--accent-hover); }
   padding: 6px 10px;
 }
 button.secondary:hover { background: var(--bg-input); }
-/* btnInspectLine/btnInspectGrid only: the plain outlined look while armed
-   (waiting for a grid drag) - deliberately not .secondary, which also
-   shrinks padding and would resize the button on every arm/disarm. Blue
-   means "idle, click me," this means "now go drag the grid" - see
-   fractal-grid.js's own comment. */
-button.inspect-armed {
+/* btnInspectLine/btnInspectGrid only: grey/outlined at rest, same as every
+   other idle button on the first page - matches .tool-btn's own default
+   over there. Its own rule rather than .secondary, which also shrinks
+   padding and would resize the button the moment it arms; this keeps the
+   idle and armed (below) states the exact same size. */
+#btn-inspect-line,
+#btn-inspect-grid {
   background: transparent;
   border-color: var(--border);
   color: var(--text);
 }
-button.inspect-armed:hover { background: var(--bg-input); }
+#btn-inspect-line:hover,
+#btn-inspect-grid:hover {
+  background: var(--bg-input);
+}
+/* Armed (waiting for a grid drag): blue, same as .tool-btn.active over on
+   the first page - so blue reads as "engaged" consistently everywhere in
+   the app, not just here. See armInspect's own comment in fractal-grid.js
+   for the (now corrected) history of why this used to run the other way.
+   Selectors combine the ID with the class (not just button.inspect-armed)
+   so this outranks the idle rule above on specificity alone - two ID
+   selectors otherwise beat a single class every time, regardless of which
+   rule comes later in the file. */
+#btn-inspect-line.inspect-armed,
+#btn-inspect-grid.inspect-armed {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+#btn-inspect-line.inspect-armed:hover,
+#btn-inspect-grid.inspect-armed:hover {
+  background: var(--accent-hover);
+}
 
 #grid-view .field-row {
   display: flex;
@@ -593,11 +663,16 @@ input[type="range"] {
 /* One of these per Inspect point ("point" and "line" entries only - a
    "grid" entry draws its own connected mesh instead, see
    #inspect-preview's own comment), on the grid itself - background color
-   is set from JS to that point's own golden-angle hue (matching its bodies
-   in the hover preview), with a black outline so it stays visible over any
-   hue the fractal coloring underneath happens to be. Position (left/top)
-   is set from JS on every render, in CSS pixels relative to
-   #grid-canvas-area's own box. */
+   is set from JS (as --marker-color, not background directly - see
+   updateInspectMarkers) to that point's own golden-angle hue (matching its
+   bodies in the hover preview), with a black outline so it stays visible
+   over any hue the fractal coloring underneath happens to be. Position
+   (left/top) is set from JS on every render, in CSS pixels relative to
+   #grid-canvas-area's own box. Clickable (see updateInspectMarkers) to
+   remove that point, so it takes real pointer events rather than passing
+   clicks through to the grid underneath; [hidden] (set when the Inspect
+   card is collapsed) still wins over that, since a hidden element gets no
+   events regardless of pointer-events. */
 .inspect-marker {
   position: absolute;
   width: 14px;
@@ -607,7 +682,29 @@ input[type="range"] {
   border-radius: 50%;
   border: 2px solid #000;
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.5);
-  pointer-events: none;
+  cursor: pointer;
+  background: var(--marker-color);
+}
+/* Hovering previews the click: the dot's own color gives way to a plain ×
+   on a dark disc, the same shape/meaning as the list row's own remove
+   button (.inspect-row-remove), so there's no doubt clicking removes this
+   point rather than adding another one on top of it. Plain background here
+   (not !important) is enough to beat the base rule above despite its color
+   coming from an inline custom property - a :hover selector already
+   outranks the bare class it's attached to, custom property or not. */
+.inspect-marker:hover {
+  background: var(--bg-panel);
+  border-color: var(--danger);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.inspect-marker:hover::after {
+  content: "\00d7";
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--danger);
 }
 
 /* Three things share this one SVG, none of them ever visible at once:
@@ -644,6 +741,14 @@ input[type="range"] {
   display: none;
 }
 
+/* Sits right above #inspect-list, but its own margin - not the list's -
+   is what has to carry the gap above it: nothing else here puts any space
+   between the .tool-grid superlative row above it and a plain button,
+   which otherwise left the two touching. */
+#btn-inspect-clear-all {
+  margin-top: 10px;
+}
+
 #inspect-list {
   list-style: none;
   margin: 12px 0 0 0;
@@ -667,6 +772,24 @@ input[type="range"] {
   flex-shrink: 0;
   border-radius: 50%;
   border: 2px solid #000;
+}
+
+/* A "line"/"grid" row's stand-in for .inspect-dot above - see
+   updateInspectList's own comment on why it's a big glyph instead of a
+   small one. align-self: stretch (overriding .inspect-row's own
+   align-items: center just for this child) is what lets it actually reach
+   the full height of the two-line .inspect-coords-group beside it, rather
+   than just being a big glyph vertically centered in a short row. */
+.inspect-row-icon {
+  flex-shrink: 0;
+  width: 18px;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--text-dim);
 }
 
 .inspect-coords {
