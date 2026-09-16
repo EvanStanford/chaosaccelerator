@@ -105,6 +105,9 @@
   var resolutionBoundsReadout = document.getElementById("resolution-bounds-readout");
   var renderProgressRingCoarse = document.getElementById("render-progress-ring-coarse");
   var renderProgressRingAa = document.getElementById("render-progress-ring-aa");
+  var renderProgressRingCoarseOpen = document.getElementById("render-progress-ring-coarse-open");
+  var renderProgressRingAaOpen = document.getElementById("render-progress-ring-aa-open");
+  var renderProgressLabel = document.getElementById("render-progress-label");
   var colorZoomCheckbox = document.getElementById("color-zoom-checkbox");
   var colorZoomField = document.getElementById("color-zoom-field");
   var displayModePanelBody = document.getElementById("grid-display-mode-list");
@@ -458,6 +461,14 @@
   // needs to open this card itself before pointing the Color Zoom tip at the
   // toggle now living inside it.
   var displayMenu = makeMenu("menu-display", "grid-btn-display");
+
+  // The rendering-progress gauge (see updateRenderProgressRing further
+  // down) doubles as a fifth accordion menu - registering it here is the
+  // whole of what that takes, since makeMenu only needs the two elements'
+  // ids and doesn't care that this one lives in the lower left instead of
+  // the column above. Nothing to start or stop on open/close, same as
+  // displayMenu.
+  var renderProgressMenu = makeMenu("menu-render-progress", "grid-btn-render-progress");
   btnResetTips.addEventListener("click", function () {
     try {
       localStorage.removeItem(TIP_DISMISSED_KEY);
@@ -3702,13 +3713,35 @@
     circle.style.strokeDashoffset = RENDER_RING_CIRCUMFERENCE * (1 - fraction);
   }
 
+  // The same numbers the ring draws, spelled out for the open menu's own
+  // one-line readout - "1 sim per Npx" while the ladder is running, then
+  // antialiasing's own count once that phase starts (see finishRun for why
+  // aaSample is already MAX_AA_SAMPLES, not one short of it, by the time
+  // the run is complete).
+  function renderProgressLabelText() {
+    if (progressive.aaSample > 0) {
+      return "Antialiasing Progress: " + Math.min(progressive.aaSample, MAX_AA_SAMPLES) +
+        " of " + MAX_AA_SAMPLES + " samples per pixel";
+    }
+    var stride = progressive.accumStride || progressive.stride || startStride();
+    return "Rendering Progress: " + (stride <= 1 ? "1 sim/px" : "1 sim per " + stride + "px");
+  }
+
   // Called from presentFrame - every path that can change what's on screen,
   // which includes both ends of a run (resetProgressive right below, and
   // finishRun further down, which calls presentFrame itself) - so the ring
-  // is never more than one frame stale.
+  // is never more than one frame stale. Updates both copies of the ring
+  // (the collapsed toggle's and the open menu's own) unconditionally rather
+  // than checking which is actually visible - four style writes a frame is
+  // free, and it's one less thing to keep in sync with is-open.
   function updateRenderProgressRing() {
-    setRenderRingFraction(renderProgressRingCoarse, renderRingGreyFraction());
-    setRenderRingFraction(renderProgressRingAa, renderRingAaFraction());
+    var grey = renderRingGreyFraction();
+    var aa = renderRingAaFraction();
+    setRenderRingFraction(renderProgressRingCoarse, grey);
+    setRenderRingFraction(renderProgressRingAa, aa);
+    setRenderRingFraction(renderProgressRingCoarseOpen, grey);
+    setRenderRingFraction(renderProgressRingAaOpen, aa);
+    renderProgressLabel.textContent = renderProgressLabelText();
   }
 
   // Abandon whatever refinement is in flight. Deliberately does NOT touch
