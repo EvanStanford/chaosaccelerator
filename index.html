@@ -497,11 +497,39 @@
                bottom as the resolution ladder refines, then a white outline
                sweeps the same path on top of it once antialiasing starts.
                Both circles share one path so the ring reads as one control
-               changing color, not two concentric rings. -->
-          <svg id="render-progress-ring" viewBox="0 0 40 40" aria-hidden="true">
-            <circle id="render-progress-ring-coarse" class="render-progress-ring-track" cx="20" cy="20" r="17"></circle>
-            <circle id="render-progress-ring-aa" class="render-progress-ring-track" cx="20" cy="20" r="17"></circle>
-          </svg>
+               changing color, not two concentric rings.
+
+               A fifth menu, same is-open/toggle-vs-card machinery as the
+               four in the column above (see makeMenu in fractal-grid.js) -
+               opening it closes whichever of those is open and vice versa,
+               it just lives down here instead of in that stack. The card
+               has no body, only a header: that single line IS the whole
+               card, so - unlike the others, where only the header line
+               collapses it and the body stays interactive - a click
+               anywhere on it collapses it. The ring is duplicated between
+               the collapsed toggle and the open card's own icon slot since
+               exactly one of the two is ever in the layout at a time (see
+               .menu-item.is-open > .menu-toggle); both copies are kept in
+               sync every frame. -->
+          <section class="menu-item" id="menu-render-progress">
+            <button class="render-progress-toggle" id="grid-btn-render-progress" type="button" title="Rendering progress" aria-label="Rendering progress" aria-expanded="false">
+              <svg id="render-progress-ring" viewBox="0 0 40 40" aria-hidden="true">
+                <circle id="render-progress-ring-coarse" class="render-progress-ring-track" cx="20" cy="20" r="17"></circle>
+                <circle id="render-progress-ring-aa" class="render-progress-ring-track" cx="20" cy="20" r="17"></circle>
+              </svg>
+            </button>
+            <div class="menu-card render-progress-card" id="render-progress-panel" hidden>
+              <div class="menu-card-header render-progress-header">
+                <span class="menu-card-icon render-progress-icon" aria-hidden="true">
+                  <svg viewBox="0 0 40 40">
+                    <circle id="render-progress-ring-coarse-open" class="render-progress-ring-track" cx="20" cy="20" r="17"></circle>
+                    <circle id="render-progress-ring-aa-open" class="render-progress-ring-track" cx="20" cy="20" r="17"></circle>
+                  </svg>
+                </span>
+                <span id="render-progress-label" class="render-progress-label">Rendering Progress: 1 sim/px</span>
+              </div>
+            </div>
+          </section>
           <div id="empty-state" hidden>
             <p>No scene has been sent from the Physics Simulator yet.</p>
             <a id="empty-state-link" href="#editor">Go map X / Y / Output and send one &rarr;</a>

@@ -743,24 +743,82 @@ input[type="range"] {
 }
 
 /* The rendering-progress gauge, lower left - see updateRenderProgressRing
-   in fractal-grid.js. Same footprint as a collapsed menu button
-   (--settings-btn-size) but no card/background of its own: just two
-   stacked circle outlines directly over the fractal. drop-shadow rather
-   than the buttons' own box-shadow, deliberately - box-shadow follows the
-   element's rectangular box, which would draw a square shadow behind a
-   ring; drop-shadow follows the painted stroke itself, so it reads the
-   same as the buttons' shadow with a shape that fits a circle. */
-#render-progress-ring {
+   and makeMenu in fractal-grid.js. Positioned exactly like #inspect-toast
+   above it, but as a fifth accordion menu rather than a plain overlay: the
+   .menu-item/.menu-toggle/.menu-card machinery (see .menu-toggle and
+   .menu-card further up this file) is shared with the four menus in the
+   column, including the is-open accordion group, even though this one
+   lives down here instead of in that stack. */
+#menu-render-progress {
   position: absolute;
   left: var(--panel-inset);
   bottom: var(--panel-inset);
+}
+/* The collapsed state: no button chrome of its own (no background/border -
+   deliberately unlike .menu-toggle elsewhere), just the ring, sized to
+   roughly three quarters of the other collapsed buttons and dimmed to
+   half-opacity so it reads as a passive gauge sitting over the fractal
+   rather than another control competing with the four real buttons above.
+   drop-shadow rather than a box-shadow, deliberately - box-shadow follows
+   the element's rectangular box, which would draw a square shadow behind a
+   ring; drop-shadow follows the painted stroke itself, matching the shape. */
+/* Same rule as .menu-item.is-open > .menu-toggle above, restated for this
+   toggle's own class - it deliberately isn't .menu-toggle itself (that
+   class also carries a square button's background/border/shadow, which
+   this bare ring doesn't want), so it needs its own copy of the rule that
+   removes the collapsed control from the layout while its card is open. */
+.menu-item.is-open > .render-progress-toggle {
+  display: none;
+}
+.render-progress-toggle {
   width: calc(var(--settings-btn-size) * 0.75);
   height: calc(var(--settings-btn-size) * 0.75);
+  padding: 0;
+  border: none;
+  background: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.render-progress-toggle #render-progress-ring {
+  width: 100%;
+  height: 100%;
   opacity: 0.5;
-  pointer-events: none;
   filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5)) drop-shadow(0 10px 30px rgba(0, 0, 0, 0.45));
 }
-/* Both rings share one path (see the two circles' identical cx/cy/r in
+/* The open state: a single header row and nothing below it - there is no
+   .menu-card-body, so the card is exactly one line tall, and (unlike the
+   other four cards, where only the header collapses the menu so the body's
+   own controls stay clickable) clicking anywhere on it closes it, because
+   the header IS the entire card. Sized to fit that one line rather than
+   the other cards' fixed --panel-width, and grown out of the ring's own
+   corner (see transform-origin) so it reads as the same control opening,
+   not a new panel appearing beside it. */
+.render-progress-card {
+  width: auto;
+  max-width: none;
+  max-height: none;
+  transform-origin: bottom left;
+}
+.render-progress-header {
+  border-bottom: none;
+  padding: 6px 16px 6px 6px;
+}
+.render-progress-icon {
+  width: calc(var(--settings-btn-size) * 0.75);
+  height: calc(var(--settings-btn-size) * 0.75);
+  flex-shrink: 0;
+}
+.render-progress-icon svg {
+  width: 100%;
+  height: 100%;
+}
+.render-progress-label {
+  font-size: 13px;
+  white-space: nowrap;
+}
+/* Both rings share one path (see each pair's identical cx/cy/r in
    index.html) so progress reads as one ring changing color, not two
    concentric ones. Rotated 90deg so the dash pattern's start point - the
    circle's own 3-o'clock point - lands at 6 o'clock (south) instead;
@@ -775,13 +833,15 @@ input[type="range"] {
   transform: rotate(90deg);
   transform-origin: 20px 20px;
 }
-#render-progress-ring-coarse {
+#render-progress-ring-coarse,
+#render-progress-ring-coarse-open {
   stroke: var(--text-dim);
 }
 /* Drawn second, directly on top of the coarse ring's own path - at rest
    (dashoffset left at its own circumference) it is fully invisible, so the
    coarse ring alone shows through until antialiasing actually starts. */
-#render-progress-ring-aa {
+#render-progress-ring-aa,
+#render-progress-ring-aa-open {
   stroke: #fff;
 }
 
