@@ -18,11 +18,12 @@
      reads as sitting ON the fractal rather than being cut out of it. */
   --panel-inset: 14px;
   --bg-panel-float: rgba(27, 30, 39, 0.86);
-  /* What the menu column keeps clear for the back link and the three menu
+  /* What the menu column keeps clear for the back link and the four menu
      buttons, so an open card can never push the other menus off the bottom
      of the screen. Named because two rules have to agree on it - the card's
-     own max-height, and the portrait override of it. */
-  --menu-reserved: calc((var(--settings-btn-size) + 8px) * 3 + 20px);
+     own max-height, and the portrait override of it. The multiplier is one
+     per collapsed menu button, so it grows with the number of menus. */
+  --menu-reserved: calc((var(--settings-btn-size) + 8px) * 4 + 20px);
 }
 
 * { box-sizing: border-box; }
@@ -74,7 +75,7 @@ html, body {
 
 /* ---- The menu column ----
    Everything on this page that is not the fractal, in one upper-left
-   stack: the way back, and three menus that are a square icon button
+   stack: the way back, and four menus that are a square icon button
    until opened, at which point that button becomes the card and pushes
    whatever is below it down. Absolutely positioned rather than flexed, so
    #grid-canvas-area takes the full area and needs no width accounting.
@@ -226,7 +227,7 @@ html, body {
 .menu-card {
   width: var(--panel-width);
   max-width: 100%;
-  /* Leave room for the back link and the three menu buttons, so opening a
+  /* Leave room for the back link and the four menu buttons, so opening a
      tall card never pushes the other menus off the bottom of the screen -
      the card scrolls inside itself instead. The column scrolls too (see
      #grid-menu-stack), which is what catches the case of several open at
@@ -741,6 +742,49 @@ input[type="range"] {
   display: none;
 }
 
+/* The rendering-progress gauge, lower left - see updateRenderProgressRing
+   in fractal-grid.js. Same footprint as a collapsed menu button
+   (--settings-btn-size) but no card/background of its own: just two
+   stacked circle outlines directly over the fractal. drop-shadow rather
+   than the buttons' own box-shadow, deliberately - box-shadow follows the
+   element's rectangular box, which would draw a square shadow behind a
+   ring; drop-shadow follows the painted stroke itself, so it reads the
+   same as the buttons' shadow with a shape that fits a circle. */
+#render-progress-ring {
+  position: absolute;
+  left: var(--panel-inset);
+  bottom: var(--panel-inset);
+  width: calc(var(--settings-btn-size) * 0.75);
+  height: calc(var(--settings-btn-size) * 0.75);
+  opacity: 0.5;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5)) drop-shadow(0 10px 30px rgba(0, 0, 0, 0.45));
+}
+/* Both rings share one path (see the two circles' identical cx/cy/r in
+   index.html) so progress reads as one ring changing color, not two
+   concentric ones. Rotated 90deg so the dash pattern's start point - the
+   circle's own 3-o'clock point - lands at 6 o'clock (south) instead;
+   stroke-dasharray/dashoffset are set from JS, where the sweep direction
+   (dashoffset shrinking from the full circumference to 0) is what actually
+   draws it clockwise from there - south to west at a quarter, south to
+   north at half. */
+.render-progress-ring-track {
+  fill: none;
+  stroke-width: 3;
+  stroke-linecap: round;
+  transform: rotate(90deg);
+  transform-origin: 20px 20px;
+}
+#render-progress-ring-coarse {
+  stroke: var(--text-dim);
+}
+/* Drawn second, directly on top of the coarse ring's own path - at rest
+   (dashoffset left at its own circumference) it is fully invisible, so the
+   coarse ring alone shows through until antialiasing actually starts. */
+#render-progress-ring-aa {
+  stroke: #fff;
+}
+
 /* Sits right above #inspect-list, but its own margin - not the list's -
    is what has to carry the gap above it: nothing else here puts any space
    between the .tool-grid superlative row above it and a plain button,
@@ -971,3 +1015,115 @@ input[type="range"] {
    settings button and the panel it opens both moved to a shared, cross-view
    floating design (see .floating-settings-btn there) instead of each page
    keeping its own copy of a slide-in drawer. */
+
+/* ---- Display Mode rows ----
+ *
+ * One row per mode: a thumbnail of what that mode looks like, and a
+ * sentence saying what it does with the sample cost on its last line.
+ * A radiogroup rather than a <select>, because the thumbnail IS the
+ * explanation here - the difference between these five is entirely visual,
+ * and a dropdown can only ever name them.
+ *
+ * The rows sit flush against each other with dividers between, so the four
+ * read as one list of choices rather than five separate controls - that's
+ * #grid-display-mode-list's own gap: 0 below, kept separate from the card
+ * body's gap so it doesn't also flatten the space above the list, between
+ * it and the Reset View/zoom row. */
+#grid-display-panel-body {
+  padding: 14px 6px 6px 6px;
+}
+#grid-display-mode-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.display-mode-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+  /* The rows are buttons, so they inherit button's own centring and
+     font-size from physics.css unless told otherwise. */
+  font: inherit;
+}
+.display-mode-row + .display-mode-row {
+  margin-top: 2px;
+}
+.display-mode-row:hover {
+  background: var(--bg-input);
+}
+.display-mode-row[aria-checked="true"] {
+  background: var(--bg-input);
+  border-color: var(--accent);
+}
+
+/* A share of the row rather than a fixed width, so dragging the panel
+   resizer scales the thumbnail and its text column together instead of
+   shrinking only the text. */
+.display-mode-row img {
+  flex: 0 0 auto;
+  /* Both of these, and min-width: 0 as well. An <img> is a replaced element,
+     so its intrinsic 400px is what min-width: auto resolves to inside a flex
+     row - a flex-basis alone loses to that and the thumbnail renders full
+     size, pushing the text out of the card entirely. */
+  width: 44%;
+  min-width: 0;
+  height: auto;
+  display: block;
+  border-radius: 6px;
+}
+
+/* min-width: 0 so a long word can wrap instead of forcing the row wider
+   than the card - the default min-width:auto on a flex child would let it
+   push the thumbnail out instead.
+ *
+ * The font size and line height here are tuned against the thumbnail's
+ * width above so that a one-sentence description plus the sample line comes
+ * out a little shorter than the image is tall - about 0.83 of it - at the
+ * card's DEFAULT width. Widening the card only rewraps the text shorter, so
+ * the relationship holds from there up.
+ *
+ * It does not hold below the default, and cannot: in a side-by-side row the
+ * text's height is set by how narrow its column is, and giving it more room
+ * means taking width from the thumbnail, which shrinks the thumbnail's
+ * height by as much - there is no share of the row that wins at every
+ * width. Dragging the panel narrower than its default therefore makes these
+ * rows progressively more text than picture. Nothing clips or overflows
+ * when it does; the row just stops being the shape it was tuned to be,
+ * which is the price of not carrying a second layout for it. */
+.display-mode-text {
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+.display-mode-row[aria-checked="true"] .display-mode-text {
+  color: var(--text);
+}
+.display-mode-name {
+  display: block;
+  font-weight: 600;
+  color: var(--text);
+}
+/* Standard's own row only (see the DISPLAY_MODES loop in fractal-grid.js) -
+   .toggle-field's own margin-bottom already separates it from the sample
+   cost line below, but nothing put space between it and the name above. */
+.display-mode-text .toggle-field {
+  margin-top: 6px;
+}
+/* The sample cost, on its own last line - the one number that says what
+   choosing this row will cost, so it is set apart from the sentence rather
+   than buried at the end of it. */
+.display-mode-cost {
+  display: block;
+  font-size: 12px;
+  color: var(--text-dim);
+}
