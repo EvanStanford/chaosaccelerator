@@ -71,4 +71,16 @@
   .page-grid .menu-card {
     max-height: calc(60vh - var(--menu-reserved));
   }
+  /* The right-hand column (Settings, Map Evolution) needs the same
+     redone-against-60vh cap, spelled with its own id because the landscape
+     rule it has to beat (in fractal-grid.css) is itself id-scoped and would
+     otherwise outrank the class selector just above. Its reserve is one
+     collapsed button plus the gap, not --menu-reserved: there are only ever
+     two items in this column. */
+  .page-grid #grid-right-menu-column {
+    max-height: 60vh;
+  }
+  .page-grid #grid-right-menu-column .menu-card {
+    max-height: calc(60vh - var(--settings-btn-size) - 8px);
+  }
 }
