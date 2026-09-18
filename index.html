@@ -322,21 +322,13 @@
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4V5z"></path><path class="vol-arc-1" d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path class="vol-arc-2" d="M19.07 4.93a10 10 0 0 1 0 14.14"></path><g class="vol-mute-x"><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></g></svg>
                   </button>
                   <input type="range" id="hover-progress-slider" min="0" max="0" step="1" value="0" disabled aria-label="Playback progress">
-                  <button id="hover-speed-btn" class="icon-button speed-btn" type="button" title="Playback speed" aria-label="Playback speed" aria-haspopup="true" aria-expanded="false">2x</button>
+                  <button id="hover-speed-btn" class="icon-button speed-btn" type="button" title="Playback speed" aria-label="Playback speed" aria-haspopup="true" aria-expanded="false">1.0x</button>
                   <button id="hover-reset" class="icon-button" type="button" title="Reset" aria-label="Reset" disabled>&#8634;</button>
                 </div>
                 <p class="readout" id="hover-readout"></p>
-                <!-- Ties the map's own timeline to this preview's clock (see
-                     followInspection in fractal-grid.js): on, the map plays
-                     the same step the preview shows; off, the map stays put
-                     and only the preview animates. -->
-                <label class="toggle-field" id="inspect-map-follow-field">
-                  <span>Play back in map</span>
-                  <span class="toggle-switch">
-                    <input type="checkbox" id="inspect-map-follow-checkbox">
-                    <span class="toggle-slider"></span>
-                  </span>
-                </label>
+                <!-- No "Play back in map" toggle here any more: having the
+                     Map Evolution card (top right) open IS that setting now
+                     - see followInspection in fractal-grid.js. -->
               </section>
 
               <section class="panel-section">
@@ -523,14 +515,10 @@
                  Play transport and the Inspect preview's (.playback-controls
                  in app-shell.css). -->
             <section class="menu-item" id="menu-playback">
-              <button class="menu-toggle" id="grid-btn-playback" type="button" title="Map Evolution" aria-label="Map Evolution" aria-expanded="false">
-                <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden="true"><path d="M8 5.2v13.6a.6.6 0 0 0 .92.5l10.65-6.8a.6.6 0 0 0 0-1L8.92 4.7a.6.6 0 0 0-.92.5z"></path></svg>
-              </button>
+              <button class="menu-toggle" id="grid-btn-playback" type="button" title="Map Evolution" aria-label="Map Evolution" aria-expanded="false">&#9655;</button>
               <div class="menu-card" id="grid-playback-panel" hidden>
                 <div class="menu-card-header">
-                  <span class="menu-card-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M8 5.2v13.6a.6.6 0 0 0 .92.5l10.65-6.8a.6.6 0 0 0 0-1L8.92 4.7a.6.6 0 0 0-.92.5z"></path></svg>
-                  </span>
+                  <span class="menu-card-icon" aria-hidden="true">&#9655;</span>
                   <h2>Map Evolution</h2>
                   <button id="grid-btn-playback-close" class="icon-button menu-collapse" type="button" title="Collapse Map Evolution" aria-label="Collapse Map Evolution">&#9660;</button>
                 </div>
@@ -538,7 +526,7 @@
                   <div class="playback-controls">
                     <button id="grid-play-pause" class="icon-button" type="button" title="Play" aria-label="Play">&#9654;</button>
                     <input type="range" id="grid-timeline-slider" min="0" max="500" step="1" value="500" aria-label="Timeline frame">
-                    <button id="grid-speed-btn" class="icon-button speed-btn" type="button" title="Playback speed" aria-label="Playback speed" aria-haspopup="true" aria-expanded="false">2x</button>
+                    <button id="grid-speed-btn" class="icon-button speed-btn" type="button" title="Playback speed" aria-label="Playback speed" aria-haspopup="true" aria-expanded="false">1.0x</button>
                     <button id="grid-restart" class="icon-button" type="button" title="Back to frame 0" aria-label="Back to frame 0">
                       <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="2.5" height="14" rx="1"></rect><path d="M19 6.1v11.8a.6.6 0 0 1-.94.5L9.6 12.5a.6.6 0 0 1 0-1l8.46-5.9a.6.6 0 0 1 .94.5z"></path></svg>
                     </button>
@@ -613,14 +601,14 @@
       <div id="hover-speed-popup" class="speed-popup" hidden>
         <!-- Moves in log2(speed) space, not speed itself - see
              sliderValueToSpeed/speedToSliderValue in fractal-grid.js - so
-             min/max/value here are log2(0.5)/log2(16)/log2(2), not 0.5/16/2.
+             min/max/value here are log2(0.5)/log2(16)/log2(1), not 0.5/16/1.
              step="1" in this space is what actually limits the control to
              whole-power-of-two speeds (0.5x/1x/2x/4x/8x/16x) and nothing
              between. -->
         <div class="speed-slider-track">
-          <input type="range" id="hover-speed-slider" min="-1" max="4" step="1" value="1" aria-label="Playback speed" aria-orientation="vertical">
+          <input type="range" id="hover-speed-slider" min="-1" max="4" step="1" value="0" aria-label="Playback speed" aria-orientation="vertical">
         </div>
-        <div class="speed-value" id="hover-speed-value">2x</div>
+        <div class="speed-value" id="hover-speed-value">1.0x</div>
       </div>
       <!-- The timeline transport's own speed popup - same shape and same
            log2(speed) slider as #hover-speed-popup above, and the same
@@ -629,13 +617,14 @@
            VIEW of that setting, not a second setting. Two elements rather
            than one only because each popup is positioned against its own
            button. The multiplier is against this transport's own base
-           rate, so 1x is real time here (see PLAYBACK_STEPS_PER_SECOND in
-           fractal-grid.js) and the shared default of 2x is twice that. -->
+           rate, so the shared default of 1x is real time here (see
+           PLAYBACK_STEPS_PER_SECOND in fractal-grid.js), while the same 1x in
+           the preview is that transport's own base rate. -->
       <div id="grid-speed-popup" class="speed-popup" hidden>
         <div class="speed-slider-track">
-          <input type="range" id="grid-speed-slider" min="-1" max="4" step="1" value="1" aria-label="Timeline playback speed" aria-orientation="vertical">
+          <input type="range" id="grid-speed-slider" min="-1" max="4" step="1" value="0" aria-label="Timeline playback speed" aria-orientation="vertical">
         </div>
-        <div class="speed-value" id="grid-speed-value">2x</div>
+        <div class="speed-value" id="grid-speed-value">1.0x</div>
       </div>
 
       <!-- Reusable tip popover - a single shared instance, repositioned and
