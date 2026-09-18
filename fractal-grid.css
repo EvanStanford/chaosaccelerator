@@ -643,6 +643,11 @@ input[type="range"] {
 }
 
 #grid-canvas-area {
+  /* How far the toast has to sit above the bottom edge - clear of the
+     render-progress ring (lower left) and the watermark (lower right),
+     which are the whole of what lives down there now that the timeline
+     transport has moved into the Map Evolution card. See .inspect-toast. */
+  --toast-bottom: calc(var(--panel-inset) + var(--settings-btn-size) * 0.75 + 16px);
   flex: 1;
   position: relative;
   min-width: 0;
@@ -747,12 +752,61 @@ input[type="range"] {
    above it, but as a fifth accordion menu rather than a plain overlay: the
    .menu-item/.menu-toggle/.menu-card machinery (see .menu-toggle and
    .menu-card further up this file) is shared with the four menus in the
-   column, including the is-open accordion group, even though this one
-   lives down here instead of in that stack. */
+   column, including the LEFT is-open accordion group (Inspect, Analysis,
+   Display Mode) it joins since it sits in that same corner - even though
+   this one lives down here instead of in that stack. Opening it never
+   closes Settings or Map Evolution on the right, and vice versa. */
 #menu-render-progress {
   position: absolute;
   left: var(--panel-inset);
   bottom: var(--panel-inset);
+}
+
+/* Settings and Map Evolution, top right - same .menu-item/.menu-toggle/
+   .menu-card machinery as the four menus in the left column (and the
+   render-progress gauge below), just anchored to the opposite corner
+   instead of living in that stack, and their own accordion group (see
+   makeMenu in fractal-grid.js): opening one of these two never closes
+   anything on the left, so e.g. Settings and Inspect can both be open at
+   once. z-index matches #grid-menu-column so an open card here layers the
+   same as an open one over there.
+
+   A real column, mirroring #grid-menu-stack: a collapsed menu's button
+   leaves the layout when its card opens (see .menu-item.is-open >
+   .menu-toggle), so the two have to stack rather than each own a fixed
+   spot - otherwise an open Settings card would simply paint over the Map
+   Evolution button below it. align-items: flex-end keeps the two collapsed
+   buttons on the right edge, where a full-width card's own right edge also
+   lands, so nothing shifts sideways as one opens. */
+#grid-right-menu-column {
+  position: absolute;
+  z-index: 3;
+  top: var(--panel-inset);
+  right: var(--panel-inset);
+  max-width: calc(100% - var(--panel-inset) * 2);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  /* Same reasoning as #grid-menu-stack's: viewport units, since the
+     column's own height is auto. */
+  max-height: calc(100vh - var(--panel-inset) * 2);
+}
+#grid-right-menu-column > .menu-item {
+  max-width: 100%;
+  flex-shrink: 0;
+}
+/* A card is what its button turned into, so - unlike the left column's
+   menus, which grow from their own top-left corner - these grow from top
+   right, matching the corner their toggle buttons sit in.
+
+   Each also leaves room for the OTHER one's collapsed button plus the gap
+   between them, so opening either never pushes the other off the bottom -
+   this column is only two items deep, so it needs nothing like the left
+   column's --menu-reserved. */
+#grid-right-menu-column .menu-card {
+  transform-origin: top right;
+  max-height: calc(100vh - var(--panel-inset) * 2 - var(--settings-btn-size) - 8px);
 }
 /* The collapsed state: no button chrome of its own (no background/border -
    deliberately unlike .menu-toggle elsewhere), just the ring, sized to
@@ -843,6 +897,22 @@ input[type="range"] {
 #render-progress-ring-aa,
 #render-progress-ring-aa-open {
   stroke: #fff;
+}
+
+/* ---- The timeline transport ----
+   The body of the Map Evolution card (see #menu-playback in index.html and
+   the Playback section of fractal-grid.js): the shared .playback-controls
+   row, the frame readout under it, then the Simulation Duration slider that
+   sets where that timeline ends. The card itself needs no look of its own -
+   it is an ordinary .menu-card like every other menu's. */
+/* .playback-controls carries a margin-top for the flowing column it was
+   designed for - meaningless as the first thing in this card's body. */
+#grid-playback-panel .playback-controls {
+  margin-top: 0;
+}
+#grid-view #grid-timeline-readout {
+  margin: 6px 0 0 0;
+  text-align: center;
 }
 
 /* Sits right above #inspect-list, but its own margin - not the list's -
@@ -939,7 +1009,8 @@ input[type="range"] {
 .inspect-toast {
   position: absolute;
   left: 50%;
-  bottom: 24px;
+  /* Clear of the bottom row - see --toast-bottom on #grid-canvas-area. */
+  bottom: var(--toast-bottom);
   transform: translateX(-50%);
   z-index: 20;
   max-width: 320px;

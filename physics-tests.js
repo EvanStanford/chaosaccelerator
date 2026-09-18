@@ -4374,6 +4374,221 @@
     }
   );
 
+  // ---- Grid playback: a pixel's simulation survives a trip through its
+  // state textures ----
+  //
+  // Playback on the fractal grid advances every pixel a few steps per frame
+  // and keeps each simulation in RGBA32F texture layers between draws (see
+  // physics-grid-codegen.js's playbackStateVariables). That only matches an
+  // uninterrupted run if the round trip is lossless AND nothing a later step
+  // reads was left out of the state - and both failures look the same from
+  // here: run a strip of pixels straight through, run the same strip again
+  // in legs with a save and reload between each, and compare every state
+  // float bit for bit.
+  //
+  // One program for both runs, on purpose. Two different programs are free
+  // to round differently (see physics-df.js's header on ANGLE Metal's
+  // fast-math), which would bury a real omission in noise.
+  //
+  // `legs` is a list of step counts; the first leg starts from each pixel's
+  // own starting state, every later one from what the leg before it saved.
+  // layersPerGroup below the real MAX_DRAW_BUFFERS forces the state to be
+  // written across several draws, which is the path a big scene takes.
+  function runPlaybackStateLegs(scene, precision, legs, layersPerGroup, width) {
+    var B = PhysicsGridCodegen.backendFor(precision);
+    var initial = PhysicsGridCodegen.generateGridInitialStateGLSL(scene, precision);
+    var frame = PhysicsEngine.wrapsAtEdges(scene) ? { width: scene.frameWidth, height: scene.frameHeight } : undefined;
+    var vars = PhysicsGridCodegen.playbackStateVariables(initial);
+    var layers = PhysicsGridCodegen.playbackStateLayerCount(vars);
+    var groups = Math.ceil(layers / layersPerGroup);
+    var indent = function (lines) { return lines.map(function (l) { return "    " + l; }).join("\n"); };
+    var src = [
+      "#version 300 es", "precision highp float;",
+      "uniform highp sampler2DArray u_state;",
+      "uniform bool u_init;", "uniform int u_steps;", "uniform int u_group;",
+      PhysicsGridCodegen.generatePlaybackStateOutputsGLSL(layersPerGroup).join("\n"), "",
+      PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(scene)), "",
+      PhysicsGPU.sceneConstantsGLSL(scene.gravity, scene.friction, scene.restitution, precision), "",
+      PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision,
+        scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), initial.spawnBase), "",
+      "void main() {",
+      // A different starting point per texel, so state crossing between
+      // texels would show up as a mismatch too.
+      "  " + B.scalar + " worldX = " + B.fromFloat("(gl_FragCoord.x - 0.5) * 7.0") + ";",
+      "  " + B.scalar + " worldY = " + B.fromFloat("3.0") + ";",
+      "  " + initial.declarationLines.join("\n  "),
+      "  " + PhysicsGridCodegen.generateCanonicalBodyDeclarationsGLSL(initial).split("\n").join("\n  "),
+      "  " + PhysicsGPU.generateHingeAnchorLocalsGLSL(initial.hingeAnchors, precision).split("\n").join("\n  "),
+      "  if (!u_init) {",
+      indent(PhysicsGridCodegen.generatePlaybackStateLoadGLSL(vars, "u_state", "ivec2(gl_FragCoord.xy)")),
+      "  }",
+      "  for (int i = 0; i < u_steps; i++) { stepOnce(" +
+        PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, precision, initial.spawnBase) + "); }",
+      indent(PhysicsGridCodegen.generatePlaybackStateStoreGLSL(vars, "u_group", layersPerGroup)),
+      "}",
+    ].join("\n");
+
+    var canvas = new OffscreenCanvas(width, 1);
+    var gl = canvas.getContext("webgl2");
+    if (!gl.getExtension("EXT_color_buffer_float")) throw new Error("EXT_color_buffer_float unavailable");
+    var program = PhysicsGPU.linkProgram(gl,
+      PhysicsGPU.compileShader(gl, gl.VERTEX_SHADER, PhysicsGPU.VERTEX_SOURCE),
+      PhysicsGPU.compileShader(gl, gl.FRAGMENT_SHADER, src));
+    gl.useProgram(program);
+    var buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
+    var posLoc = gl.getAttribLocation(program, "a_position");
+    gl.enableVertexAttribArray(posLoc);
+    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+    var textures = [0, 1].map(function () {
+      var t = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, t);
+      gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA32F, width, 1, layers);
+      // A float texture isn't filterable, and a sampler whose filter asks
+      // for filtering reads back as incomplete - all zeros - even through
+      // texelFetch.
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      return t;
+    });
+    var fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.viewport(0, 0, width, 1);
+    gl.uniform1i(gl.getUniformLocation(program, "u_state"), 0);
+    var current = 0;
+    legs.forEach(function (steps, legIndex) {
+      var target = textures[1 - current];
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, textures[current]);
+      gl.uniform1i(gl.getUniformLocation(program, "u_init"), legIndex === 0 ? 1 : 0);
+      gl.uniform1i(gl.getUniformLocation(program, "u_steps"), steps);
+      for (var g = 0; g < groups; g++) {
+        var attachments = [];
+        for (var k = 0; k < layersPerGroup; k++) {
+          var layer = g * layersPerGroup + k;
+          if (layer < layers) {
+            gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + k, target, 0, layer);
+            attachments.push(gl.COLOR_ATTACHMENT0 + k);
+          } else {
+            gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + k, null, 0, 0);
+          }
+        }
+        gl.drawBuffers(attachments);
+        var status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+        if (status !== gl.FRAMEBUFFER_COMPLETE) throw new Error("state framebuffer incomplete (" + status + ")");
+        gl.uniform1i(gl.getUniformLocation(program, "u_group"), g);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+      }
+      current = 1 - current;
+    });
+
+    for (var d = 1; d < layersPerGroup; d++) gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + d, null, 0, 0);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+    gl.readBuffer(gl.COLOR_ATTACHMENT0);
+    var state = new Float32Array(width * layers * 4);
+    for (var l = 0; l < layers; l++) {
+      gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, textures[current], 0, l);
+      gl.readPixels(0, 0, width, 1, gl.RGBA, gl.FLOAT, state.subarray(l * width * 4, (l + 1) * width * 4));
+    }
+    var loseCtx = gl.getExtension("WEBGL_lose_context");
+    if (loseCtx) loseCtx.loseContext();
+    return { state: state, layers: layers, groups: groups, floats: vars.length };
+  }
+
+  // Compared as raw bits, so -0.0 vs 0.0 or two different NaNs count as the
+  // mismatch they are.
+  function comparePlaybackLegs(scene, precision, straight, legs, layersPerGroup) {
+    var WIDTH = 6;
+    var a = runPlaybackStateLegs(scene, precision, [straight], layersPerGroup, WIDTH);
+    var b = runPlaybackStateLegs(scene, precision, legs, layersPerGroup, WIDTH);
+    var bitsA = new Uint32Array(a.state.buffer), bitsB = new Uint32Array(b.state.buffer);
+    var mismatches = 0, first = null, moved = 0;
+    var start = runPlaybackStateLegs(scene, precision, [0], layersPerGroup, WIDTH);
+    var bitsStart = new Uint32Array(start.state.buffer);
+    for (var i = 0; i < bitsA.length; i++) {
+      if (bitsA[i] !== bitsB[i]) {
+        mismatches++;
+        if (!first) first = "layer " + Math.floor(i / (WIDTH * 4)) + ", texel " + (Math.floor(i / 4) % WIDTH) + ": " + a.state[i] + " vs " + b.state[i];
+      }
+      if (bitsA[i] !== bitsStart[i]) moved++;
+    }
+    return {
+      // `moved` guards against passing vacuously: a scene that never left
+      // its starting state would match itself no matter what was dropped.
+      pass: mismatches === 0 && moved > 0,
+      detail: a.layers + " layers in " + a.groups + " draw(s); " + straight + " steps straight vs legs " + legs.join("+") +
+        ": " + mismatches + " of " + bitsA.length + " floats differ" + (first ? " (first: " + first + ")" : "") +
+        "; " + moved + " floats changed from the starting state",
+    };
+  }
+
+  addTest(
+    "Grid playback: a hinged pendulum's state survives being saved and reloaded between steps",
+    "Playback carries each pixel's simulation in float textures between frames - a lossy round trip or a missing state variable (here: the world hinge's own anchor) would drift from an uninterrupted run",
+    function () {
+      var scene = {
+        gravity: 800, friction: 0.4, restitution: 0.2,
+        bodies: [PhysicsEngine.createLine(600, 300, 160, 0, false), PhysicsEngine.createLine(760, 300, 160, 0, false)],
+        hinges: [
+          { bodyA: null, bodyB: 0, localAnchorA: { x: 520, y: 300 }, localAnchorB: { x: -80, y: 0 } },
+          { bodyA: 0, bodyB: 1, localAnchorA: { x: 80, y: 0 }, localAnchorB: { x: -80, y: 0 } },
+        ],
+        xInput: { body: 0, property: "angle" },
+        yInput: { body: 1, property: "angle" },
+        output: { body: 1, property: "angle" },
+        frameWidth: 1192, frameHeight: 819, edgeMode: "wrap",
+      };
+      return comparePlaybackLegs(scene, "f32", 120, [1, 37, 50, 32], 8);
+    }
+  );
+
+  addTest(
+    "Grid playback: pinball's state round trip is exact in both precisions, written across several draws",
+    "Anchored walls are deliberately NOT carried in the state (stepOnce never writes them) - if that ever stops being true, this is where it shows",
+    function () {
+      var scene = buildDeepZoomScene();
+      scene.edgeMode = "wrap";
+      var f32 = comparePlaybackLegs(scene, "f32", 150, [60, 1, 89], 1);
+      var df = comparePlaybackLegs(scene, "df", 150, [75, 75], 2);
+      return { pass: f32.pass && df.pass, detail: "float32: " + f32.detail + " | double-float: " + df.detail };
+    }
+  );
+
+  addTest(
+    "Grid playback: a splitter scene's spawn slots survive the round trip",
+    "A split rewrites a spawn slot's size, mass, alive flag and lineage mid-run, and liveCount decides which slot the next split takes - all of it has to be state",
+    function () {
+      var scene = buildSplitterScene(385);
+      scene.xInput = { body: 1, property: "x" };
+      scene.output = { body: 1, property: "x" };
+      return comparePlaybackLegs(scene, "f32", 90, [20, 20, 50], 8);
+    }
+  );
+
+  addTest(
+    "Grid playback: mutual gravity's state round trip is exact",
+    "Mutual Gravity welds touching bodies inside stepOnce - stateless by design, so nothing beyond the six accumulators should need carrying",
+    function () {
+      var scene = {
+        gravity: 800, mutualGravity: true, friction: 0.4, restitution: 0.2,
+        bodies: [
+          PhysicsEngine.createCircle(500, 400, 40, false),
+          PhysicsEngine.createCircle(700, 400, 20, false),
+          PhysicsEngine.createCircle(600, 250, 10, false),
+        ],
+        hinges: [],
+        xInput: { body: 2, property: "x" },
+        yInput: { body: 2, property: "y" },
+        output: { body: 2, property: "y" },
+        frameWidth: 1192, frameHeight: 809, edgeMode: "infinite",
+      };
+      scene.bodies[1].vy = 180;
+      scene.bodies[2].vx = -120;
+      return comparePlaybackLegs(scene, "f32", 200, [99, 101], 8);
+    }
+  );
+
   // ---- Runner / report rendering ----
 
   function renderRow(tbody, name, bugRef, outcome) {

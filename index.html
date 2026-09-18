@@ -190,7 +190,8 @@
            #btn-speed (see positionSpeedPopup in physics-ui.js) whenever
            it's open. The grid view keeps its own separate instance
            (#hover-speed-popup) below, since each page tracks its own
-           playbackSpeed. -->
+           playbackSpeed - and #grid-view's is in turn shared between ITS
+           two speed buttons (see #grid-speed-popup). -->
       <div id="speed-popup" class="speed-popup" hidden>
         <!-- Moves in log2(speed) space, not speed itself - see
              sliderValueToSpeed/speedToSliderValue in physics-ui.js - so
@@ -288,65 +289,9 @@
             <!-- Each menu is one <section>: the collapsed icon button, and
                  the card it becomes. Exactly one of the two is ever in the
                  layout (see .menu-card[hidden]); JS only flips that and the
-                 button's aria-expanded. -->
-            <section class="menu-item" id="menu-settings">
-              <button class="menu-toggle" id="grid-btn-settings" type="button" title="Settings" aria-label="Settings" aria-expanded="false">&#9881;</button>
-              <div class="menu-card" id="grid-settings-panel" hidden>
-                <div class="menu-card-header">
-                  <span class="menu-card-icon" aria-hidden="true">&#9881;</span>
-                  <h2>Settings</h2>
-                  <button id="grid-btn-settings-close" class="icon-button menu-collapse" type="button" title="Collapse Settings" aria-label="Collapse Settings">&#8964;</button>
-                </div>
-                <div class="menu-card-body">
-                  <label class="volume-field">
-                    <span>Sound</span>
-                    <span class="volume-icon" id="grid-sound-volume-icon" aria-hidden="true">
-                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5z"></path><path class="vol-arc-1" d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path class="vol-arc-2" d="M19.07 4.93a10 10 0 0 1 0 14.14"></path><g class="vol-mute-x"><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></g></svg>
-                    </span>
-                    <input type="range" id="grid-sound-volume-slider" min="0" max="100" step="1" value="100" aria-label="Sound volume">
-                  </label>
-                  <label class="field">
-                    <span>Simulation Duration (Frames): <b id="steps-readout">500</b></span>
-                    <input type="range" id="steps-slider" min="1" max="50" value="5">
-                  </label>
-                  <label class="field">
-                    <span>Numeric precision: <b id="precision-readout">float32</b></span>
-                    <select id="precision-select">
-                      <option value="auto">Auto (switch at the float32 wall)</option>
-                      <option value="f32" selected>Force float32</option>
-                      <option value="df">Force double-float</option>
-                    </select>
-                  </label>
-                  <label class="field">
-                    <span>Resolution Limits: <b id="resolution-bounds-readout">&hellip;</b></span>
-                    <div class="dual-range">
-                      <div class="dual-range-track"></div>
-                      <div class="dual-range-fill" id="resolution-range-fill"></div>
-                      <input type="range" id="resolution-min-slider" min="0" max="100" value="0">
-                      <input type="range" id="resolution-max-slider" min="0" max="100" value="100">
-                    </div>
-                  </label>
-                  <label class="field">
-                    <span>Inspection Line Sample Count: <b id="inspect-line-sample-count-readout">30</b></span>
-                    <input type="range" id="inspect-line-sample-count-slider" min="5" max="60" value="30">
-                  </label>
-                  <label class="field">
-                    <span>Inspection Grid Size: <b id="inspect-grid-size-readout">3&times;3</b></span>
-                    <input type="range" id="inspect-grid-size-slider" min="1" max="8" value="3">
-                  </label>
-                  <label class="toggle-field">
-                    <span>Inspection Grid Two Part Line</span>
-                    <span class="toggle-switch">
-                      <input type="checkbox" id="inspect-grid-two-part-checkbox" checked>
-                      <span class="toggle-slider"></span>
-                    </span>
-                  </label>
-                  <button id="grid-btn-reset-tips" class="secondary">Reset Tool Tips</button>
-                  <button id="grid-btn-replay-intro" class="secondary">Reset Intro Animation</button>
-                  <button id="grid-btn-reset-all" class="secondary">Reset All</button>
-                </div>
-              </div>
-            </section>
+                 button's aria-expanded. Settings itself no longer lives in
+                 this stack - see #menu-settings further down, floated in
+                 the top-right corner instead. -->
 
             <!-- The hover/Inspect workspace - the preview canvas, its
                  transport, the view controls and the locked-point list. Open
@@ -363,7 +308,7 @@
                     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="16.2" y1="16.2" x2="21" y2="21"></line></svg>
                   </span>
                   <h2>Inspect</h2>
-                  <button id="grid-btn-inspect-close" class="icon-button menu-collapse" type="button" title="Collapse Inspect" aria-label="Collapse Inspect">&#8964;</button>
+                  <button id="grid-btn-inspect-close" class="icon-button menu-collapse" type="button" title="Collapse Inspect" aria-label="Collapse Inspect">&#9660;</button>
                 </div>
                 <div class="menu-card-body">
               <section class="panel-section">
@@ -381,6 +326,17 @@
                   <button id="hover-reset" class="icon-button" type="button" title="Reset" aria-label="Reset" disabled>&#8634;</button>
                 </div>
                 <p class="readout" id="hover-readout"></p>
+                <!-- Ties the map's own timeline to this preview's clock (see
+                     followInspection in fractal-grid.js): on, the map plays
+                     the same step the preview shows; off, the map stays put
+                     and only the preview animates. -->
+                <label class="toggle-field" id="inspect-map-follow-field">
+                  <span>Play back in map</span>
+                  <span class="toggle-switch">
+                    <input type="checkbox" id="inspect-map-follow-checkbox">
+                    <span class="toggle-slider"></span>
+                  </span>
+                </label>
               </section>
 
               <section class="panel-section">
@@ -417,7 +373,7 @@
                     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="13"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="18" y1="20" x2="18" y2="9"></line></svg>
                   </span>
                   <h2>Analysis</h2>
-                  <button id="grid-btn-stats-close" class="icon-button menu-collapse" type="button" title="Collapse Analysis" aria-label="Collapse Analysis">&#8964;</button>
+                  <button id="grid-btn-stats-close" class="icon-button menu-collapse" type="button" title="Collapse Analysis" aria-label="Collapse Analysis">&#9660;</button>
                 </div>
                 <div class="menu-card-body" id="grid-stats-panel-body"></div>
               </div>
@@ -440,7 +396,7 @@
                     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
                   </span>
                   <h2>Display</h2>
-                  <button id="grid-btn-display-close" class="icon-button menu-collapse" type="button" title="Collapse Display" aria-label="Collapse Display">&#8964;</button>
+                  <button id="grid-btn-display-close" class="icon-button menu-collapse" type="button" title="Collapse Display" aria-label="Collapse Display">&#9660;</button>
                 </div>
                 <div class="menu-card-body" id="grid-display-panel-body">
                   <div class="field-row">
@@ -491,6 +447,111 @@
                just opacity:0, pointer-events:none, toggled by the .visible
                class alone. -->
           <div id="inspect-toast" class="inspect-toast"></div>
+          <!-- The right-hand menu column - Settings, then Map Evolution.
+               Same is-open/toggle-vs-card machinery as the menus in the
+               left column (see makeMenu in fractal-grid.js), but its own
+               accordion group: opening one of these two closes the other,
+               without touching whatever is open on the left (Inspect,
+               Analysis, Display Mode or the render-progress gauge) - so
+               e.g. Settings and Inspect can be open together. A column
+               rather than two separately-positioned corners because an open
+               card takes its own button's place in the layout, so whichever
+               of these two is open has to push the other one's button down
+               instead of covering it. -->
+          <div id="grid-right-menu-column">
+            <section class="menu-item" id="menu-settings">
+              <button class="menu-toggle" id="grid-btn-settings" type="button" title="Settings" aria-label="Settings" aria-expanded="false">&#9881;</button>
+              <div class="menu-card" id="grid-settings-panel" hidden>
+                <div class="menu-card-header">
+                  <span class="menu-card-icon" aria-hidden="true">&#9881;</span>
+                  <h2>Settings</h2>
+                  <button id="grid-btn-settings-close" class="icon-button menu-collapse" type="button" title="Collapse Settings" aria-label="Collapse Settings">&#9660;</button>
+                </div>
+                <div class="menu-card-body">
+                  <label class="volume-field">
+                    <span>Sound</span>
+                    <span class="volume-icon" id="grid-sound-volume-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5z"></path><path class="vol-arc-1" d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path class="vol-arc-2" d="M19.07 4.93a10 10 0 0 1 0 14.14"></path><g class="vol-mute-x"><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></g></svg>
+                    </span>
+                    <input type="range" id="grid-sound-volume-slider" min="0" max="100" step="1" value="100" aria-label="Sound volume">
+                  </label>
+                  <label class="field">
+                    <span>Numeric precision: <b id="precision-readout">float32</b></span>
+                    <select id="precision-select">
+                      <option value="auto">Auto (switch at the float32 wall)</option>
+                      <option value="f32" selected>Force float32</option>
+                      <option value="df">Force double-float</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Resolution Limits: <b id="resolution-bounds-readout">&hellip;</b></span>
+                    <div class="dual-range">
+                      <div class="dual-range-track"></div>
+                      <div class="dual-range-fill" id="resolution-range-fill"></div>
+                      <input type="range" id="resolution-min-slider" min="0" max="100" value="0">
+                      <input type="range" id="resolution-max-slider" min="0" max="100" value="100">
+                    </div>
+                  </label>
+                  <label class="field">
+                    <span>Inspection Line Sample Count: <b id="inspect-line-sample-count-readout">30</b></span>
+                    <input type="range" id="inspect-line-sample-count-slider" min="5" max="60" value="30">
+                  </label>
+                  <label class="field">
+                    <span>Inspection Grid Size: <b id="inspect-grid-size-readout">3&times;3</b></span>
+                    <input type="range" id="inspect-grid-size-slider" min="1" max="8" value="3">
+                  </label>
+                  <label class="toggle-field">
+                    <span>Inspection Grid Two Part Line</span>
+                    <span class="toggle-switch">
+                      <input type="checkbox" id="inspect-grid-two-part-checkbox" checked>
+                      <span class="toggle-slider"></span>
+                    </span>
+                  </label>
+                  <button id="grid-btn-reset-tips" class="secondary">Reset Tool Tips</button>
+                  <button id="grid-btn-replay-intro" class="secondary">Reset Intro Animation</button>
+                  <button id="grid-btn-reset-all" class="secondary">Reset All</button>
+                </div>
+              </div>
+            </section>
+
+            <!-- The grid's own timeline (see the Playback section of
+                 fractal-grid.js): which step every pixel is shown at, and the
+                 transport that plays it forward to the Simulation Duration -
+                 which is why that slider lives in here with it rather than in
+                 Settings, where it used to sit: it sets the end of the very
+                 timeline this card scrubs. Same row shape as the editor's
+                 Play transport and the Inspect preview's (.playback-controls
+                 in app-shell.css). -->
+            <section class="menu-item" id="menu-playback">
+              <button class="menu-toggle" id="grid-btn-playback" type="button" title="Map Evolution" aria-label="Map Evolution" aria-expanded="false">
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden="true"><path d="M8 5.2v13.6a.6.6 0 0 0 .92.5l10.65-6.8a.6.6 0 0 0 0-1L8.92 4.7a.6.6 0 0 0-.92.5z"></path></svg>
+              </button>
+              <div class="menu-card" id="grid-playback-panel" hidden>
+                <div class="menu-card-header">
+                  <span class="menu-card-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M8 5.2v13.6a.6.6 0 0 0 .92.5l10.65-6.8a.6.6 0 0 0 0-1L8.92 4.7a.6.6 0 0 0-.92.5z"></path></svg>
+                  </span>
+                  <h2>Map Evolution</h2>
+                  <button id="grid-btn-playback-close" class="icon-button menu-collapse" type="button" title="Collapse Map Evolution" aria-label="Collapse Map Evolution">&#9660;</button>
+                </div>
+                <div class="menu-card-body">
+                  <div class="playback-controls">
+                    <button id="grid-play-pause" class="icon-button" type="button" title="Play" aria-label="Play">&#9654;</button>
+                    <input type="range" id="grid-timeline-slider" min="0" max="500" step="1" value="500" aria-label="Timeline frame">
+                    <button id="grid-speed-btn" class="icon-button speed-btn" type="button" title="Playback speed" aria-label="Playback speed" aria-haspopup="true" aria-expanded="false">2x</button>
+                    <button id="grid-restart" class="icon-button" type="button" title="Back to frame 0" aria-label="Back to frame 0">
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="2.5" height="14" rx="1"></rect><path d="M19 6.1v11.8a.6.6 0 0 1-.94.5L9.6 12.5a.6.6 0 0 1 0-1l8.46-5.9a.6.6 0 0 1 .94.5z"></path></svg>
+                    </button>
+                  </div>
+                  <p class="readout" id="grid-timeline-readout"></p>
+                  <label class="field">
+                    <span>Simulation Duration (Frames): <b id="steps-readout">500</b></span>
+                    <input type="range" id="steps-slider" min="1" max="50" value="5">
+                  </label>
+                </div>
+              </div>
+            </section>
+          </div>
           <!-- A car-gauge-style ring in the lower left, tracking the
                progressive render (see updateRenderProgressRing in
                fractal-grid.js): a grey outline sweeps clockwise from the
@@ -499,10 +560,13 @@
                Both circles share one path so the ring reads as one control
                changing color, not two concentric rings.
 
-               A fifth menu, same is-open/toggle-vs-card machinery as the
-               four in the column above (see makeMenu in fractal-grid.js) -
-               opening it closes whichever of those is open and vice versa,
-               it just lives down here instead of in that stack. The card
+               A menu in its own right, same is-open/toggle-vs-card
+               machinery as the others (see makeMenu in fractal-grid.js) -
+               it joins the LEFT accordion group (Inspect, Analysis, Display
+               Mode), since that's the corner it actually sits in, so
+               opening it closes whichever of those was open and vice versa,
+               without touching Settings or Map Evolution on the right; it
+               just lives down here instead of in that stack. The card
                has no body, only a header: that single line IS the whole
                card, so - unlike the others, where only the header line
                collapses it and the body stays interactive - a click
@@ -557,6 +621,21 @@
           <input type="range" id="hover-speed-slider" min="-1" max="4" step="1" value="1" aria-label="Playback speed" aria-orientation="vertical">
         </div>
         <div class="speed-value" id="hover-speed-value">2x</div>
+      </div>
+      <!-- The timeline transport's own speed popup - same shape and same
+           log2(speed) slider as #hover-speed-popup above, and the same
+           value behind it: one playbackSpeed drives both buttons (see the
+           Playback speed section of fractal-grid.js), so this is a second
+           VIEW of that setting, not a second setting. Two elements rather
+           than one only because each popup is positioned against its own
+           button. The multiplier is against this transport's own base
+           rate, so 1x is real time here (see PLAYBACK_STEPS_PER_SECOND in
+           fractal-grid.js) and the shared default of 2x is twice that. -->
+      <div id="grid-speed-popup" class="speed-popup" hidden>
+        <div class="speed-slider-track">
+          <input type="range" id="grid-speed-slider" min="-1" max="4" step="1" value="1" aria-label="Timeline playback speed" aria-orientation="vertical">
+        </div>
+        <div class="speed-value" id="grid-speed-value">2x</div>
       </div>
 
       <!-- Reusable tip popover - a single shared instance, repositioned and

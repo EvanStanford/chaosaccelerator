@@ -9,10 +9,10 @@
 // lifetime - there's no live editing here, unlike the physics simulator.
 // Each render (on load, pan, zoom, or resize) redoes the full offset +
 // simulation for every pixel from scratch, for however many steps the
-// Settings panel currently asks for - the
-// whole grid has no Play button or animation of its own (only the hover
-// panel replays a single point's trajectory), so this doesn't need to stay
-// fast enough for 60fps.
+// timeline currently shows - which is the Settings panel's Simulation
+// Duration unless the timeline has been moved. Playing that timeline is the
+// one thing that can't afford to start from scratch, and doesn't: see the
+// Playback section near the end.
 (function (global) {
   "use strict";
 
@@ -118,6 +118,7 @@
   var btnSuperlativeSmallest = document.getElementById("btn-superlative-smallest");
   var btnSuperlativeEdge = document.getElementById("btn-superlative-edge");
   var btnSuperlativeRarest = document.getElementById("btn-superlative-rarest");
+  var inspectMenuEl = document.getElementById("menu-inspect");
   var inspectListEl = document.getElementById("inspect-list");
   var inspectPreviewSvg = document.getElementById("inspect-preview");
   var inspectToastEl = document.getElementById("inspect-toast");
@@ -137,6 +138,15 @@
   var inspectGridSizeSlider = document.getElementById("inspect-grid-size-slider");
   var inspectGridSizeReadout = document.getElementById("inspect-grid-size-readout");
   var inspectGridTwoPartCheckbox = document.getElementById("inspect-grid-two-part-checkbox");
+  var gridPlayPauseBtn = document.getElementById("grid-play-pause");
+  var gridRestartBtn = document.getElementById("grid-restart");
+  var gridTimelineSlider = document.getElementById("grid-timeline-slider");
+  var gridTimelineReadout = document.getElementById("grid-timeline-readout");
+  var gridSpeedBtn = document.getElementById("grid-speed-btn");
+  var gridSpeedPopup = document.getElementById("grid-speed-popup");
+  var gridSpeedSlider = document.getElementById("grid-speed-slider");
+  var gridSpeedValueEl = document.getElementById("grid-speed-value");
+  var inspectMapFollowCheckbox = document.getElementById("inspect-map-follow-checkbox");
   var hoverMuteBtn = document.getElementById("hover-mute");
   var gridSoundVolumeSlider = document.getElementById("grid-sound-volume-slider");
   var gridSoundVolumeIcon = document.getElementById("grid-sound-volume-icon");
@@ -328,37 +338,43 @@
     hideTip();
   });
 
-  // ---- The menu column (upper left) ----
+  // ---- The menus ----
   //
-  // Four menus - Settings, Inspect, Analysis, Display Mode - each a square
-  // icon button until it is opened, at which point the button leaves the
-  // layout and its card takes the space. Accordion, not independent:
-  // opening one closes whichever of the others was open (see menuGroup
-  // below), so the column never has to show more than one card's worth of
-  // controls at once. Zero open is still fine - closing the last one just
-  // leaves the four collapsed buttons.
+  // Inspect, Analysis and Display Mode in the column upper left, Settings
+  // and Map Evolution in the column upper right, and the rendering-progress
+  // gauge lower left (grouped with the left column - see its own comment at
+  // the renderProgressMenu call below) - each a square icon button until it
+  // is opened, at which point the button leaves the layout and its card
+  // takes the space. One accordion per side, not one across the whole
+  // screen: opening a left-side menu closes whichever OTHER left-side menu
+  // was open, and likewise for the right side, but a left and a right menu
+  // (e.g. Inspect and Settings) can be open together (see menuGroups
+  // below). Zero open on a side is still fine - closing the last one there
+  // just leaves the collapsed buttons.
   //
   // The open/shut state lives HERE rather than being read back off a class,
   // so the one thing that can vary (which of the button and the card is in
   // the layout) has exactly one owner.
   //
-  // Every menu this factory builds registers itself here, so opening one
-  // can close the others without each menu having to know them by name at
-  // its own construction time (settingsMenu/inspectMenu/statsMenu are still
-  // being built when the first of them runs this).
-  var menuGroup = [];
-  function makeMenu(itemId, toggleId, onChange) {
+  // Every menu this factory builds registers itself in its side's group, so
+  // opening one can close the others on that side without each menu having
+  // to know them by name at its own construction time (settingsMenu/
+  // inspectMenu/statsMenu are still being built when the first of them runs
+  // this).
+  var menuGroups = { left: [], right: [] };
+  function makeMenu(itemId, toggleId, side, onChange) {
     var item = document.getElementById(itemId);
     var toggle = document.getElementById(toggleId);
     var card = item.querySelector(".menu-card");
     var header = card.querySelector(".menu-card-header");
+    var group = menuGroups[side];
     var open = false;
     function set(next) {
       next = !!next;
       if (next === open) return;
       open = next;
       if (open) {
-        menuGroup.forEach(function (other) {
+        group.forEach(function (other) {
           if (other !== api && other.isOpen()) other.set(false);
         });
       }
@@ -387,11 +403,11 @@
       // zeros, which would park the popover in the corner.
       anchor: function () { return open ? card : toggle; },
     };
-    menuGroup.push(api);
+    group.push(api);
     return api;
   }
 
-  var settingsMenu = makeMenu("menu-settings", "grid-btn-settings",
+  var settingsMenu = makeMenu("menu-settings", "grid-btn-settings", "right",
     function (open) {
       // Opening Settings IS the "yes, show me" that the deep-zoom tip's
       // step 1 asks for, so getting there by hand skips straight ahead
@@ -429,7 +445,7 @@
   // the card closes would still turn the next click or drag on the grid
   // into a new inspection, which is exactly what a collapsed Inspect card
   // is supposed to mean "not right now" to.
-  var inspectMenu = makeMenu("menu-inspect", "grid-btn-inspect",
+  var inspectMenu = makeMenu("menu-inspect", "grid-btn-inspect", "left",
     function (open) {
       if (open) {
         // Pick up whatever should be on screen now - the locked points if
@@ -449,7 +465,7 @@
     inspectMenu.set(open);
   }
 
-  var statsMenu = makeMenu("menu-stats", "grid-btn-stats",
+  var statsMenu = makeMenu("menu-stats", "grid-btn-stats", "left",
     function (open) {
       setStatsPanelOpen(open);
     });
@@ -460,15 +476,23 @@
   // old discarded return value) because checkColorSpreadAndMaybeSuggestColorZoom
   // needs to open this card itself before pointing the Color Zoom tip at the
   // toggle now living inside it.
-  var displayMenu = makeMenu("menu-display", "grid-btn-display");
+  var displayMenu = makeMenu("menu-display", "grid-btn-display", "left");
+
+  // The map's own transport plus the Simulation Duration slider that sets
+  // where its timeline ends - see updateTimelineUI. Nothing to start or
+  // stop on open/close: the timeline keeps running (and the map keeps
+  // showing whichever frame it is on) with the card shut, which is the
+  // point of collapsing it - an unobstructed fractal, still playing.
+  var playbackMenu = makeMenu("menu-playback", "grid-btn-playback", "right");
 
   // The rendering-progress gauge (see updateRenderProgressRing further
-  // down) doubles as a fifth accordion menu - registering it here is the
+  // down) doubles as another accordion menu - registering it here is the
   // whole of what that takes, since makeMenu only needs the two elements'
   // ids and doesn't care that this one lives in the lower left instead of
-  // the column above. Nothing to start or stop on open/close, same as
-  // displayMenu.
-  var renderProgressMenu = makeMenu("menu-render-progress", "grid-btn-render-progress");
+  // a column. It joins the LEFT group since that's the corner it actually
+  // sits in, even though it isn't part of #grid-menu-stack. Nothing to
+  // start or stop on open/close, same as displayMenu.
+  var renderProgressMenu = makeMenu("menu-render-progress", "grid-btn-render-progress", "left");
   btnResetTips.addEventListener("click", function () {
     try {
       localStorage.removeItem(TIP_DISMISSED_KEY);
@@ -603,6 +627,15 @@
   // physics-gpu-df.js for the df physics library; see pickPrecision()
   // below for when each one is used.
   function buildFragmentShader(sceneToCompile, precision) {
+    return compileScenePieces(sceneToCompile, precision).gridSource;
+  }
+
+  // Everything one scene compiles to, in named pieces: the grid's own
+  // program (gridSource), plus the parts playback's two programs are
+  // assembled from (see buildPlaybackStepShader/buildPlaybackColorShader).
+  // One function builds both, so playback can't drift from the physics,
+  // Output reading and colour ramp the grid itself runs.
+  function compileScenePieces(sceneToCompile, precision) {
     var df = precision === "df";
     var B = PhysicsGridCodegen.backendFor(precision);
     var initial = PhysicsGridCodegen.generateGridInitialStateGLSL(sceneToCompile, precision);
@@ -783,103 +816,141 @@
     outputIndices.forEach(function (idx) {
       if (trackedIndices.indexOf(idx) === -1) trackedIndices.push(idx);
     });
-    var stepLoopLines;
-    if (sceneToCompile.edgeMode === "sticky" && frame && watchedIndices.length > 0) {
-      var halfW = PhysicsGPU.fnum(frame.width / 2), halfH = PhysicsGPU.fnum(frame.height / 2);
-      var fullW = PhysicsGPU.fnum(frame.width), fullH = PhysicsGPU.fnum(frame.height);
-      // The frozen samples ARE the reported output on any pixel that stops,
-      // so they are tracked at the pass's own precision: collapsing them to
-      // float32 here would quantize the answer for exactly the pixels this
-      // feature exists to serve, no matter how precise the step loop that
-      // produced them was.
-      var bodyVar = df ? "dbody" : "body";
+    // ---- The step loop, for either of the two programs that run it ----
+    //
+    // The grid's own program runs every step from 0 to u_maxSteps in one
+    // draw. Playback's step pass runs only the next few, picking up from
+    // state it read back (see buildPlaybackStepShader). The loop is the same
+    // either way; `loop` names the three spellings that differ:
+    //   bound     - how many steps THIS draw runs
+    //   stepIndex - iteration i's step number counted from the start of the
+    //               whole run, not of this draw: a wrap-stop's lifespan is
+    //               recorded against it
+    //   budget    - the lifespan of a pixel that never stops, i.e. the total
+    //               step count once this draw is done
+    // Returned as the locals the loop needs and the loop itself, separately,
+    // so playback can restore saved state in between the two.
+    var isStickyLoop = sceneToCompile.edgeMode === "sticky" && frame && watchedIndices.length > 0;
+    function stepLoop(loop) {
+      var declarations = [];
       var lines = [];
-      trackedIndices.forEach(function (idx) {
-        lines.push("  " + B.scalar + " frozenX" + idx + " = " + bodyVar + idx + ".x;");
-        lines.push("  " + B.scalar + " frozenY" + idx + " = " + bodyVar + idx + ".y;");
-        lines.push("  " + B.scalar + " frozenAngle" + idx + " = " + bodyVar + idx + ".angle;");
-        lines.push("  " + B.scalar + " prevFrozenX" + idx + " = " + B.zero + ";");
-        lines.push("  " + B.scalar + " prevFrozenY" + idx + " = " + B.zero + ";");
-        lines.push("  " + B.scalar + " prevFrozenAngle" + idx + " = " + B.zero + ";");
-      });
-      lines.push("  bool hasPrevFrozen = false;");
-      lines.push("  bool wrapStopped = false;");
-      // Default: never crosses within the budget, so it "lasts" the whole
-      // thing - matches outputRangeMax's own ceiling, which is this same
-      // step budget.
-      lines.push("  float lifespanValue = float(u_maxSteps);");
-      bounceInitLines.forEach(function (l) { lines.push(l); });
-      lines.push("  for (int i = 0; i < u_maxSteps; i++) {");
-      lines.push("    if (wrapStopped) break;");
-      lines.push("    " + stepOnceCall);
-      bounceStepLines.forEach(function (l) { lines.push(l); });
-      // DT+1.0 sentinel: strictly greater than any real tFrac (which is
-      // clamped into [0, DT]), so the first real crossing this step always
-      // wins the comparison below regardless of watch order.
-      lines.push("    float bestTFrac = DT + 1.0;");
-      watchedIndices.forEach(function (idx) {
-        lines.push("    {");
-        // The crossing TEST is coarse by nature (did this step move most of
-        // a frame width?), so it collapses to float32 - but the numerator
-        // of tFrac below does not: it is a distance-to-the-edge of order
-        // one step's travel, and it sets where the extrapolated output
-        // lands.
-        lines.push("      float wrapDx = " + B.toFloat(B.sub(bodyVar + idx + ".x", "frozenX" + idx)) + ";");
-        lines.push("      float wrapDy = " + B.toFloat(B.sub(bodyVar + idx + ".y", "frozenY" + idx)) + ";");
-        lines.push("      if (abs(wrapDx) > " + halfW + " || abs(wrapDy) > " + halfH + ") {");
-        lines.push("        bool xCrossed = abs(wrapDx) > " + halfW + ";");
-        lines.push("        float span = xCrossed ? " + fullW + " : " + fullH + ";");
-        lines.push("        float vAxis = " + B.toFloat("xCrossed ? " + bodyVar + idx + ".vx : " + bodyVar + idx + ".vy") + ";");
-        lines.push("        " + B.scalar + " prevAxis = xCrossed ? frozenX" + idx + " : frozenY" + idx + ";");
-        lines.push("        float boundary = vAxis > 0.0 ? span : 0.0;");
-        lines.push("        float tFrac = clamp(" + B.toFloat(B.sub(B.fromFloat("boundary"), "prevAxis")) + " / vAxis, 0.0, DT);");
-        // Earliest continuous crossing wins when more than one watched body
-        // registers a crossing on the same discrete step.
-        lines.push("        if (tFrac < bestTFrac) bestTFrac = tFrac;");
-        lines.push("      }");
+      if (isStickyLoop) {
+        var halfW = PhysicsGPU.fnum(frame.width / 2), halfH = PhysicsGPU.fnum(frame.height / 2);
+        var fullW = PhysicsGPU.fnum(frame.width), fullH = PhysicsGPU.fnum(frame.height);
+        // The frozen samples ARE the reported output on any pixel that stops,
+        // so they are tracked at the pass's own precision: collapsing them to
+        // float32 here would quantize the answer for exactly the pixels this
+        // feature exists to serve, no matter how precise the step loop that
+        // produced them was.
+        var bodyVar = df ? "dbody" : "body";
+        trackedIndices.forEach(function (idx) {
+          declarations.push("  " + B.scalar + " frozenX" + idx + " = " + bodyVar + idx + ".x;");
+          declarations.push("  " + B.scalar + " frozenY" + idx + " = " + bodyVar + idx + ".y;");
+          declarations.push("  " + B.scalar + " frozenAngle" + idx + " = " + bodyVar + idx + ".angle;");
+          declarations.push("  " + B.scalar + " prevFrozenX" + idx + " = " + B.zero + ";");
+          declarations.push("  " + B.scalar + " prevFrozenY" + idx + " = " + B.zero + ";");
+          declarations.push("  " + B.scalar + " prevFrozenAngle" + idx + " = " + B.zero + ";");
+        });
+        declarations.push("  bool hasPrevFrozen = false;");
+        declarations.push("  bool wrapStopped = false;");
+        // Default: never crosses within the budget, so it "lasts" the whole
+        // thing - matches outputRangeMax's own ceiling, which is this same
+        // step budget.
+        declarations.push("  float lifespanValue = " + loop.budget + ";");
+        bounceInitLines.forEach(function (l) { declarations.push(l); });
+        lines.push("  for (int i = 0; i < " + loop.bound + "; i++) {");
+        lines.push("    if (wrapStopped) break;");
+        lines.push("    " + stepOnceCall);
+        bounceStepLines.forEach(function (l) { lines.push(l); });
+        // DT+1.0 sentinel: strictly greater than any real tFrac (which is
+        // clamped into [0, DT]), so the first real crossing this step always
+        // wins the comparison below regardless of watch order.
+        lines.push("    float bestTFrac = DT + 1.0;");
+        watchedIndices.forEach(function (idx) {
+          lines.push("    {");
+          // The crossing TEST is coarse by nature (did this step move most of
+          // a frame width?), so it collapses to float32 - but the numerator
+          // of tFrac below does not: it is a distance-to-the-edge of order
+          // one step's travel, and it sets where the extrapolated output
+          // lands.
+          lines.push("      float wrapDx = " + B.toFloat(B.sub(bodyVar + idx + ".x", "frozenX" + idx)) + ";");
+          lines.push("      float wrapDy = " + B.toFloat(B.sub(bodyVar + idx + ".y", "frozenY" + idx)) + ";");
+          lines.push("      if (abs(wrapDx) > " + halfW + " || abs(wrapDy) > " + halfH + ") {");
+          lines.push("        bool xCrossed = abs(wrapDx) > " + halfW + ";");
+          lines.push("        float span = xCrossed ? " + fullW + " : " + fullH + ";");
+          lines.push("        float vAxis = " + B.toFloat("xCrossed ? " + bodyVar + idx + ".vx : " + bodyVar + idx + ".vy") + ";");
+          lines.push("        " + B.scalar + " prevAxis = xCrossed ? frozenX" + idx + " : frozenY" + idx + ";");
+          lines.push("        float boundary = vAxis > 0.0 ? span : 0.0;");
+          lines.push("        float tFrac = clamp(" + B.toFloat(B.sub(B.fromFloat("boundary"), "prevAxis")) + " / vAxis, 0.0, DT);");
+          // Earliest continuous crossing wins when more than one watched body
+          // registers a crossing on the same discrete step.
+          lines.push("        if (tFrac < bestTFrac) bestTFrac = tFrac;");
+          lines.push("      }");
+          lines.push("    }");
+        });
+        lines.push("    if (bestTFrac <= DT) {");
+        lines.push("      float tTarget = bestTFrac - DT;");
+        lines.push("      lifespanValue = " + loop.stepIndex + " + bestTFrac / DT;");
+        outputIndices.forEach(function (out) {
+          // frozen + (frozen - prevFrozen)/DT * tTarget, kept whole at the
+          // pass's precision: the reconstructed velocity is a difference of
+          // two consecutive samples (small, so precise either way), but the
+          // base it is added onto is a full-magnitude coordinate that must
+          // not be rounded.
+          function extrapolate(axis) {
+            var vel = B.mul(B.sub("frozen" + axis + out, "prevFrozen" + axis + out), B.fromFloat("(1.0 / DT)"));
+            return B.add("frozen" + axis + out, B.mul(vel, B.fromFloat("tTarget")));
+          }
+          lines.push("      if (hasPrevFrozen) {");
+          lines.push("        " + bodyVar + out + ".x = " + extrapolate("X") + ";");
+          lines.push("        " + bodyVar + out + ".y = " + extrapolate("Y") + ";");
+          lines.push("        " + bodyVar + out + ".angle = " + extrapolate("Angle") + ";");
+          lines.push("      } else {");
+          lines.push("        " + bodyVar + out + ".x = frozenX" + out + "; " + bodyVar + out + ".y = frozenY" + out + "; " + bodyVar + out + ".angle = frozenAngle" + out + ";");
+          lines.push("      }");
+        });
+        lines.push("      wrapStopped = true;");
+        lines.push("    } else {");
+        trackedIndices.forEach(function (idx) {
+          lines.push("      prevFrozenX" + idx + " = frozenX" + idx + "; prevFrozenY" + idx + " = frozenY" + idx + "; prevFrozenAngle" + idx + " = frozenAngle" + idx + ";");
+          lines.push("      frozenX" + idx + " = " + bodyVar + idx + ".x; frozenY" + idx + " = " + bodyVar + idx + ".y; frozenAngle" + idx + " = " + bodyVar + idx + ".angle;");
+        });
+        lines.push("      hasPrevFrozen = true;");
         lines.push("    }");
-      });
-      lines.push("    if (bestTFrac <= DT) {");
-      lines.push("      float tTarget = bestTFrac - DT;");
-      lines.push("      lifespanValue = float(i) + bestTFrac / DT;");
-      outputIndices.forEach(function (out) {
-        // frozen + (frozen - prevFrozen)/DT * tTarget, kept whole at the
-        // pass's precision: the reconstructed velocity is a difference of
-        // two consecutive samples (small, so precise either way), but the
-        // base it is added onto is a full-magnitude coordinate that must
-        // not be rounded.
-        function extrapolate(axis) {
-          var vel = B.mul(B.sub("frozen" + axis + out, "prevFrozen" + axis + out), B.fromFloat("(1.0 / DT)"));
-          return B.add("frozen" + axis + out, B.mul(vel, B.fromFloat("tTarget")));
-        }
-        lines.push("      if (hasPrevFrozen) {");
-        lines.push("        " + bodyVar + out + ".x = " + extrapolate("X") + ";");
-        lines.push("        " + bodyVar + out + ".y = " + extrapolate("Y") + ";");
-        lines.push("        " + bodyVar + out + ".angle = " + extrapolate("Angle") + ";");
-        lines.push("      } else {");
-        lines.push("        " + bodyVar + out + ".x = frozenX" + out + "; " + bodyVar + out + ".y = frozenY" + out + "; " + bodyVar + out + ".angle = frozenAngle" + out + ";");
-        lines.push("      }");
-      });
-      lines.push("      wrapStopped = true;");
-      lines.push("    } else {");
-      trackedIndices.forEach(function (idx) {
-        lines.push("      prevFrozenX" + idx + " = frozenX" + idx + "; prevFrozenY" + idx + " = frozenY" + idx + "; prevFrozenAngle" + idx + " = frozenAngle" + idx + ";");
-        lines.push("      frozenX" + idx + " = " + bodyVar + idx + ".x; frozenY" + idx + " = " + bodyVar + idx + ".y; frozenAngle" + idx + " = " + bodyVar + idx + ".angle;");
-      });
-      lines.push("      hasPrevFrozen = true;");
-      lines.push("    }");
-      lines.push("  }");
-      stepLoopLines = lines.join("\n");
-    } else {
+        lines.push("  }");
+        return { declarations: declarations, loop: lines };
+      }
       // No watched bodies at all (every body is static or a hinge child) -
       // Sticky Edges has nothing to trigger on, so lifespan is trivially
       // always the full run length.
-      stepLoopLines = "  float lifespanValue = float(u_maxSteps);\n" +
-        bounceInitLines.map(function (l) { return l + "\n"; }).join("") +
-        "  for (int i = 0; i < u_maxSteps; i++) {\n" +
-        "    " + stepOnceCall + "\n" +
-        bounceStepLines.map(function (l) { return l + "\n"; }).join("") +
-        "  }";
+      declarations.push("  float lifespanValue = " + loop.budget + ";");
+      bounceInitLines.forEach(function (l) { declarations.push(l); });
+      lines.push("  for (int i = 0; i < " + loop.bound + "; i++) {");
+      lines.push("    " + stepOnceCall);
+      bounceStepLines.forEach(function (l) { lines.push(l); });
+      lines.push("  }");
+      return { declarations: declarations, loop: lines };
+    }
+    var gridLoop = stepLoop({ bound: "u_maxSteps", stepIndex: "float(i)", budget: "float(u_maxSteps)" });
+    var stepLoopLines = gridLoop.declarations.concat(gridLoop.loop).join("\n");
+
+    // The half of the loop's bookkeeping that outlives a draw, which playback
+    // carries between draws alongside the physics state itself (see
+    // PhysicsGridCodegen.playbackStateVariables). Lifespan is only state in
+    // the sticky loop: nowhere else can a pixel stop early, so its lifespan
+    // is simply however many steps have run.
+    var loopStateVariables = [];
+    if (isStickyLoop) {
+      trackedIndices.forEach(function (idx) {
+        ["frozenX", "frozenY", "frozenAngle", "prevFrozenX", "prevFrozenY", "prevFrozenAngle"].forEach(function (name) {
+          loopStateVariables.push({ name: name + idx, type: df ? "df" : "float" });
+        });
+      });
+      loopStateVariables.push({ name: "hasPrevFrozen", type: "bool" }, { name: "wrapStopped", type: "bool" },
+        { name: "lifespanValue", type: "float" });
+    }
+    if (isBounces) {
+      loopStateVariables.push({ name: "bounceCount", type: "float" }, { name: "bounceTouching", type: "bool" });
     }
 
     // ---- Derived display modes ----
@@ -914,7 +985,7 @@
     // differencing through it would report the sigmoid's own flattening
     // far from centre as the field itself going smooth.
     var deltaDenom = isBounces ? "max(u_bounceMax, 1.0)"
-      : isLifespan ? "float(u_maxSteps)"
+      : isLifespan ? "float(u_durationSteps)"
         : "OUTPUT_RANGE_MAX";
     // Contours needs the gradient of t ITSELF, and deltaT deliberately does
     // not give it that: deltaT reports the field's own linear rate of change
@@ -973,7 +1044,7 @@
     isBounces
       ? "  float t = u_bounceMax > 0.0 ? outputValue / u_bounceMax : 0.0;"
       : isLifespan
-        ? "  float t = clamp(outputValue / float(u_maxSteps), 0.0, 1.0);"
+        ? "  float t = clamp(outputValue / float(u_durationSteps), 0.0, 1.0);"
         : isInfinitePosition
           ? "  float t = frameSigmoid(" + B.toFloat(B.div("outputValue", B.fromFloat("OUTPUT_RANGE_MAX"))) + ");"
           // Distance clamps for the same reason lifespan does: its maximum
@@ -984,7 +1055,37 @@
             ? "  float t = clamp(" + B.toFloat(B.div("outputValue", B.fromFloat("OUTPUT_RANGE_MAX"))) + ", 0.0, 1.0);"
             : "  float t = " + B.toFloat(B.div(B.mod("outputValue", "OUTPUT_RANGE_MAX"), B.fromFloat("OUTPUT_RANGE_MAX"))) + ";";
 
-    return [
+    // A pixel's starting state from its world X/Y, and the locals stepOnce()
+    // is threaded through - the same three blocks in every program that
+    // simulates.
+    var physicsDeclarationLines = [
+      initial.declarationLines.map(function (l) { return "  " + l; }).join("\n"),
+      "  " + PhysicsGridCodegen.generateCanonicalBodyDeclarationsGLSL(initial).split("\n").join("\n  "),
+      "  " + PhysicsGPU.generateHingeAnchorLocalsGLSL(initial.hingeAnchors, precision).split("\n").join("\n  "),
+    ];
+
+    // Which world point a pixel simulates. Shared with playback's step pass,
+    // whose pixels have to land on exactly the points the grid's own would.
+    var worldCoordLines = [
+      // gl_FragCoord.xy - 0.5 is the integer index of the pixel being
+      // shaded in THIS draw's target; mapping it through the stride/origin
+      // gives the index of the full-res pixel it stands for, and the final
+      // + 0.5 puts it back at that pixel's center. At stride 1, origin 0
+      // this collapses to (x - 0.5) + 0.5, which is exact for every pixel
+      // index a canvas can hold - so the full-res pass computes precisely
+      // the coordinates it always did, to the bit.
+      "  vec2 fullCoord = (gl_FragCoord.xy - 0.5) * u_gridStride + u_gridOrigin + 0.5;",
+      "  vec2 uv = (fullCoord - 0.5 * u_resolution) / u_resolution.y;",
+      // uv * u_scale stays a plain float32 product on purpose. Its relative
+      // error is ~1e-7 of a quantity that is itself at most u_scale, i.e.
+      // ~1e-4 of ONE PIXEL's worth of world distance - far below anything
+      // visible. The catastrophic step is the ADD onto the center, and
+      // that is the one done in df.
+      df ? "  vec2 worldX = dfAddFloat(vec2(u_centerHi.x, u_centerLo.x), uv.x * u_scale);" : "  float worldX = u_centerHi.x + uv.x * u_scale;",
+      df ? "  vec2 worldY = dfAddFloat(vec2(u_centerHi.y, u_centerLo.y), uv.y * u_scale);" : "  float worldY = u_centerHi.y + uv.y * u_scale;",
+    ];
+
+    var gridHeaderLines = [
       "#version 300 es",
       "precision highp float;",
       // The FULL-resolution canvas dimensions - deliberately not the
@@ -1021,6 +1122,14 @@
       // notch - GLSL ES 3.00 allows a non-constant loop bound (ES 1.00
       // didn't), and measured, the dynamic bound costs nothing.
       "uniform int u_maxSteps;",
+      // The Simulation Duration, i.e. the far end of the playback timeline -
+      // which is what Scene Lifespan is measured against, including while
+      // u_maxSteps above is showing some step short of it. Measuring against
+      // the step shown instead would recolour every pixel that stopped long
+      // ago on every frame of playback. The two are equal whenever the
+      // timeline sits at its end, which is the only place it ever sat before
+      // playback existed.
+      "uniform int u_durationSteps;",
       // Bounce Count only: the largest bounce count currently in view, which
       // is what a pixel's own count is scaled against (see findBounceMax).
       // A uniform, not a baked constant, because it's a property of where
@@ -1039,6 +1148,12 @@
       "",
       PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(sceneToCompile)),
       "",
+    ];
+
+    // Everything that turns a t - or a derivative of one - into a colour.
+    // Playback's colour pass includes this same block, so a value can't look
+    // different depending on which of the two drew it.
+    var colorLibraryLines = [
       "vec3 hsl2rgb(float h, float s, float l) {",
       "  float c = (1.0 - abs(2.0 * l - 1.0)) * s;",
       "  float hp = h / 60.0;",
@@ -1236,9 +1351,11 @@
       "  return rainbow(t) * alpha;",
       "}",
       "",
+    ];
 
-      // Scene lifespan's range IS the step budget and Bounce Count's is
-      // u_bounceMax, so both read a uniform instead of a baked-in constant;
+    var gridPhysicsLines = [
+      // Scene lifespan's range IS the Simulation Duration and Bounce Count's
+      // is u_bounceMax, so both read a uniform instead of a baked-in constant;
       // every other property's range is a fixed property of the scene.
       isRunTally ? "" : "const float OUTPUT_RANGE_MAX = " + PhysicsGPU.fnum(rangeMax) + ";",
       PhysicsGPU.sceneConstantsGLSL(sceneToCompile.gravity, sceneToCompile.friction, sceneToCompile.restitution, precision),
@@ -1277,7 +1394,9 @@
       "  return outputValue;",
       "}",
       "",
+    ];
 
+    var deltaTLines = [
       // ---- b - a, in t units ----
       //
       // The subtraction happens at the pass's OWN precision and only then
@@ -1304,7 +1423,9 @@
       "  return " + OB.toFloat("d") + " / " + deltaDenom + ";",
       "}",
       "",
+    ];
 
+    var gridTailLines = [
       // The four axial neighbours, in units of one full-res pixel. Every
       // derived mode is a five-point stencil (these four plus the centre),
       // so this is the whole footprint any of them reads.
@@ -1360,22 +1481,9 @@
       "}",
       "",
       "void main() {",
-      // gl_FragCoord.xy - 0.5 is the integer index of the pixel being
-      // shaded in THIS draw's target; mapping it through the stride/origin
-      // gives the index of the full-res pixel it stands for, and the final
-      // + 0.5 puts it back at that pixel's center. At stride 1, origin 0
-      // this collapses to (x - 0.5) + 0.5, which is exact for every pixel
-      // index a canvas can hold - so the full-res pass computes precisely
-      // the coordinates it always did, to the bit.
-      "  vec2 fullCoord = (gl_FragCoord.xy - 0.5) * u_gridStride + u_gridOrigin + 0.5;",
-      "  vec2 uv = (fullCoord - 0.5 * u_resolution) / u_resolution.y;",
-      // uv * u_scale stays a plain float32 product on purpose. Its relative
-      // error is ~1e-7 of a quantity that is itself at most u_scale, i.e.
-      // ~1e-4 of ONE PIXEL's worth of world distance - far below anything
-      // visible. The catastrophic step is the ADD onto the center, and
-      // that is the one done in df.
-      df ? "  vec2 worldX = dfAddFloat(vec2(u_centerHi.x, u_centerLo.x), uv.x * u_scale);" : "  float worldX = u_centerHi.x + uv.x * u_scale;",
-      df ? "  vec2 worldY = dfAddFloat(vec2(u_centerHi.y, u_centerLo.y), uv.y * u_scale);" : "  float worldY = u_centerHi.y + uv.y * u_scale;",
+    ];
+
+    var gridMainLines = [
       // Standard mode's whole path, inline and character-for-character what
       // it was before the derived modes existed - NOT a call to
       // sampleOutput(), even though that function holds an identical copy of
@@ -1407,7 +1515,33 @@
       "  }",
       "  fragColor = vec4(colorMap(t), 1.0);",
       "}",
-    ].join("\n");
+    ];
+
+    return {
+      gridSource: [].concat(gridHeaderLines, colorLibraryLines, gridPhysicsLines, deltaTLines,
+        gridTailLines, worldCoordLines, gridMainLines).join("\n"),
+      precision: df ? "df" : "f32",
+      initial: initial,
+      outScalar: outScalar,
+      outZero: outZero,
+      outputLines: outputLines,
+      tLine: tLine,
+      // Output bodies the colour pass reads - carried in playback's state
+      // even when anchored, since that pass has no starting state of its own.
+      outputBodyIndices: outputIndices,
+      stepOnceSource: stepOnceSource,
+      stepLoop: stepLoop,
+      loopStateVariables: loopStateVariables,
+      physicsDeclarationLines: physicsDeclarationLines,
+      worldCoordLines: worldCoordLines,
+      colorLibraryLines: colorLibraryLines,
+      deltaTLines: deltaTLines,
+      libraryLines: [PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(sceneToCompile))],
+      constantLines: [
+        isRunTally ? "" : "const float OUTPUT_RANGE_MAX = " + PhysicsGPU.fnum(rangeMax) + ";",
+        PhysicsGPU.sceneConstantsGLSL(sceneToCompile.gravity, sceneToCompile.friction, sceneToCompile.restitution, precision),
+      ],
+    };
   }
 
   // antialias:false is load-bearing, not a micro-optimization. The
@@ -1463,6 +1597,7 @@
         scale: gl.getUniformLocation(prog, "u_scale"),
         colorZoom: gl.getUniformLocation(prog, "u_colorZoom"),
         maxSteps: gl.getUniformLocation(prog, "u_maxSteps"),
+        durationSteps: gl.getUniformLocation(prog, "u_durationSteps"),
         bounceMax: gl.getUniformLocation(prog, "u_bounceMax"),
         displayMode: gl.getUniformLocation(prog, "u_displayMode"),
       },
@@ -1601,6 +1736,7 @@
           centerLo: gl.getUniformLocation(prog, "u_centerLo"),
           scale: gl.getUniformLocation(prog, "u_scale"),
           maxSteps: gl.getUniformLocation(prog, "u_maxSteps"),
+          durationSteps: gl.getUniformLocation(prog, "u_durationSteps"),
           bounceMax: gl.getUniformLocation(prog, "u_bounceMax"),
         },
       };
@@ -1640,6 +1776,55 @@
     // have been averaged together so far.
     aaSample: 0,
   };
+
+  // ---- The playback timeline ----
+  //
+  // Declared up here for the same reason `progressive` is: the progress ring
+  // (updateRenderProgressRing) reads it, and that is reachable from setup
+  // code long before the Playback section further down has run.
+  //
+  // `step` is the step the grid shows: every render and every measurement
+  // of the picture simulates to it (see renderedSteps), and Settings'
+  // Simulation Duration is where the timeline ends. It rests AT that end,
+  // which is all the grid ever showed before it had a timeline. The other
+  // fields are the Playback section's own bookkeeping - see there.
+  var timeline = {
+    step: simulationSteps,
+    playing: false,
+    // Steps the playback clock has asked for but no draw has run yet.
+    carry: 0,
+    lastTickAt: 0,
+    // Which view the CURRENT state texture was built for (null: nothing
+    // valid in it), and how many steps it holds.
+    stateKey: null,
+    stateStep: 0,
+    // A write into the OTHER state texture that is still in flight, or null.
+    pass: null,
+    // The last view seen, and when it changed - playback waits for the
+    // view to hold still before rebuilding state for it.
+    seenKey: null,
+    seenAt: 0,
+    // What the playback colour pass last put in the accumulator, so a pause
+    // can tell whether that image is still the one it would ask the ladder
+    // to refine.
+    presentedKey: null,
+    // Whether playback drew the most recent frame (rather than handing it to
+    // the ladder), and if so what it was doing - read by the progress ring
+    // and the timeline readout.
+    drawing: false,
+    catchingUp: false,
+    catchUpFraction: 0,
+    stride: 1,
+    // Inspect's "Play back in map": while `following`, the step comes from
+    // the Inspect preview's clock rather than this timeline's own - see
+    // followInspection. followTarget is the step that clock is showing,
+    // followPlaying whether it is advancing.
+    following: false,
+    followTarget: 0,
+    followPlaying: false,
+  };
+  function renderedSteps() { return Math.min(timeline.step, simulationSteps); }
+
   var dirty = true;
   // Every caller means the same thing by this: "what's on screen no longer
   // reflects the view." That has always invalidated the rendered image; now
@@ -1982,7 +2167,12 @@
     gl.uniform2f(sampler.uniforms.gridOrigin, 0, rowStart);
     setCenterUniforms(sampler.uniforms);
     gl.uniform1f(sampler.uniforms.scale, view.scale);
-    gl.uniform1i(sampler.uniforms.maxSteps, simulationSteps);
+    // What's on screen - the timeline's step - for every measurement of the
+    // picture. The one exception is the bounce-count divisor (rawBounces,
+    // see findBounceMax), which is taken over the whole Simulation Duration
+    // so that colours stay put while the timeline plays toward it.
+    gl.uniform1i(sampler.uniforms.maxSteps, rawBounces ? simulationSteps : renderedSteps());
+    gl.uniform1i(sampler.uniforms.durationSteps, simulationSteps);
     gl.uniform1f(sampler.uniforms.bounceMax, rawBounces ? 1 : bounceMaxValue);
     bindQuad(sampler.posLoc);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
@@ -2278,10 +2468,18 @@
 
   function checkColorSpreadAndMaybeSuggestColorZoom() {
     if (colorZoomEnabled) return; // nothing to suggest - it's already on
+    // Only about the finished picture. Partway along the timeline a narrow
+    // spread is often just early - step 0 of a Scene Lifespan scene is one
+    // flat colour by definition - and Color Zoom is no answer to that.
+    if (timeline.playing || renderedSteps() < simulationSteps) return;
     var grid = sampleValueGrid(SAMPLE_SIZE, SAMPLE_SIZE);
     if (!grid) return;
     var values = [];
     for (var i = 0; i < grid.values.length; i += 4) values.push(grid.values[i]);
+    // Once dismissed, showTip below would no-op anyway - but only after
+    // already forcing the Display card open, which is the bug: a dismissed
+    // tip should stop touching the UI at all, not just stop being visible.
+    if (isTipDismissed("color-zoom")) return;
     if (circularSpread(values) <= COLOR_SPREAD_SUGGEST_THRESHOLD) {
       // Color Zoom now lives inside the Display card's Standard row (see
       // the DISPLAY_MODES loop below) - opening the card is what makes the
@@ -2317,7 +2515,9 @@
   // The largest bounce count in the current view, which is what every pixel's
   // own count is colored relative to. Measured from a small offscreen sample
   // rather than the real render, which is 8-bit color and can't be read back
-  // as a number.
+  // as a number. Measured over the whole Simulation Duration whatever step
+  // the timeline shows (see drawSampleBand's rawBounces), so a pixel's
+  // colour only ever moves when its own count does.
   // Never returns 0: an all-quiet view would otherwise divide by zero, and
   // "nothing bounced anywhere" and "everything bounced 0 times" want the same
   // flat color anyway.
@@ -2359,7 +2559,8 @@
     setCenterUniforms(pass.uniforms);
     gl.uniform1f(pass.uniforms.scale, view.scale);
     gl.uniform1i(pass.uniforms.colorZoom, colorZoomEnabled ? 1 : 0);
-    gl.uniform1i(pass.uniforms.maxSteps, simulationSteps);
+    gl.uniform1i(pass.uniforms.maxSteps, renderedSteps());
+    gl.uniform1i(pass.uniforms.durationSteps, simulationSteps);
     gl.uniform1f(pass.uniforms.bounceMax, bounceMaxValue);
     gl.uniform1i(pass.uniforms.displayMode, displayMode.id);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
@@ -3240,11 +3441,6 @@
   // instead of being smoothed in. See noteFrameTiming.
   var HARD_OVERRUN_RATIO = 2.5;
   var BUDGET_SMOOTHING = 0.35; // weight of each new measurement
-  var throughputEstimate = 0;  // pixels that fit in one refresh period
-  // Pixels dispatched during the previous work frame - the other half of
-  // the measurement, since the interval alone says nothing without knowing
-  // what was being timed.
-  var lastFrameSpent = 0;
   // Enough to be worth a frame on anything, small enough not to jank a
   // phone on the first frame before any feedback exists.
   var INITIAL_PIXEL_BUDGET = 120000;
@@ -3257,17 +3453,41 @@
   // pixels per frame, and the budget has to be able to follow it there.
   var MIN_PIXEL_BUDGET = 1000;
   var MAX_PIXEL_BUDGET = 32000000;
-  var pixelBudget = INITIAL_PIXEL_BUDGET;
-  // Wall-clock timestamp of the last frame that actually dispatched work.
-  // Frames where refinement was already complete are NOT fed back into the
-  // budget: an idle rAF returns in one refresh period no matter how slow
-  // the GPU is, so counting those would ratchet the budget up without
-  // limit and guarantee a stutter on the next view change.
-  var lastWorkFrameAt = 0;
 
-  function noteFrameTiming(now) {
-    if (lastWorkFrameAt > 0 && lastFrameSpent > 0) {
-      var dt = now - lastWorkFrameAt;
+  // One work budget and the measurements that steer it. There are two: the
+  // refinement ladder's (counted in simulated pixels) and playback's
+  // (counted in pixel-steps, since a playback draw costs its step count as
+  // well - see the Playback section). Each is only ever compared against
+  // itself, so its unit is simply whatever its owner charges.
+  //
+  // growMinUse is the share of its budget a frame must actually have spent
+  // before fitting inside one period counts as a reason to grow - see
+  // noteFrameTiming.
+  function makeWorkBudget(initial, min, max, growMinUse) {
+    return {
+      budget: initial,
+      min: min,
+      max: max,
+      growMinUse: growMinUse || 0,
+      // How much work fits in one refresh period, as last measured.
+      throughput: 0,
+      // Work dispatched during the previous work frame - the other half of
+      // the measurement, since the interval alone says nothing without
+      // knowing what was being timed.
+      lastSpent: 0,
+      // Wall-clock timestamp of the last frame that actually dispatched
+      // work. Frames with nothing to do are NOT fed back into the budget:
+      // an idle rAF returns in one refresh period no matter how slow the
+      // GPU is, so counting those would ratchet the budget up without limit
+      // and guarantee a stutter on the next view change.
+      lastWorkAt: 0,
+    };
+  }
+  var ladderBudget = makeWorkBudget(INITIAL_PIXEL_BUDGET, MIN_PIXEL_BUDGET, MAX_PIXEL_BUDGET);
+
+  function noteFrameTiming(b, now) {
+    if (b.lastWorkAt > 0 && b.lastSpent > 0) {
+      var dt = now - b.lastWorkAt;
       // Deliberately NOT rounded to whole periods. Under strict vsync an
       // interval really is a whole multiple of the refresh period and
       // rounding is harmless, but plenty of contexts don't present that
@@ -3280,7 +3500,7 @@
       var periods = Math.max(1, dt / displayPeriodMs);
       if (periods > OVERRUN_RATIO) {
         // A real measurement of how much work fits in one period.
-        var measured = lastFrameSpent / periods;
+        var measured = b.lastSpent / periods;
         // A frame that ran several periods long is not noise to be averaged
         // away - it is an unambiguous statement that the budget is far too
         // big, and smoothing it would spend the next several frames
@@ -3292,18 +3512,25 @@
         // Small overruns still get smoothed, because there they really are
         // jitter.
         var blend = periods > HARD_OVERRUN_RATIO ? 1 : BUDGET_SMOOTHING;
-        throughputEstimate = throughputEstimate > 0
-          ? throughputEstimate * (1 - blend) + measured * blend
+        b.throughput = b.throughput > 0
+          ? b.throughput * (1 - blend) + measured * blend
           : measured;
-        pixelBudget = throughputEstimate * BUDGET_SAFETY;
-      } else {
+        b.budget = b.throughput * BUDGET_SAFETY;
+      } else if (b.lastSpent >= b.budget * b.growMinUse) {
         // Fit inside one period, by an unknowable margin. Creep upward.
-        pixelBudget *= BUDGET_GROW;
-        throughputEstimate = Math.max(throughputEstimate, pixelBudget / BUDGET_SAFETY);
+        //
+        // The ladder grows on every such frame (growMinUse 0) - it draws
+        // until its budget runs out, so a frame that fit really was a full
+        // one. Playback at a modest speed spends only what its clock asks
+        // for, though, and a frame that used a tenth of its budget says
+        // nothing about where the ceiling is: growing on those would leave
+        // the budget far too big the moment the work rose to meet it.
+        b.budget *= BUDGET_GROW;
+        b.throughput = Math.max(b.throughput, b.budget / BUDGET_SAFETY);
       }
-      pixelBudget = clamp(pixelBudget, MIN_PIXEL_BUDGET, MAX_PIXEL_BUDGET);
+      b.budget = clamp(b.budget, b.min, b.max);
     }
-    lastWorkFrameAt = now;
+    b.lastWorkAt = now;
   }
 
   // ---- Where the user's two resolution handles land on the ladder ----
@@ -3734,14 +3961,33 @@
   // (the collapsed toggle's and the open menu's own) unconditionally rather
   // than checking which is actually visible - four style writes a frame is
   // free, and it's one less thing to keep in sync with is-open.
+  //
+  // While playback is drawing the frames (see stepPlayback), the ring
+  // reports playback instead: how far a catch-up has got, or otherwise the
+  // ladder level playback's lattice sits at - which is also the level a
+  // pause will refine on from.
+  function playbackRingFraction() {
+    if (timeline.catchingUp) return timeline.catchUpFraction;
+    if (timeline.stride <= 1) return 1;
+    var idx = RENDER_RING_STRIDE_CHECKPOINTS.indexOf(timeline.stride);
+    return idx < 0 ? 0 : idx / RENDER_RING_STRIDE_CHECKPOINTS.length;
+  }
+  function playbackProgressLabelText() {
+    if (timeline.catchingUp) {
+      return "Playback: catching up to frame " + timeline.step.toLocaleString() +
+        " (" + Math.floor(timeline.catchUpFraction * 100) + "%)";
+    }
+    return "Playback: " + (timeline.stride <= 1 ? "1 sim/px" : "1 sim per " + timeline.stride + "px");
+  }
   function updateRenderProgressRing() {
-    var grey = renderRingGreyFraction();
-    var aa = renderRingAaFraction();
+    var playback = timeline.playing && timeline.drawing;
+    var grey = playback ? playbackRingFraction() : renderRingGreyFraction();
+    var aa = playback ? 0 : renderRingAaFraction();
     setRenderRingFraction(renderProgressRingCoarse, grey);
     setRenderRingFraction(renderProgressRingAa, aa);
     setRenderRingFraction(renderProgressRingCoarseOpen, grey);
     setRenderRingFraction(renderProgressRingAaOpen, aa);
-    renderProgressLabel.textContent = renderProgressLabelText();
+    renderProgressLabel.textContent = playback ? playbackProgressLabelText() : renderProgressLabelText();
   }
 
   // Abandon whatever refinement is in flight. Deliberately does NOT touch
@@ -3912,12 +4158,13 @@
       // whatever value the last settled refinement had left it at, which
       // is a frame's worth of work for a run that RESUMES, and several
       // frames' worth for one that starts over from the coarsest level.
-      lastWorkFrameAt = 0;
-      lastFrameSpent = 0;
+      ladderBudget.lastWorkAt = 0;
+      ladderBudget.lastSpent = 0;
       return;
     }
 
-    noteFrameTiming(now);
+    noteFrameTiming(ladderBudget, now);
+    var pixelBudget = ladderBudget.budget;
     var spent = 0;
 
     // Antialiasing runs on the same budget, banding and present path as
@@ -3935,7 +4182,7 @@
         updateResolutionBoundsUI();
         if (progressive.aaSample >= MAX_AA_SAMPLES) return finishRun(spent);
       }
-      lastFrameSpent = spent;
+      ladderBudget.lastSpent = spent;
       presentFrame();
       return;
     }
@@ -3982,7 +4229,7 @@
       if (progressive.stride <= endStride()) return finishRun(spent);
       width = levelWidth(progressive.stride);
     }
-    lastFrameSpent = spent;
+    ladderBudget.lastSpent = spent;
     presentFrame();
     if (levelChanged) updateResolutionBoundsUI();
   }
@@ -3994,7 +4241,7 @@
   // nothing to attribute it to and would never adapt during a gesture -
   // exactly the case where adapting matters most.
   function finishRun(spent) {
-    lastFrameSpent = spent || 0;
+    ladderBudget.lastSpent = spent || 0;
     // The ladder is done. If antialiasing is on, this isn't the end of the
     // work, just the end of the first sample - and only when the ladder
     // actually reached one simulation per pixel, since averaging offset
@@ -4435,7 +4682,17 @@
   stepsSlider.addEventListener("change", function () {
     var next = stepsFromSlider();
     if (next === simulationSteps) return;
+    // The timeline ends at the duration. One resting at its end moves with
+    // it, which is all this slider ever did before there was a timeline; one
+    // partway along keeps its step, unless the new duration ends before it.
+    var timelineAtEnd = timeline.step >= simulationSteps;
     simulationSteps = next;
+    if (timelineAtEnd || timeline.step > next) {
+      stopTimelineClock();
+      timeline.step = next;
+    }
+    if (timeline.stateStep > timeline.step) timeline.stateKey = null;
+    updateTimelineUI();
     updateStepsUI(simulationSteps);
     // Duration is a property of the SCENE, not of this page's view of it,
     // and the editor has the same slider on the same value. Writing it into
@@ -4767,11 +5024,26 @@
   // tick - see playbackTick - so dragging the slider takes effect
   // immediately on whatever's already animating rather than only on the
   // next hover. Not part of setPlaybackControlsEnabled below: it's a
-  // standing preference (like the grid's own Simulation Duration setting),
-  // useful to set before ever hovering a pixel, not a transport control
-  // that needs something loaded to act on. Defaults to 2x on this page -
-  // physics-ui.js's own default is a real-time 1x instead.
-  var playbackSpeed = 2;
+  // standing preference (like the Simulation Duration setting beside the
+  // timeline), useful to set before ever hovering a pixel, not a transport
+  // control that needs something loaded to act on. Defaults to 2x on this
+  // page - physics-ui.js's own default is a real-time 1x instead.
+  //
+  // ONE speed, two buttons. Inspect's preview transport and the Map
+  // Evolution timeline both ask the same question - how fast should
+  // playback run - so the value lives here and each button is only a view
+  // of it, exactly as this page's two sound controls are two views of
+  // PhysicsSound's one volume (see updateVolumeUI). Setting 4x in the
+  // preview and finding the map still at 1x was the whole complaint: two
+  // controls that look identical and read the same word have to mean the
+  // same thing. The two popups stay separate elements (each is positioned
+  // against its own button - see position() below); it's the value behind
+  // them that is shared.
+  //
+  // The multiplier means different absolute rates in the two places, and
+  // that is the point: 2x is twice HOVER_MS_PER_FRAME's base rate in the
+  // preview and twice PLAYBACK_STEPS_PER_SECOND on the timeline. "Twice as
+  // fast as normal" is what the user set, in both.
   var SPEED_MIN = 0.5, SPEED_MAX = 16;
   // The slider itself moves in log2(speed) space, not speed - see
   // sliderValueToSpeed/speedToSliderValue. A linear 0.5-16 slider spends
@@ -4785,12 +5057,6 @@
   var SPEED_LOG_MIN = Math.log2(SPEED_MIN), SPEED_LOG_MAX = Math.log2(SPEED_MAX);
   function sliderValueToSpeed(v) { return Math.pow(2, v); }
   function speedToSliderValue(speed) { return Math.log2(speed); }
-  // The HTML hardcodes matching min/max/step (see #hover-speed-slider's own
-  // comment) for a flash-free first paint before this runs - set from the
-  // same constants here so the two can never quietly drift apart.
-  hoverSpeedSlider.min = String(SPEED_LOG_MIN);
-  hoverSpeedSlider.max = String(SPEED_LOG_MAX);
-  hoverSpeedSlider.step = "1";
 
   // "2x"/"16x" (no decimal) once a whole step no longer reads as a
   // meaningfully different speed; "0.5x"/"1.3x" below that, where a tenth
@@ -4799,58 +5065,92 @@
     return (v < 2 ? v.toFixed(1) : String(Math.round(v))) + "x";
   }
 
+  // The one value both controls show and both playback loops read. Read
+  // fresh by whoever uses it, never cached, which is what lets a drag take
+  // effect mid-run - on the preview and the timeline at once.
+  var playbackSpeed = 2;
+  // Every makeSpeedControl instance registers its own render function
+  // here, so setPlaybackSpeed can repaint all of them without knowing how
+  // many there are or which one the user actually dragged - the same shape
+  // as PhysicsSound.onVolumeChange driving updateVolumeUI above.
+  var speedRenderers = [];
   function updateSpeedUI() {
-    var text = formatSpeed(playbackSpeed);
-    hoverSpeedBtn.textContent = text;
-    hoverSpeedValueEl.textContent = text;
-    hoverSpeedSlider.value = String(speedToSliderValue(playbackSpeed));
+    speedRenderers.forEach(function (render) { render(); });
   }
-
-  // Fixed positioning (see #hover-speed-popup's own HTML comment) means
-  // this has to be placed by hand, the same way positionTip places this
-  // file's own tip popover: measured against the button's live position
-  // rather than laid out declaratively, since nothing here is a
-  // normal-flow descendant of it. Centered above the button, clamped so a
-  // button near either edge doesn't push the popup off-screen.
-  function positionSpeedPopup() {
-    var rect = hoverSpeedBtn.getBoundingClientRect();
-    var width = hoverSpeedPopup.offsetWidth, height = hoverSpeedPopup.offsetHeight;
-    var left = clamp(rect.left + rect.width / 2 - width / 2, 8, window.innerWidth - width - 8);
-    hoverSpeedPopup.style.left = left + "px";
-    hoverSpeedPopup.style.top = (rect.top - height - 8) + "px";
-  }
-
-  function openSpeedPopup() {
-    hoverSpeedPopup.hidden = false;
-    hoverSpeedBtn.setAttribute("aria-expanded", "true");
-    positionSpeedPopup();
-    hoverSpeedSlider.focus();
-  }
-  function closeSpeedPopup() {
-    if (hoverSpeedPopup.hidden) return;
-    hoverSpeedPopup.hidden = true;
-    hoverSpeedBtn.setAttribute("aria-expanded", "false");
-  }
-
-  hoverSpeedBtn.addEventListener("click", function (e) {
-    e.stopPropagation(); // otherwise the document click listener below sees this same click as "outside" and immediately closes what it just opened
-    if (hoverSpeedPopup.hidden) openSpeedPopup(); else closeSpeedPopup();
-  });
-  hoverSpeedSlider.addEventListener("input", function () {
-    playbackSpeed = clamp(sliderValueToSpeed(Number(hoverSpeedSlider.value)), SPEED_MIN, SPEED_MAX);
+  function setPlaybackSpeed(v) {
+    playbackSpeed = clamp(v, SPEED_MIN, SPEED_MAX);
     updateSpeedUI();
-  });
-  document.addEventListener("click", function (e) {
-    if (hoverSpeedPopup.hidden) return;
-    if (hoverSpeedBtn.contains(e.target) || hoverSpeedPopup.contains(e.target)) return;
-    closeSpeedPopup();
-  });
-  document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape" && !hoverSpeedPopup.hidden) { closeSpeedPopup(); hoverSpeedBtn.focus(); }
-  });
-  window.addEventListener("resize", function () {
-    if (!hoverSpeedPopup.hidden) positionSpeedPopup();
-  });
+  }
+
+  // A speed button, the popup slider it opens, and the readout under that
+  // slider - a view of playbackSpeed, not a value of its own.
+  function makeSpeedControl(button, popup, slider, valueEl) {
+    // The HTML hardcodes matching min/max/step (see #hover-speed-slider's own
+    // comment) for a flash-free first paint before this runs - set from the
+    // same constants here so the two can never quietly drift apart.
+    slider.min = String(SPEED_LOG_MIN);
+    slider.max = String(SPEED_LOG_MAX);
+    slider.step = "1";
+
+    speedRenderers.push(function () {
+      var text = formatSpeed(playbackSpeed);
+      button.textContent = text;
+      valueEl.textContent = text;
+      slider.value = String(speedToSliderValue(playbackSpeed));
+    });
+
+    // Fixed positioning (see #hover-speed-popup's own HTML comment) means
+    // this has to be placed by hand, the same way positionTip places this
+    // file's own tip popover: measured against the button's live position
+    // rather than laid out declaratively, since nothing here is a
+    // normal-flow descendant of it. Centered above the button, clamped so a
+    // button near either edge doesn't push the popup off-screen - and below
+    // it instead if there is no room above, which a button near the top of
+    // the window would otherwise push off the top edge.
+    function position() {
+      var rect = button.getBoundingClientRect();
+      var width = popup.offsetWidth, height = popup.offsetHeight;
+      var left = clamp(rect.left + rect.width / 2 - width / 2, 8, window.innerWidth - width - 8);
+      var top = rect.top - height - 8;
+      if (top < 8) top = rect.bottom + 8;
+      popup.style.left = left + "px";
+      popup.style.top = top + "px";
+    }
+    function open() {
+      popup.hidden = false;
+      button.setAttribute("aria-expanded", "true");
+      position();
+      slider.focus();
+    }
+    function close() {
+      if (popup.hidden) return;
+      popup.hidden = true;
+      button.setAttribute("aria-expanded", "false");
+    }
+
+    button.addEventListener("click", function (e) {
+      e.stopPropagation(); // otherwise the document click listener below sees this same click as "outside" and immediately closes what it just opened
+      if (popup.hidden) open(); else close();
+    });
+    slider.addEventListener("input", function () {
+      // Not control.update() - setPlaybackSpeed repaints the OTHER button
+      // too, so a drag here shows up there immediately rather than the
+      // next time that card happens to be rebuilt.
+      setPlaybackSpeed(sliderValueToSpeed(Number(slider.value)));
+    });
+    document.addEventListener("click", function (e) {
+      if (popup.hidden) return;
+      if (button.contains(e.target) || popup.contains(e.target)) return;
+      close();
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && !popup.hidden) { close(); button.focus(); }
+    });
+    window.addEventListener("resize", function () {
+      if (!popup.hidden) position();
+    });
+  }
+  makeSpeedControl(hoverSpeedBtn, hoverSpeedPopup, hoverSpeedSlider, hoverSpeedValueEl);
 
   function setPlaybackControlsEnabled(enabled) {
     playbackHasSession = enabled;
@@ -4968,6 +5268,8 @@
 
   function showHoverEmpty(message) {
     stopHoverReplay();
+    // Nothing left playing for the map to follow.
+    releaseMapFollow();
     if (hoverUpgradeTimer) { clearTimeout(hoverUpgradeTimer); hoverUpgradeTimer = null; }
     hoverKey = null;
     activeReplay = null;
@@ -5385,9 +5687,10 @@
   // Steps per real second the replay plays back at. Derived from the
   // per-frame duration and NOTHING else - in particular not from how many
   // steps the run has, which is what makes a replay's length proportional to
-  // its step count - scaled by the user's own playbackSpeed on top of that
-  // fixed base rate. Expressed as a rate rather than "steps per callback"
-  // because the tick is driven by wall-clock elapsed time (see
+  // its step count - scaled by the user's own playbackSpeed (shared with the
+  // Map Evolution timeline - see the Playback speed section) on top of that
+  // fixed base rate. Expressed as a rate rather than "steps per
+  // callback" because the tick is driven by wall-clock elapsed time (see
   // playbackTick for why that distinction matters).
   function hoverStepsPerSecond() {
     return (1000 / HOVER_MS_PER_FRAME) * playbackSpeed;
@@ -5405,7 +5708,7 @@
   // really was only ever logged that far) rather than silently changing
   // the denominator, while everything else on screen keeps going until ITS
   // own final frame.
-  function renderPlaybackFrame() {
+  function renderPlaybackFrame(skipMapSync) {
     var step = Math.floor(playbackStep);
     hoverCtx.setTransform(1, 0, 0, 1, 0, 0);
     hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);
@@ -5473,6 +5776,12 @@
         " - step " + (Math.min(overallMaxStep - 1, step) + 1) + " / " + overallMaxStep;
     }
     updateProgressSliderPosition();
+    // Every frame the preview shows - playing, scrubbed, reset or looped -
+    // passes through here, so this one call keeps the map on the same step.
+    // Skipped only for a hover's very first frame when it didn't autoplay
+    // (see beginPlaybackSession) - a plain hover shouldn't touch the map at
+    // all until the user actually starts playback.
+    if (!skipMapSync) syncMapToInspection();
   }
 
   // Every trajectory-bearing thing currently on screen, in the exact order
@@ -5595,6 +5904,8 @@
     if (hoverLoopTimer) clearTimeout(hoverLoopTimer);
     hoverLoopTimer = null;
     updatePlayPauseButtonUI();
+    // Pausing doesn't draw a frame, so the map has to be told separately.
+    syncMapToInspection();
   }
 
   function resumePlayback() {
@@ -5604,17 +5915,20 @@
     playbackPlaying = true;
     updatePlayPauseButtonUI();
     ensurePlaybackAdvancing();
+    syncMapToInspection();
   }
 
   // The one entry point for "start showing something new": a fresh hover
   // point (runHoverAt) or Inspect-only preview (beginInspectOnlySession).
-  // Always starts at step 0 and auto-plays - restarting from 0 is what
-  // guarantees a newly-added inspected point starts in sync with everything
-  // already on screen (see restartCurrentPreview) - and always stops
-  // whatever was animating before it, so a slow point that finishes
-  // compiling after the cursor has moved on can't draw over a session that
-  // has since moved on to something else.
-  function beginPlaybackSession(replay) {
+  // Always starts at step 0 and, unless autoplay is explicitly suppressed,
+  // auto-plays - restarting from 0 is what guarantees a newly-added
+  // inspected point starts in sync with everything already on screen (see
+  // restartCurrentPreview) - and always stops whatever was animating
+  // before it, so a slow point that finishes compiling after the cursor
+  // has moved on can't draw over a session that has since moved on to
+  // something else.
+  function beginPlaybackSession(replay, autoplay) {
+    if (autoplay === undefined) autoplay = true;
     stopHoverReplay();
     activeReplay = replay || null;
     playbackStep = 0;
@@ -5622,11 +5936,11 @@
     hoverProgressSlider.min = "0";
     hoverProgressSlider.max = String(Math.max(0, playbackConfiguredMax - 1));
     setPlaybackControlsEnabled(true);
-    playbackPlaying = true;
+    playbackPlaying = autoplay;
     playbackAutoStartedAt = performance.now();
     updatePlayPauseButtonUI();
-    ensurePlaybackAdvancing();
-    renderPlaybackFrame();
+    if (autoplay) ensurePlaybackAdvancing();
+    renderPlaybackFrame(!autoplay);
     hoverEmptyState.hidden = true;
   }
 
@@ -5818,7 +6132,7 @@
       lineageSlots: isLifespan || isBouncesOutput ? null : outputLineageSlotsAt(worldPoint, steps),
       extraWrapOverrides: extraWrapOverrides,
       bounceEvents: bounceEventsAt(worldPoint, steps),
-    });
+    }, /* autoplay */ !mapFollowsInspect);
   }
 
   // Shown instead of the ordinary "hover the grid to preview a pixel" empty
@@ -5862,8 +6176,10 @@
     // no extra move needed - but once at least one point/line/grid is
     // locked, the panel belongs to THEM: it no longer swaps in a preview of
     // the currently-hovered cell's own trajectory alongside whatever is
-    // already playing back.
-    if (inspectedGroups.length > 0) return;
+    // already playing back. Same reasoning applies while the map is
+    // following Inspect: with the toggle on, merely hovering shouldn't
+    // touch the preview panel or the map at all - only a locked point does.
+    if (inspectedGroups.length > 0 || mapFollowsInspect) return;
     stopHoverReplay(); // a previous cell's replay may still be animating - don't let it keep drawing over the new cell's preview
     if (hoverUpgradeTimer) clearTimeout(hoverUpgradeTimer);
     showHoverInstant(world);
@@ -5886,6 +6202,11 @@
     // the canvas without being one of that row's DOM descendants.
     if (e.relatedTarget && (hoverPlaybackControlsEl.contains(e.relatedTarget) || hoverSpeedPopup.contains(e.relatedTarget))) return;
     isHoveringGrid = false;
+    // Moving onto the Inspect bar itself (the sidebar list of locked
+    // points, its buttons, etc.) isn't "done looking at this" either - if a
+    // locked-group session is already playing, leave it running right where
+    // it is instead of restarting it from step 0.
+    if (e.relatedTarget && inspectMenuEl.contains(e.relatedTarget) && inspectedGroups.length > 0 && playbackHasSession) return;
     if (inspectedGroups.length > 0) { beginInspectOnlySession(); } else { showHoverEmpty(); }
   });
 
@@ -6250,7 +6571,7 @@
     // inside one idle slice. STATS_MAX_BAND_SAMPLES is a second, flat
     // ceiling on the readback buffer, so the memory this holds does not
     // grow with the slider even though the block does.
-    var bandRows = clamp(Math.floor(pixelBudget / 2 / w), 1,
+    var bandRows = clamp(Math.floor(ladderBudget.budget / 2 / w), 1,
       Math.min(h, Math.max(1, Math.floor(STATS_MAX_BAND_SAMPLES / w))));
 
     statsRun = {
@@ -6564,6 +6885,820 @@
     });
   })();
 
+  // ---- Playback: the grid's own timeline ----
+  //
+  // Plays the fractal forward in time. The grid always shows every pixel's
+  // simulation run to one step (timeline.step - see renderedSteps); Play
+  // walks that step up toward the Simulation Duration while the picture
+  // keeps up with it.
+  //
+  // Not by re-rendering each frame from step 0: frame N would cost N steps
+  // per pixel, so a run's total cost would grow with the SQUARE of its
+  // length - measured on the samples, minutes of GPU time to play one
+  // full-resolution view out to step 1000. Instead every pixel's simulation
+  // lives in float textures between frames (see
+  // PhysicsGridCodegen.playbackStateVariables for exactly what that is), and
+  // a frame pays only for the steps it adds: a step pass reads the state,
+  // runs a few steps and writes the other texture of a ping-pong pair, then a
+  // colour pass paints the result.
+  //
+  // What that costs, and what takes over where it can't reach:
+  //  - Resolution. Two full copies of the state is a lot of video memory,
+  //    and every step costs every pixel it covers, so playback runs on one
+  //    sub-lattice of the full-res grid (see playbackStride) - at most one
+  //    sample per CSS pixel. It is the ladder's own lattice, so pausing hands
+  //    the image to the ladder as an already-finished level (see
+  //    seedLadderFromPlayback) and refinement carries on from there to full
+  //    resolution and antialiasing.
+  //  - The view. State belongs to the world points it was built for, so a
+  //    pan, zoom or resize throws all of it away. While the view is moving
+  //    the ladder shows the current step the ordinary way; once it has held
+  //    still for PLAYBACK_SETTLE_MS, playback rebuilds its state up to that
+  //    step ("catching up") and carries on.
+  //  - Going backward. State only moves forward, so an earlier step is a
+  //    rebuild from step 0.
+  //  - Exactness where the field is chaotic. The step pass is a different
+  //    program from the grid's own, and this backend's compiler rounds each
+  //    program's arithmetic its own way (see physics-df.js's header), so
+  //    where one ULP decides a trajectory, playback's step N and the paused
+  //    render of step N can differ pixel by pixel. Wherever the field is
+  //    smooth enough to see, they agree.
+
+  // 1x is real time: a step is PhysicsGPU.FIXED_DT of simulated time, the
+  // same rate the editor's own Play runs at.
+  var PLAYBACK_STEPS_PER_SECOND = 1 / PhysicsGPU.FIXED_DT;
+  // How long the view has to hold still before playback rebuilds its state
+  // for it. Any shorter and every pause between two mousemoves of a slow
+  // drag would start a rebuild, only to throw it away on the next one.
+  var PLAYBACK_SETTLE_MS = 250;
+  // Both copies of the state together. Playback coarsens its lattice until
+  // they fit. Kept well short of what a browser will allocate: the page
+  // already holds several full-resolution targets of its own (the
+  // accumulators, antialiasing's float average), all of it shares one GPU
+  // process with every other tab, and running that process out of memory
+  // takes the browser down with it - it was 640MB at first, and Chrome
+  // crashed. A typical scene on a Retina laptop needs about half of this at
+  // one sample per CSS pixel; bigger states just run coarser.
+  var PLAYBACK_STATE_MAX_BYTES = 256 * 1024 * 1024;
+  var BYTES_PER_STATE_TEXEL = 16; // RGBA32F, one layer
+  // The most wall-clock time the clock will owe steps for. A hitch - a
+  // shader compile, a GC pause, a backgrounded tab - should cost that much
+  // playback, not come back as a burst of catch-up steps afterward.
+  var PLAYBACK_MAX_CARRY_SECONDS = 0.25;
+  // Counted in pixel-steps. The ladder's budget can't be shared: a playback
+  // draw's cost is its step count times its pixels, a ladder draw's is its
+  // pixels at the whole run length. Starts modest (a handful of steps over a
+  // CSS-pixel lattice) and only grows on frames that used it - see
+  // makeWorkBudget's growMinUse.
+  var playbackBudget = makeWorkBudget(8000000, 20000, 4000000000, 0.5);
+  var MAX_STATE_ATTACHMENTS = Math.min(gl.getParameter(gl.MAX_DRAW_BUFFERS), gl.getParameter(gl.MAX_COLOR_ATTACHMENTS));
+
+  // Programs per precision, built on the first Play that needs them (null:
+  // this device couldn't build them). The two state textures are sized to
+  // whatever the current canvas, lattice and state layout need, and
+  // reallocated when any of those change.
+  var playbackGpu = {
+    programs: {},
+    textures: [null, null],
+    current: 0, // which of the two holds the complete state
+    fbo: null,
+    width: 0,
+    height: 0,
+    layers: 0,
+    // The view the textures were allocated for - see
+    // releasePlaybackIfViewMoved.
+    viewKey: null,
+  };
+
+  function indentLines(lines, by) {
+    return lines.map(function (l) { return by + l; });
+  }
+
+  // The step pass: continue each pixel's simulation by u_steps steps from the
+  // state in u_state (or from its own starting state when u_init is set),
+  // and write one group's slice of the result.
+  function buildPlaybackStepShader(pieces, vars, layersPerGroup) {
+    var loop = pieces.stepLoop({
+      bound: "u_steps",
+      stepIndex: "float(u_baseStep + i)",
+      budget: "float(u_baseStep + u_steps)",
+    });
+    var carriesLifespan = vars.some(function (v) { return v.name === "lifespanValue"; });
+    return [
+      "#version 300 es",
+      "precision highp float;",
+      "precision highp sampler2DArray;",
+      // The grid program's own pixel -> world point uniforms, with the same
+      // meanings - see its header.
+      "uniform vec2 u_resolution;",
+      "uniform float u_gridStride;",
+      "uniform vec2 u_gridOrigin;",
+      "uniform vec2 u_centerHi;",
+      "uniform vec2 u_centerLo;",
+      "uniform float u_scale;",
+      "uniform sampler2DArray u_state;",
+      "uniform bool u_init;",
+      // How many steps u_state already holds, and how many this draw adds.
+      "uniform int u_baseStep;",
+      "uniform int u_steps;",
+      "uniform int u_group;",
+    ].concat(
+      PhysicsGridCodegen.generatePlaybackStateOutputsGLSL(layersPerGroup),
+      [""], pieces.libraryLines, [""], pieces.constantLines,
+      ["", pieces.stepOnceSource, "", "void main() {"],
+      pieces.worldCoordLines,
+      pieces.physicsDeclarationLines,
+      loop.declarations,
+      ["  if (!u_init) {"],
+      indentLines(PhysicsGridCodegen.generatePlaybackStateLoadGLSL(vars, "u_state", "ivec2(gl_FragCoord.xy)"), "    "),
+      // The saved lifespan of a pixel still running is the step count as of
+      // the save; it has lived through the steps this draw adds, too.
+      carriesLifespan ? ["    if (!wrapStopped) lifespanValue = float(u_baseStep + u_steps);"] : [],
+      ["  }"],
+      loop.loop,
+      indentLines(PhysicsGridCodegen.generatePlaybackStateStoreGLSL(vars, "u_group", layersPerGroup), "  "),
+      ["}"]
+    ).join("\n");
+  }
+
+  // The colour pass: each texel's Output value from its saved state, through
+  // exactly the grid program's own t and colour code.
+  function buildPlaybackColorShader(pieces, vars) {
+    var outScalar = pieces.outScalar;
+    var carriesLifespan = vars.some(function (v) { return v.name === "lifespanValue"; });
+    return [
+      "#version 300 es",
+      "precision highp float;",
+      "precision highp sampler2DArray;",
+      "uniform sampler2DArray u_state;",
+      "uniform ivec2 u_stateSize;",
+      // How many steps the state holds - the lifespan of a pixel still running.
+      "uniform int u_stateSteps;",
+      // Full-res pixels between two neighbouring texels - see
+      // shadePlaybackDerived.
+      "uniform float u_gridStride;",
+      // The grid program's own colouring uniforms - see its header.
+      "uniform bool u_colorZoom;",
+      "uniform int u_durationSteps;",
+      "uniform float u_bounceMax;",
+      "uniform int u_displayMode;",
+      "out vec4 fragColor;",
+      "",
+    ].concat(
+      pieces.libraryLines, [""], pieces.colorLibraryLines, pieces.constantLines,
+      ["", outScalar + " outputAt(ivec2 texel) {"],
+      carriesLifespan ? [] : ["  float lifespanValue = float(u_stateSteps);"],
+      indentLines(PhysicsGridCodegen.generatePlaybackStateDeclarationsGLSL(vars), "  "),
+      indentLines(PhysicsGridCodegen.generatePlaybackStateLoadGLSL(vars, "u_state", "texel"), "  "),
+      [
+        "  " + outScalar + " outputValue = " + pieces.outZero + ";",
+        pieces.outputLines.join("\n"),
+        "  return outputValue;",
+        "}",
+        "",
+      ],
+      pieces.deltaTLines,
+      [
+        "const ivec2 PLAYBACK_STENCIL[4] = ivec2[4](ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1));",
+        "",
+        // The derived modes, from neighbouring TEXELS' saved values rather
+        // than from re-simulating a stencil around each one - the texels are
+        // already simulated, and five simulations a pixel is exactly the cost
+        // playback exists to avoid. The grid's own program can't do this (its
+        // accumulators hold hue-ramped colour, see shadeDerived), but these
+        // are raw values. Neighbours are u_gridStride full-res pixels apart,
+        // so each difference is scaled back to "per full-res pixel", the unit
+        // the colour formulas are calibrated in; the Laplacian's sum of
+        // differences grows with the square of the spacing. An edge texel
+        // reuses itself for its missing neighbour, which reads as flat.
+        "vec3 shadePlaybackDerived(ivec2 texel, " + outScalar + " outputValue, float t) {",
+        "  float d[4];",
+        "  for (int k = 0; k < 4; k++) {",
+        "    ivec2 q = clamp(texel + PLAYBACK_STENCIL[k], ivec2(0), u_stateSize - 1);",
+        "    d[k] = deltaT(outputValue, outputAt(q)) / u_gridStride;",
+        "  }",
+        "  if (u_displayMode == MODE_LAPLACIAN) return laplacianColor((d[0] + d[1] + d[2] + d[3]) / u_gridStride);",
+        "  vec2 g = vec2(d[0] - d[1], d[2] - d[3]) * 0.5;",
+        "  if (u_displayMode == MODE_CONTOURS) return contourColor(t, g);",
+        "  return gradientColor(g);",
+        "}",
+        "",
+        "void main() {",
+        "  ivec2 texel = ivec2(gl_FragCoord.xy);",
+        "  " + outScalar + " outputValue = outputAt(texel);",
+        pieces.tLine,
+        "  if (u_displayMode != MODE_STANDARD) {",
+        "    fragColor = vec4(shadePlaybackDerived(texel, outputValue, t), 1.0);",
+        "    return;",
+        "  }",
+        "  fragColor = vec4(colorMap(t), 1.0);",
+        "}",
+      ]
+    ).join("\n");
+  }
+
+  function linkPlaybackProgram(source, uniformNames) {
+    var fs = PhysicsGPU.compileShader(gl, gl.FRAGMENT_SHADER, source);
+    var prog;
+    try {
+      prog = PhysicsGPU.linkProgram(gl, vs, fs);
+    } finally {
+      // A linked program keeps what it needs; the shader object would
+      // otherwise stay alive for the life of the context, one per build.
+      gl.deleteShader(fs);
+    }
+    var uniforms = {};
+    uniformNames.forEach(function (name) { uniforms[name] = gl.getUniformLocation(prog, "u_" + name); });
+    return { program: prog, posLoc: gl.getAttribLocation(prog, "a_position"), uniforms: uniforms };
+  }
+
+  function buildPlaybackPrograms(precision) {
+    var pieces = compileScenePieces(scene, precision);
+    var vars = PhysicsGridCodegen.playbackStateVariables(pieces.initial, pieces.outputBodyIndices)
+      .concat(pieces.loopStateVariables);
+    var layers = PhysicsGridCodegen.playbackStateLayerCount(vars);
+    return {
+      layers: layers,
+      groups: Math.ceil(layers / MAX_STATE_ATTACHMENTS),
+      step: linkPlaybackProgram(buildPlaybackStepShader(pieces, vars, MAX_STATE_ATTACHMENTS),
+        ["resolution", "gridStride", "gridOrigin", "centerHi", "centerLo", "scale", "state", "init", "baseStep", "steps", "group"]),
+      color: linkPlaybackProgram(buildPlaybackColorShader(pieces, vars),
+        ["state", "stateSize", "stateSteps", "gridStride", "colorZoom", "durationSteps", "bounceMax", "displayMode"]),
+    };
+  }
+
+  // Null when this precision's programs can't be built here - the same
+  // quiet fallback getPass uses, plus a status line, since unlike the df
+  // pass there is nothing else to show in its place.
+  function playbackProgramsFor(precision) {
+    if (!(precision in playbackGpu.programs)) {
+      try {
+        playbackGpu.programs[precision] = buildPlaybackPrograms(precision);
+      } catch (err) {
+        playbackGpu.programs[precision] = null;
+        setStatus(false, "Playback unavailable: " + (err.message || err));
+      }
+    }
+    return playbackGpu.programs[precision];
+  }
+
+  function releasePlaybackPrograms() {
+    Object.keys(playbackGpu.programs).forEach(function (k) {
+      var p = playbackGpu.programs[k];
+      if (p) { gl.deleteProgram(p.step.program); gl.deleteProgram(p.color.program); }
+    });
+    playbackGpu.programs = {};
+  }
+
+  // Frees the state - by far the biggest thing playback holds - and forgets
+  // everything that described it. Called the moment the state stops being
+  // useful: the view moves (see releasePlaybackIfViewMoved), the page is
+  // left, or the scene changes. A later Play rebuilds it from step 0, which
+  // it would have had to do for any of those anyway.
+  function releasePlaybackTextures() {
+    // The framebuffer first, so no attachment is holding a texture alive.
+    if (playbackGpu.fbo) gl.deleteFramebuffer(playbackGpu.fbo);
+    playbackGpu.textures.forEach(function (t) { if (t) gl.deleteTexture(t); });
+    playbackGpu.textures = [null, null];
+    playbackGpu.fbo = null;
+    playbackGpu.width = playbackGpu.height = playbackGpu.layers = 0;
+    playbackGpu.viewKey = null;
+    timeline.stateKey = null;
+    timeline.pass = null;
+    timeline.presentedKey = null;
+  }
+
+  // Everything, including the compiled programs - for leaving the page.
+  function releaseAllPlayback() {
+    stopTimelineClock();
+    timeline.following = false;
+    releasePlaybackTextures();
+    releasePlaybackPrograms();
+  }
+
+  // The world view and canvas the state was built for, without the lattice
+  // or precision - those are only known once programs exist, and this is
+  // checked every frame, playing or not.
+  function playbackViewKey() {
+    return [view.center.x, view.center.y, view.scale, canvas.width, canvas.height].join(" ");
+  }
+
+  // State built for a view is worthless once the view moves: every pixel's
+  // simulation belongs to the world point it started from. So a pan, zoom or
+  // resize frees it immediately rather than holding hundreds of megabytes
+  // until the next Play happens to reallocate.
+  function releasePlaybackIfViewMoved() {
+    if (playbackGpu.fbo && playbackGpu.viewKey !== playbackViewKey()) releasePlaybackTextures();
+  }
+
+  function ensurePlaybackTextures(w, h, layers) {
+    if (playbackGpu.fbo && playbackGpu.width === w && playbackGpu.height === h && playbackGpu.layers === layers) return true;
+    releasePlaybackTextures();
+    // Whatever is already queued up is somebody else's error, not this
+    // allocation's.
+    while (gl.getError() !== gl.NO_ERROR) { /* drain */ }
+    for (var i = 0; i < 2; i++) {
+      var tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
+      gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA32F, w, h, layers);
+      // A float texture isn't filterable, and one whose filter asks for
+      // filtering is incomplete - every texelFetch of it reads zero.
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      playbackGpu.textures[i] = tex;
+    }
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
+    playbackGpu.fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, playbackGpu.fbo);
+    gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, playbackGpu.textures[0], 0, 0);
+    var complete = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    if (!complete || gl.getError() !== gl.NO_ERROR) {
+      releasePlaybackTextures();
+      return false;
+    }
+    playbackGpu.width = w;
+    playbackGpu.height = h;
+    playbackGpu.layers = layers;
+    playbackGpu.current = 0;
+    playbackGpu.viewKey = playbackViewKey();
+    return true;
+  }
+
+  // Which sub-lattice of the full-res grid playback simulates: never finer
+  // than one sample per CSS pixel (a Retina canvas has four device pixels to
+  // each), never finer than the Resolution Limits setting allows the ladder,
+  // and coarser still until both state copies fit PLAYBACK_STATE_MAX_BYTES.
+  // A power of two, so it is always one of the ladder's own levels.
+  function playbackStride(layers) {
+    var dpr = window.devicePixelRatio || 1;
+    var stride = Math.max(endStride(), Math.pow(2, Math.floor(Math.log2(Math.max(1, dpr)))));
+    while (stride < COARSEST_STRIDE &&
+      2 * layers * BYTES_PER_STATE_TEXEL * levelWidth(stride) * levelHeight(stride) > PLAYBACK_STATE_MAX_BYTES) {
+      stride *= 2;
+    }
+    return stride;
+  }
+
+  // What one playback frame needs for the view as it stands, or null when
+  // playback can't run here. `key` names what the state is only valid for:
+  // the exact view, canvas, lattice and precision.
+  //
+  // Deliberately allocates no state. That happens in stepPlayback, and only
+  // once the view has held still: allocating here - every frame, before
+  // knowing whether the view was still moving - reallocated both state
+  // textures on every frame of a window resize, hundreds of megabytes a
+  // frame, which is enough to crash the browser's GPU process.
+  function playbackPlan() {
+    if (!hasFloatColorBuffer || !ensureTargets()) return null;
+    var precision = (getPass(pickPrecision()) || basePass).precision;
+    var programs = playbackProgramsFor(precision);
+    if (!programs) return null;
+    var stride = playbackStride(programs.layers);
+    var w = levelWidth(stride), h = levelHeight(stride);
+    return {
+      programs: programs,
+      stride: stride,
+      w: w,
+      h: h,
+      key: [view.center.x, view.center.y, view.scale, canvas.width, canvas.height, stride, precision].join(" "),
+    };
+  }
+
+  // Everything the colour pass's picture depends on besides the state
+  // itself - if any of it changes, the same state has to be painted again.
+  function playbackLookKey(res) {
+    return [res.key, timeline.stateStep, displayMode.id, colorZoomEnabled, simulationSteps, bounceMaxValue].join(" ");
+  }
+
+  // Rows [band, band + rows) of one step pass, into the texture that isn't
+  // current. A state with more layers than one draw can write is written
+  // one group per draw - the same steps, a different slice kept each time.
+  function drawPlaybackBand(res, pass, rows) {
+    var prog = res.programs.step, u = prog.uniforms;
+    var layers = res.programs.layers;
+    var target = playbackGpu.textures[1 - playbackGpu.current];
+    gl.useProgram(prog.program);
+    bindQuad(prog.posLoc);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, playbackGpu.textures[playbackGpu.current]);
+    gl.uniform1i(u.state, 0);
+    // The full-res canvas, and this lattice's place in it - so every texel
+    // lands on the world point the ladder's own pixel there would.
+    gl.uniform2f(u.resolution, canvas.width, canvas.height);
+    gl.uniform1f(u.gridStride, res.stride);
+    gl.uniform2f(u.gridOrigin, 0, 0);
+    setCenterUniforms(u);
+    gl.uniform1f(u.scale, view.scale);
+    gl.uniform1i(u.init, pass.init ? 1 : 0);
+    gl.uniform1i(u.baseStep, pass.from);
+    gl.uniform1i(u.steps, pass.steps);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, playbackGpu.fbo);
+    gl.viewport(0, 0, res.w, res.h);
+    gl.enable(gl.SCISSOR_TEST);
+    gl.scissor(0, pass.band, res.w, rows);
+    for (var g = 0; g < res.programs.groups; g++) {
+      var buffers = [];
+      for (var k = 0; k < MAX_STATE_ATTACHMENTS; k++) {
+        var layer = g * MAX_STATE_ATTACHMENTS + k;
+        var used = layer < layers;
+        gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + k, used ? target : null, 0, used ? layer : 0);
+        buffers.push(used ? gl.COLOR_ATTACHMENT0 + k : gl.NONE);
+      }
+      gl.drawBuffers(buffers);
+      gl.uniform1i(u.group, g);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+    gl.disable(gl.SCISSOR_TEST);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  // Paints the current state into the accumulator, at the lattice's own
+  // size, and puts it on the canvas the same way the ladder shows a level.
+  function presentPlayback(res) {
+    var prog = res.programs.color, u = prog.uniforms;
+    var target = accum[accumIndex];
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
+    gl.viewport(0, 0, res.w, res.h);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.useProgram(prog.program);
+    bindQuad(prog.posLoc);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, playbackGpu.textures[playbackGpu.current]);
+    gl.uniform1i(u.state, 0);
+    gl.uniform2i(u.stateSize, res.w, res.h);
+    gl.uniform1i(u.stateSteps, timeline.stateStep);
+    gl.uniform1f(u.gridStride, res.stride);
+    gl.uniform1i(u.colorZoom, colorZoomEnabled ? 1 : 0);
+    gl.uniform1i(u.durationSteps, simulationSteps);
+    gl.uniform1f(u.bounceMax, bounceMaxValue);
+    gl.uniform1i(u.displayMode, displayMode.id);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    presentLevel(target, res.w, res.h, res.stride);
+    timeline.presentedKey = playbackLookKey(res);
+  }
+
+  // One frame of playback. Returns false when playback isn't drawing this
+  // frame (paused, or waiting for the view to hold still), in which case the
+  // ladder gets the frame instead.
+  function stepPlayback(now) {
+    timeline.drawing = false;
+    if (!timeline.playing) return false;
+    var dt = timeline.lastTickAt > 0 ? (now - timeline.lastTickAt) / 1000 : 0;
+    timeline.lastTickAt = now;
+    var res = playbackPlan();
+    if (!res) {
+      stopTimelineClock();
+      timeline.following = false;
+      markDirty();
+      updateTimelineUI();
+      return false;
+    }
+    if (res.key !== timeline.seenKey) {
+      if (timeline.seenKey !== null) timeline.seenAt = now;
+      timeline.seenKey = res.key;
+    }
+    var building = timeline.pass && timeline.pass.key === res.key;
+    if (res.key !== timeline.stateKey && !building) {
+      // Nothing valid for this view - it moved, or there never was any.
+      timeline.pass = null;
+      timeline.carry = 0;
+      if (now - timeline.seenAt < PLAYBACK_SETTLE_MS) {
+        playbackBudget.lastWorkAt = 0;
+        playbackBudget.lastSpent = 0;
+        updateTimelineUI();
+        return false;
+      }
+    }
+    // The view has held still, so this is the first moment the state is
+    // worth its memory - see playbackPlan.
+    if (!ensurePlaybackTextures(res.w, res.h, res.programs.layers)) {
+      setStatus(false, "Playback unavailable: not enough video memory for its state");
+      stopTimelineClock();
+      timeline.following = false;
+      markDirty();
+      updateTimelineUI();
+      return false;
+    }
+
+    // The ladder's timing is meaningless across however long playback holds
+    // the frame; left alone it would read the whole stretch as one frame of
+    // its own and shrink its budget to nothing.
+    ladderBudget.lastWorkAt = 0;
+    ladderBudget.lastSpent = 0;
+    noteFrameTiming(playbackBudget, now);
+    var budget = playbackBudget.budget;
+    var groups = res.programs.groups;
+    var following = timeline.following;
+    var catchingUp = timeline.stateKey !== res.key || timeline.stateStep < timeline.step;
+    if (!catchingUp && !following) {
+      var rate = PLAYBACK_STEPS_PER_SECOND * playbackSpeed;
+      timeline.carry = Math.min(timeline.carry + dt * rate, Math.max(1, rate * PLAYBACK_MAX_CARRY_SECONDS));
+    }
+
+    var spent = 0, advanced = false;
+    // Always at least one band, however tight the budget - the same
+    // forward-progress rule as the ladder's.
+    while (spent < budget || spent === 0) {
+      if (!timeline.pass) {
+        var fresh = timeline.stateKey !== res.key;
+        var have = fresh ? 0 : timeline.stateStep;
+        // Following Inspect, the target is whatever step its clock shows;
+        // otherwise it's the step to catch up to, or else the clock's.
+        var want = following ? Math.min(simulationSteps, timeline.followTarget)
+          : (fresh || have < timeline.step) ? timeline.step
+          : Math.min(simulationSteps, have + Math.floor(timeline.carry));
+        if (!fresh && want <= have) break;
+        if (fresh && isBouncesOutput) bounceMaxValue = findBounceMax();
+        // As many steps as the rest of this frame's budget covers across the
+        // whole lattice, never fewer than one: a pass that can't finish this
+        // frame just bands across the next few.
+        var affordable = Math.max(1, Math.floor((budget - spent) / (res.w * res.h * groups)));
+        timeline.pass = { key: res.key, init: fresh, from: have, steps: Math.min(want - have, affordable), band: 0 };
+      }
+      var pass = timeline.pass;
+      var rowCost = res.w * Math.max(1, pass.steps) * groups;
+      var rows = Math.min(res.h - pass.band, Math.max(1, Math.floor((budget - spent) / rowCost)));
+      drawPlaybackBand(res, pass, rows);
+      spent += rows * rowCost;
+      pass.band += rows;
+      if (pass.band < res.h) continue;
+
+      // The pass is complete: the texture it wrote is the state now.
+      playbackGpu.current = 1 - playbackGpu.current;
+      timeline.stateKey = pass.key;
+      timeline.stateStep = pass.from + pass.steps;
+      timeline.pass = null;
+      if (following) {
+        timeline.step = timeline.stateStep;
+      } else if (timeline.stateStep > timeline.step) {
+        timeline.carry = Math.max(0, timeline.carry - (timeline.stateStep - timeline.step));
+        timeline.step = timeline.stateStep;
+      }
+      advanced = true;
+      if (timeline.stateStep >= simulationSteps) break;
+    }
+    playbackBudget.lastSpent = spent;
+
+    if (following) {
+      // Best effort, never a hold-up: whatever step the state has reached
+      // is shown, even short of Inspect's - a GPU slower than the preview's
+      // clock just trails it a little rather than freezing the map until it
+      // catches up. Only a rebuild for a new view shows nothing new.
+      catchingUp = timeline.stateKey !== res.key;
+      timeline.catchingUp = catchingUp;
+      timeline.catchUpFraction = 0;
+      timeline.stride = res.stride;
+      timeline.drawing = true;
+      if (!catchingUp && (advanced || timeline.presentedKey !== playbackLookKey(res))) presentPlayback(res);
+      updateRenderProgressRing();
+      // Inspect has stopped and the map has reached its step - sharpen it.
+      if (!catchingUp && !timeline.followPlaying && timeline.stateStep >= timeline.followTarget) pauseTimeline();
+      else updateTimelineUI();
+      return true;
+    }
+
+    catchingUp = timeline.stateKey !== res.key || timeline.stateStep < timeline.step;
+    timeline.catchingUp = catchingUp;
+    timeline.catchUpFraction = timeline.step > 0 && timeline.stateKey === res.key ? timeline.stateStep / timeline.step : 0;
+    timeline.stride = res.stride;
+    timeline.drawing = true;
+    if (!catchingUp && (advanced || timeline.presentedKey !== playbackLookKey(res))) presentPlayback(res);
+    updateRenderProgressRing();
+    // Reached the end - the picture stops changing, so let the ladder
+    // finish it off at full quality.
+    if (!catchingUp && timeline.step >= simulationSteps) pauseTimeline();
+    else updateTimelineUI();
+    return true;
+  }
+
+  // Hands the image playback last painted to the ladder as a finished level
+  // of the current run, so pausing sharpens what is on screen rather than
+  // restarting from the coarsest blocks. Only when that image is exactly the
+  // picture the ladder would be refining (same view, step and look), and
+  // only in Standard: the derived modes' playback shading differences
+  // neighbouring texels (see shadePlaybackDerived), which approximates the
+  // ladder's per-pixel stencil but doesn't reproduce it, and a level built
+  // one way refined by samples of the other would show the seam.
+  function seedLadderFromPlayback() {
+    if (displayMode !== DISPLAY_MODES[0] || !timeline.presentedKey) return false;
+    var res = playbackPlan();
+    if (!res || timeline.stateKey !== res.key || timeline.stateStep !== timeline.step) return false;
+    if (timeline.presentedKey !== playbackLookKey(res)) return false;
+    dirty = false;
+    progressive.stride = res.stride;
+    progressive.accumStride = res.stride;
+    progressive.sublattice = 1;
+    progressive.band = 0;
+    progressive.complete = false;
+    progressive.aaSample = 0;
+    // What beginProgressive would have done for a run of its own - the
+    // bounce-count divisor excepted, which playback already measured for
+    // this same view.
+    updateInspectMarkers();
+    updatePrecisionReadout();
+    if (res.stride <= endStride()) {
+      finishRun(0);
+    } else {
+      presentFrame();
+      updateResolutionBoundsUI();
+    }
+    scheduleColorSpreadCheck();
+    statsOnViewChanged();
+    return true;
+  }
+
+  // Stops the clock without deciding what the grid shows next.
+  function stopTimelineClock() {
+    timeline.playing = false;
+    timeline.drawing = false;
+    timeline.catchingUp = false;
+    // The texture a pass in flight was writing is simply abandoned - the
+    // current one is still complete.
+    timeline.pass = null;
+    timeline.carry = 0;
+    timeline.lastTickAt = 0;
+    playbackBudget.lastWorkAt = 0;
+    playbackBudget.lastSpent = 0;
+  }
+
+  // A first measurement to start playback's budget from, rather than a
+  // guess: the ladder's throughput is pixels per period at the step count it
+  // was rendering, i.e. roughly that many pixel-steps.
+  function seedPlaybackBudget() {
+    if (playbackBudget.throughput === 0 && ladderBudget.throughput > 0) {
+      playbackBudget.budget = clamp(ladderBudget.throughput * Math.max(1, renderedSteps()) * displayMode.samples,
+        playbackBudget.min, playbackBudget.max);
+    }
+  }
+
+  function playTimeline() {
+    if (timeline.playing || timeline.following || !hasFloatColorBuffer) return;
+    // Play at the end starts over, the way a media player does.
+    if (timeline.step >= simulationSteps) {
+      timeline.step = 0;
+      timeline.stateKey = null;
+    }
+    seedPlaybackBudget();
+    timeline.playing = true;
+    timeline.carry = 0;
+    timeline.lastTickAt = 0;
+    // Nothing is moving - no reason to wait for the view to settle.
+    timeline.seenKey = null;
+    timeline.seenAt = 0;
+    // The picture is about to change every frame: nothing measured of it
+    // stays true, and nothing new is worth measuring until it stops.
+    statsOnViewChanged();
+    updateTimelineUI();
+  }
+
+  function pauseTimeline() {
+    if (!timeline.playing) return;
+    stopTimelineClock();
+    if (!seedLadderFromPlayback()) markDirty();
+    updateRenderProgressRing();
+    updateTimelineUI();
+  }
+
+  // Shows `step` - from a scrub of the timeline, or the restart button.
+  // Pauses first: a user dragging the timeline is choosing the step
+  // themselves.
+  function seekTimeline(step) {
+    step = clamp(Math.round(step), 0, simulationSteps);
+    var wasPlaying = timeline.playing;
+    if (wasPlaying) stopTimelineClock();
+    if (step === timeline.step && !wasPlaying) return;
+    // State only moves forward; a later step is still reachable from it.
+    if (step < timeline.stateStep) timeline.stateKey = null;
+    timeline.step = step;
+    markDirty();
+    updateTimelineUI();
+  }
+
+  // ---- Inspect's "Play back in map" ----
+  //
+  // With the toggle on, the map plays whatever step the Inspect preview is
+  // showing, so a hovered or inspected point and the whole field around it
+  // evolve together. The preview's clock stays the one clock: it already
+  // owns play/pause, scrubbing, speed, restarting on a new hover and looping
+  // at the end, and the map just follows it. The map's own transport is
+  // locked out meanwhile, so there are never two clocks disagreeing.
+  var mapFollowsInspect = false;
+
+  // Called with the step the preview is showing and whether its clock is
+  // advancing, every time either might have changed (see
+  // syncMapToInspection). Cheap to call when neither has.
+  function followInspection(step, playing) {
+    if (!mapFollowsInspect || !hasFloatColorBuffer) return;
+    step = clamp(step, 0, simulationSteps);
+    if (timeline.following && step === timeline.followTarget && playing === timeline.followPlaying) return;
+    if (!timeline.following) {
+      stopTimelineClock();
+      timeline.following = true;
+      timeline.seenKey = null;
+      timeline.seenAt = 0;
+      seedPlaybackBudget();
+      statsOnViewChanged();
+    }
+    var backward = step < timeline.stateStep;
+    timeline.followTarget = step;
+    timeline.followPlaying = playing;
+    if (playing || (!backward && timeline.playing)) {
+      // Advancing - or paused just ahead of where the map has got to, which
+      // it can still reach from its state and then sharpen (stepPlayback).
+      // Behind the state is a rebuild from step 0, and a write already in
+      // flight belongs to the old run.
+      if (backward) {
+        timeline.stateKey = null;
+        timeline.pass = null;
+      }
+      timeline.playing = true;
+    } else {
+      // Paused somewhere the state can't reach - most often a scrub of the
+      // preview's slider, one tick at a time. The ladder renders each step
+      // directly, the same as scrubbing the map's own timeline.
+      stopTimelineClock();
+      if (backward) timeline.stateKey = null;
+      timeline.step = step;
+      markDirty();
+    }
+    updateTimelineUI();
+  }
+
+  // The preview's step, in the map's terms. playbackStep is 0-indexed over
+  // logged rows, and row 0 is the state after one step - the preview's own
+  // readout says "step 1" there, and so does the map.
+  function syncMapToInspection() {
+    if (!playbackHasSession) return;
+    followInspection(Math.floor(playbackStep) + 1, playbackPlaying);
+  }
+
+  // Back to the map's own timeline, resting at its end - the static map it
+  // shows with the toggle off.
+  function releaseMapFollow() {
+    if (!timeline.following) return;
+    stopTimelineClock();
+    timeline.following = false;
+    timeline.step = simulationSteps;
+    if (timeline.stateStep > timeline.step) timeline.stateKey = null;
+    markDirty();
+    updateTimelineUI();
+  }
+
+  function updateTimelineUI() {
+    var playing = timeline.playing && !timeline.following;
+    gridPlayPauseBtn.textContent = playing ? "⏸" : "▶";
+    gridPlayPauseBtn.title = timeline.following ? "The map is following Inspect's playback"
+      : !hasFloatColorBuffer ? "Playback needs floating-point render targets, which this browser doesn't provide"
+      : playing ? "Pause" : "Play";
+    gridPlayPauseBtn.setAttribute("aria-label", playing ? "Pause" : "Play");
+    gridPlayPauseBtn.disabled = timeline.following || !hasFloatColorBuffer;
+    gridRestartBtn.disabled = timeline.following;
+    gridTimelineSlider.disabled = timeline.following;
+    gridSpeedBtn.disabled = timeline.following;
+    gridTimelineSlider.max = String(simulationSteps);
+    gridTimelineSlider.value = String(renderedSteps());
+    var text = "Frame " + renderedSteps().toLocaleString() + " / " + simulationSteps.toLocaleString();
+    if (timeline.following) {
+      text += " · following Inspect";
+    } else if (playing && timeline.drawing && timeline.catchingUp) {
+      text += " · catching up " + Math.floor(timeline.catchUpFraction * 100) + "%";
+    }
+    gridTimelineReadout.textContent = text;
+  }
+
+  makeSpeedControl(gridSpeedBtn, gridSpeedPopup, gridSpeedSlider, gridSpeedValueEl);
+
+  // No float render targets means nowhere to keep the state (updateTimelineUI
+  // disables Play for it). The scrubber still works - every step it picks is
+  // an ordinary render - but following Inspect can't.
+  if (!hasFloatColorBuffer) {
+    inspectMapFollowCheckbox.disabled = true;
+    inspectMapFollowCheckbox.closest("label").title = "Playback needs floating-point render targets, which this browser doesn't provide";
+  }
+  gridPlayPauseBtn.addEventListener("click", function () {
+    if (timeline.following) return;
+    if (timeline.playing) pauseTimeline(); else playTimeline();
+  });
+  gridRestartBtn.addEventListener("click", function () {
+    if (!timeline.following) seekTimeline(0);
+  });
+  gridTimelineSlider.addEventListener("input", function () {
+    if (!timeline.following) seekTimeline(Number(gridTimelineSlider.value));
+  });
+  inspectMapFollowCheckbox.checked = mapFollowsInspect;
+  inspectMapFollowCheckbox.addEventListener("change", function () {
+    mapFollowsInspect = inspectMapFollowCheckbox.checked;
+    if (mapFollowsInspect) {
+      // Whatever the map's own timeline was doing gives way to the preview.
+      pauseTimeline();
+      syncMapToInspection();
+    } else {
+      releaseMapFollow();
+    }
+  });
+
   // resizeCanvas both matches the backing store to the new CSS size and
   // (via markDirty) restarts refinement, which is the whole of what a
   // resize needs now. This used to have a second job - retrying a startup
@@ -6590,7 +7725,8 @@
 
   resizeCanvas();
   updateZoomReadout();
-  updateSpeedUI();
+  updateSpeedUI(); // both speed buttons at once - they share one value
+  updateTimelineUI();
   showHoverEmpty(); // sets the X: 0, Y: 0 placeholder before the cursor ever touches the grid
   // Inspect is the one menu open on arrival. The other two configure and
   // measure the fractal; this one is how you read it, and landing on a page
@@ -6608,12 +7744,17 @@
   // and the refinement itself carries on across frames until it reaches the
   // end of the ladder, at which point stepProgressive returns immediately
   // and the loop costs nothing until the next change.
+  //
+  // Playback, while it is playing, takes the frame instead - except while
+  // the view is moving, when it hands the frame back so the ladder can show
+  // the current step (see stepPlayback).
   requestAnimationFrame(function frame(now) {
     // Every frame, working or idle - see noteFrameCadence on why the idle
     // ones are the important ones.
     noteFrameCadence(now);
     if (dirty) { resetProgressive(); dirty = false; }
-    stepProgressive(now);
+    releasePlaybackIfViewMoved();
+    if (!stepPlayback(now)) stepProgressive(now);
     requestAnimationFrame(frame);
   });
 
@@ -6653,9 +7794,15 @@
   // looping when the user navigated away just kept firing indefinitely from
   // the now-invisible page. pausePlayback() is exactly the same stop this
   // page's own Pause button performs, just triggered from outside instead of
-  // a click.
+  // a click. The grid's own timeline gets the same treatment, for the same
+  // reason: nothing would stop it simulating a page nobody can see.
   global.FractalGrid.pausePlayback = function () {
     pausePlayback();
+    // Leaving the page, so playback's GPU memory goes with it - state and
+    // programs both. Coming back rebuilds whatever is needed on the next Play.
+    releaseAllPlayback();
+    markDirty();
+    updateTimelineUI();
   };
   // Forces the pending frame out now rather than on the next rAF tick -
   // the transition needs the grid's picture to be current for the frame it
@@ -6676,6 +7823,11 @@
   global.FractalGrid.setScene = function (nextScene) {
     scene = nextScene;
     adoptSceneDuration();
+    // The timeline was the old scene's: stop it, drop everything playback
+    // compiled and simulated for that scene, and rest at the new one's end.
+    releaseAllPlayback();
+    timeline.step = simulationSteps;
+    updateTimelineUI();
     isBouncesOutput = scene.output.property === "bounces";
     isInfinitePositionOutput = scene.edgeMode === "infinite" &&
       (scene.output.property === "x" || scene.output.property === "y");
