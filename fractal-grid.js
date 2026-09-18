@@ -146,7 +146,6 @@
   var gridSpeedPopup = document.getElementById("grid-speed-popup");
   var gridSpeedSlider = document.getElementById("grid-speed-slider");
   var gridSpeedValueEl = document.getElementById("grid-speed-value");
-  var inspectMapFollowCheckbox = document.getElementById("inspect-map-follow-checkbox");
   var hoverMuteBtn = document.getElementById("hover-mute");
   var gridSoundVolumeSlider = document.getElementById("grid-sound-volume-slider");
   var gridSoundVolumeIcon = document.getElementById("grid-sound-volume-icon");
@@ -454,9 +453,12 @@
         if (inspectedGroups.length > 0) beginInspectOnlySession();
         else showHoverEmpty();
       } else {
-        pausePlayback();
-        stopHoverReplay();
-        hoverKey = null; // so re-entering the same cell later still previews it
+        // End the session, don't just pause it: with the card shut there is
+        // nothing for the map to be in lockstep WITH, so showHoverEmpty's
+        // own releaseMapFollow is what puts the map back on the finished
+        // field (and it clears hoverKey, so re-entering the same cell later
+        // still previews it).
+        showHoverEmpty();
         disarmInspect();
       }
       updateInspectMarkers();
@@ -479,11 +481,27 @@
   var displayMenu = makeMenu("menu-display", "grid-btn-display", "left");
 
   // The map's own transport plus the Simulation Duration slider that sets
-  // where its timeline ends - see updateTimelineUI. Nothing to start or
-  // stop on open/close: the timeline keeps running (and the map keeps
-  // showing whichever frame it is on) with the card shut, which is the
-  // point of collapsing it - an unobstructed fractal, still playing.
-  var playbackMenu = makeMenu("menu-playback", "grid-btn-playback", "right");
+  // where its timeline ends - see updateTimelineUI.
+  //
+  // This card being OPEN is the whole of what used to be Inspect's "Play
+  // back in map" checkbox: while it is up, the map plays whatever step the
+  // Inspect preview is showing (see followInspection), and shut, the map is
+  // frozen at the finished field. A card you open to see the map evolve and
+  // a switch that says "also evolve the map" were two ways of saying the
+  // same thing, so there is now one.
+  var playbackMenu = makeMenu("menu-playback", "grid-btn-playback", "right",
+    function (open) {
+      if (open) {
+        // Opening it changes nothing on screen: the map stays exactly where
+        // it was - at the end, scrubber parked on the last frame - and
+        // stays there, hovering included, until the user works one of the
+        // transport controls (see mapLinked).
+        pauseTimeline();
+        mapLinked = false;
+      } else {
+        freezeMapAtEnd();
+      }
+    });
 
   // The rendering-progress gauge (see updateRenderProgressRing further
   // down) doubles as another accordion menu - registering it here is the
@@ -1815,10 +1833,10 @@
     catchingUp: false,
     catchUpFraction: 0,
     stride: 1,
-    // Inspect's "Play back in map": while `following`, the step comes from
-    // the Inspect preview's clock rather than this timeline's own - see
-    // followInspection. followTarget is the step that clock is showing,
-    // followPlaying whether it is advancing.
+    // While `following`, the step comes from the Inspect preview's clock
+    // rather than this timeline's own - see followInspection, and the Map
+    // Evolution card whose being open turns that on. followTarget is the
+    // step that clock is showing, followPlaying whether it is advancing.
     following: false,
     followTarget: 0,
     followPlaying: false,
@@ -5026,8 +5044,8 @@
   // next hover. Not part of setPlaybackControlsEnabled below: it's a
   // standing preference (like the Simulation Duration setting beside the
   // timeline), useful to set before ever hovering a pixel, not a transport
-  // control that needs something loaded to act on. Defaults to 2x on this
-  // page - physics-ui.js's own default is a real-time 1x instead.
+  // control that needs something loaded to act on. Defaults to 1x, the
+  // same real-time default physics-ui.js's own copy of this control uses.
   //
   // ONE speed, two buttons. Inspect's preview transport and the Map
   // Evolution timeline both ask the same question - how fast should
@@ -5068,7 +5086,7 @@
   // The one value both controls show and both playback loops read. Read
   // fresh by whoever uses it, never cached, which is what lets a drag take
   // effect mid-run - on the preview and the timeline at once.
-  var playbackSpeed = 2;
+  var playbackSpeed = 1;
   // Every makeSpeedControl instance registers its own render function
   // here, so setPlaybackSpeed can repaint all of them without knowing how
   // many there are or which one the user actually dragged - the same shape
@@ -5708,7 +5726,7 @@
   // really was only ever logged that far) rather than silently changing
   // the denominator, while everything else on screen keeps going until ITS
   // own final frame.
-  function renderPlaybackFrame(skipMapSync) {
+  function renderPlaybackFrame() {
     var step = Math.floor(playbackStep);
     hoverCtx.setTransform(1, 0, 0, 1, 0, 0);
     hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);
@@ -5777,11 +5795,11 @@
     }
     updateProgressSliderPosition();
     // Every frame the preview shows - playing, scrubbed, reset or looped -
-    // passes through here, so this one call keeps the map on the same step.
-    // Skipped only for a hover's very first frame when it didn't autoplay
-    // (see beginPlaybackSession) - a plain hover shouldn't touch the map at
-    // all until the user actually starts playback.
-    if (!skipMapSync) syncMapToInspection();
+    // passes through here, so this one call is the whole of what keeps the
+    // map in lockstep with it. Unconditional: with Map Evolution shut,
+    // followInspection is itself a no-op, so there is nothing here for a
+    // caller to have to opt out of.
+    syncMapToInspection();
   }
 
   // Every trajectory-bearing thing currently on screen, in the exact order
@@ -5872,14 +5890,27 @@
     checkPlaybackSounds(prevStep, Math.floor(playbackStep));
     renderPlaybackFrame();
     if (playbackStep >= ceiling - 1) {
+      hoverRafId = null;
+      // With Map Evolution open this clock is the MAP's clock too, and a
+      // map run ends at its last frame rather than starting over - so it
+      // stops here, frozen on the final frame, and Play from there begins
+      // again at 0 (see resumePlayback). Inspect on its own still loops.
+      if (playbackMenu.isOpen()) {
+        playbackPlaying = false;
+        updatePlayPauseButtonUI();
+        syncMapToInspection();
+        return;
+      }
       // Everything on screen has reached its final logged frame - hold
       // there for a beat, then play the whole thing again from the start
-      // (every replay loops this way, with or without Inspect) unless the
-      // user paused during the hold.
-      hoverRafId = null;
+      // unless the user paused during the hold.
       hoverLoopTimer = setTimeout(function () {
         hoverLoopTimer = null;
         if (!playbackPlaying) return;
+        // Opening Map Evolution during the hold turns this run into a map
+        // run, which doesn't start over - the same rule as above, applied
+        // to a loop that was already queued when the card came up.
+        if (playbackMenu.isOpen()) { playbackPlaying = false; updatePlayPauseButtonUI(); syncMapToInspection(); return; }
         playbackStep = 0;
         playbackLastTickTime = performance.now();
         playbackAutoStartedAt = performance.now();
@@ -5930,6 +5961,7 @@
   function beginPlaybackSession(replay, autoplay) {
     if (autoplay === undefined) autoplay = true;
     stopHoverReplay();
+    unlinkMapWhereItIs();
     activeReplay = replay || null;
     playbackStep = 0;
     playbackConfiguredMax = hoverStepCount();
@@ -5940,7 +5972,7 @@
     playbackAutoStartedAt = performance.now();
     updatePlayPauseButtonUI();
     if (autoplay) ensurePlaybackAdvancing();
-    renderPlaybackFrame(!autoplay);
+    renderPlaybackFrame();
     hoverEmptyState.hidden = true;
   }
 
@@ -5951,14 +5983,17 @@
       // playback started on its own almost certainly meant to start it,
       // which already happened.
       if (performance.now() - playbackAutoStartedAt < PLAY_PAUSE_GRACE_MS) return;
+      linkMapToPreview();
       pausePlayback();
     } else {
+      linkMapToPreview();
       resumePlayback();
     }
   });
 
   hoverProgressSlider.addEventListener("input", function () {
     if (!playbackHasSession) return;
+    linkMapToPreview();
     pausePlayback();
     playbackStep = Number(hoverProgressSlider.value);
     renderPlaybackFrame();
@@ -5966,6 +6001,7 @@
 
   hoverResetBtn.addEventListener("click", function () {
     if (!playbackHasSession) return;
+    linkMapToPreview();
     pausePlayback();
     playbackStep = 0;
     renderPlaybackFrame();
@@ -6132,7 +6168,11 @@
       lineageSlots: isLifespan || isBouncesOutput ? null : outputLineageSlotsAt(worldPoint, steps),
       extraWrapOverrides: extraWrapOverrides,
       bounceEvents: bounceEventsAt(worldPoint, steps),
-    }, /* autoplay */ !mapFollowsInspect);
+      // Open Map Evolution means the map is playing this same clock, and
+      // a map run is something the user starts - so a hover lands on the
+      // replay's first frame (which IS this point's starting state, the
+      // same picture the instant preview just drew) and waits there.
+    }, /* autoplay */ !playbackMenu.isOpen());
   }
 
   // Shown instead of the ordinary "hover the grid to preview a pixel" empty
@@ -6146,7 +6186,7 @@
   // immediately, including falling back to the real empty state if that
   // empties the array entirely.
   function beginInspectOnlySession() {
-    beginPlaybackSession(null);
+    beginPlaybackSession(null, /* autoplay */ !playbackMenu.isOpen());
   }
 
   canvas.addEventListener("mousemove", function (e) {
@@ -6176,10 +6216,8 @@
     // no extra move needed - but once at least one point/line/grid is
     // locked, the panel belongs to THEM: it no longer swaps in a preview of
     // the currently-hovered cell's own trajectory alongside whatever is
-    // already playing back. Same reasoning applies while the map is
-    // following Inspect: with the toggle on, merely hovering shouldn't
-    // touch the preview panel or the map at all - only a locked point does.
-    if (inspectedGroups.length > 0 || mapFollowsInspect) return;
+    // already playing back.
+    if (inspectedGroups.length > 0) return;
     stopHoverReplay(); // a previous cell's replay may still be animating - don't let it keep drawing over the new cell's preview
     if (hoverUpgradeTimer) clearTimeout(hoverUpgradeTimer);
     showHoverInstant(world);
@@ -7576,21 +7614,63 @@
     updateTimelineUI();
   }
 
-  // ---- Inspect's "Play back in map" ----
+  // ---- The map in lockstep with Inspect ----
   //
-  // With the toggle on, the map plays whatever step the Inspect preview is
-  // showing, so a hovered or inspected point and the whole field around it
-  // evolve together. The preview's clock stays the one clock: it already
-  // owns play/pause, scrubbing, speed, restarting on a new hover and looping
-  // at the end, and the map just follows it. The map's own transport is
-  // locked out meanwhile, so there are never two clocks disagreeing.
-  var mapFollowsInspect = false;
+  // While the Map Evolution card is open, the map plays whatever step the
+  // Inspect preview is showing, so a hovered or inspected point and the
+  // whole field around it evolve together. The preview's clock is the one
+  // clock: it already owns play/pause, scrubbing, speed and restarting on a
+  // new hover, and the map follows it.
+  //
+  // The two cards' transports are then two views of that one clock rather
+  // than two clocks - Map Evolution's play/pause, scrubber and reset drive
+  // the PREVIEW (see previewOwnsTimeline and the listeners below), exactly
+  // as its own controls do, so whichever the user reaches for they stay in
+  // the same state. With no preview session to share - Inspect shut, or
+  // nothing hovered or locked - those same controls drive the map's own
+  // timeline instead, which is Map Evolution working on its own.
+  //
+  // But NOT until asked. Merely hovering the grid builds a preview session
+  // and parks it on its first frame, and following that would drag the
+  // whole map off the finished field and back to frame 1 just because the
+  // cursor crossed the picture - so the map ignores the preview entirely
+  // until the user reaches for a transport control (either card's: they are
+  // the same clock). That gesture is the only thing that sets this, and
+  // going back to the finished field - the card opening or closing, Inspect
+  // closing, the preview session ending - is the only thing that clears it,
+  // so the map is always either resting at the end or somewhere the user
+  // themselves put it.
+  var mapLinked = false;
+  function linkMapToPreview() { mapLinked = true; }
+
+  // Something new to preview - a different cell under the cursor, a point
+  // locked or removed - is not a request to move the map either. It comes
+  // unlinked and stays exactly where the user last put it, rather than
+  // being dragged back to the new replay's own first frame. (A preview that
+  // goes away entirely is different: see releaseMapFollow, which returns
+  // the map to the finished field, its resting state.)
+  function unlinkMapWhereItIs() {
+    if (!mapLinked) return;
+    mapLinked = false;
+    pauseTimeline(); // stops the follow clock and sharpens the frame it stopped on
+    timeline.following = false;
+    updateTimelineUI();
+  }
+
+  function previewOwnsTimeline() {
+    return hasFloatColorBuffer && playbackMenu.isOpen() && inspectMenu.isOpen() && playbackHasSession
+      // Already mid-run on its own clock (started here, with nothing
+      // hovered at the time): this row goes on controlling THAT rather than
+      // silently switching to a preview the user hasn't linked - otherwise
+      // Pause would leave the map running.
+      && (mapLinked || !timeline.playing);
+  }
 
   // Called with the step the preview is showing and whether its clock is
   // advancing, every time either might have changed (see
   // syncMapToInspection). Cheap to call when neither has.
   function followInspection(step, playing) {
-    if (!mapFollowsInspect || !hasFloatColorBuffer) return;
+    if (!playbackMenu.isOpen() || !mapLinked || !hasFloatColorBuffer) return;
     step = clamp(step, 0, simulationSteps);
     if (timeline.following && step === timeline.followTarget && playing === timeline.followPlaying) return;
     if (!timeline.following) {
@@ -7634,69 +7714,109 @@
     followInspection(Math.floor(playbackStep) + 1, playbackPlaying);
   }
 
-  // Back to the map's own timeline, resting at its end - the static map it
-  // shows with the toggle off.
-  function releaseMapFollow() {
-    if (!timeline.following) return;
+  // The finished field - the step the Simulation Duration names - which is
+  // what the grid shows whenever Map Evolution is shut, and what it opens
+  // on. Panning and zooming are untouched by any of this; only which step
+  // every pixel is rendered at.
+  function freezeMapAtEnd() {
     stopTimelineClock();
     timeline.following = false;
+    // Back at the end is back to "don't move until asked" - see mapLinked.
+    mapLinked = false;
     timeline.step = simulationSteps;
     if (timeline.stateStep > timeline.step) timeline.stateKey = null;
     markDirty();
     updateTimelineUI();
   }
 
+  // Back to the map's own timeline, resting at its end - for when the thing
+  // being followed goes away (the preview session ends, Inspect closes)
+  // rather than the card itself. Guarded, so it never stomps a Map
+  // Evolution run the user started on its own.
+  function releaseMapFollow() {
+    if (!timeline.following) return;
+    freezeMapAtEnd();
+  }
+
   function updateTimelineUI() {
-    var playing = timeline.playing && !timeline.following;
+    // Sharing Inspect's clock, this row reports and controls THAT clock -
+    // so the button reads from playbackPlaying, not from whether the map's
+    // own timeline happens to be mid-catch-up. Nothing is disabled for
+    // following any more: these controls drive the shared clock rather than
+    // being locked out of it.
+    var linked = previewOwnsTimeline();
+    var playing = linked ? playbackPlaying : timeline.playing;
     gridPlayPauseBtn.textContent = playing ? "⏸" : "▶";
-    gridPlayPauseBtn.title = timeline.following ? "The map is following Inspect's playback"
-      : !hasFloatColorBuffer ? "Playback needs floating-point render targets, which this browser doesn't provide"
+    gridPlayPauseBtn.title = !linked && !hasFloatColorBuffer
+      ? "Playback needs floating-point render targets, which this browser doesn't provide"
       : playing ? "Pause" : "Play";
     gridPlayPauseBtn.setAttribute("aria-label", playing ? "Pause" : "Play");
-    gridPlayPauseBtn.disabled = timeline.following || !hasFloatColorBuffer;
-    gridRestartBtn.disabled = timeline.following;
-    gridTimelineSlider.disabled = timeline.following;
-    gridSpeedBtn.disabled = timeline.following;
+    gridPlayPauseBtn.disabled = !linked && !hasFloatColorBuffer;
+    gridRestartBtn.disabled = false;
+    gridTimelineSlider.disabled = false;
+    gridSpeedBtn.disabled = false;
     gridTimelineSlider.max = String(simulationSteps);
     gridTimelineSlider.value = String(renderedSteps());
     var text = "Frame " + renderedSteps().toLocaleString() + " / " + simulationSteps.toLocaleString();
-    if (timeline.following) {
-      text += " · following Inspect";
-    } else if (playing && timeline.drawing && timeline.catchingUp) {
-      text += " · catching up " + Math.floor(timeline.catchUpFraction * 100) + "%";
+    // Honest about where the MAP has actually got to: following, the value
+    // is the step it has rendered, which can trail the preview's by a beat
+    // on a slow GPU. No percentage in that case - a follow rebuild reports
+    // no fraction (see stepPlayback).
+    if (timeline.drawing && timeline.catchingUp) {
+      text += timeline.following ? " · catching up"
+        : playing ? " · catching up " + Math.floor(timeline.catchUpFraction * 100) + "%" : "";
     }
     gridTimelineReadout.textContent = text;
   }
 
   makeSpeedControl(gridSpeedBtn, gridSpeedPopup, gridSpeedSlider, gridSpeedValueEl);
 
-  // No float render targets means nowhere to keep the state (updateTimelineUI
-  // disables Play for it). The scrubber still works - every step it picks is
-  // an ordinary render - but following Inspect can't.
-  if (!hasFloatColorBuffer) {
-    inspectMapFollowCheckbox.disabled = true;
-    inspectMapFollowCheckbox.closest("label").title = "Playback needs floating-point render targets, which this browser doesn't provide";
-  }
+  // Each of these three drives the shared clock when there is one - the
+  // preview's, the very clock Inspect's own identical row drives - and the
+  // map's own timeline otherwise. Same handler either way, so the two cards
+  // can never end up in different states: there is only ever one clock
+  // being controlled.
+  //
+  // The step mapping is renderPlaybackFrame's, inverted: the preview's
+  // playbackStep is 0-indexed over logged rows and row 0 is the state after
+  // one step, so map frame N is preview row N-1 (see syncMapToInspection).
   gridPlayPauseBtn.addEventListener("click", function () {
-    if (timeline.following) return;
+    if (previewOwnsTimeline()) {
+      if (playbackPlaying) {
+        // The same grace window Inspect's own button honours - a click
+        // landing this soon after playback started on its own meant
+        // "start", which already happened.
+        if (performance.now() - playbackAutoStartedAt < PLAY_PAUSE_GRACE_MS) return;
+        linkMapToPreview();
+        pausePlayback();
+      } else {
+        linkMapToPreview();
+        resumePlayback();
+      }
+      return;
+    }
     if (timeline.playing) pauseTimeline(); else playTimeline();
   });
   gridRestartBtn.addEventListener("click", function () {
-    if (!timeline.following) seekTimeline(0);
+    if (previewOwnsTimeline()) {
+      linkMapToPreview();
+      pausePlayback();
+      playbackStep = 0;
+      renderPlaybackFrame();
+      return;
+    }
+    seekTimeline(0);
   });
   gridTimelineSlider.addEventListener("input", function () {
-    if (!timeline.following) seekTimeline(Number(gridTimelineSlider.value));
-  });
-  inspectMapFollowCheckbox.checked = mapFollowsInspect;
-  inspectMapFollowCheckbox.addEventListener("change", function () {
-    mapFollowsInspect = inspectMapFollowCheckbox.checked;
-    if (mapFollowsInspect) {
-      // Whatever the map's own timeline was doing gives way to the preview.
-      pauseTimeline();
-      syncMapToInspection();
-    } else {
-      releaseMapFollow();
+    var frame = Number(gridTimelineSlider.value);
+    if (previewOwnsTimeline()) {
+      linkMapToPreview();
+      pausePlayback();
+      playbackStep = clamp(frame - 1, 0, playbackClockCeiling() - 1);
+      renderPlaybackFrame();
+      return;
     }
+    seekTimeline(frame);
   });
 
   // resizeCanvas both matches the backing store to the new CSS size and
