@@ -615,17 +615,12 @@
     return;
   }
 
-  // Adopt the sent scene's own duration, same fallback-on-garbage and
-  // snap-to-notch treatment as physics-ui.js's parseSceneData - scene JSON
-  // written before this field existed (or a hand-edited/malformed value)
-  // just keeps this page's long-standing default instead.
+  // Adopt the sent scene's own duration - always one of the editor slider's
+  // notches, which this page's identical slider can show as it is.
   // Named rather than an inline IIFE so setScene() can re-run it for a
   // scene arriving after boot.
   function adoptSceneDuration() {
-    var v = Number(scene.simulationSteps);
-    if (!isFinite(v) || v <= 0) return;
-    simulationSteps = Math.min(50 * SIMULATION_STEPS_PER_NOTCH, Math.max(SIMULATION_STEPS_PER_NOTCH,
-      Math.round(v / SIMULATION_STEPS_PER_NOTCH) * SIMULATION_STEPS_PER_NOTCH));
+    simulationSteps = scene.simulationSteps;
     // The Settings card has a slider on this exact value. Adopting a
     // duration without moving it is what used to leave this page rendering
     // at the scene's duration while its own panel still showed the one from
@@ -1376,7 +1371,6 @@
       // is u_bounceMax, so both read a uniform instead of a baked-in constant;
       // every other property's range is a fixed property of the scene.
       isRunTally ? "" : "const float OUTPUT_RANGE_MAX = " + PhysicsGPU.fnum(rangeMax) + ";",
-      PhysicsGPU.sceneConstantsGLSL(sceneToCompile.gravity, sceneToCompile.friction, sceneToCompile.restitution, precision),
       "",
       stepOnceSource,
       "",
@@ -1557,7 +1551,6 @@
       libraryLines: [PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(sceneToCompile))],
       constantLines: [
         isRunTally ? "" : "const float OUTPUT_RANGE_MAX = " + PhysicsGPU.fnum(rangeMax) + ";",
-        PhysicsGPU.sceneConstantsGLSL(sceneToCompile.gravity, sceneToCompile.friction, sceneToCompile.restitution, precision),
       ],
     };
   }

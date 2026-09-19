@@ -65,7 +65,6 @@
       // solve2x2, which multiplies invMass/invInertia directly. A version
       // of this test without a hinge would silently test nothing.
       var authored = {
-        gravity: 800, friction: 0.4, restitution: 0.2,
         bodies: [{ type: "circle", x: 500, y: 300, angle: 0, isAnchored: false, radius: 50, vx: 0, vy: 0, w: 0 }],
         hinges: [{ bodyA: null, bodyB: 0, localAnchorA: { x: 500, y: 300 }, localAnchorB: { x: 0, y: 0 } }],
       };
@@ -93,20 +92,29 @@
     "Fast fall doesn't tunnel through a thin line",
     "MAX_SPEED cap + LINE_THICKNESS bump",
     function () {
+      // Launched straight down at the speed cap, the fastest anything moves:
+      // each step then covers more than the line is thick, so a contact
+      // missed for even one step would carry the ball clean through.
+      var ball = PhysicsEngine.createCircle(400, -400, 20, false);
+      ball.vy = PhysicsEngine.MAX_SPEED;
       var scene = {
-        gravity: 3000, friction: 0.4, restitution: 0.1,
         bodies: [
           PhysicsEngine.createLine(400, 600, 700, 0, true),
-          PhysicsEngine.createCircle(400, -400, 20, false),
+          ball,
         ],
         hinges: [],
       };
-      runJS(scene, 400);
-      var circle = scene.bodies[1];
-      var expectedRestY = 600 - PhysicsEngine.LINE_THICKNESS / 2 - circle.radius;
-      var drift = Math.abs(circle.y - expectedRestY);
-      var detail = "final y=" + circle.y.toFixed(2) + ", expected rest y=" + expectedRestY.toFixed(2) + ", drift=" + drift.toFixed(2) + "px";
-      return { pass: circle.y < 600 && drift < 3, detail: detail };
+      var deepestY = -Infinity;
+      for (var i = 0; i < 400; i++) {
+        PhysicsEngine.step(scene, DT);
+        deepestY = Math.max(deepestY, scene.bodies[1].y);
+      }
+      var surfaceY = 600 - PhysicsEngine.LINE_THICKNESS / 2 - ball.radius;
+      var stepTravel = PhysicsEngine.MAX_SPEED * DT;
+      var detail = "at " + stepTravel.toFixed(1) + "px per step against a " + PhysicsEngine.LINE_THICKNESS +
+        "px-thick line: deepest y=" + deepestY.toFixed(2) + ", surface contact at y=" + surfaceY.toFixed(2) +
+        " (a tunnel would carry it past y=600)";
+      return { pass: deepestY < surfaceY + 3 && deepestY > surfaceY - 2 * stepTravel, detail: detail };
     }
   );
 
@@ -115,7 +123,6 @@
     "collideCircleCircle had no continuous collision detection: a same-step start/end sample (dist=10, then dist=6.67) can both read as 'not touching' (rsum=6) even though the straight path passes through dist=0 in between",
     function () {
       var scene = {
-        gravity: 0, friction: 0.4, restitution: 0.8,
         bodies: [
           PhysicsEngine.createCircle(0, 300, 3, false),
           PhysicsEngine.createCircle(10, 300, 3, true),
@@ -136,7 +143,6 @@
     "collideCircleCircle's continuous collision detection (GLSL port)",
     function () {
       var scene = {
-        gravity: 0, friction: 0.4, restitution: 0.8,
         bodies: [
           PhysicsEngine.createCircle(0, 300, 3, false),
           PhysicsEngine.createCircle(10, 300, 3, true),
@@ -160,7 +166,6 @@
     function () {
       function finalXAt(startX) {
         var scene = {
-          gravity: 800, friction: 0.4, restitution: 0.6,
           bodies: [
             PhysicsEngine.createCircle(startX, 100, 20, false),
             PhysicsEngine.createCircle(500, 400, 40, true),
@@ -195,25 +200,31 @@
     }
   );
 
-  // ---- 2. Resting contact: a nearly-flat rod must settle, not spin forever ----
+  // ---- 2. Line-line contact: a flat rod must land on both ends at once ----
   addTest(
-    "A rod dropped onto flat ground settles instead of spinning",
+    "A rod dropped flat onto flat ground bounces without starting to spin",
     "2-point contact for near-parallel lines",
     function () {
       var scene = {
-        gravity: 1200, friction: 0.5, restitution: 0.05,
         bodies: [
           PhysicsEngine.createLine(400, 600, 700, 0, true),
-          PhysicsEngine.createLine(400, 550, 300, 0.12, false),
+          PhysicsEngine.createLine(400, 550, 300, 0, false),
         ],
         hinges: [],
       };
-      runJS(scene, 900);
-      var rod = scene.bodies[1];
-      var angleDeg = Math.abs(rod.angle * 180 / Math.PI);
-      var w = Math.abs(rod.w);
-      var detail = "final angle=" + angleDeg.toFixed(3) + "deg, angular vel=" + w.toFixed(4) + "rad/s";
-      return { pass: angleDeg < 2 && w < 0.1, detail: detail };
+      // Contacts are perfectly elastic, so the rod never settles - it keeps
+      // bouncing for the whole run. What has to hold throughout is that it
+      // lands on both ends at once: a single contact point pushes up one end
+      // only, and that off-center impulse is what set rods spinning.
+      var maxAngle = 0, maxW = 0;
+      for (var i = 0; i < 900; i++) {
+        PhysicsEngine.step(scene, DT);
+        maxAngle = Math.max(maxAngle, Math.abs(scene.bodies[1].angle));
+        maxW = Math.max(maxW, Math.abs(scene.bodies[1].w));
+      }
+      var maxAngleDeg = maxAngle * 180 / Math.PI;
+      var detail = "over 900 steps: max angle=" + maxAngleDeg.toFixed(3) + "deg, max angular vel=" + maxW.toFixed(4) + "rad/s";
+      return { pass: maxAngleDeg < 2 && maxW < 0.1, detail: detail };
     }
   );
 
@@ -221,7 +232,6 @@
   //         not drift apart, in BOTH the JS engine and the GPU compiler.
   function buildDoublePendulum() {
     return {
-      gravity: 800, friction: 0.4, restitution: 0.2,
       bodies: [
         PhysicsEngine.createLine(475, 300, 150, 0, false),
         PhysicsEngine.createLine(625, 300, 150, 0, false),
@@ -276,7 +286,6 @@
         {
           name: "3 bodies, all colliding, no hinges",
           scene: {
-            gravity: 800, friction: 0.4, restitution: 0.2,
             bodies: [
               PhysicsEngine.createLine(400, 560, 700, 0, true),
               PhysicsEngine.createCircle(270, 150, 30, false),
@@ -288,7 +297,6 @@
         {
           name: "6 bodies (MAX_BODIES), mixed world + body hinges",
           scene: {
-            gravity: 800, friction: 0.4, restitution: 0.2,
             bodies: [
               PhysicsEngine.createLine(400, 300, 150, 0, false),
               PhysicsEngine.createCircle(600, 300, 30, false),
@@ -307,7 +315,6 @@
         {
           name: "3-body hinge chain, zero collision pairs",
           scene: {
-            gravity: 800, friction: 0.4, restitution: 0.2,
             bodies: [
               PhysicsEngine.createCircle(400, 300, 20, false),
               PhysicsEngine.createCircle(450, 300, 20, false),
@@ -345,7 +352,6 @@
     "stepTarget off-by-one",
     function () {
       var scene = {
-        gravity: 1000, friction: 0.4, restitution: 0.2,
         bodies: [PhysicsEngine.createCircle(100, 100, 20, false)],
         hinges: [],
       };
@@ -353,7 +359,7 @@
       var traj = PhysicsGPU.runSceneOnGPU(scene, N);
       var y = 100, vy = 0;
       var expected = [];
-      for (var s = 0; s < N; s++) { vy += 1000 * DT; y += vy * DT; expected.push(y); }
+      for (var s = 0; s < N; s++) { vy += PhysicsEngine.GRAVITY * DT; y += vy * DT; expected.push(y); }
       var maxErr = 0, xDrift = 0;
       for (var i = 0; i < N; i++) {
         maxErr = Math.max(maxErr, Math.abs(traj[i][0].y - expected[i]));
@@ -371,7 +377,6 @@
     function () {
       function buildScene() {
         return {
-          gravity: 800, friction: 0.4, restitution: 0.2,
           bodies: [
             PhysicsEngine.createLine(400, 560, 700, 0, true),
             PhysicsEngine.createCircle(270, 150, 30, false),
@@ -404,7 +409,6 @@
   // ---- 7. Heavy/large hinged body must not free-fall (degenerate 2x2 matrix) ----
   function buildHeavyHingedCircle() {
     return {
-      gravity: 800, friction: 0.4, restitution: 0.2,
       bodies: [PhysicsEngine.createCircle(500, 300, 130, false)],
       hinges: [{ bodyA: null, bodyB: 0, localAnchorA: { x: 499, y: 299 }, localAnchorB: { x: -1, y: -1 } }],
     };
@@ -522,10 +526,7 @@
     var fs = [
       "#version 300 es", "precision highp float;", "out vec4 fragColor;", "",
       PhysicsGPU.libraryGLSL("f32", PhysicsEngine.speedCapFor(scene)), "",
-      "const float GRAVITY = " + PhysicsGPU.fnum(scene.gravity) + ";",
-      "const float FRICTION = " + PhysicsGPU.fnum(scene.friction) + ";",
-      "const float RESTITUTION = " + PhysicsGPU.fnum(scene.restitution) + ";",
-      "", stepOnceSrc, "",
+      stepOnceSrc, "",
       "void main() {",
       "  float worldX = " + PhysicsGPU.fnum(worldX) + ";",
       "  float worldY = " + PhysicsGPU.fnum(worldY) + ";",
@@ -593,7 +594,6 @@
       // separately below via joint gap, which - unlike raw angle - stays
       // meaningful regardless of oscillation phase.
       var scene = {
-        gravity: 800, friction: 0.4, restitution: 0.2,
         bodies: [PhysicsEngine.createCircle(500, 300, 50, false)],
         hinges: [{ bodyA: null, bodyB: 0, localAnchorA: { x: 502, y: 300 }, localAnchorB: { x: 2, y: 0 } }],
         xInput: { body: 0, property: "radius" },
@@ -629,7 +629,6 @@
     function () {
       var hinge = { bodyA: null, bodyB: 0, localAnchorA: { x: 502, y: 300 }, localAnchorB: { x: 2, y: 0 } };
       var scene = {
-        gravity: 800, friction: 0.4, restitution: 0.2,
         bodies: [PhysicsEngine.createCircle(500, 300, 50, false)],
         hinges: [hinge],
         xInput: { body: 0, property: "radius" },
@@ -660,7 +659,6 @@
       // JS-only shortcut the hover-preview uses for its instant first
       // frame. All three had better agree.
       var scene = {
-        gravity: 800, friction: 0.4, restitution: 0.2,
         bodies: [
           PhysicsEngine.createLine(500, 300, 200, 0, false),
           PhysicsEngine.createCircle(650, 300, 30, false),
@@ -693,7 +691,6 @@
       var hinge0 = { bodyA: null, bodyB: 0, localAnchorA: { x: 400, y: 300 }, localAnchorB: { x: -100, y: 0 } };
       var hinge1 = { bodyA: 0, bodyB: 1, localAnchorA: { x: 100, y: 0 }, localAnchorB: { x: 0, y: 0 } };
       var scene = {
-        gravity: 800, friction: 0.4, restitution: 0.2,
         bodies: [
           PhysicsEngine.createLine(500, 300, 200, 0, false),
           PhysicsEngine.createCircle(650, 300, 30, false),
@@ -742,7 +739,6 @@
     "physics-grid-codegen.js port of applyBodyEditPreservingHinge",
     function () {
       var scene = {
-        gravity: 800, friction: 0.4, restitution: 0.2,
         bodies: [
           PhysicsEngine.createLine(500, 300, 200, 0, false),
           PhysicsEngine.createCircle(650, 300, 30, false),
@@ -774,7 +770,6 @@
       var hinge0 = { bodyA: null, bodyB: 0, localAnchorA: { x: 400, y: 300 }, localAnchorB: { x: -100, y: 0 } };
       var hinge1 = { bodyA: 0, bodyB: 1, localAnchorA: { x: 100, y: 0 }, localAnchorB: { x: 0, y: 0 } };
       var scene = {
-        gravity: 800, friction: 0.4, restitution: 0.2,
         bodies: [
           PhysicsEngine.createLine(500, 300, 200, 0, false),
           PhysicsEngine.createCircle(600, 300, 30, false),
@@ -802,7 +797,6 @@
     "physics-grid-codegen.js's applyResizeRotateTarget only ever recentered around a WORLD hinge, the exact same gap as applyBodyEditPreservingHinge - reported via this exact double-pendulum scene, whose yInput links the CHILD body's own angle",
     function () {
       var scene = {
-        gravity: 800, friction: 0, restitution: 1,
         bodies: [
           { type: "line", x: 492, y: 330, angle: 0, isAnchored: false, length: 140, vx: 0, vy: 0, w: 0 },
           { type: "line", x: 632, y: 328, angle: 0, isAnchored: false, length: 140, vx: 0, vy: 0, w: 0 },
@@ -833,7 +827,6 @@
     "physics-grid-codegen.js Y-axis convention flip",
     function () {
       var scene = {
-        gravity: 800, friction: 0.4, restitution: 0.2,
         bodies: [PhysicsEngine.createCircle(500, 300, 50, false)],
         hinges: [{ bodyA: null, bodyB: 0, localAnchorA: { x: 500, y: 300 }, localAnchorB: { x: 0, y: 0 } }],
         xInput: null,
@@ -852,7 +845,6 @@
     "physics-grid-codegen.js isAnchored guard on the ported mass formula",
     function () {
       var scene = {
-        gravity: 800, friction: 0.4, restitution: 0.2,
         bodies: [PhysicsEngine.createCircle(500, 300, 50, true)],
         hinges: [],
         xInput: { body: 0, property: "radius" },
@@ -892,7 +884,6 @@
       var hinge0 = { bodyA: null, bodyB: 0, localAnchorA: { x: 520, y: 300 }, localAnchorB: { x: 20, y: 0 } };
       var hinge1 = { bodyA: 0, bodyB: 1, localAnchorA: { x: 40, y: 0 }, localAnchorB: { x: 0, y: 0 } };
       var scene = {
-        gravity: 800, friction: 0.4, restitution: 0.2,
         bodies: [
           PhysicsEngine.createCircle(500, 300, 50, false),
           PhysicsEngine.createCircle(540, 300, 10, false),
@@ -921,41 +912,48 @@
     "Pac-Man wrap: a body crossing any edge reappears on the opposite side, velocity unchanged",
     "PhysicsEngine.step's frame-wrap - the whole point of this feature",
     function () {
-      var scene = {
-        gravity: 0, friction: 0.4, restitution: 0.2,
-        bodies: [
-          PhysicsEngine.createCircle(190, 100, 10, false), // -> right edge
-          PhysicsEngine.createCircle(10, 100, 10, false),  // -> left edge
-          PhysicsEngine.createCircle(100, 190, 10, false), // -> bottom edge
-          PhysicsEngine.createCircle(100, 10, 10, false),  // -> top edge
-        ],
-        hinges: [],
-        frameWidth: 200, frameHeight: 200,
-      };
-      scene.bodies[0].vx = 500;
-      scene.bodies[1].vx = -500;
-      scene.bodies[2].vy = 500;
-      scene.bodies[3].vy = -500;
-      for (var i = 0; i < 2; i++) PhysicsEngine.step(scene, DT);
-
-      var d = 190 + 2 * 500 * DT - 200; // start position + net displacement, then wrapped back by one frame length
+      function run(edgeMode) {
+        var scene = {
+          bodies: [
+            PhysicsEngine.createCircle(190, 100, 10, false), // -> right edge
+            PhysicsEngine.createCircle(10, 100, 10, false),  // -> left edge
+            PhysicsEngine.createCircle(100, 190, 10, false), // -> bottom edge
+            PhysicsEngine.createCircle(100, 10, 10, false),  // -> top edge
+          ],
+          hinges: [],
+          frameWidth: 200, frameHeight: 200, edgeMode: edgeMode,
+        };
+        scene.bodies[0].vx = 500;
+        scene.bodies[1].vx = -500;
+        scene.bodies[2].vy = 500;
+        scene.bodies[3].vy = -500;
+        for (var i = 0; i < 2; i++) PhysicsEngine.step(scene, DT);
+        return scene;
+      }
+      // Gravity acts on every body along the way, so the reference is the
+      // same two steps with no edges at all: wrapping must move each body by
+      // exactly one frame length along the axis it crossed, and change
+      // nothing else - not the other axis, and not the velocity.
+      var wrapped = run("wrap"), free = run("infinite");
       var checks = [
-        { body: scene.bodies[0], axis: "x", want: d, otherAxis: "y", otherWant: 100 },
-        { body: scene.bodies[1], axis: "x", want: 200 - d, otherAxis: "y", otherWant: 100 },
-        { body: scene.bodies[2], axis: "y", want: d, otherAxis: "x", otherWant: 100 },
-        { body: scene.bodies[3], axis: "y", want: 200 - d, otherAxis: "x", otherWant: 100 },
+        { axis: "x", shift: -200, otherAxis: "y" },
+        { axis: "x", shift: 200, otherAxis: "y" },
+        { axis: "y", shift: -200, otherAxis: "x" },
+        { axis: "y", shift: 200, otherAxis: "x" },
       ];
       var pass = true;
       var details = [];
       checks.forEach(function (c, idx) {
-        var got = c.body[c.axis];
-        var otherGot = c.body[c.otherAxis];
-        var inRange = got >= 0 && got < 200;
-        var ok = Math.abs(got - c.want) < 1e-6 && Math.abs(otherGot - c.otherWant) < 1e-6 && inRange;
+        var got = wrapped.bodies[idx], ref = free.bodies[idx];
+        var want = ref[c.axis] + c.shift;
+        var inRange = got[c.axis] >= 0 && got[c.axis] < 200;
+        var ok = Math.abs(got[c.axis] - want) < 1e-6 && Math.abs(got[c.otherAxis] - ref[c.otherAxis]) < 1e-6 && inRange;
         if (!ok) pass = false;
-        details.push("body" + idx + "." + c.axis + "=" + got.toFixed(4) + " (want " + c.want.toFixed(4) + ")");
+        details.push("body" + idx + "." + c.axis + "=" + got[c.axis].toFixed(4) + " (want " + want.toFixed(4) + ")");
       });
-      var velOk = scene.bodies[0].vx === 500 && scene.bodies[1].vx === -500 && scene.bodies[2].vy === 500 && scene.bodies[3].vy === -500;
+      var velOk = wrapped.bodies.every(function (b, i) {
+        return b.vx === free.bodies[i].vx && b.vy === free.bodies[i].vy;
+      });
       return { pass: pass && velOk, detail: details.join("; ") + "; velocities unchanged=" + velOk };
     }
   );
@@ -965,7 +963,6 @@
     "PhysicsEngine.step's frame-wrap must skip static bodies (they don't fall, so they shouldn't warp either)",
     function () {
       var scene = {
-        gravity: 800, friction: 0.4, restitution: 0.2,
         bodies: [PhysicsEngine.createCircle(300, 100, 10, true)], // x=300 is outside a 200-wide frame
         hinges: [],
         frameWidth: 200, frameHeight: 200,
@@ -982,7 +979,6 @@
     "PhysicsGPU.generateStepOnceGLSL's frame-wrap port",
     function () {
       var scene = {
-        gravity: 0, friction: 0.4, restitution: 0.2,
         bodies: [PhysicsEngine.createCircle(190, 100, 10, false)],
         hinges: [],
         frameWidth: 200, frameHeight: 200,
@@ -1012,7 +1008,6 @@
       // either edge of a 1198-wide frame - under the old per-body-center
       // rule this wrapped the body but not the pin, tearing the joint.
       var scene = {
-        gravity: 800, friction: 0, restitution: 1,
         bodies: [PhysicsEngine.createLine(336.15, 568, 511, 0, false)],
         hinges: [{ bodyA: null, bodyB: 0, localAnchorA: { x: 77, y: 568 }, localAnchorB: { x: -259.15, y: 0 } }],
         frameWidth: 1198, frameHeight: 1128,
@@ -1040,7 +1035,6 @@
     "PhysicsGPU.generateStepOnceGLSL's port of the pin-decides-the-wrap rule, including the new inout HINGEn_A plumbing",
     function () {
       var scene = {
-        gravity: 800, friction: 0, restitution: 1,
         bodies: [PhysicsEngine.createLine(336.15, 568, 511, 0, false)],
         hinges: [{ bodyA: null, bodyB: 0, localAnchorA: { x: 77, y: 568 }, localAnchorB: { x: -259.15, y: 0 } }],
         frameWidth: 1198, frameHeight: 1128,
@@ -1067,7 +1061,6 @@
       // however it got there) so a wrap is guaranteed on the very first
       // step, cascading through a 2-body chain.
       var scene = {
-        gravity: 800, friction: 0.4, restitution: 0.2,
         bodies: [PhysicsEngine.createLine(1050, 300, 200, 0, false), PhysicsEngine.createCircle(1150, 300, 20, false)],
         hinges: [
           { bodyA: null, bodyB: 0, localAnchorA: { x: 1050, y: 300 }, localAnchorB: { x: 0, y: 0 } },
@@ -1101,9 +1094,6 @@
     var offset = PhysicsGridCodegen.computeOffsetSceneNumeric(scene, worldX, worldY);
     var initialBody = { x: offset.bodies[0].x, y: offset.bodies[0].y, angle: offset.bodies[0].angle };
     offset.bodies.forEach(PhysicsEngine.computeMass);
-    if (scene.gravity !== undefined) offset.gravity = scene.gravity;
-    if (scene.friction !== undefined) offset.friction = scene.friction;
-    if (scene.restitution !== undefined) offset.restitution = scene.restitution;
     var traj = [];
     for (var i = 0; i < steps; i++) {
       PhysicsEngine.step(offset, DT);
@@ -1117,7 +1107,6 @@
     "the OLD behavior (return the raw logged sample before the wrap) made the answer a function of WHICH DISCRETE STEP first noticed the crossing - an integer that changes by 1 exactly when a sweep crosses a step boundary, producing a real jump with zero collisions involved (confirmed on a lone free-falling circle: a clean jump of about one step's fall distance, at regular intervals matching it)",
     function () {
       var scene = {
-        gravity: 800, friction: 0, restitution: 1,
         bodies: [PhysicsEngine.createCircle(600, 1120, 20, false)],
         hinges: [], xInput: null, yInput: { body: 0, property: "y" },
         frameWidth: 1198, frameHeight: 1128,
@@ -1150,7 +1139,6 @@
       // speed and the clamp keeps removing it, so it descends at exactly
       // MAX_SPEED - and it holds whatever that constant is set to.
       var scene = {
-        gravity: 800, friction: 0, restitution: 1,
         bodies: [PhysicsEngine.createCircle(600, 50, 20, false)],
         hinges: [], xInput: null, yInput: { body: 0, property: "y" },
         frameWidth: 1198, frameHeight: 1128,
@@ -1169,7 +1157,6 @@
     "fractal-grid.js's buildFragmentShader ports this same one-step-before-crossing interpolation into the per-pixel GLSL loop (using body.vx/vy directly instead of finite-differencing, since it has live velocity - see its own comment)",
     function () {
       var scene = {
-        gravity: 800, friction: 0, restitution: 1,
         bodies: [PhysicsEngine.createCircle(600, 1120, 20, false)],
         hinges: [], xInput: null, yInput: { body: 0, property: "y" },
         frameWidth: 1198, frameHeight: 1128,
@@ -1183,9 +1170,6 @@
         var fs = [
           "#version 300 es", "precision highp float;", "out vec4 fragColor;", "",
           PhysicsGPU.libraryGLSL("f32", PhysicsEngine.speedCapFor(scene)), "",
-          "const float GRAVITY = " + PhysicsGPU.fnum(scene.gravity) + ";",
-          "const float FRICTION = " + PhysicsGPU.fnum(scene.friction) + ";",
-          "const float RESTITUTION = " + PhysicsGPU.fnum(scene.restitution) + ";", "",
           PhysicsGPU.generateStepOnceGLSL(1, consts, [], [], frame), "",
           "void main() {",
           "  Body body0 = Body(" + PhysicsGPU.fnum(consts[0].x + worldX) + ", " + PhysicsGPU.fnum(consts[0].y + worldY) + ", " + PhysicsGPU.fnum(consts[0].angle) + ", 0.0, 0.0, 0.0);",
@@ -1286,7 +1270,6 @@
     function () {
       function traceAt(worldX) {
         var scene = {
-          gravity: 800, friction: 0, restitution: 1,
           bodies: [
             PhysicsEngine.createCircle(449 + worldX, 111, 30, false),
             PhysicsEngine.createCircle(676, 577, 30, true),
@@ -1320,7 +1303,6 @@
     "PhysicsEngine.cloneScene silently dropped these, so a Play -> Reset cycle in physics-ui.js wiped every mapping and un-locked the wrap frame",
     function () {
       var scene = {
-        gravity: 800, friction: 0.4, restitution: 0.2,
         bodies: [PhysicsEngine.createCircle(100, 100, 10, false), PhysicsEngine.createCircle(200, 100, 10, false)],
         hinges: [],
         xInput: { body: 0, property: "x" },
@@ -1395,7 +1377,6 @@
       // to body0's local (100,0) - sitting exactly at that joint, also far
       // outside the frame, but rigidly so (it must NOT be wrapped on its own).
       var scene = {
-        gravity: 800, friction: 0.4, restitution: 0.2,
         bodies: [PhysicsEngine.createLine(5100, 300, 200, 0, false), PhysicsEngine.createCircle(5200, 300, 20, false)],
         hinges: [
           { bodyA: null, bodyB: 0, localAnchorA: { x: 5000, y: 300 }, localAnchorB: { x: -100, y: 0 } },
@@ -1420,13 +1401,11 @@
     "physics-grid-codegen.js's GLSL port of PhysicsHingeGeometry.frameWrapDelta inside generateGridInitialStateGLSL",
     function () {
       var nonAnchored = {
-        gravity: 0, friction: 0.4, restitution: 0.2,
         bodies: [{ type: "circle", x: 100, y: 100, angle: 0, isAnchored: false, radius: 10, vx: 0, vy: 0, w: 0 }],
         hinges: [], xInput: { body: 0, property: "x" }, yInput: null, output: { body: 0, property: "x" },
         frameWidth: 200, frameHeight: 200,
       };
       var anchoredFullyOut = {
-        gravity: 0, friction: 0.4, restitution: 0.2,
         bodies: [{ type: "circle", x: 100, y: 100, angle: 0, isAnchored: true, radius: 10, vx: 0, vy: 0, w: 0 }],
         hinges: [], xInput: { body: 0, property: "x" }, yInput: null, output: { body: 0, property: "x" },
         frameWidth: 200, frameHeight: 200,
@@ -1450,7 +1429,6 @@
       "applyBodyEditPreservingHinge (radius/length/rotation)",
       function () {
         var scene = {
-          gravity: 800, friction: 0.4, restitution: 0.2,
           bodies: [
             PhysicsEngine.createLine(500, 300, 200, 0, false),
             PhysicsEngine.createCircle(650, 300, 30, false),
@@ -1481,7 +1459,6 @@
       "translateBodyPreservingHinges (Center X/Y edit + drag)",
       function () {
         var scene = {
-          gravity: 800, friction: 0.4, restitution: 0.2,
           bodies: [
             PhysicsEngine.createCircle(500, 300, 50, false),
             PhysicsEngine.createCircle(600, 300, 20, false),
@@ -1517,7 +1494,6 @@
       "applyBodyEditPreservingHinge (isResize=false, previously untested)",
       function () {
         var scene = {
-          gravity: 800, friction: 0.4, restitution: 0.2,
           bodies: [
             PhysicsEngine.createLine(500, 300, 200, 0, false),
             PhysicsEngine.createCircle(600, 300, 30, false),
@@ -1547,7 +1523,6 @@
       "applyBodyEditPreservingHinge (isResize=false, previously untested)",
       function () {
         var scene = {
-          gravity: 800, friction: 0.4, restitution: 0.2,
           bodies: [
             PhysicsEngine.createCircle(500, 300, 50, false),
             PhysicsEngine.createLine(500, 340, 60, 0, false),
@@ -1578,7 +1553,6 @@
       "applyBodyEditPreservingHinge only ever recentered around a WORLD hinge; a body hinged to a non-world parent was mutated in place with no recenter at all, tearing the joint (reported via a double-pendulum scene whose yInput links the CHILD body's own angle)",
       function () {
         var scene = {
-          gravity: 800, friction: 0.4, restitution: 0.2,
           bodies: [
             PhysicsEngine.createLine(500, 300, 200, 0, false),
             PhysicsEngine.createLine(675, 300, 150, 0, false),
@@ -1624,7 +1598,6 @@
       function () {
         function buildScene() {
           return {
-            gravity: 800, friction: 0.4, restitution: 0.2,
             bodies: [
               PhysicsEngine.createLine(500, 300, 100, 0, false),
               PhysicsEngine.createCircle(550, 300, 20, false),
@@ -1750,7 +1723,6 @@
       // has to forward them or it would silently compile different physics
       // than the scene it was handed.
       PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(scene)), "",
-      PhysicsGPU.sceneConstantsGLSL(scene.gravity, scene.friction, scene.restitution, precision),
       "const " + B.scalar + " worldX = " + B.lit(worldX) + ";",
       "const " + B.scalar + " worldY = " + B.lit(worldY) + ";", "",
       PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene)), "",
@@ -1773,7 +1745,6 @@
   // ground truth. Same shape as samples/pinball.json.
   function buildDeepZoomScene() {
     return {
-      gravity: 800, friction: 0, restitution: 1,
       bodies: [
         PhysicsEngine.createCircle(673.9, 46.1, 30, false),
         PhysicsEngine.createLine(323, 468, 300, 0.35, true),
@@ -1979,7 +1950,6 @@
     "the offset cascade rotates hinge anchors about a df angle; df trig with a bad range reduction only shows up after many turns",
     function () {
       var scene = {
-        gravity: 800, friction: 0, restitution: 1,
         bodies: [PhysicsEngine.createLine(409, 288, 140, 0, false), PhysicsEngine.createLine(480, 217, 142, 0, false)],
         hinges: [
           { bodyA: null, bodyB: 0, localAnchorA: { x: 408, y: 358 }, localAnchorB: { x: -70, y: -1 } },
@@ -2011,7 +1981,6 @@
     "generateCanonicalBodyDeclarationsGLSL hardcoded all three velocity accumulators to zero - correct back when nothing could give a body a starting velocity, silently wrong once the Set Velocity tool could. The JS mirror (computeOffsetSceneNumeric, via cloneScene) kept the velocity all along, so the grid ran a different scene than its own hover preview claimed",
     function () {
       var scene = {
-        gravity: 800, friction: 0, restitution: 1,
         bodies: [PhysicsEngine.createCircle(300, 250, 28, false)],
         hinges: [],
         xInput: { body: 0, property: "x" },
@@ -2064,7 +2033,7 @@
       // Regime 1: four mutually-attracting bodies, short horizon.
       function chaotic() {
         return {
-          gravity: 800, mutualGravity: true, friction: 0, restitution: 1,
+          mutualGravity: true,
           bodies: [
             PhysicsEngine.createCircle(300, 300, 40, false),
             PhysicsEngine.createCircle(700, 320, 25, false),
@@ -2100,7 +2069,7 @@
       // spent 18 steps there, and disagreed by 62px as a result.
       function orbit() {
         var s = {
-          gravity: 800, mutualGravity: true, friction: 0, restitution: 1,
+          mutualGravity: true,
           bodies: [
             PhysicsEngine.createCircle(1000, 400, 9, false),
             PhysicsEngine.createCircle(500, 400, 30, true),
@@ -2144,7 +2113,7 @@
     function () {
       function pullOn0(secondAnchored) {
         var scene = {
-          gravity: 800, mutualGravity: true, friction: 0, restitution: 1,
+          mutualGravity: true,
           bodies: [
             PhysicsEngine.createCircle(300, 300, 30, false),
             PhysicsEngine.createCircle(700, 300, 30, secondAnchored),
@@ -2158,7 +2127,7 @@
 
       // And it must stay put while doing it.
       var scene = {
-        gravity: 800, mutualGravity: true, friction: 0, restitution: 1,
+        mutualGravity: true,
         bodies: [
           PhysicsEngine.createCircle(300, 300, 30, false),
           PhysicsEngine.createCircle(700, 300, 30, true),
@@ -2183,14 +2152,13 @@
     "computeAccelerations replaced a hardcoded downward scalar for EVERY scene, so the default path had to come out bit-for-bit unchanged",
     function () {
       var scene = {
-        gravity: 800, friction: 0, restitution: 1,
         bodies: [PhysicsEngine.createCircle(400, 100, 30, false)],
         hinges: [],
       };
       var STEPS = 10;
       for (var i = 0; i < STEPS; i++) PhysicsEngine.step(scene, DT);
       // Free fall from rest: v = g*t exactly, with no sideways component.
-      var wantVy = 800 * DT * STEPS;
+      var wantVy = PhysicsEngine.GRAVITY * DT * STEPS;
       return {
         pass: Math.abs(scene.bodies[0].vy - wantVy) < 1e-9 && scene.bodies[0].vx === 0 && scene.bodies[0].x === 400,
         detail: "after " + STEPS + " steps: vy=" + scene.bodies[0].vy.toFixed(6) + " (want " + wantVy.toFixed(6) +
@@ -2207,7 +2175,7 @@
         return { type: "circle", x: x, y: 300, angle: 0, radius: 30, vx: 0, vy: 0, w: 0, isAnchored: false };
       }
       var scene = {
-        gravity: 800, mutualGravity: true, friction: 0, restitution: 1,
+        mutualGravity: true,
         bodies: [c(350), c(650)], hinges: [],
       };
       scene.bodies.forEach(PhysicsEngine.computeMass);
@@ -2246,7 +2214,7 @@
       // A small fast body into a big stationary one, far from anything else,
       // with the frame off so nothing wraps.
       var scene = {
-        gravity: 0, mutualGravity: true, friction: 0, restitution: 1,
+        mutualGravity: true,
         bodies: [
           PhysicsEngine.createCircle(0, 0, 15, false),
           PhysicsEngine.createCircle(200, 0, 45, false),
@@ -2280,7 +2248,7 @@
       // still for entirely legitimate reasons and would pass this test
       // whether or not the merge had frozen it.
       var scene = {
-        gravity: 800, mutualGravity: true, friction: 0, restitution: 1,
+        mutualGravity: true,
         bodies: [
           PhysicsEngine.createLine(500, 300, 200, 0, false),
           PhysicsEngine.createLine(700, 300, 200, 0, false),
@@ -2318,7 +2286,6 @@
 
       // A body under ordinary gravity must still be held at the lower ceiling.
       var falling = {
-        gravity: 800, friction: 0, restitution: 1,
         bodies: [PhysicsEngine.createCircle(500, 0, 20, false)], hinges: [],
       };
       falling.bodies[0].vy = 100000; // absurd, purely to drive it into the clamp
@@ -2327,7 +2294,7 @@
 
       // The same absurd speed under Mutual Gravity clamps to the higher one.
       var orbiting = {
-        gravity: 800, mutualGravity: true, friction: 0, restitution: 1,
+        mutualGravity: true,
         bodies: [PhysicsEngine.createCircle(500, 0, 20, false)], hinges: [],
       };
       orbiting.bodies[0].vy = 100000;
@@ -2351,7 +2318,7 @@
       // Started 500px out at 300px/s tangential - a wide, ordinary ellipse
       // whose closest approach is nowhere near either surface.
       var scene = {
-        gravity: 800, mutualGravity: true, friction: 0, restitution: 1,
+        mutualGravity: true,
         bodies: [
           PhysicsEngine.createCircle(1000, 400, 9, false),
           PhysicsEngine.createCircle(500, 400, 30, true),
@@ -2407,7 +2374,7 @@
         function c(x) {
           return { type: "circle", x: x, y: 0, angle: 0, radius: 30, vx: 0, vy: 0, w: 0, isAnchored: false };
         }
-        var scene = { gravity: 800, mutualGravity: true, friction: 0, restitution: 1,
+        var scene = { mutualGravity: true,
                       bodies: [c(0), c(sep)], hinges: [] };
         scene.bodies.forEach(PhysicsEngine.computeMass);
         return PhysicsEngine.computeAccelerations(scene)[0].x;
@@ -2435,7 +2402,7 @@
       // The exact reported scene: a free circle released far from an
       // anchored one, left to fall in, bounce, and settle.
       var scene = {
-        gravity: 970, mutualGravity: true, friction: 0, restitution: 1,
+        mutualGravity: true,
         bodies: [
           PhysicsEngine.createCircle(538, 427, 30, true),
           PhysicsEngine.createCircle(907, 221, 30, false),
@@ -2483,10 +2450,11 @@
     "Bounce Count counts contact episodes, not steps spent in contact",
     "PhysicsEngine.runBounceCounts - a body resting or sliding on a surface is touching for hundreds of consecutive steps, which a naive per-step tally would report as hundreds of bounces for what is visibly one",
     function () {
+      // Set down on the floor already moving, so it slides - frictionless,
+      // it keeps going the whole run without ever leaving the surface.
       var scene = {
-        gravity: 800, friction: 0.4, restitution: 0,
         bodies: [
-          { type: "circle", x: 400, y: 200, angle: 0, isAnchored: false, radius: 20, vx: 0, vy: 0, w: 0 },
+          { type: "circle", x: 150, y: 570, angle: 0, isAnchored: false, radius: 20, vx: 60, vy: 0, w: 0 },
           { type: "line", x: 400, y: 600, angle: 0, isAnchored: true, length: 700, vx: 0, vy: 0, w: 0 },
         ],
         hinges: [], frameWidth: 1200, frameHeight: 800,
@@ -2511,7 +2479,7 @@
       var total = counts[STEPS - 1];
       return {
         pass: monotonic && total >= 1 && total <= 5 && touchingSteps > 100,
-        detail: "inelastic ball settling on a floor: " + touchingSteps + " of " + STEPS +
+        detail: "ball sliding along a floor: " + touchingSteps + " of " + STEPS +
           " steps in contact, reported as " + total + " bounce(s) (want a handful, not ~" + touchingSteps +
           "); running totals monotonic=" + monotonic,
       };
@@ -2523,7 +2491,6 @@
     "PhysicsEngine.step's contactFlags must be rewritten each step, not accumulated - a stale true would make every later step read as still-touching",
     function () {
       var scene = {
-        gravity: 800, friction: 0, restitution: 1,
         bodies: [{ type: "circle", x: 400, y: 200, angle: 0, isAnchored: false, radius: 20, vx: 0, vy: 0, w: 0 }],
         hinges: [], frameWidth: 1200, frameHeight: 800,
       };
@@ -2550,7 +2517,6 @@
       // and the exact numbers matter (body 0's -pi/2 rest angle in
       // particular), so this can't be a hand-approximated stand-in.
       var scene = {
-        gravity: 800, friction: 0, restitution: 1,
         bodies: [
           PhysicsEngine.createLine(409, 288, 140, -1.5708, false),
           PhysicsEngine.createLine(480, 217, 140, 0, false),
@@ -2624,7 +2590,7 @@
     function () {
       function fallFor(mode) {
         var scene = {
-          gravity: 800, edgeMode: mode, friction: 0, restitution: 1,
+          edgeMode: mode,
           bodies: [PhysicsEngine.createCircle(500, 400, 20, false)],
           hinges: [], frameWidth: 900, frameHeight: 600,
         };
@@ -2632,15 +2598,11 @@
         return scene.bodies[0].y;
       }
       var sticky = fallFor("sticky"), wrap = fallFor("wrap"), infinite = fallFor("infinite");
-      // An unspecified mode must behave as it always did, so old scenes and
-      // old JSON keep working.
-      var legacy = fallFor(undefined);
       return {
-        pass: sticky < 600 && wrap < 600 && infinite > 600 &&
-          Math.abs(sticky - wrap) < 1e-9 && Math.abs(legacy - sticky) < 1e-9,
+        pass: sticky < 600 && wrap < 600 && infinite > 600 && Math.abs(sticky - wrap) < 1e-9,
         detail: "after 200 steps of free fall in a 600-tall frame: sticky y=" + sticky.toFixed(1) +
           ", wrap y=" + wrap.toFixed(1) + " (both wrapped back inside), infinite y=" + infinite.toFixed(1) +
-          " (kept going); an unset mode falls exactly where sticky does",
+          " (kept going)",
       };
     }
   );
@@ -2651,7 +2613,7 @@
     function () {
       function build() {
         var s = {
-          gravity: 800, edgeMode: "infinite", friction: 0, restitution: 1,
+          edgeMode: "infinite",
           bodies: [
             PhysicsEngine.createCircle(500, 400, 20, false),
             PhysicsEngine.createCircle(300, 200, 25, false),
@@ -2685,7 +2647,7 @@
     function () {
       function base(mode) {
         return {
-          gravity: 0, mutualGravity: false, friction: 0, restitution: 1,
+          mutualGravity: false,
           bodies: [PhysicsEngine.createCircle(500, 400, 20, false)], hinges: [],
           xInput: { body: 0, property: "x" }, yInput: { body: 0, property: "y" },
           output: { body: 0, property: "y" }, frameWidth: 900, frameHeight: 600,
@@ -2697,8 +2659,8 @@
       var wrap = PhysicsGridCodegen.computeOffsetSceneNumeric(base("wrap"), OFFSET, 0).bodies[0].x;
       var infinite = PhysicsGridCodegen.computeOffsetSceneNumeric(base("infinite"), OFFSET, 0).bodies[0].x;
 
-      // The GPU's own starting state for the same pixel. Gravity is off, so
-      // the first logged step is still the starting position.
+      // The GPU's own starting state for the same pixel. Gravity only acts
+      // on y, so the first logged step's x is still the starting position.
       var compiled = PhysicsGridCodegen.compileHoverTrajectoryGLSL(base("infinite"), OFFSET, 0, 2, "f32");
       var gpuStart = PhysicsGPU.runCompiledTrajectoryOnGPU(compiled, 2)[0][0].x;
 
@@ -2807,7 +2769,6 @@
       // +y (down) - a ball dropped on the mouth's centerline should fall
       // through and reappear at the throat's centerline, still falling.
       var scene = {
-        gravity: 800, friction: 0, restitution: 1,
         bodies: [
           PhysicsEngine.createFunnel(400, 400, 120, 0, true),
           PhysicsEngine.createCircle(400, 250, 10, false),
@@ -2852,7 +2813,6 @@
       // only closes that gap, since leg2 slants toward smaller x as y
       // grows, so it can only ever hit the flat side of leg2 itself.
       var scene = {
-        gravity: 800, friction: 0, restitution: 1,
         bodies: [
           PhysicsEngine.createFunnel(400, 400, 120, 0, true),
           PhysicsEngine.createCircle(450, 400, 8, false),
@@ -2881,7 +2841,6 @@
     function () {
       var angle = Math.PI / 2; // mouth now faces -x instead of -y
       var scene = {
-        gravity: 0, friction: 0, restitution: 1,
         bodies: [
           PhysicsEngine.createFunnel(400, 400, 120, angle, true),
           PhysicsEngine.createCircle(400, 400, 10, false),
@@ -2915,7 +2874,6 @@
     "collidePair has no funnel<->line or funnel<->funnel model yet - it must return null there instead of falling through to collideLineLine and reading a funnel's undefined .length",
     function () {
       var scene = {
-        gravity: 800, friction: 0, restitution: 1,
         bodies: [
           PhysicsEngine.createFunnel(300, 300, 100, 0, true),
           PhysicsEngine.createFunnel(700, 300, 100, 0.4, false),
@@ -2936,7 +2894,7 @@
     function () {
       function buildScene() {
         return {
-          gravity: 800, mutualGravity: false, friction: 0, restitution: 1,
+          mutualGravity: false,
           bodies: [
             PhysicsEngine.createFunnel(400, 400, 120, 0, true),
             PhysicsEngine.createCircle(400, 250, 10, false),
@@ -2969,7 +2927,7 @@
     function () {
       function buildScene() {
         return {
-          gravity: 800, mutualGravity: false, friction: 0, restitution: 1,
+          mutualGravity: false,
           bodies: [
             PhysicsEngine.createFunnel(400, 400, 120, 0, true),
             PhysicsEngine.createCircle(450, 400, 8, false),
@@ -2999,7 +2957,6 @@
     "the funnel GLSL functions (sweptCapsuleCircleContact, collideFunnelMouthTHit, etc.) exist only in float32 - generateStepOnceGLSL must throw in df mode rather than reference undefined df functions or silently drop the funnel's physics",
     function () {
       var scene = {
-        gravity: 800, friction: 0, restitution: 1,
         bodies: [
           PhysicsEngine.createFunnel(400, 400, 120, 0, true),
           PhysicsEngine.createCircle(400, 250, 10, false),
@@ -3031,7 +2988,7 @@
   // face the falling ball.
   function buildSplitterScene(ballX, ballRadius) {
     return {
-      gravity: 800, mutualGravity: false, friction: 0, restitution: 1,
+      mutualGravity: false,
       bodies: [
         PhysicsEngine.createSplitter(400, 400, 120, Math.PI, true),
         PhysicsEngine.createCircle(ballX, 250, ballRadius === undefined ? 4 : ballRadius, false),
@@ -3083,7 +3040,7 @@
       var sameAsEachOther = Math.abs(split[0].vx - split[1].vx) < 1e-9 && Math.abs(split[0].vy - split[1].vy) < 1e-9;
       // One step of gravity (the step the split happened on) separates the
       // children's velocity from the pre-step reading, and nothing else may.
-      var expectedVy = beforeV.vy + 800 * DT;
+      var expectedVy = beforeV.vy + PhysicsEngine.GRAVITY * DT;
       var carriedThrough = Math.abs(split[0].vy - expectedVy) < 1e-6 && Math.abs(split[0].vx - beforeV.vx) < 1e-9;
       var detail = "children v=(" + split[0].vx.toFixed(3) + "," + split[0].vy.toFixed(3) + ") and (" +
         split[1].vx.toFixed(3) + "," + split[1].vy.toFixed(3) + "); parent entered the step at vy=" +
@@ -3127,7 +3084,7 @@
       // above meets the long side, which is solid here (the mirror image of
       // the funnel, where the long side is the special one).
       var scene = {
-        gravity: 800, mutualGravity: false, friction: 0, restitution: 1,
+        mutualGravity: false,
         bodies: [
           PhysicsEngine.createSplitter(400, 400, 120, 0, true),
           PhysicsEngine.createCircle(400, 250, 10, false),
@@ -3154,7 +3111,7 @@
       // the lower one (offset under one of the two halves) splits that half
       // again - 1 -> 2 -> 3 balls, all in lineage 1.
       var scene = {
-        gravity: 800, mutualGravity: false, friction: 0, restitution: 1,
+        mutualGravity: false,
         bodies: [
           PhysicsEngine.createSplitter(400, 400, 120, Math.PI, true),
           PhysicsEngine.createCircle(400, 250, 4, false),
@@ -3182,7 +3139,7 @@
 
   function twoBallScene(edgeMode, ax, ay, bx, by) {
     var scene = {
-      gravity: 800, friction: 0, restitution: 1, edgeMode: edgeMode,
+      edgeMode: edgeMode,
       frameWidth: 800, frameHeight: 600, hinges: [],
       bodies: [PhysicsEngine.createCircle(ax, ay, 10, false), PhysicsEngine.createCircle(bx, by, 10, false)],
     };
@@ -3288,7 +3245,7 @@
         ["scene lifespan", { body: null, bodyB: null, property: "lifespan" }],
         ["lifespan, no bodyB key at all", { body: null, property: "lifespan" }],
         ["one body", { body: 1, bodyB: null, property: "y" }],
-        ["legacy one body", { body: 1, property: "y" }],
+        ["one body, no bodyB key at all", { body: 1, property: "y" }],
         ["bounce count", { body: 2, bodyB: null, property: "bounces" }],
         ["pair average", { body: 0, bodyB: 2, property: "x" }],
         ["distance", { body: 0, bodyB: 2, property: "distance" }],
@@ -3478,7 +3435,7 @@
     function () {
       function cascade(cap) {
         var scene = {
-          gravity: 800, mutualGravity: false, friction: 0, restitution: 1,
+          mutualGravity: false,
           bodies: [
             PhysicsEngine.createSplitter(400, 400, 120, Math.PI, true),
             PhysicsEngine.createCircle(400, 250, 4, false),
@@ -3531,7 +3488,7 @@
       ];
       var bad = clamps.filter(function (c) { return F(c[0]) !== c[1]; });
       var round = PhysicsEngine.cloneScene({
-        gravity: 800, bodies: [], hinges: [], maxSimulationBodies: 6,
+        bodies: [], hinges: [], maxSimulationBodies: 6,
         xInput: null, yInput: null, output: null,
       });
       var survived = round.maxSimulationBodies === 6;
@@ -3607,7 +3564,7 @@
     function () {
       var STEPS = 90, WORLD_X = 12;
       var scene = {
-        gravity: 800, mutualGravity: false, friction: 0, restitution: 1,
+        mutualGravity: false,
         bodies: [
           PhysicsEngine.createSplitter(400, 400, 120, Math.PI, true),
           PhysicsEngine.createCircle(385, 250, 4, false),
@@ -3647,7 +3604,7 @@
     function () {
       var STEPS = 130;
       var scene = {
-        gravity: 800, mutualGravity: false, friction: 0, restitution: 1,
+        mutualGravity: false,
         bodies: [
           PhysicsEngine.createSplitter(400, 400, 120, Math.PI, true),
           PhysicsEngine.createCircle(400, 250, 4, false),
@@ -3681,7 +3638,7 @@
     function () {
       // The exact reported scene.
       var scene = {
-        gravity: 970, mutualGravity: true, friction: 0, restitution: 1,
+        mutualGravity: true,
         bodies: [
           PhysicsEngine.createCircle(1027, 140, 11, false),
           PhysicsEngine.createSplitter(688, 492, 120, 0, true),
@@ -3698,7 +3655,7 @@
       // A funnel under Mutual Gravity has to stay finite for the same reason,
       // even though it can't multiply bodies.
       var fScene = {
-        gravity: 800, mutualGravity: true, friction: 0, restitution: 1,
+        mutualGravity: true,
         bodies: [
           PhysicsEngine.createCircle(500, 200, 10, false),
           PhysicsEngine.createFunnel(500, 500, 120, 0, true),
@@ -3715,34 +3672,33 @@
   );
 
   addTest(
-    "A circle sitting against a splitter's short side splits once, not once per step",
+    "A circle resting against a splitter's short side never splits",
     "only a FRESH crossing splits - a circle already inside the trigger capsule at the start of a step would otherwise re-split every step, which is exponential in steps rather than an occasional extra ball",
     function () {
-      // Aimed to loiter right at the short side: zero gravity and a crawl,
-      // so once it reaches the trigger's capsule it stays inside it for
-      // hundreds of consecutive steps. The short side (angle=PI puts it on
-      // top) sits at y=348, and the capsule reaches 18px out from it
-      // (LINE_THICKNESS/2 + radius), so this enters the trigger around step
-      // 150 and is still inside it at step 400.
+      // The short side stands vertical at x=448 (angle PI/2), spanning
+      // y=470-530, and the ball sits on a floor 12px to its left - inside
+      // the trigger's capsule, which reaches 18px out (LINE_THICKNESS/2 +
+      // radius). The floor holds it against gravity, so it stays inside the
+      // capsule the whole run without ever having crossed into it. Without
+      // the rule it splits on the very first step.
       var scene = {
-        gravity: 0, mutualGravity: false, friction: 0, restitution: 1,
         bodies: [
-          PhysicsEngine.createSplitter(400, 400, 120, Math.PI, true),
-          PhysicsEngine.createCircle(400, 320, 8, false),
+          PhysicsEngine.createSplitter(500, 500, 120, Math.PI / 2, true),
+          PhysicsEngine.createLine(300, 518, 300, 0, true),
+          PhysicsEngine.createCircle(436, 500, 8, false),
         ],
-        hinges: [], frameWidth: 1200, frameHeight: 900, edgeMode: "wrap",
+        hinges: [], frameWidth: 1200, frameHeight: 900, edgeMode: "infinite",
       };
-      scene.bodies[1].vy = 4; // ~0.07px per step
-      var counts = [];
+      var firstSplit = 0;
       for (var i = 0; i < 400; i++) {
         PhysicsEngine.step(scene, DT);
-        counts.push(scene.bodies.length);
+        if (!firstSplit && scene.bodies.length > 3) firstSplit = i + 1;
       }
       var circles = scene.bodies.filter(function (b) { return b.type === "circle"; }).length;
-      var detail = "after 400 steps of creeping across the short side: " + circles +
-        " circles (want exactly 2 - one split, not one per step); body count went " +
-        counts[0] + " -> " + counts[counts.length - 1];
-      return { pass: circles === 2, detail: detail };
+      var detail = "after 400 steps resting against the short side: " + circles +
+        " circle(s) (want exactly 1 - it never crossed in, so it never splits)" +
+        (firstSplit ? "; first split at step " + firstSplit : "");
+      return { pass: circles === 1, detail: detail };
     }
   );
 
@@ -3768,7 +3724,6 @@
     function () {
       function scene() {
         return {
-          gravity: 800, friction: 0, restitution: 1,
           bodies: [
             PhysicsEngine.createCircle(673.9, 46.1, 30, false),
             PhysicsEngine.createLine(323, 468, 300, 0.35, true),
@@ -3804,7 +3759,6 @@
     "resolveOffsetTargetsNumeric's isYAxisProperty must catch \"vy\" the same way it already catches \"y\", or panning the world view \"up\" would feel backwards for a velocity link while feeling right for a position link",
     function () {
       var scene = {
-        gravity: 0, friction: 0, restitution: 1,
         bodies: [PhysicsEngine.createCircle(500, 300, 20, false)],
         hinges: [],
         xInput: { body: 0, property: "vx" },
@@ -3829,7 +3783,6 @@
     "vx/vy used to be baked as a compile-time literal in generateCanonicalBodyDeclarationsGLSL - a Input link to them would silently do nothing on the actual grid/Play GPU path while still working in computeOffsetSceneNumeric's JS-only hover preview",
     function () {
       var scene = {
-        gravity: 300, friction: 0, restitution: 1,
         bodies: [PhysicsEngine.createCircle(500, 300, 20, false)],
         hinges: [],
         xInput: { body: 0, property: "vx" },
@@ -3846,7 +3799,7 @@
       // zero, so this must land on the authored (5, -10) velocity, not on
       // the frozen-at-compile-time value some other regression could leave
       // it at.
-      var noInputScene = { gravity: 300, friction: 0, restitution: 1, bodies: [PhysicsEngine.createCircle(500, 300, 20, false)], hinges: [], xInput: null, yInput: null, output: null };
+      var noInputScene = { bodies: [PhysicsEngine.createCircle(500, 300, 20, false)], hinges: [], xInput: null, yInput: null, output: null };
       noInputScene.bodies[0].vx = 5; noInputScene.bodies[0].vy = -10;
       var jsNoInput = PhysicsEngine.cloneScene(noInputScene);
       PhysicsEngine.computeMass(jsNoInput.bodies[0]);
@@ -3865,7 +3818,7 @@
     function () {
       function scene(collisionsEnabled) {
         var s = {
-          gravity: 800, mutualGravity: false, friction: 0, restitution: 1,
+          mutualGravity: false,
           bodies: [
             PhysicsEngine.createCircle(500, 100, 20, false),
             PhysicsEngine.createLine(500, 500, 400, 0, true),
@@ -3897,7 +3850,7 @@
     "\"objects can pass right through each other\" was read as applying uniformly - a funnel/splitter's solid edges and triggers use the exact same swept detection as an ordinary bounce, so leaving them collidable while turning off everything else would be an inconsistent carve-out",
     function () {
       var funnelScene = {
-        gravity: 800, mutualGravity: false, friction: 0, restitution: 1, collisionsEnabled: false,
+        mutualGravity: false, collisionsEnabled: false,
         bodies: [
           PhysicsEngine.createCircle(400, 250, 10, false),
           PhysicsEngine.createFunnel(400, 400, 120, 0, true),
@@ -3926,7 +3879,7 @@
     function () {
       function buildScene() {
         return {
-          gravity: 800, mutualGravity: false, friction: 0.4, restitution: 0.2, collisionsEnabled: false,
+          mutualGravity: false, collisionsEnabled: false,
           bodies: [
             PhysicsEngine.createLine(400, 560, 700, 0, true),
             PhysicsEngine.createCircle(400, 400, 30, false), // already overlapping the line at step 0
@@ -3958,7 +3911,7 @@
     function () {
       function pullAt(r, collisions) {
         var scene = {
-          gravity: 0, mutualGravity: true, collisionsEnabled: collisions,
+          mutualGravity: true, collisionsEnabled: collisions,
           bodies: [PhysicsEngine.createCircle(0, 0, 30, false), PhysicsEngine.createCircle(r, 0, 30, false)],
           hinges: [],
         };
@@ -3995,7 +3948,7 @@
     "reported as 'non-continuousness' on a two-circle scene: two starts 4.7e-5px apart came out 133.9px apart, and bringing them 7 decades closer together did not shrink that gap at all - the signature of a discontinuity rather than chaos. Cause was the contact-shell cutoff above; this pins the outcome rather than the mechanism, so it fails if any future change reintroduces a branch anywhere in this path",
     function () {
       var SCENE = {
-        gravity: 800, mutualGravity: true, collisionsEnabled: false, friction: 0, restitution: 1,
+        mutualGravity: true, collisionsEnabled: false,
         bodies: [
           { type: "circle", x: 695.1829, y: 424.083, angle: 0, isAnchored: false, radius: 30, vx: -82, vy: 133, w: 0 },
           { type: "circle", x: 335.4948, y: 446.0356, angle: 0, isAnchored: false, radius: 30, vx: 126, vy: -2, w: 0 },
@@ -4031,7 +3984,7 @@
     function () {
       function buildScene() {
         return {
-          gravity: 0, mutualGravity: true, collisionsEnabled: false, friction: 0, restitution: 1,
+          mutualGravity: true, collisionsEnabled: false,
           bodies: [
             PhysicsEngine.createCircle(400, 300, 30, false),
             PhysicsEngine.createCircle(600, 300, 30, false),
@@ -4408,7 +4361,6 @@
       "uniform bool u_init;", "uniform int u_steps;", "uniform int u_group;",
       PhysicsGridCodegen.generatePlaybackStateOutputsGLSL(layersPerGroup).join("\n"), "",
       PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(scene)), "",
-      PhysicsGPU.sceneConstantsGLSL(scene.gravity, scene.friction, scene.restitution, precision), "",
       PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision,
         scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), initial.spawnBase), "",
       "void main() {",
@@ -4528,7 +4480,6 @@
     "Playback carries each pixel's simulation in float textures between frames - a lossy round trip or a missing state variable (here: the world hinge's own anchor) would drift from an uninterrupted run",
     function () {
       var scene = {
-        gravity: 800, friction: 0.4, restitution: 0.2,
         bodies: [PhysicsEngine.createLine(600, 300, 160, 0, false), PhysicsEngine.createLine(760, 300, 160, 0, false)],
         hinges: [
           { bodyA: null, bodyB: 0, localAnchorA: { x: 520, y: 300 }, localAnchorB: { x: -80, y: 0 } },
@@ -4571,7 +4522,7 @@
     "Mutual Gravity welds touching bodies inside stepOnce - stateless by design, so nothing beyond the six accumulators should need carrying",
     function () {
       var scene = {
-        gravity: 800, mutualGravity: true, friction: 0.4, restitution: 0.2,
+        mutualGravity: true,
         bodies: [
           PhysicsEngine.createCircle(500, 400, 40, false),
           PhysicsEngine.createCircle(700, 400, 20, false),

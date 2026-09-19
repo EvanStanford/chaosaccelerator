@@ -9,8 +9,8 @@
   // slider), not a fixed constant: it travels with the scene through export/
   // import and the Fractal Grid handoff, so the same duration authored here
   // is what a sent scene simulates per pixel there. This is only the default
-  // for a brand-new scene / a fallback for JSON written before this field
-  // existed - see the scene object literal and parseSceneData below.
+  // for a brand-new scene, and for pasted JSON that leaves it out - see the
+  // scene object literal and parseSceneData below.
   var DEFAULT_SIMULATION_STEPS = 1000;
   // Notches are hundreds of steps - matches fractal-grid.js's own slider
   // exactly, notch-for-notch, since a scene's simulationSteps now has to mean
@@ -166,10 +166,6 @@
   }
 
   var scene = {
-    // No longer user-configurable either (the Gravity slider became the
-    // Mutual Gravity toggle below) - this is the strength of the downward
-    // pull whenever mutualGravity is off, and is simply unused when it's on.
-    gravity: 800,
     // Off: the usual constant downward gravity. On: no "down" at all, and
     // every body attracts every other by its mass instead - see
     // PhysicsEngine.computeAccelerations.
@@ -187,11 +183,6 @@
     // this value, though it can still be explored further from there without
     // that changing what's authored here.
     simulationSteps: DEFAULT_SIMULATION_STEPS,
-    // No longer user-configurable (the Friction/Bounciness sliders were
-    // removed) - every scene now always runs frictionless and perfectly
-    // elastic.
-    friction: 0,
-    restitution: 1,
     bodies: [],
     hinges: [],
     xInput: null,
@@ -2154,12 +2145,9 @@
 
   function serializeScene() {
     return {
-      gravity: roundNum(scene.gravity),
       mutualGravity: !!scene.mutualGravity,
       collisionsEnabled: PhysicsEngine.collisionsEnabled(scene),
       simulationSteps: scene.simulationSteps,
-      friction: roundNum(scene.friction),
-      restitution: roundNum(scene.restitution),
       bodies: scene.bodies.map(function (b) {
         var out = { type: b.type, x: roundNum(b.x), y: roundNum(b.y), angle: roundNum(b.angle), isAnchored: !!b.isAnchored };
         if (b.type === "circle") out.radius = roundNum(b.radius);
@@ -2263,8 +2251,7 @@
       }
       // Output only: an optional second body, which switches the mapping to
       // the pair reading (average, or Distance Apart). Absent/null is the
-      // one-body mapping every scene written before this existed has, so
-      // there is nothing to migrate.
+      // one-body mapping.
       var bodyB = null;
       if (allowLifespan && raw.bodyB !== null && raw.bodyB !== undefined) {
         bodyB = Number(raw.bodyB);
@@ -2292,41 +2279,14 @@
       xInput: parseMapping(parsed.xInput, "xInput"),
       yInput: parseMapping(parsed.yInput, "yInput"),
       output: parseMapping(parsed.output, "output", OUTPUT_PROPERTIES, true),
-      gravity: parsed.gravity !== undefined ? Number(parsed.gravity) : undefined,
-      // friction/restitution aren't read here - no longer user-configurable,
-      // so an imported scene's values (if any, e.g. from before this was
-      // removed) are ignored rather than restored; scene.friction/
-      // restitution just stay at their fixed 0/1 default forever.
-      // Defaults true (unlike the other fields above, which default to
-      // "leave whatever's already there" via undefined) so pasted/loaded
-      // JSON that predates this field, or simply omits it, still gets the
-      // stop-at-edge behavior almost every scene should use - only an
-      // explicit false opts out.
-      // edgeMode supersedes the older stickyEdges boolean; JSON written
-      // before this existed still says stickyEdges, and true/false there
-      // meant exactly Sticky/Pac-Man.
-      edgeMode: PhysicsEngine.EDGE_MODES.indexOf(parsed.edgeMode) !== -1 ? parsed.edgeMode
-        : (parsed.stickyEdges === false ? "wrap" : "sticky"),
-      // Defaults false, unlike edgeMode above which defaults to its "on"
-      // value: JSON that predates this field describes a downward-gravity
-      // scene, and reading it as mutual would silently change what it means.
+      // Pasted JSON that leaves any of these out, or garbles one, gets the
+      // same default a brand-new scene starts with rather than an error.
+      edgeMode: PhysicsEngine.edgeModeOf(parsed),
       mutualGravity: parsed.mutualGravity === true,
-      // Clamped, never rejected - maxSimulationBodiesFor handles a missing
-      // field (every scene written before this existed), a garbage one, and
-      // an out-of-range one identically, so there is nothing to validate
-      // separately here.
       maxSimulationBodies: PhysicsEngine.maxSimulationBodiesFor(parsed),
-      // Defaults true - the opposite of mutualGravity's default above, and
-      // for the same kind of reason: every scene written before this field
-      // existed (including one with mutualGravity already true) ran with
-      // collisions fully on, so only an explicit false opts out.
-      collisionsEnabled: parsed.collisionsEnabled !== false,
-      // Falls back to the old fixed duration for JSON written before this
-      // field existed, or a garbage/missing value - same "predates the
-      // field" reasoning as edgeMode above. Snapped onto the slider's own
-      // grid of hundreds so the control can always show exactly what got
-      // loaded, the same way edgeMode above only ever lands on a value its
-      // own <select> can pick.
+      collisionsEnabled: PhysicsEngine.collisionsEnabled(parsed),
+      // Snapped onto the slider's own grid of hundreds so the control can
+      // always show exactly what got loaded.
       simulationSteps: (function () {
         var v = Number(parsed.simulationSteps);
         if (!isFinite(v) || v <= 0) return DEFAULT_SIMULATION_STEPS;
@@ -2342,7 +2302,6 @@
     scene.xInput = data.xInput;
     scene.yInput = data.yInput;
     scene.output = data.output;
-    if (data.gravity !== undefined) scene.gravity = data.gravity;
     scene.edgeMode = data.edgeMode;
     scene.maxSimulationBodies = data.maxSimulationBodies;
     scene.mutualGravity = !!data.mutualGravity;

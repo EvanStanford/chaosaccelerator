@@ -5,7 +5,7 @@
 // Pure, DOM-free 2D rigid body physics engine: circles and line segments,
 // capsule-style collision, revolute (pin) joints, static anchors.
 //
-// The scene is plain, serializable data - { gravity, bodies: [...], hinges: [...] }
+// The scene is plain, serializable data - { bodies: [...], hinges: [...] }
 // - and step(scene, dt) mutates it in place. That data-in/data-out shape is
 // deliberate: it's what a future per-pixel GPU port (Milestone 2) or a
 // deterministic replay-from-a-starting-state (Milestone 3) both need.
@@ -115,13 +115,16 @@
   function speedCapFor(scene) {
     return scene.mutualGravity ? MUTUAL_GRAVITY_MAX_SPEED : MAX_SPEED;
   }
-  var DEFAULT_RESTITUTION = 0.2;
+  // The constant downward pull whenever Mutual Gravity is off (under Mutual
+  // Gravity nothing pulls "down" at all - see computeAccelerations). Fixed,
+  // not a scene setting - and so are friction (none) and restitution
+  // (perfectly elastic, apart from the resting-contact ramp below).
+  var GRAVITY = 800;
   // Below this closing speed, treat restitution as 0. Without this, a body
   // resting under constant gravity never quite settles: each step gravity
   // adds a little velocity, and bouncing that back with restitution > 0
   // creates a permanent small jitter instead of coming to rest.
   var RESTITUTION_THRESHOLD = 30;
-  var DEFAULT_FRICTION = 0.4;
   var VELOCITY_ITERATIONS = 8;
   var POSITION_ITERATIONS = 4;
   var POSITION_SLOP = 0.01;
@@ -157,7 +160,7 @@
   // Takes the whole acceleration as a vector rather than just a downward
   // scalar, because under Mutual Gravity (see computeAccelerations) every
   // body pulls in its own direction - uniform gravity is then simply the
-  // special case where every body's acceleration is (0, scene.gravity).
+  // special case where every body's acceleration is (0, GRAVITY).
   function advanceVelocity(vx, vy, dt, ax, ay, maxSpeed) {
     vx += ax * dt;
     vy += ay * dt;
@@ -183,7 +186,7 @@
   var ANCHORED_GRAVITY_DENSITY = 10;
   // The one free parameter, since replacing the Gravity slider left no UI to
   // tune it with. Set so an anchored default-size circle (radius 30) pulls
-  // at roughly the old constant gravity, 800, from 300px away - near enough
+  // at roughly GRAVITY from 300px away - near enough
   // that scenes built for downward gravity stay in a familiar range when
   // flipped over to Mutual, while two free bodies that far apart pull on
   // each other about ten times more gently, which is the regime where orbits
@@ -222,7 +225,7 @@
   // Each body's total acceleration for this step, as {x, y} per body.
   //
   // Uniform mode is the trivial case: everything accelerates downward at
-  // scene.gravity. Under Mutual Gravity each body instead sums G*m/r^2
+  // GRAVITY. Under Mutual Gravity each body instead sums G*m/r^2
   // toward every OTHER body - including anchored ones, which pull without
   // ever being pulled (they don't move, and advanceVelocity is never called
   // for them, so their own entry is left at zero).
@@ -284,8 +287,7 @@
   function computeAccelerations(scene) {
     var bodies = scene.bodies, n = bodies.length, i, acc = new Array(n);
     if (!scene.mutualGravity) {
-      var g = scene.gravity !== undefined ? scene.gravity : 0;
-      for (i = 0; i < n; i++) acc[i] = { x: 0, y: g };
+      for (i = 0; i < n; i++) acc[i] = { x: 0, y: GRAVITY };
       return acc;
     }
     for (i = 0; i < n; i++) {
@@ -1018,7 +1020,7 @@
     return { x: body.vx - body.w * r.y, y: body.vy + body.w * r.x };
   }
 
-  function solveContactVelocity(contact, bodyA, bodyB, friction, restitution) {
+  function solveContactVelocity(contact, bodyA, bodyB) {
     var n = contact.normal;
     // Lever arms recorded at the contact instant by the narrow phase, NOT
     // re-derived as (point - center) here - the centers are mid-step and
@@ -1042,28 +1044,11 @@
     // without being a cliff - this is also what keeps a grazing hit
     // continuous with a near miss, since -velAlongNormal -> 0 as the
     // impact goes tangential.
-    var e = restitution * smoothstep(0.5 * RESTITUTION_THRESHOLD, RESTITUTION_THRESHOLD, -velAlongNormal);
+    var e = smoothstep(0.5 * RESTITUTION_THRESHOLD, RESTITUTION_THRESHOLD, -velAlongNormal);
     var j = -(1 + e) * velAlongNormal / invMassSum;
     applyImpulse(bodyA, -n.x * j, -n.y * j, rA);
     applyImpulse(bodyB, n.x * j, n.y * j, rB);
-
-    var vA2 = velocityAt(bodyA, rA), vB2 = velocityAt(bodyB, rB);
-    var rv2 = { x: vB2.x - vA2.x, y: vB2.y - vA2.y };
-    var vAlongN2 = dot(rv2, n);
-    var tangent = { x: rv2.x - n.x * vAlongN2, y: rv2.y - n.y * vAlongN2 };
-    var tLen = Math.sqrt(tangent.x * tangent.x + tangent.y * tangent.y);
-    if (tLen > 1e-9) {
-      tangent.x /= tLen; tangent.y /= tLen;
-      var raCrossT = rA.x * tangent.y - rA.y * tangent.x;
-      var rbCrossT = rB.x * tangent.y - rB.y * tangent.x;
-      var invMassSumT = bodyA.invMass + bodyB.invMass +
-        raCrossT * raCrossT * bodyA.invInertia + rbCrossT * rbCrossT * bodyB.invInertia;
-      if (invMassSumT > 0) {
-        var jt = clampNum(-dot(rv2, tangent) / invMassSumT, -friction * Math.abs(j), friction * Math.abs(j));
-        applyImpulse(bodyA, -tangent.x * jt, -tangent.y * jt, rA);
-        applyImpulse(bodyB, tangent.x * jt, tangent.y * jt, rB);
-      }
-    }
+    // Nothing along the tangent: every contact is frictionless.
     // No position fixup here. step() integrates the step in two legs split
     // at each body's own tHit, which accounts for the sub-step exactly;
     // correcting here as well would double-count it.
@@ -1196,9 +1181,8 @@
   }
 
   // Defaults true when absent (not just when scene.collisionsEnabled ===
-  // true) so every scene authored, saved, or sampled before this toggle
-  // existed keeps behaving exactly as it always did - this is an opt-OUT,
-  // never an opt-in. physics-ui.js's Mutual Gravity checkbox flips this to
+  // true) - this is an opt-OUT, never an opt-in. physics-ui.js's Mutual
+  // Gravity checkbox flips this to
   // a sensible default (off under Mutual Gravity, on otherwise) as a one-
   // time UX nudge whenever THAT checkbox changes, not as a property of the
   // engine itself - this function has no opinion about mutualGravity at all.
@@ -1374,8 +1358,6 @@
     var velIter = opts.velocityIterations || VELOCITY_ITERATIONS;
     var posIter = opts.positionIterations || POSITION_ITERATIONS;
     var bodies = scene.bodies;
-    var friction = scene.friction !== undefined ? scene.friction : DEFAULT_FRICTION;
-    var restitution = scene.restitution !== undefined ? scene.restitution : DEFAULT_RESTITUTION;
     var i, j;
 
     // Fixed for the whole step, from the positions it starts at, and reused
@@ -1635,7 +1617,7 @@
     for (iter = 0; iter < velIter; iter++) {
       for (i = 0; i < scene.hinges.length; i++) solveHingeVelocity(scene.hinges[i], bodies);
       for (i = 0; i < contacts.length; i++) {
-        solveContactVelocity(contacts[i], bodies[contacts[i].a], bodies[contacts[i].b], friction, restitution);
+        solveContactVelocity(contacts[i], bodies[contacts[i].a], bodies[contacts[i].b]);
       }
     }
 
@@ -1751,7 +1733,6 @@
 
   function cloneScene(scene) {
     return {
-      gravity: scene.gravity,
       // Same reasoning as xInput/frameWidth below: physics-ui.js clones the
       // live scene on Play and clones it back on Reset, so anything omitted
       // here is silently wiped by that round trip - and dropping this one
@@ -1768,8 +1749,6 @@
       // clones the live scene on Play and clones it back on Reset, so an
       // omission here silently resets the ceiling mid-edit.
       maxSimulationBodies: maxSimulationBodiesFor(scene),
-      friction: scene.friction,
-      restitution: scene.restitution,
       bodies: scene.bodies.map(function (b) {
         var copy = {};
         for (var key in b) if (Object.prototype.hasOwnProperty.call(b, key)) copy[key] = b[key];
@@ -2032,6 +2011,7 @@
     LINE_LINEAR_DENSITY: LINE_LINEAR_DENSITY,
     // Exported so physics-gpu.js's GLSL port bakes the very same numbers
     // rather than keeping its own copies to drift out of sync.
+    GRAVITY: GRAVITY,
     ANCHORED_GRAVITY_DENSITY: ANCHORED_GRAVITY_DENSITY,
     MUTUAL_GRAVITY_CONSTANT: MUTUAL_GRAVITY_CONSTANT,
     gravitationalMass: gravitationalMass,
