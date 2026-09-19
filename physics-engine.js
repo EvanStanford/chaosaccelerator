@@ -231,7 +231,8 @@
   // for them, so their own entry is left at zero).
   //
   // TWO BODIES THAT ARE ACTUALLY TOUCHING EXERT NO MUTUAL GRAVITY - but only
-  // when collisions are on. See the ramp below for the collisions-off case.
+  // when collisions are on. See the smooth interior below for the
+  // collisions-off case.
   //
   // Not an approximation for tidiness - without it the simulation invents
   // energy. Once a body settles against another it sits a fraction of a pixel
@@ -274,16 +275,39 @@
   // apart, and that gap stayed at 133.9 px as the starts were brought 7 decades
   // closer together - a gap that will not close is a discontinuity, not chaos.
   //
-  // So with collisions off the pull ramps down instead of falling off a cliff:
-  // outside, the usual G*m/r^2; inside, G*m*r/contact^3, which is the textbook
-  // interior solution for a body of uniform density (only the enclosed mass
-  // pulls). The two agree exactly at r == contact and the ramp reaches 0 at
-  // r == 0, so the field is continuous everywhere and still has no singularity
-  // to guard against. Measured on the same scene: adjacent-sample jumps then
-  // fall 10x per 10x of refinement across 5 decades, and peak speed over the
-  // whole parameter sweep is 465 px/s against the 5000 cap - where dropping the
-  // rule entirely (plain 1/r^2 all the way down) pins the cap at 5000 and still
-  // leaves 3e+4 px jumps at practical sampling.
+  // So with collisions off the pull carries on smoothly through the interior
+  // instead of falling off a cliff: outside, the usual G*m/r^2; inside,
+  //
+  //   |a| = G*m*r/contact^3 * (35/8 - 21/4*u^2 + 15/8*u^4),   u = r/contact
+  //
+  // which is the pull inside a ball whose density fades smoothly to zero at
+  // its surface (as (1 - u^2)^2) rather than stopping dead there. At
+  // r == contact it matches G*m/r^2 in value, slope AND curvature, and it
+  // reaches 0 at r == 0 - a polynomial in r^2, so it is smooth through the
+  // center too, and there is still no singularity to guard against. (Dropping
+  // the rule entirely instead - plain 1/r^2 all the way down - pins the 5000
+  // speed cap and leaves 3e+4 px jumps at practical sampling.)
+  //
+  // Continuity alone is not enough. This used to be the uniform-density
+  // interior G*m*r/contact^3, which meets G*m/r^2 at the shell but turns from
+  // rising to falling there, leaving a sharp peak in the pull right at
+  // contact. A step samples the pull once - ~10px apart on a fast pass - so
+  // what a pass picks up from that peak depends on where the step grid falls
+  // relative to the crossing, and sliding a pixel's start along a line slides
+  // that phase until one more step lands inside the shell and the output's
+  // slope flips. Measured on a reported scene (a 6.18px circle passing through
+  // a free 30px one): 30 starts spread over 10px came out as a sawtooth, the
+  // slope reversing 10 times with jumps of up to 67px, while the same law at
+  // 1/128th of the step is a smooth line the sawtooth strayed up to 54px from.
+  // Matching the slope at the shell as well only shrank it; matching the
+  // curvature too leaves no reversals at all. The rounding also has to be
+  // broad, spread over the whole interior: one packed into a band much
+  // narrower than the ~10px a pass covers per step still reads as a corner.
+  //
+  // What this does change is a pass through another body: the interior pull
+  // now peaks at ~1.64x its rim value (at u ~= 0.59) instead of at the rim, so
+  // an overlapping pass runs faster and exits on a different path than it did
+  // under the old ramp. Bodies that never overlap are unaffected.
   function computeAccelerations(scene) {
     var bodies = scene.bodies, n = bodies.length, i, acc = new Array(n);
     if (!scene.mutualGravity) {
@@ -305,8 +329,11 @@
           } else if (collisionsEnabled(scene)) {
             continue; // touching - the contact force answers for it
           } else {
-            // Uniform-density interior: |a| = G*m*r/contact^3, linear in r.
-            pull = MUTUAL_GRAVITY_CONSTANT * gravitationalMass(bodies[j]) / (contact * contact * contact);
+            // Smooth interior (see above): meets G*m/r^2 at r == contact in
+            // value, slope and curvature, and reaches 0 at the center.
+            var u2 = r2 / (contact * contact);
+            pull = MUTUAL_GRAVITY_CONSTANT * gravitationalMass(bodies[j]) / (contact * contact * contact) *
+              (35 / 8 - 21 / 4 * u2 + 15 / 8 * u2 * u2);
           }
           ax += pull * dx;
           ay += pull * dy;

@@ -1136,9 +1136,10 @@
           // It also bounds this expression: r2 can never get near zero, so
           // there is no singularity to guard against.
           // With collisions off nothing supplies that force and bodies pass
-          // through each other, so the pull ramps linearly to zero inside
-          // `contact` instead of being switched off at its rim - same reason,
-          // same formula, same comment as the JS engine's branch.
+          // through each other, so inside `contact` the pull follows the
+          // smooth interior law down to zero instead of being switched off at
+          // its rim - same reason, same formula, same comment as the JS
+          // engine's branch.
           lines.push("    float contact = fHalf" + a + " + fHalf" + b2 + ";");
           lines.push("    float r2 = dot(d, d);");
           if (collisionsOn) {
@@ -1146,11 +1147,13 @@
               fnum(global.PhysicsEngine.MUTUAL_GRAVITY_CONSTANT) +
               " * gravMass" + b2 + " / (r2 * sqrt(r2))) * d;");
           } else {
+            lines.push("    float u2_" + b2 + " = r2 / (contact * contact);");
             lines.push("    float pull" + b2 + " = (r2 >= contact * contact)");
             lines.push("      ? " + fnum(global.PhysicsEngine.MUTUAL_GRAVITY_CONSTANT) +
               " * gravMass" + b2 + " / (r2 * sqrt(r2))");
             lines.push("      : " + fnum(global.PhysicsEngine.MUTUAL_GRAVITY_CONSTANT) +
-              " * gravMass" + b2 + " / (contact * contact * contact);");
+              " * gravMass" + b2 + " / (contact * contact * contact) *");
+            lines.push("        (35.0 / 8.0 - 21.0 / 4.0 * u2_" + b2 + " + 15.0 / 8.0 * u2_" + b2 + " * u2_" + b2 + ");");
             lines.push("    gravAcc" + a + " += pull" + b2 + " * d;");
           }
           lines.push("  }");
