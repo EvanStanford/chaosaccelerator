@@ -2316,7 +2316,7 @@
       var plain = PhysicsEngine.speedCapFor({ mutualGravity: false });
       var mutual = PhysicsEngine.speedCapFor({ mutualGravity: true });
 
-      // A body under ordinary gravity must still be held at the old ceiling.
+      // A body under ordinary gravity must still be held at the lower ceiling.
       var falling = {
         gravity: 800, friction: 0, restitution: 1,
         bodies: [PhysicsEngine.createCircle(500, 0, 20, false)], hinges: [],
@@ -2335,8 +2335,8 @@
       var mutualClamped = Math.hypot(orbiting.bodies[0].vx, orbiting.bodies[0].vy);
 
       return {
-        pass: plain === 1000 && mutual === 5000 &&
-          Math.abs(plainClamped - 1000) < 1e-6 && Math.abs(mutualClamped - 5000) < 1e-6,
+        pass: plain === 2000 && mutual === 5000 &&
+          Math.abs(plainClamped - 2000) < 1e-6 && Math.abs(mutualClamped - 5000) < 1e-6,
         detail: "ordinary gravity caps at " + plain + " (a body launched at 100000 came out at " +
           plainClamped.toFixed(1) + "), Mutual Gravity at " + mutual + " (came out at " +
           mutualClamped.toFixed(1) + ")",
