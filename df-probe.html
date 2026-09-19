@@ -280,7 +280,6 @@
   // would be a poor test - its answer is nearly linear in the starting
   // position, so it looks smooth at any zoom and any precision.
   var DEMO_SCENE = {
-    gravity: 800, friction: 0, restitution: 1,
     bodies: [
       PhysicsEngine.createCircle(596, 120, 30, false),
       PhysicsEngine.createLine(430, 430, 620, 0.32, true),
@@ -308,9 +307,6 @@
       "uniform vec2 u_resolution; uniform vec2 u_centerHi; uniform vec2 u_centerLo; uniform float u_scale;",
       "out vec4 fragColor;", "",
       PhysicsGPU.libraryGLSL(precision), "",
-      "const float GRAVITY = " + PhysicsGPU.fnum(DEMO_SCENE.gravity) + ";",
-      "const float FRICTION = " + PhysicsGPU.fnum(DEMO_SCENE.friction) + ";",
-      "const float RESTITUTION = " + PhysicsGPU.fnum(DEMO_SCENE.restitution) + ";",
       "const float RANGE = " + PhysicsGPU.fnum(DEMO_SCENE.frameHeight) + ";", "",
       PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision), "",
       "void main() {",

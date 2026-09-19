@@ -42,22 +42,11 @@
 (function (global) {
   "use strict";
 
-  // Stamped into every scene JSON written in authored space, and the only
-  // thing that tells the two apart on the way back in. JSON without it
-  // predates this file and IS engine space - it is read unchanged, which is
-  // what keeps an old export, an old sample, or an auto-save written by the
-  // previous version of the editor loading exactly as it always did.
-  var CENTERED = "centered-y-up";
-
   // Same precision serializeScene rounds to; re-applied after a conversion
   // so a round trip through authored space doesn't leave 408 sitting in the
   // file as 407.99999999999994.
   function round(n) {
     return Math.round(n * 10000) / 10000;
-  }
-
-  function isAuthored(json) {
-    return !!json && json.coordinateSpace === CENTERED;
   }
 
   // Half the frame, i.e. where the authored origin sits in engine space.
@@ -67,8 +56,8 @@
   // the same frame.
   function halfFrame(frame) {
     return {
-      x: (Number(frame && frame.frameWidth) || 0) / 2,
-      y: (Number(frame && frame.frameHeight) || 0) / 2,
+      x: (Number(frame.frameWidth) || 0) / 2,
+      y: (Number(frame.frameHeight) || 0) / 2,
     };
   }
 
@@ -79,13 +68,6 @@
   // Both spaces measure rotation from the same axis; only its direction
   // differs, so this is its own inverse and serves both ways.
   function flipAngle(a) { return -a; }
-
-  function toAuthoredPoint(x, y, frame) {
-    return { x: toAuthoredX(x, frame), y: toAuthoredY(y, frame) };
-  }
-  function toEnginePoint(x, y, frame) {
-    return { x: toEngineX(x, frame), y: toEngineY(y, frame) };
-  }
 
   // The two directions differ only in how a position maps, so both are this
   // one walk over the scene with a different pair of position functions -
@@ -127,13 +109,10 @@
 
   // Engine-space scene JSON (what serializeScene produces) -> the authored
   // JSON that gets exported, auto-saved, or written into a sample file.
-  // `frame` defaults to the scene's own locked frame, which is what every
-  // caller wants: the scene is being described relative to the frame it was
-  // actually built in.
-  function toAuthoredJSON(json, frame) {
-    var out = convert(json, frame || json, toAuthoredX, toAuthoredY);
-    out.coordinateSpace = CENTERED;
-    return out;
+  // Measured from the scene's own locked frame: it is being described
+  // relative to the frame it was actually built in.
+  function toAuthoredJSON(json) {
+    return convert(json, json, toAuthoredX, toAuthoredY);
   }
 
   // The way back. `frame` is deliberately NOT defaulted to the JSON's own
@@ -141,28 +120,15 @@
   // centered in whatever frame is receiving it (the editor's live canvas),
   // which is the whole reason for describing it from the center. Callers
   // pass the frame they are loading INTO.
-  //
-  // JSON that isn't in authored space is already engine space and comes back
-  // untouched, so every caller can hand its raw parse straight to this
-  // without first asking which kind it has.
   function toEngineJSON(json, frame) {
-    if (!isAuthored(json)) return json;
-    var out = convert(json, frame || json, toEngineX, toEngineY);
-    delete out.coordinateSpace;
-    return out;
+    return convert(json, frame, toEngineX, toEngineY);
   }
 
   global.PhysicsCoords = {
-    CENTERED: CENTERED,
-    isAuthored: isAuthored,
     toAuthoredJSON: toAuthoredJSON,
     toEngineJSON: toEngineJSON,
-    toAuthoredPoint: toAuthoredPoint,
-    toEnginePoint: toEnginePoint,
     toAuthoredX: toAuthoredX,
     toAuthoredY: toAuthoredY,
-    toEngineX: toEngineX,
-    toEngineY: toEngineY,
     flipAngle: flipAngle,
   };
 })(window);

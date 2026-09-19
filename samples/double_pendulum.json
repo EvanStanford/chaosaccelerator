@@ -1,14 +1,11 @@
 {
-  "gravity": 800,
-  "friction": 0,
-  "restitution": 1,
   "bodies": [
     {
       "type": "line",
       "x": -187,
       "y": 121.5,
       "angle": 1.5708,
-      "isStatic": false,
+      "isAnchored": false,
       "length": 140,
       "vx": 0,
       "vy": 0,
@@ -19,7 +16,7 @@
       "x": -116,
       "y": 192.5,
       "angle": 0,
-      "isStatic": false,
+      "isAnchored": false,
       "length": 140,
       "vx": 0,
       "vy": 0,
@@ -65,6 +62,5 @@
     "property": "angle"
   },
   "frameWidth": 1192,
-  "frameHeight": 819,
-  "coordinateSpace": "centered-y-up"
+  "frameHeight": 819
 }

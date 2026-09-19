@@ -35,8 +35,6 @@
   var POSITION_SLOP = 0.01;
   var POSITION_PERCENT = 0.2;
   var FIXED_DT = 1 / 60;
-  var DEFAULT_FRICTION = 0.4;
-  var DEFAULT_RESTITUTION = 0.2;
 
   function fnum(n) {
     if (!isFinite(n)) n = 0;
@@ -60,6 +58,7 @@
     "const float POSITION_SLOP = " + fnum(POSITION_SLOP) + ";",
     "const float POSITION_PERCENT = " + fnum(POSITION_PERCENT) + ";",
     "const float DT = " + fnum(FIXED_DT) + ";",
+    "const float GRAVITY = " + fnum(global.PhysicsEngine.GRAVITY) + ";",
     "",
     // tHit defaults to 0.0 (already touching as of the START of this step)
     // here - true for every contact except collideCircleCircle's swept
@@ -168,10 +167,6 @@
     "// step DT - stepOnce() calls this once per leg of a CCD-split step (see",
     "// its own comment), so it has to be continuous in dt itself: dt=0.0 must",
     "// reduce to a clamp of an already-clamped vector, i.e. the identity.",
-    "// Takes gravity as an explicit parameter rather than reading a GRAVITY",
-    "// const directly, matching solveContactVelocity's own friction/",
-    "// restitution params - this library is assembled BEFORE the",
-    "// scene-specific GRAVITY const is declared, so it can't reference it.",
     // accel is the body's WHOLE acceleration this step, not just a downward
     // scalar - under Mutual Gravity each body has its own direction, and
     // uniform gravity is just the case where every body's is (0, GRAVITY).
@@ -484,7 +479,7 @@
     "",
     "void solveContactVelocity(inout Body bodyA, float invMassA, float invInertiaA,",
     "                          inout Body bodyB, float invMassB, float invInertiaB,",
-    "                          Contact contact, float friction, float restitution) {",
+    "                          Contact contact) {",
     "  if (!contact.hit) return;",
     "  vec2 n = contact.normal;",
     "  // Lever arms recorded at the contact instant by the narrow phase, NOT",
@@ -510,28 +505,11 @@
     "  // without being a cliff - this is also what keeps a grazing hit",
     "  // continuous with a near miss, since -velAlongNormal -> 0 as the",
     "  // impact goes tangential.",
-    "  float e = restitution * smoothstep(0.5 * RESTITUTION_THRESHOLD, RESTITUTION_THRESHOLD, -velAlongNormal);",
+    "  float e = smoothstep(0.5 * RESTITUTION_THRESHOLD, RESTITUTION_THRESHOLD, -velAlongNormal);",
     "  float j = -(1.0 + e) * velAlongNormal / invMassSum;",
     "  applyImpulse(bodyA, invMassA, invInertiaA, vec2(-n.x * j, -n.y * j), rA);",
     "  applyImpulse(bodyB, invMassB, invInertiaB, vec2(n.x * j, n.y * j), rB);",
-    "",
-    "  vec2 vA2 = velocityAt(bodyA, rA);",
-    "  vec2 vB2 = velocityAt(bodyB, rB);",
-    "  vec2 rv2 = vB2 - vA2;",
-    "  float vAlongN2 = dot(rv2, n);",
-    "  vec2 tangent = rv2 - n * vAlongN2;",
-    "  float tLen = length(tangent);",
-    "  if (tLen > 1e-9) {",
-    "    tangent /= tLen;",
-    "    float raCrossT = rA.x * tangent.y - rA.y * tangent.x;",
-    "    float rbCrossT = rB.x * tangent.y - rB.y * tangent.x;",
-    "    float invMassSumT = invMassA + invMassB + raCrossT * raCrossT * invInertiaA + rbCrossT * rbCrossT * invInertiaB;",
-    "    if (invMassSumT > 0.0) {",
-    "      float jt = clamp(-dot(rv2, tangent) / invMassSumT, -friction * abs(j), friction * abs(j));",
-    "      applyImpulse(bodyA, invMassA, invInertiaA, vec2(-tangent.x * jt, -tangent.y * jt), rA);",
-    "      applyImpulse(bodyB, invMassB, invInertiaB, vec2(tangent.x * jt, tangent.y * jt), rB);",
-    "    }",
-    "  }",
+    "  // Nothing along the tangent: every contact is frictionless.",
     "  // No position fixup here. stepOnce() integrates the step in two legs",
     "  // split at each body's own tHit, which accounts for the sub-step",
     "  // exactly; correcting here as well would double-count it.",
@@ -601,28 +579,6 @@
     "void main() { gl_Position = vec4(a_position, 0.0, 1.0); }",
   ].join("\n");
 
-  // Everything a df shader needs before any generated code: the uniform
-  // dfv() hides behind, the df arithmetic itself, the float32 physics
-  // library, and the DBody bridge between the last two. Assembled here so
-  // no caller has to remember the order.
-  // The three per-scene constants, in whichever precision the step loop
-  // will read them. The float32 names stay declared in both modes: the
-  // per-pixel cascade and the trajectory main() still use them.
-  function sceneConstantsGLSL(gravity, friction, restitution, precision) {
-    var lines = [
-      "const float GRAVITY = " + fnum(gravity) + ";",
-      "const float FRICTION = " + fnum(friction) + ";",
-      "const float RESTITUTION = " + fnum(restitution) + ";",
-    ];
-    if (precision === "df") {
-      var d = global.PhysicsDF.num;
-      lines.push("const vec2 DF_GRAVITY = " + d(gravity) + ";");
-      lines.push("const vec2 DF_FRICTION = " + d(friction) + ";");
-      lines.push("const vec2 DF_RESTITUTION = " + d(restitution) + ";");
-    }
-    return lines.join("\n");
-  }
-
   // maxSpeed is per SCENE, not a fixed constant of the library: Mutual
   // Gravity runs a higher ceiling than ordinary downward gravity (see
   // PhysicsEngine.speedCapFor, which is the single source of truth for
@@ -637,6 +593,10 @@
     return lines.join("\n") + "\n";
   }
 
+  // Everything a df shader needs before any generated code: the uniform
+  // dfv() hides behind, the df arithmetic itself, the float32 physics
+  // library, and the DBody bridge between the last two. Assembled here so
+  // no caller has to remember the order.
   function libraryGLSL(precision, maxSpeed) {
     if (precision !== "df") return speedCapDecls(precision, maxSpeed) + GLSL_LIBRARY;
     // Order matters: the df arithmetic defines DVec2 and the dv2* helpers
@@ -923,7 +883,7 @@
     // simply not routed through here.
     var E = df ? {
       body: "dbody", bodyType: "DBody", scalarType: "vec2", vecType: "DVec2",
-      DT: "DF_DT", GRAVITY: "DF_GRAVITY", FRICTION: "DF_FRICTION", RESTITUTION: "DF_RESTITUTION",
+      DT: "DF_DT", GRAVITY: "DF_GRAVITY",
       zero: "DF_ZERO", one: "DF_ONE",
       vec: function (x, y) { return "dv2(" + x + ", " + y + ")"; },
       add: function (a, b) { return "dfAdd(" + a + ", " + b + ")"; },
@@ -939,7 +899,7 @@
       solveHingeVelocity: "dfSolveHingeVelocity", solveHingePosition: "dfSolveHingePosition",
     } : {
       body: "body", bodyType: "Body", scalarType: "float", vecType: "vec2",
-      DT: "DT", GRAVITY: "GRAVITY", FRICTION: "FRICTION", RESTITUTION: "RESTITUTION",
+      DT: "DT", GRAVITY: "GRAVITY",
       zero: "0.0", one: "1.0",
       vec: function (x, y) { return "vec2(" + x + ", " + y + ")"; },
       add: function (a, b) { return "(" + a + ") + (" + b + ")"; },
@@ -1547,7 +1507,7 @@
       var varName = "pair_" + pair[0] + "_" + pair[1];
       ["c0", "c1"].forEach(function (slot) {
         lines.push("    " + E.solveContactVelocity + "(" + B(pair[0]) + ", BODY" + pair[0] + "_INV_MASS, BODY" + pair[0] + "_INV_INERTIA, " +
-          B(pair[1]) + ", BODY" + pair[1] + "_INV_MASS, BODY" + pair[1] + "_INV_INERTIA, " + varName + "." + slot + ", " + E.FRICTION + ", " + E.RESTITUTION + ");");
+          B(pair[1]) + ", BODY" + pair[1] + "_INV_MASS, BODY" + pair[1] + "_INV_INERTIA, " + varName + "." + slot + ");");
       });
     });
     trapezoidPairs.forEach(function (fp) {
@@ -1557,7 +1517,7 @@
       lines.push("    if (!" + excluded + ") {");
       fp.walls.forEach(function (w) {
         lines.push("      solveContactVelocity(" + B(fi) + ", BODY" + fi + "_INV_MASS, BODY" + fi + "_INV_INERTIA, " +
-          B(ci) + ", BODY" + ci + "_INV_MASS, BODY" + ci + "_INV_INERTIA, " + vn + "_" + w[0] + ", FRICTION, RESTITUTION);");
+          B(ci) + ", BODY" + ci + "_INV_MASS, BODY" + ci + "_INV_INERTIA, " + vn + "_" + w[0] + ");");
       });
       lines.push("    }");
     });
@@ -1833,9 +1793,6 @@
     var bodies = scene.bodies;
     var n = bodies.length;
     var consts = bodies.map(bodyConst);
-    var gravity = scene.gravity;
-    var friction = scene.friction !== undefined ? scene.friction : DEFAULT_FRICTION;
-    var restitution = scene.restitution !== undefined ? scene.restitution : DEFAULT_RESTITUTION;
     // Empty rather than filtered post-hoc: generateStepOnceGLSL's funnel
     // codegen (mouth teleport) is itself derived by pulling matching entries
     // OUT of this same list (see its own comment), so handing it none at
@@ -1868,7 +1825,6 @@
     lines.push("");
     lines.push(libraryGLSL(precision, global.PhysicsEngine.speedCapFor(scene)));
     lines.push("");
-    lines.push(sceneConstantsGLSL(gravity, friction, restitution, precision));
     lines.push("const int MAX_STEPS = " + maxSteps + ";");
     lines.push("");
     lines.push(generateStepOnceGLSL(n, consts, pairs, hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), spawnBase));
@@ -2019,7 +1975,6 @@
     generateStepOnceGLSL: generateStepOnceGLSL,
     stepOnceCallArgs: stepOnceCallArgs,
     generateBodyLocalsGLSL: generateBodyLocalsGLSL,
-    sceneConstantsGLSL: sceneConstantsGLSL,
     generateHingeAnchorLocalsGLSL: generateHingeAnchorLocalsGLSL,
     compileShader: compileShader,
     linkProgram: linkProgram,

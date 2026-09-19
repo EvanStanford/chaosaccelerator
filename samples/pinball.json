@@ -1,8 +1,5 @@
 {
-  "gravity": 800,
   "mutualGravity": false,
-  "friction": 0,
-  "restitution": 1,
   "bodies": [
     {
       "type": "circle",
@@ -53,6 +50,5 @@
   },
   "frameWidth": 1192,
   "frameHeight": 809,
-  "edgeMode": "wrap",
-  "coordinateSpace": "centered-y-up"
+  "edgeMode": "wrap"
 }

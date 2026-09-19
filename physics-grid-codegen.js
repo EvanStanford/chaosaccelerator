@@ -612,9 +612,6 @@
   function compileHoverTrajectoryGLSL(scene, worldX, worldY, maxSteps, precision) {
     var df = precision === "df";
     var B = backendFor(precision);
-    var gravity = scene.gravity;
-    var friction = scene.friction !== undefined ? scene.friction : 0.4;
-    var restitution = scene.restitution !== undefined ? scene.restitution : 0.2;
     var initial = generateGridInitialStateGLSL(scene, precision);
     // undefined in Infinite Space: no frame means the step loop emits no
     // wrap at all, which is exactly what that mode is.
@@ -627,7 +624,6 @@
     lines.push("");
     lines.push(PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(scene)));
     lines.push("");
-    lines.push(PhysicsGPU.sceneConstantsGLSL(gravity, friction, restitution, precision));
     lines.push("const int MAX_STEPS = " + maxSteps + ";");
     // Baked as a df literal in df mode: the hovered point is a float64 JS
     // number, and rounding it to one float32 here would replay a
