@@ -996,7 +996,7 @@
     // case the trapezoid's own solid edges must not push on it this step.
     // A funnel excludes the one it teleported through; a splitter excludes
     // the one it split at (its mouth and legs reach past the short side's
-    // corners, so a ball entering off-centre clips one on the very step it
+    // corners, so a ball entering off-center clips one on the very step it
     // splits, and the split then carries that bounce out with it). GLSL
     // twin of the two contact filters in physics-engine.js's step().
     function trapezoidExclusion(fp, fi, ci) {

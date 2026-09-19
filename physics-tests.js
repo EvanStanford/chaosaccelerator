@@ -2713,15 +2713,15 @@
   );
 
   addTest(
-    "Infinite Space's output curve keeps every distance inside the colour range",
-    "with nothing wrapping a coordinate back into the frame there is no range to divide it into: mod() would report a body two frames out as barely off-centre, and a plain divide would run past 1 and off the end of the colours. The sigmoid squashes the whole infinite line into [0,1]",
+    "Infinite Space's output curve keeps every distance inside the color range",
+    "with nothing wrapping a coordinate back into the frame there is no range to divide it into: mod() would report a body two frames out as barely off-center, and a plain divide would run past 1 and off the end of the colors. The sigmoid squashes the whole infinite line into [0,1]",
     function () {
       var f = PhysicsEngine.frameSigmoid;
       // The worked example this was specified with: a 100-tall scene whose
       // body ends at y=200 is v=2, and must come out near 0.9995 rather than
       // the 2 a plain divide would give.
       var worked = f(200 / 100);
-      var centre = f(0.5), top = f(0), bottom = f(1);
+      var center = f(0.5), top = f(0), bottom = f(1);
       // Monotonic and bounded however far out it is asked about.
       var monotonic = true, bounded = true, prev = -Infinity;
       for (var v = -50; v <= 50; v += 0.25) {
@@ -2731,10 +2731,10 @@
         prev = y;
       }
       return {
-        pass: Math.abs(worked - 0.9995) < 5e-4 && Math.abs(centre - 0.5) < 1e-12 &&
+        pass: Math.abs(worked - 0.9995) < 5e-4 && Math.abs(center - 0.5) < 1e-12 &&
           monotonic && bounded && top > 0 && bottom < 1,
-        detail: "two frames out -> " + worked.toFixed(4) + " (spec said ~0.9995); frame centre -> " +
-          centre.toFixed(4) + ", its edges -> " + top.toFixed(4) + " and " + bottom.toFixed(4) +
+        detail: "two frames out -> " + worked.toFixed(4) + " (spec said ~0.9995); frame center -> " +
+          center.toFixed(4) + ", its edges -> " + top.toFixed(4) + " and " + bottom.toFixed(4) +
           "; monotonic and inside [0,1] across ±50 frames=" + (monotonic && bounded),
       };
     }
@@ -2742,7 +2742,7 @@
 
   addTest(
     "Off-screen pointers sit on the frame edge and fade to nothing at it",
-    "PhysicsHingeGeometry.offscreenPointer - where the arrow marking a body that has left the view goes, shared by the editor's playback and the fractal grid's replay panel. Two properties matter: the tip is exactly where the line from the frame's centre crosses the edge, and the length reaches zero as the body arrives at that edge, so the arrow shrinks away instead of popping out of existence when the body comes back on screen",
+    "PhysicsHingeGeometry.offscreenPointer - where the arrow marking a body that has left the view goes, shared by the editor's playback and the fractal grid's replay panel. Two properties matter: the tip is exactly where the line from the frame's center crosses the edge, and the length reaches zero as the body arrives at that edge, so the arrow shrinks away instead of popping out of existence when the body comes back on screen",
     function () {
       var W = 900, H = 600, MAX = 70;
       function p(x, y) { return PhysicsHingeGeometry.offscreenPointer(x, y, W, H, MAX); }
@@ -3192,7 +3192,7 @@
 
   addTest(
     "A two-body Output averages the pair, and a one-body Output still reads exactly what it always did",
-    "PhysicsEngine.computeOutputValue is the single definition of what an Output means - physics-ui.js's playback colour, fractal-grid.js's instant preview and the grid shader's GLSL are all written against it, so the one-body case has to come through it completely unchanged or every existing scene shifts colour",
+    "PhysicsEngine.computeOutputValue is the single definition of what an Output means - physics-ui.js's playback color, fractal-grid.js's instant preview and the grid shader's GLSL are all written against it, so the one-body case has to come through it completely unchanged or every existing scene shifts color",
     function () {
       var scene = twoBallScene("wrap", 100, 200, 700, 500);
       var cases = [
@@ -3223,7 +3223,7 @@
       var infinite = PhysicsEngine.computeOutputValue(twoBallScene("infinite", 100, 300, 700, 300), { body: 0, bodyB: 1, property: "distance" });
       // A plain 3-4-5, nowhere near an edge, must be untouched by any of it.
       var plain = PhysicsEngine.computeOutputValue(twoBallScene("infinite", 100, 200, 400, 600), { body: 0, bodyB: 1, property: "distance" });
-      // The colour range: the antipode on a torus is HALF a frame per axis.
+      // The color range: the antipode on a torus is HALF a frame per axis.
       var maxWrap = PhysicsEngine.outputDistanceMax(twoBallScene("wrap", 0, 0, 0, 0));
       var maxInf = PhysicsEngine.outputDistanceMax(twoBallScene("infinite", 0, 0, 0, 0));
       var ok = Math.abs(wrapped - 200) < 1e-9 && Math.abs(sticky - 200) < 1e-9 &&
@@ -3357,11 +3357,11 @@
   );
 
   addTest(
-    "A ball entering a splitter off-centre isn't bounced by the splitter it's passing through",
+    "A ball entering a splitter off-center isn't bounced by the splitter it's passing through",
     "a splitter's mouth and legs are solid, and their capsules reach LINE_THICKNESS/2 PAST the short side's own corners - so a ball entering anywhere near a corner clips a leg end-cap on the very step it splits, and the split then carries that bounce's velocity out with it. Reported as \"the balls come out at weird angles\"; measured, a ball entering 2px from a corner at vy=+373 came out at vy=-332 (reflected backwards) with 102px/s of sideways drift it never had. step() now drops those contacts, exactly as it already did for a funnel teleport.",
     function () {
       // The throat spans x 370..430 at this size/angle, so 372 and 428 are
-      // hard against a corner while 400 is dead centre. All of them are
+      // hard against a corner while 400 is dead center. All of them are
       // dropped straight down, so any vx at all is invented, and vy must
       // stay positive (still heading the way it entered).
       function dropAt(x) {
@@ -3383,7 +3383,7 @@
       // Every entry point must produce the same velocity - the parent's -
       // which for a straight drop means vx exactly 0 and one identical
       // positive vy across all five.
-      var vy0 = entries[2].vy; // the dead-centre drop, which never touched a leg
+      var vy0 = entries[2].vy; // the dead-center drop, which never touched a leg
       var clean = entries.every(function (e) {
         return e.matched && Math.abs(e.vx) < 1e-9 && Math.abs(e.vy - vy0) < 1e-9;
       });
@@ -4056,7 +4056,7 @@
         maxErr = Math.max(maxErr, Math.abs(jsScene.bodies[b].x - row[b].x), Math.abs(jsScene.bodies[b].y - row[b].y));
       }
       var wentInside = minSep < 60;
-      var detail = "closest centre separation=" + minSep.toFixed(2) + "px (contact is 60px, so the ramp was exercised=" +
+      var detail = "closest center separation=" + minSep.toFixed(2) + "px (contact is 60px, so the ramp was exercised=" +
         wentInside + "); max JS/GPU position error after " + STEPS + " steps=" + maxErr.toFixed(4) + "px";
       return { pass: wentInside && maxErr < 0.05, detail: detail };
     }
@@ -4073,7 +4073,7 @@
   // of them is wrong on a real fractal there is nothing to compare against.
   // So each of these builds a picture with a known answer (a ramp, stripes
   // at a known angle and period, white noise, a value sweeping through the
-  // colour wheel's wrap point) and checks the number that comes back.
+  // color wheel's wrap point) and checks the number that comes back.
   //
   // FractalStats is DOM-free and WebGL-free by design, precisely so it can
   // be loaded straight into this page - see its own header.
@@ -4236,7 +4236,7 @@
 
   addTest(
     "A wrapping Output's seam is not mistaken for an edge",
-    "mod() cutting the colour wheel would otherwise read as the sharpest feature in the view",
+    "mod() cutting the color wheel would otherwise read as the sharpest feature in the view",
     function () {
       // A smooth ramp that passes through t = 1 -> t = 0 twice. The real
       // slope between neighbours is 2/W everywhere; a naive difference sees

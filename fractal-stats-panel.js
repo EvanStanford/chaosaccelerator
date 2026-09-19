@@ -9,7 +9,7 @@
 // none of the measuring. fractal-stats.js does the arithmetic and
 // fractal-grid.js does the sampling and the scheduling - this file is the
 // seam between them, which is why it takes a `host` of callbacks (turn a t
-// into a real Output value, into that value's colour, into world
+// into a real Output value, into that value's color, into world
 // coordinates) rather than reaching for any of that itself.
 //
 // Every section starts OFF, and nothing is measured for a section that is
@@ -25,14 +25,18 @@
   // enabledGroups() below is a direct copy of whatever is switched on.
   var SECTIONS = [
     {
-      key: "distribution",
-      title: "Value Distribution",
-      hint: "How the visible Output values are spread across the colour range - the shape of the picture's histogram, and the summary numbers that describe that shape.",
-    },
-    {
       key: "orientation",
       title: "Polar Plot",
       hint: "Which way the sharp lines in this view run. The rose shows how much edge there is pointing in each direction; a long spike means many lines share that heading.",
+      // On by default - the one section worth seeing without an extra
+      // click, so the card already has something to look at the first time
+      // it opens.
+      defaultOn: true,
+    },
+    {
+      key: "distribution",
+      title: "Value Distribution",
+      hint: "How the visible Output values are spread across the color range - the shape of the picture's histogram, and the summary numbers that describe that shape.",
     },
     {
       key: "extremes",
@@ -169,11 +173,11 @@
     ctx.fillText(text, x, y);
   }
 
-  // ---- The colour histogram ----
+  // ---- The color histogram ----
   //
-  // X is the colour itself, not a number: each bar is filled with the exact
-  // colour the grid paints that bucket's values, so the plot reads as "how
-  // much of each colour is on screen" without needing an axis at all. The
+  // X is the color itself, not a number: each bar is filled with the exact
+  // color the grid paints that bucket's values, so the plot reads as "how
+  // much of each color is on screen" without needing an axis at all. The
   // log switch is there because a fractal's histogram is routinely one
   // spike and a long tail, which on a linear axis is one spike and nothing.
   function drawHistogram(canvas, dist, host, useLog) {
@@ -383,7 +387,7 @@
   // ---- Section renderers ----
   //
   // Each takes the body element it may fill, that section's slice of the
-  // result, and the host (for turning t into values, colours and world
+  // result, and the host (for turning t into values, colors and world
   // coordinates). ctxInfo carries what the numbers need to be expressed in
   // the reader's own units: how big one sample is on screen and in the
   // world, and what the Output property is called.
@@ -402,17 +406,25 @@
       wrap.appendChild(head);
       row(wrap, "Position", "X " + world.x.toFixed(5) + ", Y " + world.y.toFixed(5),
         "Where in the fractal's own coordinates this sample sits - the same X/Y the hover readout shows.");
-      row(wrap, "Colour", host.colorForT(e.t), "The exact colour the grid paints this sample.");
-      row(wrap, "Position on the colour range", percent(e.t), "0% is one end of the rainbow, 100% the other.");
+      row(wrap, "Colour", host.colorForT(e.t), "The exact color the grid paints this sample.");
+      row(wrap, "Position on the color range", percent(e.t), "0% is one end of the rainbow, 100% the other.");
       body.appendChild(wrap);
     }
-    point("max", "Maximum");
-    point("min", "Minimum");
-    row(body, "Range (max − min)", host.formatValue(host.valueForT(g.max.t) - host.valueForT(g.min.t)) +
-      "  (" + percent(g.range) + " of the colour range)",
+    // g.max/g.min are the extremes of t, the colour coordinate, and t no
+    // longer always runs the same way as the Output's own value: with +y
+    // up, t = 0 is the top of the frame and so the LARGEST Center Y (see
+    // fractal-grid.js's authoredOutputValue). So which of the two samples
+    // to call the maximum is decided by their values, not by their t, and
+    // the span between them is a magnitude either way.
+    var valueAtMaxT = host.valueForT(g.max.t), valueAtMinT = host.valueForT(g.min.t);
+    var tRunsBackwards = valueAtMaxT < valueAtMinT;
+    point(tRunsBackwards ? "min" : "max", "Maximum");
+    point(tRunsBackwards ? "max" : "min", "Minimum");
+    row(body, "Range (max − min)", host.formatValue(Math.abs(valueAtMaxT - valueAtMinT)) +
+      "  (" + percent(g.range) + " of the color range)",
       "How much of the Output's full span this view covers.");
     if (info.circular) {
-      note(body, "This Output wraps, so its largest and smallest values are two points on a colour wheel rather than two ends of a line - see the circular spread under Value Distribution for the spread that accounts for that.");
+      note(body, "This Output wraps, so its largest and smallest values are two points on a color wheel rather than two ends of a line - see the circular spread under Value Distribution for the spread that accounts for that.");
     }
   }
 
@@ -432,22 +444,22 @@
     toggleRow.appendChild(logBtn);
     body.appendChild(toggleRow);
 
-    note(body, "Every visible sample dropped into " + g.buckets + " colour buckets. The height of a bar is how many pixels on screen carry that colour.");
+    note(body, "Every visible sample dropped into " + g.buckets + " color buckets. The height of a bar is how many pixels on screen carry that color.");
 
     if (info.circular) {
       row(body, "Mean (circular)", host.formatValue(host.valueForT(g.mean)),
-        "Averaged around the colour wheel, so values either side of the wrap average to the point between them rather than to the opposite side.");
+        "Averaged around the color wheel, so values either side of the wrap average to the point between them rather than to the opposite side.");
       row(body, "Concentration", fixed(info.resultantLength, 3),
         "0 means the values are spread evenly right round the wheel; 1 means they are all the same.");
       row(body, "Std deviation (circular)", isFinite(info.circularStd) ? percent(info.circularStd) : "unbounded",
-        "As a fraction of the full colour range.");
+        "As a fraction of the full color range.");
       row(body, "Circular spread", percent(g.circularSpread),
-        "The smallest arc of the colour wheel that still contains every visible value.");
+        "The smallest arc of the color wheel that still contains every visible value.");
     } else {
       row(body, "Mean", host.formatValue(host.valueForT(g.mean)));
       row(body, "Median", host.formatValue(host.valueForT(g.median)));
       row(body, "Std deviation", percent(g.std) + " of range",
-        "How far a typical sample sits from the mean, as a fraction of the full colour range.");
+        "How far a typical sample sits from the mean, as a fraction of the full color range.");
       row(body, "Interquartile range", percent(g.iqr) + " of range",
         "The span the middle half of the samples falls in.");
     }
@@ -456,12 +468,16 @@
     row(body, "Excess kurtosis", fixed(g.kurtosisExcess, 2),
       "0 matches a normal distribution. Positive means values cluster tightly with rare far outliers; negative means they spread out flatly.");
     row(body, "Entropy", fixed(g.entropyBits, 2) + " bits  (" + percent(g.entropyNormalized) + ")",
-      "How evenly the colours are used. 100% would mean every bucket is equally occupied - the busiest a view of this many buckets can be.");
+      "How evenly the colors are used. 100% would mean every bucket is equally occupied - the busiest a view of this many buckets can be.");
     row(body, "Buckets in use", g.occupiedBuckets + " / " + g.buckets,
       "How much of the rainbow appears on screen at all.");
     if (!info.circular && g.quantiles) {
+      // Percentiles of t, so the same caveat as the extremes above: read
+      // the band low-to-high by value, not by which quantile it came from.
+      var band = [host.valueForT(g.quantiles.p5), host.valueForT(g.quantiles.p95)]
+        .sort(function (a, b) { return a - b; });
       row(body, "5th / 95th percentile",
-        host.formatValue(host.valueForT(g.quantiles.p5)) + "  –  " + host.formatValue(host.valueForT(g.quantiles.p95)),
+        host.formatValue(band[0]) + "  –  " + host.formatValue(band[1]),
         "The band 90% of the visible samples fall inside.");
     }
 
@@ -474,11 +490,11 @@
     // The measured step is between two SAMPLES, which are coarser than
     // screen pixels - so both figures are given rather than silently
     // reporting one as the other. The per-screen-pixel one is what a reader
-    // means by "how fast does the colour change as I move the mouse"; the
+    // means by "how fast does the color change as I move the mouse"; the
     // per-sample one is the number actually measured.
     var perPixel = g.meanGradient * info.screenPixelsPerSampleRecip;
-    row(body, "Average slope", percent(perPixel, 2) + " of the colour range per screen pixel",
-      "Move one pixel in the steepest direction and the Output moves this far through its colour range, on average.");
+    row(body, "Average slope", percent(perPixel, 2) + " of the color range per screen pixel",
+      "Move one pixel in the steepest direction and the Output moves this far through its color range, on average.");
     row(body, "  in Output units", host.formatValue(g.meanGradient * info.valuePerT / info.worldPerSample) + " per world unit",
       "The same slope in the Output's own units, per unit of the fractal's own coordinates.");
     row(body, "Steepest step", percent(g.maxGradient, 1) + " of the range between neighbouring samples",
@@ -568,13 +584,13 @@
     } else {
       row(body, "Correlation length",
         fixed(g.correlationLength, 2) + " samples  (" + fixed(g.correlationLength * info.screenPixelsPerSample, 1) + " screen px)",
-        "The distance at which two samples stop resembling each other - the typical size of one patch of similar colour.");
+        "The distance at which two samples stop resembling each other - the typical size of one patch of similar color.");
     }
     row(body, "Moran's I", fixed(g.moransI, 3) + "  (" + describeMoran(g.moransI) + ")",
       "Clustering of neighbouring samples. Near " + fixed(g.moransExpected, 3) + " would mean no clustering at all; 1 is perfectly smooth; below that baseline is checkerboard-like.");
     if (g.planeR2 !== undefined) {
       row(body, "Flat-ramp fit (R²)", percent(g.planeR2, 1) + "  (" + describeR2(g.planeR2) + ")",
-        "How much of the whole view a single straight gradient - one colour ramp across the screen - already explains. The rest is structure.");
+        "How much of the whole view a single straight gradient - one color ramp across the screen - already explains. The rest is structure.");
     }
     return function () { drawCorrelation(canvas, g); };
   }
@@ -695,7 +711,7 @@
       var sw = el("span", "toggle-switch");
       var input = document.createElement("input");
       input.type = "checkbox";
-      input.checked = false;
+      input.checked = !!section.defaultOn;
       sw.appendChild(input);
       sw.appendChild(el("span", "toggle-slider"));
       head.appendChild(el("span", "stats-section-title", section.title));
@@ -703,12 +719,14 @@
       wrap.appendChild(head);
 
       var hint = el("p", "stats-section-hint", section.hint);
-      hint.hidden = true;
+      hint.hidden = !section.defaultOn;
       wrap.appendChild(hint);
 
       var body = el("div", "stats-section-body");
-      body.hidden = true;
+      body.hidden = !section.defaultOn;
       wrap.appendChild(body);
+
+      if (section.defaultOn) enabled[section.key] = true;
 
       input.addEventListener("change", function () {
         enabled[section.key] = input.checked;
@@ -786,8 +804,18 @@
         return false;
       },
       setStatus: function (text, kind) {
-        statusEl.textContent = text;
         statusEl.className = "stats-status" + (kind ? " stats-status-" + kind : "");
+        statusEl.innerHTML = "";
+        // "loading" gets a spinner next to the text - reserved for "nothing
+        // to show yet, but something is coming" (the view moved and the
+        // fractal is still rendering), as opposed to "working", which is
+        // already mid-measurement and has its own percent-complete text.
+        if (kind === "loading") {
+          statusEl.appendChild(el("span", "stats-spinner"));
+          statusEl.appendChild(el("span", "stats-status-text", text));
+        } else {
+          statusEl.textContent = text;
+        }
         // A finished, seam-free measurement passes "" - nothing wrong to
         // report - and an empty <p> would otherwise still sit there as a
         // blank gap above Sampling resolution.

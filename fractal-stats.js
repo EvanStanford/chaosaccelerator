@@ -148,7 +148,7 @@
   // step that cannot be broken up and a second copy of the whole block in
   // memory. Counting into 4096 buckets is one pass that CAN be broken up
   // (it rides along with the display histogram), needs 32KB whatever the
-  // sample count, and pins every quantile to within 1/4096 of the colour
+  // sample count, and pins every quantile to within 1/4096 of the color
   // range - far finer than the two decimal places any of them is shown to.
   var QUANTILE_BUCKETS = 4096;
 
@@ -166,7 +166,7 @@
     return 1;
   }
 
-  // The smallest arc of the colour wheel containing every sampled value, as
+  // The smallest arc of the color wheel containing every sampled value, as
   // a fraction of the whole wheel - the full circle minus its single
   // largest gap. A plain max-minus-min can't see that 0.97 and 0.02 are
   // neighbours. Read off the same bucket counts as the quantiles: the
@@ -500,7 +500,7 @@
         var meanMag = magCount > 0 ? sumMag / magCount : 0;
         var lapMean = lapCount > 0 ? sumLap / lapCount : 0;
         out.groups.roughness = {
-          // The headline number: how much of the colour range one sample
+          // The headline number: how much of the color range one sample
           // step moves through, on average.
           meanGradient: meanMag,
           maxGradient: maxMag,
@@ -560,7 +560,7 @@
             }
             if (!ok) continue;
             // Every neighbour expressed as a wrapped offset from the
-            // centre, so the Sobel sums below never straddle the seam.
+            // center, so the Sobel sums below never straddle the seam.
             var nw = delta(t[i], t[i + W - 1], circular), nn = delta(t[i], t[i + W], circular), ne = delta(t[i], t[i + W + 1], circular);
             var ww = delta(t[i], t[i - 1], circular), ee = delta(t[i], t[i + 1], circular);
             var sw = delta(t[i], t[i - W - 1], circular), ss = delta(t[i], t[i - W], circular), se = delta(t[i], t[i - W + 1], circular);
@@ -655,7 +655,7 @@
             power: new Float64Array(S * S),
             re: new Float64Array(S * S),
             im: new Float64Array(S * S),
-            // The tiling is centred, so an odd leftover row or column is
+            // The tiling is centered, so an odd leftover row or column is
             // split between the two edges rather than all falling off one.
             originX: Math.floor((W - tilesX * S) / 2),
             originY: Math.floor((H - tilesY * S) / 2),
@@ -1007,7 +1007,7 @@
     if (groups.features) {
       // Everything below is measured against the picture's own scale, so
       // "flat" means flat relative to how much this view varies at all
-      // rather than against some absolute number of colour units.
+      // rather than against some absolute number of color units.
       var scaleSum = 0, scaleN = 0, flatCutoff = 0;
       addRowPass(1, Math.max(1, H - 1), function measureScale(r0, r1) {
         if (out.empty) return;
@@ -1056,7 +1056,7 @@
             if (isPit) pits++;
 
             // Discrete Hessian, every term a wrapped offset from the
-            // centre. Eigenvalue SIGNS are what classify the local shape:
+            // center. Eigenvalue SIGNS are what classify the local shape:
             // both negative is a ridge/peak, both positive a valley/pit,
             // opposite signs a saddle - the pass where two basins meet.
             var txx = delta(t[i], t[i + 1], circular) + delta(t[i], t[i - 1], circular);

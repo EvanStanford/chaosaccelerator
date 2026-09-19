@@ -419,7 +419,7 @@
   // frame geometry, so the editor's playback and the fractal grid's replay
   // panel point at things the same way instead of each inventing a rule.
   //
-  // The tip sits where the straight line from the frame's centre to the body
+  // The tip sits where the straight line from the frame's center to the body
   // crosses the frame's edge, so the arrow is always on the edge nearest the
   // direction you'd look. Its LENGTH grows with how far past that crossing
   // the body actually is, and - the property that makes it feel right -
@@ -441,9 +441,9 @@
     var cx = frameWidth / 2, cy = frameHeight / 2;
     var dx = x - cx, dy = y - cy;
     var len = Math.sqrt(dx * dx + dy * dy);
-    if (len === 0) return null; // dead centre can't be outside, but don't divide by it
+    if (len === 0) return null; // dead center can't be outside, but don't divide by it
 
-    // The centre is the middle of the rectangle, so the crossing is simply
+    // The center is the middle of the rectangle, so the crossing is simply
     // whichever axis runs out of half-extent first along this direction.
     var t = Infinity;
     if (dx !== 0) t = Math.min(t, (frameWidth / 2) / Math.abs(dx));

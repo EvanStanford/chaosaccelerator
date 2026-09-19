@@ -5,9 +5,9 @@
   "bodies": [
     {
       "type": "line",
-      "x": 409,
-      "y": 288,
-      "angle": -1.5708,
+      "x": -187,
+      "y": 121.5,
+      "angle": 1.5708,
       "isStatic": false,
       "length": 140,
       "vx": 0,
@@ -16,8 +16,8 @@
     },
     {
       "type": "line",
-      "x": 480,
-      "y": 217,
+      "x": -116,
+      "y": 192.5,
       "angle": 0,
       "isStatic": false,
       "length": 140,
@@ -31,12 +31,12 @@
       "bodyA": null,
       "bodyB": 0,
       "localAnchorA": {
-        "x": 408,
-        "y": 358
+        "x": -188,
+        "y": 51.5
       },
       "localAnchorB": {
         "x": -70,
-        "y": -1
+        "y": 1
       }
     },
     {
@@ -48,7 +48,7 @@
       },
       "localAnchorB": {
         "x": -71,
-        "y": -1
+        "y": 1
       }
     }
   ],
@@ -65,5 +65,6 @@
     "property": "angle"
   },
   "frameWidth": 1192,
-  "frameHeight": 819
+  "frameHeight": 819,
+  "coordinateSpace": "centered-y-up"
 }

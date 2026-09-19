@@ -767,7 +767,7 @@
   // every solver), so its value at any step is its starting value, which
   // each draw recomputes anyway. extraBodies names any that must be carried
   // regardless - a reader that has no starting state of its own, like the
-  // playback colour pass reading an anchored Output body, needs them.
+  // playback color pass reading an anchored Output body, needs them.
   //
   // A world hinge's anchor is carried because the frame wrap moves it in
   // place (see stepOnceParams). Spawn slots carry the shape constants a split
@@ -813,7 +813,7 @@
   }
 
   // Uninitialized declarations, for a program that has no step loop of its
-  // own to declare them (the playback colour pass). Every field is assigned
+  // own to declare them (the playback color pass). Every field is assigned
   // by the load below before anything reads it.
   function generatePlaybackStateDeclarationsGLSL(vars) {
     return vars.map(function (v) { return STATE_TYPE_GLSL[v.type] + " " + v.name + ";"; });
