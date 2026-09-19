@@ -144,13 +144,43 @@
   for (var si = 0; si <= 8; si++) SIN_COEFFS.push((si % 2 ? -1 : 1) / factorial(2 * si + 1));
   for (var cj = 0; cj <= 9; cj++) COS_COEFFS.push((cj % 2 ? -1 : 1) / factorial(2 * cj));
 
-  var GLSL_LIBRARY = [
+  // ---- Kernel options ----
+  //
+  // Three of the kernels below exist in two forms, because which one is
+  // right is a measurement rather than an argument - df-probe.html and
+  // physics-tests.js both render with either and compare. The defaults are
+  // what that measurement chose; the alternatives stay buildable so the
+  // comparison can be re-run on a new GPU or driver.
+  //
+  //   sloppyAdd  Dekker's add (11 float ops) in place of the IEEE-style one
+  //              (20). Both carry ~48 bits of the OPERANDS; they differ only
+  //              under heavy cancellation, where the accurate form returns
+  //              the small result to 48 of ITS OWN bits and the sloppy one
+  //              to 48 bits of the operands' magnitude. Every coordinate
+  //              here is already rounded to the operands' magnitude, so the
+  //              extra digits the accurate form keeps describe rounding
+  //              noise, not the scene.
+  //   fastDiv    Two quotient words instead of three. The third is the
+  //              correctly-rounded-last-bit word (~2^-48 of the quotient);
+  //              dropping it costs at most about one df ulp.
+  //   fastSqrt   s + (a - s*s) / 2s with the correction taken in float32,
+  //              instead of a full df division. The correction is at most
+  //              ~2^-23 of the root, so float32's 24 bits place it to ~2^-47.
+  var DEFAULT_OPTIONS = { sloppyAdd: true, fastDiv: true, fastSqrt: true };
+
+  function buildLibrary(options) {
+    var opt = {};
+    for (var key in DEFAULT_OPTIONS) {
+      opt[key] = options && options[key] !== undefined ? !!options[key] : DEFAULT_OPTIONS[key];
+    }
+    return [
     "// ---- Double-float (df) arithmetic: a value is vec2(hi, lo) = hi + lo ----",
     "// See physics-df.js's header for what these are, and for why dfv()",
     "// wraps what look like pointless identities (short version: without",
     "// it, ANGLE/Metal folds every error term below to exactly 0.0).",
     "",
     "const vec2 DF_TWO_PI = vec2(" + fnum(TWO_PI[0]) + ", " + fnum(TWO_PI[1]) + ");",
+    "const vec2 DF_ONE_CONST = vec2(1.0, 0.0);",
     "",
     "// The optimizer barrier. u_dfVeil is 0, so this is the identity - but",
     "// that is only knowable at runtime, so no algebraic rewrite can reach",
@@ -197,6 +227,26 @@
     "  return vec2(p, e);",
     "}",
     "",
+    "// a*a exactly. One split instead of two and three partial products",
+    "// instead of four - the two cross terms are the same number, and",
+    "// doubling it is exact.",
+    "vec2 dfTwoSqr(float a) {",
+    "  float p = dfv(a * a);",
+    "  vec2 as = dfSplit(a);",
+    "  float e = dfv(dfv(dfv(dfv(as.x * as.x) - p) + dfv(2.0 * dfv(as.x * as.y))) + dfv(as.y * as.y));",
+    "  return vec2(p, e);",
+    "}",
+    "",
+    opt.sloppyAdd ? [
+    "// Dekker's add: one twoSum for the high words, the low words summed",
+    "// in plain float32. See DEFAULT_OPTIONS in physics-df.js for why this",
+    "// and not the 20-op form.",
+    "vec2 dfAdd(vec2 a, vec2 b) {",
+    "  vec2 s = dfTwoSum(a.x, b.x);",
+    "  s.y = dfv(s.y + dfv(a.y + b.y));",
+    "  return dfQuickTwoSum(s.x, s.y);",
+    "}",
+    ].join("\n") : [
     "vec2 dfAdd(vec2 a, vec2 b) {",
     "  vec2 s = dfTwoSum(a.x, b.x);",
     "  vec2 t = dfTwoSum(a.y, b.y);",
@@ -205,6 +255,7 @@
     "  s.y = dfv(s.y + t.y);",
     "  return dfQuickTwoSum(s.x, s.y);",
     "}",
+    ].join("\n"),
     "",
     "// The hot path: a df accumulator plus an ordinary float32 increment.",
     "// Every integrate/impulse site in the engine is this shape - the",
@@ -230,6 +281,31 @@
     "  return dfQuickTwoSum(p.x, p.y);",
     "}",
     "",
+    "vec2 dfSqr(vec2 a) {",
+    "  vec2 p = dfTwoSqr(a.x);",
+    "  p.y = dfv(p.y + dfv(2.0 * dfv(a.x * a.y)));",
+    "  return dfQuickTwoSum(p.x, p.y);",
+    "}",
+    "",
+    "// Scaling by a power of two (2.0, 4.0, 0.5 ...) is exact word by word,",
+    "// so it needs none of dfMulFloat's machinery - and being exact, there",
+    "// is nothing in it for an optimizer to get wrong either.",
+    "vec2 dfMulPow2(vec2 a, float p) { return a * p; }",
+    "",
+    opt.fastDiv ? [
+    "// A float32 quotient, then one correction against the df remainder.",
+    "// b*q1 agrees with a to ~24 bits, so the high words cancel EXACTLY and",
+    "// what is left fits a float32 - which is all the second quotient word",
+    "// needs. See DEFAULT_OPTIONS in physics-df.js for the third word this",
+    "// leaves out.",
+    "vec2 dfDiv(vec2 a, vec2 b) {",
+    "  float q1 = a.x / b.x;",
+    "  vec2 p = dfMulFloat(b, q1);",
+    "  float r = dfv(dfv(a.x - p.x) + dfv(a.y - p.y));",
+    "  float q2 = r / b.x;",
+    "  return dfQuickTwoSum(q1, q2);",
+    "}",
+    ].join("\n") : [
     "// A float32 quotient, then two correction rounds against the df",
     "// remainder - the standard Newton-style df division.",
     "vec2 dfDiv(vec2 a, vec2 b) {",
@@ -241,6 +317,7 @@
     "  vec2 q = dfQuickTwoSum(q1, q2);",
     "  return dfAddFloat(q, q3);",
     "}",
+    ].join("\n"),
     "",
     "vec2 dfDivFloat(vec2 a, float b) { return dfDiv(a, vec2(b, 0.0)); }",
     "",
@@ -271,9 +348,11 @@
     "// this evaluates the FUNCTION in df too: Cody-Waite range reduction",
     "// down to [-pi/4, pi/4], then a Taylor series.",
     "//",
-    "// Not on any hot path. Only the per-pixel initial-state cascade",
-    "// rotates about a df angle; the step loop runs in float32 inside a",
-    "// local frame, so it uses the hardware trig as before.",
+    "// By far the most expensive routine here (about forty dfMuls), and it",
+    "// IS on the hot path: the whole step runs in df, so every hinge and",
+    "// every line rotates about a df angle. The callers hoist it as far out",
+    "// of their loops as the physics allows - see physics-gpu-df.js - and",
+    "// dfSinCosNudge below covers the case where an angle only moved a hair.",
     HALF_PI_DECLS,
     "const float DF_INV_HALF_PI = " + fnum(f32(2 / Math.PI)) + ";",
     "",
@@ -319,6 +398,28 @@
     "vec2 dfCos(vec2 a) { vec2 s, c; dfSinCos(a, s, c); return c; }",
     "vec2 dfSin(vec2 a) { vec2 s, c; dfSinCos(a, s, c); return s; }",
     "",
+    "// (sn, cs) of an angle that has just moved by a SMALL known delta, from",
+    "// the pair it had before: the angle-sum identities, with the delta's own",
+    "// sin/cos from a series short enough to be cheap. At |delta| <= 2^-6 the",
+    "// first dropped terms are delta^7/7! and delta^8/8!, both under 2^-54 -",
+    "// below anything a df can hold - so this is as exact as dfSinCos itself",
+    "// for a third of the cost. The position solver nudges every hinged",
+    "// body's angle by a tiny correction several times a step, which is the",
+    "// case this exists for. Returns false (and leaves sn/cs alone) when the",
+    "// delta is too large for the short series; the caller then recomputes.",
+    "const float DF_NUDGE_LIMIT = 0.015625;",
+    "bool dfSinCosNudge(inout vec2 sn, inout vec2 cs, vec2 delta) {",
+    "  if (abs(delta.x) > DF_NUDGE_LIMIT) return false;",
+    "  if (delta.x == 0.0 && delta.y == 0.0) return true;",
+    "  vec2 u = dfSqr(delta);",
+    "  vec2 sd = dfMul(delta, dfAdd(DF_ONE_CONST, dfMul(u, dfAdd(" + num(-1 / 6) + ", dfMul(u, " + num(1 / 120) + ")))));",
+    "  vec2 cd = dfAdd(DF_ONE_CONST, dfMul(u, dfAdd(" + num(-1 / 2) + ", dfMul(u, dfAdd(" + num(1 / 24) + ", dfMul(u, " + num(-1 / 720) + "))))));",
+    "  vec2 sn2 = dfAdd(dfMul(sn, cd), dfMul(cs, sd));",
+    "  cs = dfSub(dfMul(cs, cd), dfMul(sn, sd));",
+    "  sn = sn2;",
+    "  return true;",
+    "}",
+    "",
     "// Fold an angle into [0, 2pi). Used wherever an accumulated angle has",
     "// to be handed to float32 code: reducing first keeps that float32",
     "// value's resolution at ~1e-7 rad however many turns the body has",
@@ -341,18 +442,33 @@
     "}",
     "vec2 dfAbs(vec2 a) { return a.x < 0.0 ? dfNeg(a) : a; }",
     "",
-    "// A 2D point in df. Only the per-pixel initial-state cascade needs",
-    "// this (it rotates hinge anchors about df angles); the physics itself",
-    "// runs in plain vec2 inside a local frame.",
+    opt.fastSqrt ? [
+    "// One Newton step from the hardware float32 root s, written as",
+    "// s + (a - s*s) / 2s. s*s is formed exactly (dfTwoSqr) and agrees with a",
+    "// to ~23 bits, so the high words cancel exactly and the remainder fits",
+    "// a float32; the correction it yields is at most ~2^-23 of s, which",
+    "// float32's 24 bits then place to ~2^-47. The step itself squares the",
+    "// seed's ~6e-8 relative error into ~2e-15, about half a df ulp (a df",
+    "// carries 48 bits, 3.6e-15) - so a second step would buy nothing a df",
+    "// can hold.",
+    "vec2 dfSqrt(vec2 a) {",
+    "  if (a.x <= 0.0) return vec2(0.0, 0.0);",
+    "  float s = sqrt(a.x);",
+    "  vec2 p = dfTwoSqr(s);",
+    "  float r = dfv(dfv(a.x - p.x) + dfv(a.y - p.y));",
+    "  return dfQuickTwoSum(s, r / (2.0 * s));",
+    "}",
+    ].join("\n") : [
     "// Newton's x' = (x + a/x)/2, seeded with the hardware float32 sqrt.",
     "// One step squares the ~6e-8 relative error of that seed into ~2e-15 -",
-    "// within an order of magnitude of df's own 1e-16 floor, so a second",
+    "// about half a df ulp (a df carries 48 bits, 3.6e-15), so a second",
     "// step would buy nothing a df value can hold.",
     "vec2 dfSqrt(vec2 a) {",
     "  if (a.x <= 0.0) return vec2(0.0, 0.0);",
     "  float s = sqrt(a.x);",
-    "  return dfMulFloat(dfAdd(vec2(s, 0.0), dfDiv(a, vec2(s, 0.0))), 0.5);",
+    "  return dfMulPow2(dfAdd(vec2(s, 0.0), dfDiv(a, vec2(s, 0.0))), 0.5);",
     "}",
+    ].join("\n"),
     "",
     "vec2 dfMin(vec2 a, vec2 b) { return dfLess(a, b) ? a : b; }",
     "vec2 dfMax(vec2 a, vec2 b) { return dfLess(a, b) ? b : a; }",
@@ -363,14 +479,14 @@
     "  vec2 span = dfSub(e1, e0);",
     "  if (span.x == 0.0 && span.y == 0.0) return dfLess(x, e0) ? vec2(0.0, 0.0) : vec2(1.0, 0.0);",
     "  vec2 t = dfClamp(dfDiv(dfSub(x, e0), span), vec2(0.0, 0.0), vec2(1.0, 0.0));",
-    "  return dfMul(dfMul(t, t), dfSub(vec2(3.0, 0.0), dfMulFloat(t, 2.0)));",
+    "  return dfMul(dfSqr(t), dfSub(vec2(3.0, 0.0), dfMulPow2(t, 2.0)));",
     "}",
     "",
     "// ---- 2D vectors in df ----",
     "// A DVec2 is two df scalars, not a df-ified vec2 - GLSL has no way to",
     "// give a user type component-wise operators, so every operation is",
-    "// spelled out. Only the physics port needs these; the per-pixel cascade",
-    "// uses DVec2 purely as a rotation result.",
+    "// spelled out. The physics port (physics-gpu-df.js) is written against",
+    "// these; the per-pixel cascade uses DVec2 purely as a rotation result.",
     "struct DVec2 { vec2 x; vec2 y; };",
     "DVec2 dv2(vec2 x, vec2 y) { DVec2 r; r.x = x; r.y = y; return r; }",
     "DVec2 dv2Zero() { return dv2(vec2(0.0, 0.0), vec2(0.0, 0.0)); }",
@@ -382,8 +498,9 @@
     "DVec2 dv2Scale(DVec2 a, vec2 s) { return dv2(dfMul(a.x, s), dfMul(a.y, s)); }",
     "vec2 dv2Dot(DVec2 a, DVec2 b) { return dfAdd(dfMul(a.x, b.x), dfMul(a.y, b.y)); }",
     "vec2 dv2Cross(DVec2 a, DVec2 b) { return dfSub(dfMul(a.x, b.y), dfMul(a.y, b.x)); }",
-    "vec2 dv2LengthSq(DVec2 a) { return dv2Dot(a, a); }",
-    "vec2 dv2Length(DVec2 a) { return dfSqrt(dv2Dot(a, a)); }",
+    "vec2 dv2LengthSq(DVec2 a) { return dfAdd(dfSqr(a.x), dfSqr(a.y)); }",
+    "vec2 dv2Length(DVec2 a) { return dfSqrt(dv2LengthSq(a)); }",
+    "DVec2 dv2MulPow2(DVec2 a, float p) { return dv2(a.x * p, a.y * p); }",
     "DVec2 dv2Perp(DVec2 a) { return dv2(dfNeg(a.y), a.x); }",
     "",
     "// Rotation with sin/cos supplied by the caller. Every solver iteration",
@@ -399,13 +516,19 @@
     "  dfSinCos(angle, sn, cs);",
     "  return dv2RotateBy(dv2(vx, vy), sn, cs);",
     "}",
-  ].join("\n");
+    ].join("\n");
+  }
 
   global.PhysicsDF = {
     split: split,
     num: num,
     fnum: fnum,
     UNIFORM_DECL: UNIFORM_DECL,
-    GLSL_LIBRARY: GLSL_LIBRARY,
+    // The library every shader includes. A plain property rather than a
+    // getter so that a measurement page can swap in buildLibrary({...}) and
+    // have every shader built afterwards pick it up.
+    GLSL_LIBRARY: buildLibrary(),
+    buildLibrary: buildLibrary,
+    DEFAULT_OPTIONS: DEFAULT_OPTIONS,
   };
 })(typeof window !== "undefined" ? window : globalThis);

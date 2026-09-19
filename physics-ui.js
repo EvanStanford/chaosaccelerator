@@ -170,9 +170,9 @@
     // every body attracts every other by its mass instead - see
     // PhysicsEngine.computeAccelerations.
     mutualGravity: false,
-    // On: bodies bounce/stick off each other exactly as they always have.
+    // On: bodies bounce off each other exactly as they always have.
     // Off: PhysicsEngine.step never checks any pair for contact at all -
-    // no impulse, no merge - so everything passes straight through
+    // no impulse - so everything passes straight through
     // everything else. Toggling Mutual Gravity flips this to a sensible
     // default (see mutualGravityCheckbox's own handler) but never locks it;
     // the checkbox itself always wins after that.

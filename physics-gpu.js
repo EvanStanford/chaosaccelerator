@@ -384,7 +384,7 @@
     "// by `size`) that teleports a circle touching its mouth to the center",
     "// of its throat, velocity unchanged - direct port of",
     "// physics-engine.js's Funnel functions, see that file's header comment",
-    "// for the geometry. Float32 only (no df port yet).",
+    "// for the geometry. physics-gpu-df.js carries the df port of all of it.",
     "const float FUNNEL_MOUTH_HALF = " + fnum(global.PhysicsEngine.FUNNEL_MOUTH_HALF) + ";",
     "const float FUNNEL_THROAT_HALF = " + fnum(global.PhysicsEngine.FUNNEL_THROAT_HALF) + ";",
     "const float FUNNEL_HALF_HEIGHT = " + fnum(global.PhysicsEngine.FUNNEL_HALF_HEIGHT) + ";",
@@ -773,6 +773,17 @@
     return lines.join("\n");
   }
 
+  // Goes wherever a pixel's bodies are declared. In df, stepOnce() builds the
+  // geometry of every ANCHORED line and trapezoid once per run, the first
+  // time it finds g_dfStaticGeomReady false (see generateStepOnceGLSL).
+  // A fresh set of bodies is a fresh run: a shader that simulates more than
+  // one starting point per invocation - the derived display modes' stencil -
+  // would otherwise carry the previous point's geometry into the next.
+  // Nothing to say in float32, which hoists nothing.
+  function staticGeometryResetGLSL(precision) {
+    return precision === "df" ? "g_dfStaticGeomReady = false;" : "";
+  }
+
   // ---- Splitter scenes: pre-allocated spawn slots ----
   //
   // A split creates a body, and a compiled shader has nowhere to put one -
@@ -890,11 +901,19 @@
       sub: function (a, b) { return "dfSub(" + a + ", " + b + ")"; },
       mul: function (a, b) { return "dfMul(" + a + ", " + b + ")"; },
       min: function (a, b) { return "dfMin(" + a + ", " + b + ")"; },
+      less: function (a, b) { return "dfLess(" + a + ", " + b + ")"; },
+      // a <= b, spelled as "not greater" because that is the one the df
+      // library has.
+      lessEq: function (a, b) { return "!dfGreater(" + a + ", " + b + ")"; },
       negVec: function (v) { return "dv2Neg(" + v + ")"; },
+      zeroVec: "dv2Zero()",
       advanceVelocity: "dfAdvanceVelocity", noContact: "dfNoContact()",
       contactType: "DContact", contactPairType: "DContactPair",
       collideCircleCircle: "dfCollideCircleCircle", collideLineCircle: "dfCollideLineCircle",
       collideLineLine: "dfCollideLineLine",
+      sweptCapsule: "dfSweptCapsuleCircleContact", halfThickness: "DF_HALF_LINE_THICKNESS",
+      mouthHitType: "DMouthHit", mouthHitFn: "dfCollideFunnelMouthTHit",
+      splitHitType: "DSplitHit", splitHitFn: "dfCollideSplitterShortSideTHit",
       solveContactVelocity: "dfSolveContactVelocity", solveContactPosition: "dfSolveContactPosition",
       solveHingeVelocity: "dfSolveHingeVelocity", solveHingePosition: "dfSolveHingePosition",
     } : {
@@ -906,11 +925,17 @@
       sub: function (a, b) { return "(" + a + ") - (" + b + ")"; },
       mul: function (a, b) { return "(" + a + ") * (" + b + ")"; },
       min: function (a, b) { return "min(" + a + ", " + b + ")"; },
+      less: function (a, b) { return "(" + a + ") < (" + b + ")"; },
+      lessEq: function (a, b) { return "(" + a + ") <= (" + b + ")"; },
       negVec: function (v) { return "-" + v; },
+      zeroVec: "vec2(0.0)",
       advanceVelocity: "advanceVelocity", noContact: "noContact()",
       contactType: "Contact", contactPairType: "ContactPair",
       collideCircleCircle: "collideCircleCircle", collideLineCircle: "collideLineCircle",
       collideLineLine: "collideLineLine",
+      sweptCapsule: "sweptCapsuleCircleContact", halfThickness: "LINE_THICKNESS * 0.5",
+      mouthHitType: "MouthHit", mouthHitFn: "collideFunnelMouthTHit",
+      splitHitType: "SplitHit", splitHitFn: "collideSplitterShortSideTHit",
       solveContactVelocity: "solveContactVelocity", solveContactPosition: "solveContactPosition",
       solveHingeVelocity: "solveHingeVelocity", solveHingePosition: "solveHingePosition",
     };
@@ -928,12 +953,6 @@
     // to the collideLineLine branch below and reading a funnel's undefined
     // "length".
     //
-    // Not supported in df mode: the funnel GLSL functions (see GLSL_LIBRARY)
-    // only exist in float32. A funnel is only reachable via the fractal grid
-    // at all once physics-grid-codegen.js/fractal-grid.js opt it in, and
-    // those force f32 precision whenever a funnel is present for exactly
-    // this reason - this check exists as a loud failure if that guard is
-    // ever bypassed, rather than silently compiling wrong GLSL.
     // A funnel and a splitter are the same trapezoid with opposite roles for
     // its two parallel sides: the funnel's long mouth teleports and its
     // throat is a wall; the splitter's short throat splits and its mouth is
@@ -976,9 +995,6 @@
       }
       return false;
     });
-    if (df && consts.some(function (c) { return isTrapezoid(c.type); })) {
-      throw new Error("Funnel and splitter bodies are not supported in double-float precision mode yet");
-    }
     var funnelPairs = trapezoidPairs.filter(function (tp) { return tp.kind === "funnel"; });
     var splitterPairs = trapezoidPairs.filter(function (tp) { return tp.kind === "splitter"; });
     // Every circle that could split this step, in ascending body index -
@@ -1011,9 +1027,53 @@
     // See the g_contactN assignments inside stepOnce() below for what these
     // are and why they're globals.
     for (var cd = 0; cd < n; cd++) lines.push("bool g_contact" + cd + " = false;");
+
+    // ---- df only: segment geometry, built as seldom as the physics allows ----
+    //
+    // See physics-gpu-df.js's header. A line in a collision pair needs its
+    // DSegment, a funnel/splitter its DTrapezoid - each costing a df sin/cos,
+    // the most expensive thing in that library. A MOVABLE one is rebuilt once
+    // per step (shared by every pair it is in, where the straight port
+    // rebuilt it per pair). An ANCHORED one never moves, so it is built once
+    // per run: into a global, on the first stepOnce() call that finds
+    // g_dfStaticGeomReady false. Whoever declares a pixel's bodies clears
+    // that flag (see staticGeometryResetGLSL), so a shader that simulates
+    // several starting points in one invocation - the derived display modes'
+    // stencil - rebuilds it for each.
+    //
+    // The float32 path is untouched by any of this: its sin/cos is a
+    // hardware instruction, and its arithmetic stays exactly what it was.
+    var segLines = {}, trapBodies = {};
+    ordinaryPairs.forEach(function (pair) {
+      pair.forEach(function (idx) { if (consts[idx].type === "line") segLines[idx] = true; });
+    });
+    trapezoidPairs.forEach(function (tp) { trapBodies[tp.trap] = true; });
+    function segExpr(idx) { return consts[idx].isAnchored ? "g_dfSeg" + idx : "seg" + idx; }
+    function trapExpr(idx) { return consts[idx].isAnchored ? "g_dfTrap" + idx : "trap" + idx; }
+    var staticGeomLines = [];
+    if (df) {
+      Object.keys(segLines).forEach(function (idx) {
+        if (!consts[idx].isAnchored) return;
+        lines.push("DSegment g_dfSeg" + idx + ";");
+        staticGeomLines.push("    g_dfSeg" + idx + " = dfLineSegment(" + B(idx) + ", BODY" + idx + "_HALF);");
+      });
+      Object.keys(trapBodies).forEach(function (idx) {
+        if (!consts[idx].isAnchored) return;
+        lines.push("DTrapezoid g_dfTrap" + idx + ";");
+        staticGeomLines.push("    g_dfTrap" + idx + " = dfTrapezoid(" + B(idx) + ", dfMulPow2(BODY" + idx + "_HALF, 2.0));");
+      });
+    }
     lines.push("");
     lines.push("void stepOnce(" + stepOnceParams(n, hingeAnchors, precision, spawnBase).join(", ") + ") {");
-    if (hingeAnchors.some(function (h) { return h.aIsWorld; })) {
+    if (staticGeomLines.length) {
+      lines.push("  if (!g_dfStaticGeomReady) {");
+      staticGeomLines.forEach(function (l) { lines.push(l); });
+      lines.push("    g_dfStaticGeomReady = true;");
+      lines.push("  }");
+    }
+    // The df path never needs a stand-in body for the world pin - its hinge
+    // solvers have world-pin forms that leave side A out altogether.
+    if (!df && hingeAnchors.some(function (h) { return h.aIsWorld; })) {
       lines.push("  " + E.bodyType + " worldBody = " + E.bodyType + "(" +
         [E.zero, E.zero, E.zero, E.zero, E.zero, E.zero].join(", ") + ");");
     }
@@ -1025,141 +1085,154 @@
     // the GLSL port of PhysicsEngine.computeAccelerations, and kept
     // deliberately line-for-line comparable to it.
     //
-    // The force math runs in float32 in BOTH precision modes. In df mode the
-    // body fields and BODY{i}_HALF are df (vec2) values, so this collapses
-    // them with dfToFloat - and does it on the SEPARATION, dfSub'd first, not
-    // on the two absolute coordinates. That ordering is the whole point: the
-    // separation is a small, well-conditioned number float32 handles easily,
-    // whereas collapsing the coordinates first would throw away the very
-    // distinction the df pass exists to keep. Only the accumulators - the
-    // velocities this feeds - need the extra precision, so the result is
-    // widened back to df at the point of use and nowhere earlier.
+    // Carried at the pass's OWN precision, force included. The df pass used
+    // to collapse each separation to float32 and run the force math there, on
+    // the theory that only the accumulators need the extra digits - the same
+    // theory measurement killed for the collision math (see
+    // physics-gpu-df.js's header), and it fails here the same way. A float32
+    // separation cannot tell two pixels apart until they differ by one of ITS
+    // ULPs (~1e-5 px at a 100px separation), so every pixel inside that block
+    // was handed an identical acceleration: the df accumulators faithfully
+    // carried a starting difference the dynamics never responded to, and a
+    // Mutual Gravity scene got barely past the float32 wall.
     //
-    // Gravitational mass is derived from BODY{i}_HALF rather than baked,
-    // because the fractal grid can link a body's radius or length to a
-    // pixel's coordinate: its size, and so its mass, varies per pixel.
-    // GRAV_K folds together density, the anchored 10x, and the shape's own
-    // constant factor (pi for a circle's area, 2 for a line's half-length).
-    // b's position minus a's, as a plain float32 vec2 in either precision.
-    // In df the subtraction happens FIRST, at full precision, and only the
-    // (small) result is collapsed.
-    function separationExpr(a, b) {
-      if (!df) return "vec2(body" + b + ".x - body" + a + ".x, body" + b + ".y - body" + a + ".y)";
-      return "vec2(dfToFloat(dfSub(dbody" + b + ".x, dbody" + a + ".x)), " +
-        "dfToFloat(dfSub(dbody" + b + ".y, dbody" + a + ".y)))";
-    }
-
-    // The body of a weld: one velocity for both, momentum-weighted. Shared
-    // by the two places a merge can happen (already-overlapping at the start
-    // of the step, and a contact the swept detection found during it), so
-    // the two can't drift apart. Mirrors PhysicsEngine.weldPair.
-    function weldLines(mi, mj, indent) {
-      var out = [];
-      var anchored = consts[mi].isAnchored ? mi : (consts[mj].isAnchored ? mj : -1);
-      if (anchored !== -1) {
-        // An anchor absorbs whatever lands on it: the free body stops.
-        var free = anchored === mi ? mj : mi;
-        ["vx", "vy", "w"].forEach(function (f) {
-          out.push(indent + B(free) + "." + f + " = " + E.zero + ";");
-        });
-        return out;
-      }
-      // Masses are only carried as their reciprocals, so the momentum
-      // weights are written with those directly: weighting v_i by m_i and
-      // v_j by m_j, then dividing by (m_i + m_j), is the same as weighting
-      // v_i by invMass_j and v_j by invMass_i over (invMass_i + invMass_j) -
-      // no mass is ever formed, so an anchored body's zero can't divide.
-      var weightI = "BODY" + mj + "_INV_MASS", weightJ = "BODY" + mi + "_INV_MASS";
-      var denom = E.add(weightI, weightJ);
-      var recip = df ? "dfDiv(DF_ONE, " + denom + ")" : "(1.0 / (" + denom + "))";
-      out.push(indent + E.scalarType + " mvScale = " + recip + ";");
-      ["vx", "vy", "w"].forEach(function (f) {
-        out.push(indent + E.scalarType + " mv_" + f + " = " +
-          E.mul(E.add(E.mul(weightI, B(mi) + "." + f), E.mul(weightJ, B(mj) + "." + f)), "mvScale") + ";");
-      });
-      ["vx", "vy", "w"].forEach(function (f) {
-        out.push(indent + B(mi) + "." + f + " = mv_" + f + "; " + B(mj) + "." + f + " = mv_" + f + ";");
-      });
-      return out;
+    // Gravitational mass and reach are derived from BODY{i}_HALF rather than
+    // baked, because the fractal grid can link a body's radius or length to a
+    // pixel's coordinate: its size, and so its mass, varies per pixel. gravK
+    // folds together density, the anchored 10x, and the shape's own constant
+    // factor; reachK is how far the shape extends per unit of HALF. Both come
+    // from PhysicsEngine's own gravitationalMass/halfExtent, evaluated on a
+    // unit-HALF body, so a trapezoid gets the same closed forms the JS engine
+    // uses rather than being mistaken for a line of the same HALF.
+    function unitBodyOf(c) {
+      if (c.type === "circle") return { type: "circle", radius: 1, isAnchored: c.isAnchored };
+      if (c.type === "funnel" || c.type === "splitter") return { type: c.type, size: 2, isAnchored: c.isAnchored };
+      return { type: "line", length: 2, isAnchored: c.isAnchored };
     }
 
     var accelExpr = {};
     if (mutualGravity) {
-      var gravK = consts.map(function (c) {
-        var density = c.isAnchored ? global.PhysicsEngine.ANCHORED_GRAVITY_DENSITY : 1;
-        return c.type === "circle"
-          ? density * global.PhysicsEngine.DENSITY * Math.PI
-          : density * global.PhysicsEngine.LINE_LINEAR_DENSITY * 2;
-      });
-      // A plain float32 half-extent for every body, so the force math below
-      // (and the merge above) can be written once for both precisions.
-      for (var h32 = 0; h32 < n; h32++) {
-        lines.push("  float fHalf" + h32 + " = " +
-          (df ? "dfToFloat(BODY" + h32 + "_HALF)" : "BODY" + h32 + "_HALF") + ";");
-      }
-      for (var m = 0; m < n; m++) {
-        lines.push("  float gravMass" + m + " = " + fnum(gravK[m]) + " * fHalf" + m +
-          (consts[m].type === "circle" ? " * fHalf" + m : "") + ";");
+      var gravK = consts.map(function (c) { return global.PhysicsEngine.gravitationalMass(unitBodyOf(c)); });
+      var reachK = consts.map(function (c) { return global.PhysicsEngine.halfExtent(unitBodyOf(c)); });
+      var GRAV_G = global.PhysicsEngine.MUTUAL_GRAVITY_CONSTANT;
+      // A dead spawn slot is not a body yet: it neither pulls nor is pulled,
+      // matching the JS engine, where it simply does not exist. (It is also
+      // what keeps two dead slots parked on the same point from dividing
+      // zero by zero.)
+      function gravGate(i, j, cond) {
+        var gate = bothAliveExpr(i, j);
+        return gate ? "(" + cond + ") && " + gate : cond;
       }
 
-      // ---- Merge on contact: the port of PhysicsEngine.applyContactMerge ----
-      //
-      // Touching bodies move as one. Emitted before anything reads a
-      // velocity, exactly as the JS engine applies it before reading its
-      // own - see applyContactMerge for why that ordering is what makes the
-      // merged state hold instead of being re-launched within the same step.
-      // Stateless by design, so nothing has to persist between shader
-      // invocations, which the Body struct has nowhere to put.
-      pairs.forEach(function (pair) {
-        var mi = pair[0], mj = pair[1];
-        lines.push("  {");
-        lines.push("    vec2 md = " + separationExpr(mi, mj) + ";");
-        lines.push("    float mc = fHalf" + mi + " + fHalf" + mj + ";");
-        var weldGate = bothAliveExpr(mi, mj);
-        lines.push("    if (dot(md, md) <= mc * mc" + (weldGate ? " && " + weldGate : "") + ") {");
-        weldLines(mi, mj, "      ").forEach(function (l) { lines.push(l); });
-        lines.push("    }");
-        lines.push("  }");
-      });
-      lines.push("");
-      for (var a = 0; a < n; a++) {
-        if (consts[a].isAnchored) continue; // never accelerates, so never needs a sum
-        lines.push("  vec2 gravAcc" + a + " = vec2(0.0);");
-        for (var b2 = 0; b2 < n; b2++) {
-          if (b2 === a) continue;
-          lines.push("  {");
-          lines.push("    vec2 d = " + separationExpr(a, b2) + ";");
-          // Bodies that are touching pull on each other not at all - see
-          // PhysicsEngine.computeAccelerations for why (short version: the
-          // contact solver's positional correction would otherwise be lifting
-          // the body out of a very steep well for free, inventing energy).
-          // It also bounds this expression: r2 can never get near zero, so
-          // there is no singularity to guard against.
-          // With collisions off nothing supplies that force and bodies pass
-          // through each other, so inside `contact` the pull follows the
-          // smooth interior law down to zero instead of being switched off at
-          // its rim - same reason, same formula, same comment as the JS
-          // engine's branch.
-          lines.push("    float contact = fHalf" + a + " + fHalf" + b2 + ";");
-          lines.push("    float r2 = dot(d, d);");
-          if (collisionsOn) {
-            lines.push("    if (r2 >= contact * contact) gravAcc" + a + " += (" +
-              fnum(global.PhysicsEngine.MUTUAL_GRAVITY_CONSTANT) +
-              " * gravMass" + b2 + " / (r2 * sqrt(r2))) * d;");
-          } else {
-            lines.push("    float u2_" + b2 + " = r2 / (contact * contact);");
-            lines.push("    float pull" + b2 + " = (r2 >= contact * contact)");
-            lines.push("      ? " + fnum(global.PhysicsEngine.MUTUAL_GRAVITY_CONSTANT) +
-              " * gravMass" + b2 + " / (r2 * sqrt(r2))");
-            lines.push("      : " + fnum(global.PhysicsEngine.MUTUAL_GRAVITY_CONSTANT) +
-              " * gravMass" + b2 + " / (contact * contact * contact) *");
-            lines.push("        (35.0 / 8.0 - 21.0 / 4.0 * u2_" + b2 + " + 15.0 / 8.0 * u2_" + b2 + " * u2_" + b2 + ");");
-            lines.push("    gravAcc" + a + " += pull" + b2 + " * d;");
-          }
-          lines.push("  }");
+      if (df) {
+        var dfnumG = global.PhysicsDF.num;
+        for (var mdf = 0; mdf < n; mdf++) {
+          var halfDf = "BODY" + mdf + "_HALF";
+          lines.push("  vec2 gravReach" + mdf + " = " +
+            (reachK[mdf] === 1 ? halfDf : "dfMul(" + halfDf + ", " + dfnumG(reachK[mdf]) + ")") + ";");
+          // G is folded into the mass here, once per body, so each pair below
+          // pays one multiply for it rather than two.
+          lines.push("  vec2 gravGM" + mdf + " = dfMul(" + dfnumG(GRAV_G * gravK[mdf]) + ", " +
+            (consts[mdf].type === "circle" ? "dfSqr(" + halfDf + ")" : halfDf) + ");");
         }
-        accelExpr[a] = df ? "dv2(dfFromFloat(gravAcc" + a + ".x), dfFromFloat(gravAcc" + a + ".y))"
-                          : "gravAcc" + a;
+        for (var adf = 0; adf < n; adf++) {
+          if (!consts[adf].isAnchored) lines.push("  DVec2 gravAcc" + adf + " = dv2Zero();");
+        }
+        // Once per UNORDERED pair: the separation, its square and the
+        // inverse-cube factor are shared by both directions, and in df those
+        // are the expensive part. b pulls a along +d and a pulls b along -d,
+        // and each body still accumulates its partners in ascending index
+        // order, exactly as PhysicsEngine.computeAccelerations does.
+        for (var pa = 0; pa < n; pa++) {
+          for (var pb = pa + 1; pb < n; pb++) {
+            if (consts[pa].isAnchored && consts[pb].isAnchored) continue;
+            lines.push("  {");
+            lines.push("    DVec2 gd = dv2(dfSub(dbody" + pb + ".x, dbody" + pa + ".x), dfSub(dbody" + pb + ".y, dbody" + pa + ".y));");
+            lines.push("    vec2 gr2 = dv2LengthSq(gd);");
+            lines.push("    vec2 gContact = dfAdd(gravReach" + pa + ", gravReach" + pb + ");");
+            lines.push("    vec2 gContact2 = dfSqr(gContact);");
+            // Compared in df: this is a branch, and a float32 comparison would
+            // put its boundary on a float32 grid.
+            var outside = "!dfLess(gr2, gContact2)";
+            var applyLines = [];
+            if (!consts[pa].isAnchored) applyLines.push("gravAcc" + pa + " = dv2Add(gravAcc" + pa + ", dv2Scale(gd, dfMul(gravGM" + pb + ", gk)));");
+            if (!consts[pb].isAnchored) applyLines.push("gravAcc" + pb + " = dv2Sub(gravAcc" + pb + ", dv2Scale(gd, dfMul(gravGM" + pa + ", gk)));");
+            if (collisionsOn) {
+              // Touching bodies pull on each other not at all - see
+              // PhysicsEngine.computeAccelerations for why.
+              lines.push("    if (" + gravGate(pa, pb, outside) + ") {");
+              lines.push("      vec2 gk = dfDiv(DF_ONE, dfMul(gr2, dfSqrt(gr2)));");
+              applyLines.forEach(function (l) { lines.push("      " + l); });
+              lines.push("    }");
+            } else {
+              // The smooth interior law - same formula, same reason, same
+              // comment as the JS engine's branch.
+              var aliveOnly = bothAliveExpr(pa, pb);
+              lines.push("    " + (aliveOnly ? "if (" + aliveOnly + ") " : "") + "{");
+              lines.push("      vec2 gk;");
+              lines.push("      if (" + outside + ") {");
+              lines.push("        gk = dfDiv(DF_ONE, dfMul(gr2, dfSqrt(gr2)));");
+              lines.push("      } else {");
+              lines.push("        vec2 gu2 = dfDiv(gr2, gContact2);");
+              lines.push("        vec2 gPoly = dfAdd(dfSub(" + dfnumG(35 / 8) + ", dfMul(" + dfnumG(21 / 4) + ", gu2)), dfMul(" + dfnumG(15 / 8) + ", dfSqr(gu2)));");
+              lines.push("        gk = dfDiv(gPoly, dfMul(gContact2, gContact));");
+              lines.push("      }");
+              applyLines.forEach(function (l) { lines.push("      " + l); });
+              lines.push("    }");
+            }
+            lines.push("  }");
+          }
+        }
+        for (var edf = 0; edf < n; edf++) {
+          if (!consts[edf].isAnchored) accelExpr[edf] = "gravAcc" + edf;
+        }
+      } else {
+        for (var h32 = 0; h32 < n; h32++) {
+          lines.push("  float fHalf" + h32 + " = BODY" + h32 + "_HALF;");
+        }
+        for (var m = 0; m < n; m++) {
+          lines.push("  float gravMass" + m + " = " + fnum(gravK[m]) + " * fHalf" + m +
+            (consts[m].type === "circle" ? " * fHalf" + m : "") + ";");
+        }
+        var reachExpr = consts.map(function (c, i) {
+          return reachK[i] === 1 ? "fHalf" + i : "(" + fnum(reachK[i]) + " * fHalf" + i + ")";
+        });
+        for (var a = 0; a < n; a++) {
+          if (consts[a].isAnchored) continue; // never accelerates, so never needs a sum
+          lines.push("  vec2 gravAcc" + a + " = vec2(0.0);");
+          for (var b2 = 0; b2 < n; b2++) {
+            if (b2 === a) continue;
+            lines.push("  {");
+            lines.push("    vec2 d = vec2(body" + b2 + ".x - body" + a + ".x, body" + b2 + ".y - body" + a + ".y);");
+            // Bodies that are touching pull on each other not at all - see
+            // PhysicsEngine.computeAccelerations for why (short version: the
+            // contact solver's positional correction would otherwise be lifting
+            // the body out of a very steep well for free, inventing energy).
+            // It also bounds this expression: r2 can never get near zero, so
+            // there is no singularity to guard against.
+            // With collisions off nothing supplies that force and bodies pass
+            // through each other, so inside `contact` the pull follows the
+            // smooth interior law down to zero instead of being switched off at
+            // its rim - same reason, same formula, same comment as the JS
+            // engine's branch.
+            lines.push("    float contact = " + reachExpr[a] + " + " + reachExpr[b2] + ";");
+            lines.push("    float r2 = dot(d, d);");
+            if (collisionsOn) {
+              lines.push("    if (" + gravGate(a, b2, "r2 >= contact * contact") + ") gravAcc" + a + " += (" +
+                fnum(GRAV_G) + " * gravMass" + b2 + " / (r2 * sqrt(r2))) * d;");
+            } else {
+              lines.push("    float u2_" + b2 + " = r2 / (contact * contact);");
+              lines.push("    float pull" + b2 + " = (r2 >= contact * contact)");
+              lines.push("      ? " + fnum(GRAV_G) + " * gravMass" + b2 + " / (r2 * sqrt(r2))");
+              lines.push("      : " + fnum(GRAV_G) + " * gravMass" + b2 + " / (contact * contact * contact) *");
+              lines.push("        (35.0 / 8.0 - 21.0 / 4.0 * u2_" + b2 + " + 15.0 / 8.0 * u2_" + b2 + " * u2_" + b2 + ");");
+              var aliveGate32 = bothAliveExpr(a, b2);
+              lines.push("    " + (aliveGate32 ? "if (" + aliveGate32 + ") " : "") + "gravAcc" + a + " += pull" + b2 + " * d;");
+            }
+            lines.push("  }");
+          }
+          accelExpr[a] = "gravAcc" + a;
+        }
       }
       lines.push("");
     }
@@ -1193,6 +1266,30 @@
 
     function probeRef(idx) { return consts[idx].isAnchored ? B(idx) : "probe" + idx; }
 
+    // df only: this step's geometry for every MOVABLE line and trapezoid a
+    // pair below is about to test (the anchored ones were built once, above).
+    // From the probe, like the tests themselves - same position and angle as
+    // the body, which is all a segment is made of.
+    if (df) {
+      Object.keys(segLines).forEach(function (idx) {
+        if (consts[idx].isAnchored) return;
+        lines.push("  DSegment seg" + idx + " = dfLineSegment(probe" + idx + ", BODY" + idx + "_HALF);");
+      });
+      Object.keys(trapBodies).forEach(function (idx) {
+        if (consts[idx].isAnchored) return;
+        lines.push("  DTrapezoid trap" + idx + " = dfTrapezoid(probe" + idx + ", dfMulPow2(BODY" + idx + "_HALF, 2.0));");
+      });
+    }
+    // A line's second argument to its collide function: its half-length in
+    // float32 (the function derives the endpoints itself), its prebuilt
+    // segment in df.
+    function lineArg(idx) { return df ? segExpr(idx) : "BODY" + idx + "_HALF"; }
+    // Only a line<->line pair can ever fill its second contact slot - see
+    // the solve loops below, which skip c1 for every other pair.
+    function pairSlots(pair) {
+      return consts[pair[0]].type === "line" && consts[pair[1]].type === "line" ? ["c0", "c1"] : ["c0"];
+    }
+
     // Contacts are computed ONCE per stepOnce() call and reused across every
     // velocity/position iteration within that step (matching JS: step()
     // detects contacts once, then solves them repeatedly) - so these must be
@@ -1205,19 +1302,19 @@
       if (tA === "circle" && tB === "circle") {
         lines.push("  " + E.contactPairType + " " + varName + " = " + E.contactPairType + "(" + E.collideCircleCircle + "(" + refI + ", BODY" + i + "_HALF, " + refJ + ", BODY" + j + "_HALF), " + E.noContact + ");");
       } else if (tA === "line" && tB === "circle") {
-        lines.push("  " + E.contactPairType + " " + varName + " = " + E.contactPairType + "(" + E.collideLineCircle + "(" + refI + ", BODY" + i + "_HALF, " + refJ + ", BODY" + j + "_HALF), " + E.noContact + ");");
+        lines.push("  " + E.contactPairType + " " + varName + " = " + E.contactPairType + "(" + E.collideLineCircle + "(" + refI + ", " + lineArg(i) + ", " + refJ + ", BODY" + j + "_HALF), " + E.noContact + ");");
       } else if (tA === "circle" && tB === "line") {
         // collideLineCircle(line, circle) always takes (line, circle) in
         // that order, so calling it as (body_j=line, body_i=circle) here
         // returns rA/rB for (line=j, circle=i) - the opposite of this
         // pair's own i/j. Swap them back along with flipping the normal,
         // matching physics-engine.js's collidePair - see its own comment.
-        lines.push("  " + E.contactType + " " + varName + "_raw = " + E.collideLineCircle + "(" + refJ + ", BODY" + j + "_HALF, " + refI + ", BODY" + i + "_HALF);");
+        lines.push("  " + E.contactType + " " + varName + "_raw = " + E.collideLineCircle + "(" + refJ + ", " + lineArg(j) + ", " + refI + ", BODY" + i + "_HALF);");
         lines.push("  " + varName + "_raw.normal = " + E.negVec(varName + "_raw.normal") + ";");
         lines.push("  { " + E.vecType + " tmp_" + i + "_" + j + " = " + varName + "_raw.rA; " + varName + "_raw.rA = " + varName + "_raw.rB; " + varName + "_raw.rB = tmp_" + i + "_" + j + "; }");
         lines.push("  " + E.contactPairType + " " + varName + " = " + E.contactPairType + "(" + varName + "_raw, " + E.noContact + ");");
       } else {
-        lines.push("  " + E.contactPairType + " " + varName + " = " + E.collideLineLine + "(" + refI + ", BODY" + i + "_HALF, " + refJ + ", BODY" + j + "_HALF);");
+        lines.push("  " + E.contactPairType + " " + varName + " = " + E.collideLineLine + "(" + refI + ", " + lineArg(i) + ", " + refJ + ", " + lineArg(j) + ");");
       }
     });
     // Any pair involving a spawn slot only counts while that slot is in
@@ -1232,6 +1329,20 @@
       var varName = "pair_" + pair[0] + "_" + pair[1];
       lines.push("  if (!" + gate + ") { " + varName + ".c0.hit = false; " + varName + ".c1.hit = false; }");
     });
+    // df only: everything about each contact that no solver iteration can
+    // change, built once here instead of on all 8 + 4 of them - see
+    // dfPrepareContact. After the gating above, so a suppressed contact is
+    // never prepared.
+    function prepareContactLine(contactExpr, a, b) {
+      return "  dfPrepareContact(" + contactExpr + ", BODY" + a + "_INV_MASS, BODY" + a + "_INV_INERTIA, BODY" + b + "_INV_MASS, BODY" + b + "_INV_INERTIA);";
+    }
+    if (df) {
+      ordinaryPairs.forEach(function (pair) {
+        pairSlots(pair).forEach(function (slot) {
+          lines.push(prepareContactLine("pair_" + pair[0] + "_" + pair[1] + "." + slot, pair[0], pair[1]));
+        });
+      });
+    }
     lines.push("");
 
     // "Is this body touching anything at all this step?", published per body
@@ -1249,7 +1360,7 @@
       ordinaryPairs.forEach(function (pair) {
         if (pair[0] !== cf && pair[1] !== cf) return;
         var vn = "pair_" + pair[0] + "_" + pair[1];
-        touching.push("(" + vn + ".c0.hit || " + vn + ".c1.hit)");
+        touching.push("(" + pairSlots(pair).map(function (slot) { return vn + "." + slot + ".hit"; }).join(" || ") + ")");
       });
       lines.push("  g_contact" + cf + " = " + (touching.length ? touching.join(" || ") : "false") + ";");
     }
@@ -1257,12 +1368,11 @@
 
     // Per-body tHit: the earliest contact instant among everything that
     // body touches this step, defaulting to DT (no contact -> the whole
-    // step is "leg 1", leg 2 never runs - see leg 2's own comment). Every
-    // circle-circle/line-circle pair fills BOTH ContactPair slots even
-    // though only one is ever real - c1 is noContact() - so an unguarded
-    // min() would let a not-hit placeholder's tHit (0.0, same as an
-    // already-touching contact's) drag every body's tHit down to 0.0.
-    // Fold in a slot's tHit only when it actually hit.
+    // step is "leg 1", leg 2 never runs - see leg 2's own comment). A slot
+    // that did not hit still carries a tHit (0.0, same as an
+    // already-touching contact's), so an unguarded min() would drag every
+    // body's tHit down to 0.0. Fold in a slot's tHit only when it actually
+    // hit - and only the slots this kind of pair can fill at all.
     function contactTHitExpr(varName, slot) {
       return varName + "." + slot + ".hit ? " + varName + "." + slot + ".tHit : " + E.DT;
     }
@@ -1273,7 +1383,8 @@
     ordinaryPairs.forEach(function (pair) {
       var i = pair[0], j = pair[1];
       var varName = "pair_" + i + "_" + j;
-      var pairMin = E.min(contactTHitExpr(varName, "c0"), contactTHitExpr(varName, "c1"));
+      var pairMin = pairSlots(pair).map(function (slot) { return contactTHitExpr(varName, slot); })
+        .reduce(function (acc, expr) { return E.min(acc, expr); });
       if (!consts[i].isAnchored) {
         lines.push("  body" + i + "THit = " + E.min("body" + i + "THit", pairMin) + ";");
       }
@@ -1283,7 +1394,7 @@
     });
     lines.push("");
 
-    // ---- Funnel<->circle pairs (float32 only - see the throw above) ----
+    // ---- Funnel/splitter <-> circle pairs ----
     //
     // A mouth teleport isn't a Contact (no impulse - see this file's Funnel
     // header comment and physics-engine.js's own), and 3 solid edges don't
@@ -1296,6 +1407,11 @@
     // flags into g_contact, excluding the specific funnel a teleport just
     // won against (its rA/rB would otherwise be evaluated against this
     // circle's stale PRE-teleport position).
+    //
+    // Written once for both precisions, like everything else in this
+    // function. The one structural difference: float32 rebuilds the
+    // trapezoid's vertices per pair (and again inside the trigger test),
+    // where df reads the body's one prebuilt DTrapezoid - see segExpr above.
     var funnelPairsByCircle = {};
     funnelPairs.forEach(function (fp) {
       (funnelPairsByCircle[fp.circle] = funnelPairsByCircle[fp.circle] || []).push(fp.trap);
@@ -1313,14 +1429,19 @@
         // block keeps the variables in scope for the solve loops below,
         // which run unconditionally and already no-op on a !hit contact.
         var gate = bothAliveExpr(fi, ci);
-        lines.push("  FunnelVerts " + vn + "_v = funnelVertices(" + refF + ", BODY" + fi + "_HALF * 2.0);");
+        var sizeArg = df ? trapExpr(fi) : "BODY" + fi + "_HALF * 2.0";
+        if (!df) lines.push("  FunnelVerts " + vn + "_v = funnelVertices(" + refF + ", " + sizeArg + ");");
         fp.walls.forEach(function (w) {
-          lines.push("  Contact " + vn + "_" + w[0] + " = sweptCapsuleCircleContact(" + vn + "_v." + w[1] + ", " + vn + "_v." + w[2] +
-            ", vec2(" + refF + ".vx, " + refF + ".vy), vec2(" + refF + ".x, " + refF + ".y), " + refC + ", BODY" + ci + "_HALF, LINE_THICKNESS * 0.5);");
+          var segArgs = df ? trapExpr(fi) + "." + w[0] : vn + "_v." + w[1] + ", " + vn + "_v." + w[2];
+          lines.push("  " + E.contactType + " " + vn + "_" + w[0] + " = " + E.sweptCapsule + "(" + segArgs +
+            ", " + E.vec(refF + ".vx", refF + ".vy") + ", " + E.vec(refF + ".x", refF + ".y") + ", " + refC + ", BODY" + ci + "_HALF, " + E.halfThickness + ");");
           if (gate) lines.push("  if (!" + gate + ") " + vn + "_" + w[0] + ".hit = false;");
+          // The trapezoid is side A of each wall contact, the circle side B -
+          // the order both solve loops below pass them in.
+          if (df) lines.push(prepareContactLine(vn + "_" + w[0], fi, ci));
         });
         if (fp.kind === "funnel") {
-          lines.push("  MouthHit " + vn + "_mouth = collideFunnelMouthTHit(" + refF + ", BODY" + fi + "_HALF * 2.0, " + refC + ", BODY" + ci + "_HALF);");
+          lines.push("  " + E.mouthHitType + " " + vn + "_mouth = " + E.mouthHitFn + "(" + refF + ", " + sizeArg + ", " + refC + ", BODY" + ci + "_HALF);");
           if (gate) lines.push("  if (!" + gate + ") " + vn + "_mouth.hit = false;");
         } else {
           // NOT folded into either body's tHit, matching
@@ -1328,13 +1449,13 @@
           // of the step, off the fully integrated position, so it takes no
           // part in the leg-1/leg-2 sub-stepping the way a funnel teleport
           // does.
-          lines.push("  SplitHit " + vn + "_split = collideSplitterShortSideTHit(" + refF + ", BODY" + fi + "_HALF * 2.0, " + refC + ", BODY" + ci + "_HALF);");
+          lines.push("  " + E.splitHitType + " " + vn + "_split = " + E.splitHitFn + "(" + refF + ", " + sizeArg + ", " + refC + ", BODY" + ci + "_HALF);");
           if (gate) lines.push("  if (!" + gate + ") " + vn + "_split.hit = false;");
         }
-        var wallTHits = fp.walls.map(function (w) { return vn + "_" + w[0] + ".hit ? " + vn + "_" + w[0] + ".tHit : DT"; });
-        lines.push("  float " + vn + "_solidTHit = min(" + wallTHits[0] + ", min(" + wallTHits[1] + ", " + wallTHits[2] + "));");
-        if (!consts[fi].isAnchored) lines.push("  body" + fi + "THit = min(body" + fi + "THit, " + vn + "_solidTHit);");
-        if (!consts[ci].isAnchored) lines.push("  body" + ci + "THit = min(body" + ci + "THit, " + vn + "_solidTHit);");
+        var wallTHits = fp.walls.map(function (w) { return vn + "_" + w[0] + ".hit ? " + vn + "_" + w[0] + ".tHit : " + E.DT; });
+        lines.push("  " + E.scalarType + " " + vn + "_solidTHit = " + E.min(wallTHits[0], E.min(wallTHits[1], wallTHits[2])) + ";");
+        if (!consts[fi].isAnchored) lines.push("  body" + fi + "THit = " + E.min("body" + fi + "THit", vn + "_solidTHit") + ";");
+        if (!consts[ci].isAnchored) lines.push("  body" + ci + "THit = " + E.min("body" + ci + "THit", vn + "_solidTHit") + ";");
       });
       lines.push("");
 
@@ -1349,16 +1470,16 @@
         // target, exactly the bug this comment is here to keep from coming
         // back (mirrors physics-engine.js's `if (tp && ...)`, where tp is
         // null - not a tHit value - when nothing was found).
-        lines.push("  float teleTHit_" + ci + " = DT;");
-        lines.push("  vec2 teleTarget_" + ci + " = vec2(0.0);");
+        lines.push("  " + E.scalarType + " teleTHit_" + ci + " = " + E.DT + ";");
+        lines.push("  " + E.vecType + " teleTarget_" + ci + " = " + E.zeroVec + ";");
         lines.push("  int teleFunnel_" + ci + " = -1;");
         lines.push("  bool teleFound_" + ci + " = false;");
         funnelPairsByCircle[ci].forEach(function (fi) {
           var vn = "trap_" + fi + "_" + ci;
-          lines.push("  if (" + vn + "_mouth.hit && (!teleFound_" + ci + " || " + vn + "_mouth.tHit < teleTHit_" + ci + ")) { teleTHit_" + ci + " = " +
+          lines.push("  if (" + vn + "_mouth.hit && (!teleFound_" + ci + " || " + E.less(vn + "_mouth.tHit", "teleTHit_" + ci) + ")) { teleTHit_" + ci + " = " +
             vn + "_mouth.tHit; teleTarget_" + ci + " = " + vn + "_mouth.target; teleFunnel_" + ci + " = " + fi + "; teleFound_" + ci + " = true; }");
         });
-        lines.push("  bool teleWon_" + ci + " = teleFound_" + ci + " && teleTHit_" + ci + " <= body" + ci + "THit;");
+        lines.push("  bool teleWon_" + ci + " = teleFound_" + ci + " && " + E.lessEq("teleTHit_" + ci, "body" + ci + "THit") + ";");
         lines.push("  if (teleWon_" + ci + ") body" + ci + "THit = teleTHit_" + ci + ";");
       });
       lines.push("");
@@ -1373,13 +1494,13 @@
       splittableCircles.forEach(function (ci) {
         lines.push("  bool splitFound_" + ci + " = false;");
         lines.push("  int splitBy_" + ci + " = -1;");
-        lines.push("  float splitTHit_" + ci + " = DT;");
-        lines.push("  vec2 splitOff1_" + ci + " = vec2(0.0);");
-        lines.push("  vec2 splitOff2_" + ci + " = vec2(0.0);");
+        lines.push("  " + E.scalarType + " splitTHit_" + ci + " = " + E.DT + ";");
+        lines.push("  " + E.vecType + " splitOff1_" + ci + " = " + E.zeroVec + ";");
+        lines.push("  " + E.vecType + " splitOff2_" + ci + " = " + E.zeroVec + ";");
         splitterPairs.forEach(function (sp) {
           if (sp.circle !== ci) return;
           var vn = "trap_" + sp.trap + "_" + ci;
-          lines.push("  if (" + vn + "_split.hit && (!splitFound_" + ci + " || " + vn + "_split.tHit < splitTHit_" + ci + ")) { " +
+          lines.push("  if (" + vn + "_split.hit && (!splitFound_" + ci + " || " + E.less(vn + "_split.tHit", "splitTHit_" + ci) + ")) { " +
             "splitTHit_" + ci + " = " + vn + "_split.tHit; " +
             "splitOff1_" + ci + " = " + vn + "_split.offset1; " +
             "splitOff2_" + ci + " = " + vn + "_split.offset2; " +
@@ -1423,7 +1544,9 @@
       // position discontinuity.
       if (funnelPairsByCircle[g3]) {
         lines.push("  if (teleWon_" + g3 + ") { " + B(g3) + ".x = teleTarget_" + g3 + ".x; " + B(g3) + ".y = teleTarget_" + g3 + ".y; } else { " +
-          B(g3) + ".x += vFull" + g3 + ".x * " + t1 + "; " + B(g3) + ".y += vFull" + g3 + ".y * " + t1 + "; }");
+          (df
+            ? B(g3) + ".x = " + E.add(B(g3) + ".x", E.mul("vFull" + g3 + ".x", t1)) + "; " + B(g3) + ".y = " + E.add(B(g3) + ".y", E.mul("vFull" + g3 + ".y", t1)) + "; }"
+            : B(g3) + ".x += vFull" + g3 + ".x * " + t1 + "; " + B(g3) + ".y += vFull" + g3 + ".y * " + t1 + "; }"));
       } else {
         lines.push("  " + B(g3) + ".x = " + E.add(B(g3) + ".x", E.mul("vFull" + g3 + ".x", t1)) + ";");
         lines.push("  " + B(g3) + ".y = " + E.add(B(g3) + ".y", E.mul("vFull" + g3 + ".y", t1)) + ";");
@@ -1434,83 +1557,86 @@
     }
     lines.push("");
 
-    // Merge whatever the swept detection actually hit this step - the port
-    // of PhysicsEngine.mergeDetectedContacts, and emitted at the matching
-    // point: bodies are at the contact instant carrying their pre-impulse
-    // velocities, so the solver below finds nothing left to bounce. Without
-    // this a collision fast enough to begin and end inside one step is never
-    // seen overlapping at a step boundary and rebounds straight through the
-    // merge.
-    if (mutualGravity) {
-      // ordinaryPairs, not pairs: a trapezoid<->circle pair is handled by
-      // its own codegen above and never declares a pair_i_j ContactPair, so
-      // naming one here emitted GLSL that referenced an undeclared variable
-      // whenever Mutual Gravity met a funnel. The contacts it does name are
-      // already alive-gated, so no separate spawn-slot test is needed.
-      ordinaryPairs.forEach(function (pair) {
-        var varName = "pair_" + pair[0] + "_" + pair[1];
-        lines.push("  if (" + varName + ".c0.hit || " + varName + ".c1.hit) {");
-        weldLines(pair[0], pair[1], "    ").forEach(function (l) { lines.push(l); });
-        lines.push("  }");
-      });
-      lines.push("");
-    }
-
-    // A df sin/cos is a Cody-Waite reduction plus a Taylor series, easily
-    // the most expensive routine in that library - and the velocity solve
-    // below rotates each hinge anchor about its body's angle on every one
-    // of its 8 iterations, even though nothing in that loop can change an
-    // angle. So hoist it: compute each participating body's sin/cos once
-    // and pass it in. Exact, not an approximation, and it removes ~4/5 of
-    // the trig from a hinge-heavy scene. The float32 path has a hardware
-    // instruction for this and doesn't care, so it keeps recomputing.
+    // ---- The two solve loops ----
+    //
+    // float32 is the straight port: every call re-derives what it needs.
+    //
+    // df lifts everything a loop cannot change out of that loop - see
+    // physics-gpu-df.js's header for the full list and for why each item
+    // computes the same values the straight port would:
+    //   - each hinged body's sin/cos, once, after leg 1 has set its angle;
+    //   - each hinge's rotated anchors and factored 2x2 matrix
+    //     (dfPrepareHinge), which no velocity iteration can change;
+    //   - each contact's effective mass and positional push
+    //     (dfPrepareContact, emitted back where the contact was detected);
+    //   - and nothing at all for a side that cannot move - an anchored body,
+    //     or the world pin, which has solver forms of its own.
+    // The position loop DOES turn bodies, so there each hinged body's sin/cos
+    // is carried through the loop and advanced by the turn itself (dfTurn)
+    // rather than re-evaluated before every solve.
+    function moves(idx) { return consts[idx].isAnchored ? "false" : "true"; }
+    function massArgs(idx) { return "BODY" + idx + "_INV_MASS, BODY" + idx + "_INV_INERTIA"; }
     var hingeBodies = {};
     hingeAnchors.forEach(function (hg) {
       if (!hg.aIsWorld) hingeBodies[hg.a] = true;
       hingeBodies[hg.b] = true;
     });
+    function trig(idx) { return "sinB" + idx + ", cosB" + idx; }
     if (df) {
       Object.keys(hingeBodies).forEach(function (idx) {
         lines.push("  vec2 sinB" + idx + ", cosB" + idx + "; dfSinCos(" + B(idx) + ".angle, sinB" + idx + ", cosB" + idx + ");");
       });
-      if (Object.keys(hingeBodies).length) lines.push("");
+      hingeAnchors.forEach(function (hg, hi) {
+        lines.push("  DHingePre hingePre" + hi + " = " + (hg.aIsWorld
+          ? "dfPrepareWorldHinge(HINGE" + hi + "_A, " + massArgs(hg.b) + ", HINGE" + hi + "_B, " + trig(hg.b) + ");"
+          : "dfPrepareHinge(" + massArgs(hg.a) + ", HINGE" + hi + "_A, " + trig(hg.a) + ", " +
+            massArgs(hg.b) + ", HINGE" + hi + "_B, " + trig(hg.b) + ");"));
+      });
+      if (hingeAnchors.length) lines.push("");
     }
 
     // Reads the HINGEn_A/B parameters stepOnceParams declared above, rather
     // than constructing vec2(...) here - see stepOnceParams's comment.
-    function hingeArgs(hg, hi, velocityOrPosition) {
+    function hingeCall(hg, hi, velocityOrPosition) {
       var velocity = velocityOrPosition === "velocity";
-      var fn = velocity ? E.solveHingeVelocity : E.solveHingePosition;
-      var aExpr, aInvMass, aInvInertia, aTrig, bTrig;
-      if (hg.aIsWorld) {
-        aExpr = "worldBody";
-        aInvMass = E.zero;
-        aInvInertia = E.zero;
-        // The world pin never rotates, so its sin/cos are the constants.
-        aTrig = E.zero + ", " + E.one;
-      } else {
-        aExpr = B(hg.a);
-        aInvMass = "BODY" + hg.a + "_INV_MASS";
-        aInvInertia = "BODY" + hg.a + "_INV_INERTIA";
-        aTrig = "sinB" + hg.a + ", cosB" + hg.a;
+      if (df) {
+        if (hg.aIsWorld) {
+          return velocity
+            ? "dfSolveWorldHingeVelocity(" + B(hg.b) + ", " + massArgs(hg.b) + ", hingePre" + hi + ");"
+            : "dfSolveWorldHingePosition(HINGE" + hi + "_A, " + B(hg.b) + ", " + massArgs(hg.b) + ", HINGE" + hi + "_B, " + trig(hg.b) + ");";
+        }
+        return velocity
+          ? "dfSolveHingeVelocity(" + B(hg.a) + ", " + massArgs(hg.a) + ", " + moves(hg.a) + ", " +
+            B(hg.b) + ", " + massArgs(hg.b) + ", " + moves(hg.b) + ", hingePre" + hi + ");"
+          : "dfSolveHingePosition(" + B(hg.a) + ", " + massArgs(hg.a) + ", HINGE" + hi + "_A, " + trig(hg.a) + ", " + moves(hg.a) + ", " +
+            B(hg.b) + ", " + massArgs(hg.b) + ", HINGE" + hi + "_B, " + trig(hg.b) + ", " + moves(hg.b) + ");";
       }
-      bTrig = "sinB" + hg.b + ", cosB" + hg.b;
-      // Only the velocity solver takes hoisted trig - the position solver
-      // moves bodies, so it has to recompute its own or it would go stale
-      // between iterations.
-      var trigA = (df && velocity) ? ", " + aTrig : "";
-      var trigB = (df && velocity) ? ", " + bTrig : "";
-      return fn + "(" + aExpr + ", " + aInvMass + ", " + aInvInertia + ", HINGE" + hi + "_A" + trigA + ", " +
-        B(hg.b) + ", BODY" + hg.b + "_INV_MASS, BODY" + hg.b + "_INV_INERTIA, HINGE" + hi + "_B" + trigB + ");";
+      var fn = velocity ? E.solveHingeVelocity : E.solveHingePosition;
+      var aExpr = hg.aIsWorld ? "worldBody" : B(hg.a);
+      var aMass = hg.aIsWorld ? E.zero + ", " + E.zero : massArgs(hg.a);
+      return fn + "(" + aExpr + ", " + aMass + ", HINGE" + hi + "_A, " +
+        B(hg.b) + ", " + massArgs(hg.b) + ", HINGE" + hi + "_B);";
+    }
+    function contactVelocityCall(a, b, contactExpr) {
+      return df
+        ? "dfSolveContactVelocity(" + B(a) + ", " + massArgs(a) + ", " + moves(a) + ", " + B(b) + ", " + massArgs(b) + ", " + moves(b) + ", " + contactExpr + ");"
+        : "solveContactVelocity(" + B(a) + ", " + massArgs(a) + ", " + B(b) + ", " + massArgs(b) + ", " + contactExpr + ");";
+    }
+    function contactPositionCall(a, b, contactExpr) {
+      return df
+        ? "dfSolveContactPosition(" + B(a) + ", " + moves(a) + ", " + B(b) + ", " + moves(b) + ", " + contactExpr + ");"
+        : "solveContactPosition(" + B(a) + ", BODY" + a + "_INV_MASS, " + B(b) + ", BODY" + b + "_INV_MASS, " + contactExpr + ");";
     }
 
     lines.push("  for (int iter = 0; iter < " + VELOCITY_ITERATIONS + "; iter++) {");
-    hingeAnchors.forEach(function (hg, hi) { lines.push("    " + hingeArgs(hg, hi, "velocity")); });
+    hingeAnchors.forEach(function (hg, hi) { lines.push("    " + hingeCall(hg, hi, "velocity")); });
     ordinaryPairs.forEach(function (pair) {
       var varName = "pair_" + pair[0] + "_" + pair[1];
-      ["c0", "c1"].forEach(function (slot) {
-        lines.push("    " + E.solveContactVelocity + "(" + B(pair[0]) + ", BODY" + pair[0] + "_INV_MASS, BODY" + pair[0] + "_INV_INERTIA, " +
-          B(pair[1]) + ", BODY" + pair[1] + "_INV_MASS, BODY" + pair[1] + "_INV_INERTIA, " + varName + "." + slot + ");");
+      // c1 only where it can ever be filled: for every pair but line<->line
+      // it is noContact() by construction, so solving it was 8 + 4 calls a
+      // step that could only return at their first line.
+      pairSlots(pair).forEach(function (slot) {
+        lines.push("    " + contactVelocityCall(pair[0], pair[1], varName + "." + slot));
       });
     });
     trapezoidPairs.forEach(function (fp) {
@@ -1519,8 +1645,7 @@
       var excluded = trapezoidExclusion(fp, fi, ci);
       lines.push("    if (!" + excluded + ") {");
       fp.walls.forEach(function (w) {
-        lines.push("      solveContactVelocity(" + B(fi) + ", BODY" + fi + "_INV_MASS, BODY" + fi + "_INV_INERTIA, " +
-          B(ci) + ", BODY" + ci + "_INV_MASS, BODY" + ci + "_INV_INERTIA, " + vn + "_" + w[0] + ");");
+        lines.push("      " + contactVelocityCall(fi, ci, vn + "_" + w[0]));
       });
       lines.push("    }");
     });
@@ -1541,16 +1666,22 @@
       lines.push("  " + B(g2) + ".vx = vPost" + g2 + ".x; " + B(g2) + ".vy = vPost" + g2 + ".y;");
       lines.push("  " + B(g2) + ".x = " + E.add(B(g2) + ".x", E.mul("vPost" + g2 + ".x", t2)) + ";");
       lines.push("  " + B(g2) + ".y = " + E.add(B(g2) + ".y", E.mul("vPost" + g2 + ".y", t2)) + ";");
-      lines.push("  " + B(g2) + ".angle = " + E.add(B(g2) + ".angle", E.mul(B(g2) + ".w", t2)) + ";");
+      if (df && hingeBodies[g2]) {
+        // A hinged body's carried sin/cos has to follow its angle into the
+        // position loop. On the everyday no-contact step tRest is exactly
+        // zero, the turn is exactly zero, and dfTurn leaves both untouched.
+        lines.push("  dfTurn(" + B(g2) + ".angle, " + trig(g2) + ", " + E.mul(B(g2) + ".w", t2) + ");");
+      } else {
+        lines.push("  " + B(g2) + ".angle = " + E.add(B(g2) + ".angle", E.mul(B(g2) + ".w", t2)) + ";");
+      }
     }
     lines.push("");
     lines.push("  for (int iter = 0; iter < " + POSITION_ITERATIONS + "; iter++) {");
-    hingeAnchors.forEach(function (hg, hi) { lines.push("    " + hingeArgs(hg, hi, "position")); });
+    hingeAnchors.forEach(function (hg, hi) { lines.push("    " + hingeCall(hg, hi, "position")); });
     ordinaryPairs.forEach(function (pair) {
       var varName = "pair_" + pair[0] + "_" + pair[1];
-      ["c0", "c1"].forEach(function (slot) {
-        lines.push("    " + E.solveContactPosition + "(" + B(pair[0]) + ", BODY" + pair[0] + "_INV_MASS, " +
-          B(pair[1]) + ", BODY" + pair[1] + "_INV_MASS, " + varName + "." + slot + ");");
+      pairSlots(pair).forEach(function (slot) {
+        lines.push("    " + contactPositionCall(pair[0], pair[1], varName + "." + slot));
       });
     });
     trapezoidPairs.forEach(function (fp) {
@@ -1559,7 +1690,7 @@
       var excluded = trapezoidExclusion(fp, fi, ci);
       lines.push("    if (!" + excluded + ") {");
       fp.walls.forEach(function (w) {
-        lines.push("      solveContactPosition(" + B(fi) + ", BODY" + fi + "_INV_MASS, " + B(ci) + ", BODY" + ci + "_INV_MASS, " + vn + "_" + w[0] + ");");
+        lines.push("      " + contactPositionCall(fi, ci, vn + "_" + w[0]));
       });
       lines.push("    }");
     });
@@ -1655,17 +1786,17 @@
         lines.push("  if (splitFound_" + ci + ") {");
         // Read the child's position off the parent BEFORE the parent moves:
         // both offsets displace the same pre-split position, not each other.
-        lines.push("    float childX_" + ci + " = body" + ci + ".x + splitOff2_" + ci + ".x;");
-        lines.push("    float childY_" + ci + " = body" + ci + ".y + splitOff2_" + ci + ".y;");
-        lines.push("    body" + ci + ".x += splitOff1_" + ci + ".x;");
-        lines.push("    body" + ci + ".y += splitOff1_" + ci + ".y;");
+        lines.push("    " + E.scalarType + " childX_" + ci + " = " + E.add(B(ci) + ".x", "splitOff2_" + ci + ".x") + ";");
+        lines.push("    " + E.scalarType + " childY_" + ci + " = " + E.add(B(ci) + ".y", "splitOff2_" + ci + ".y") + ";");
+        lines.push("    " + B(ci) + ".x = " + E.add(B(ci) + ".x", "splitOff1_" + ci + ".x") + ";");
+        lines.push("    " + B(ci) + ".y = " + E.add(B(ci) + ".y", "splitOff1_" + ci + ".y") + ";");
         if (spawnSlots.length) {
           // At the ceiling the ball still passes through - the offset above
           // has already been applied - it just doesn't duplicate.
           lines.push("    if (liveCount < " + n + ") {");
           spawnSlots.forEach(function (k, si) {
             lines.push("      " + (si === 0 ? "if" : "else if") + " (liveCount == " + k + ") { " +
-              "body" + k + " = Body(childX_" + ci + ", childY_" + ci + ", body" + ci + ".angle, body" + ci + ".vx, body" + ci + ".vy, body" + ci + ".w); " +
+              B(k) + " = " + E.bodyType + "(childX_" + ci + ", childY_" + ci + ", " + B(ci) + ".angle, " + B(ci) + ".vx, " + B(ci) + ".vy, " + B(ci) + ".w); " +
               // A split never changes size, so the child's shape constants
               // are the parent's, verbatim - no re-derivation from a radius
               // that would have to agree with computeMass all over again.
@@ -1713,6 +1844,8 @@
       lines.push(sc + "BODY" + i + "_INV_INERTIA = " + num(b.invInertia) + ";");
       lines.push(sc + "BODY" + i + "_HALF = " + num(shapeHalf(consts, i)) + ";");
     }
+    var geomReset = staticGeometryResetGLSL(precision);
+    if (geomReset) lines.push(geomReset);
     return lines.join("\n");
   }
 
@@ -1975,6 +2108,7 @@
     sceneHasSplitter: sceneHasSplitter,
     padSceneForSplitting: padSceneForSplitting,
     generateSpawnSlotLocalsGLSL: generateSpawnSlotLocalsGLSL,
+    staticGeometryResetGLSL: staticGeometryResetGLSL,
     generateStepOnceGLSL: generateStepOnceGLSL,
     stepOnceCallArgs: stepOnceCallArgs,
     generateBodyLocalsGLSL: generateBodyLocalsGLSL,

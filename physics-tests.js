@@ -2168,8 +2168,8 @@
   );
 
   addTest(
-    "Mutual Gravity: touching bodies merge and thereafter move as one",
-    "bodies under Mutual Gravity no longer bounce off each other - they accrete, which is what an n-body simulation does with a collision. This replaces a test that pinned the old bouncing behaviour. The reason for the change is that contact plus a field ~20x ordinary gravity is the one regime this engine cannot integrate: the contact solver's positional correction moves bodies without touching their velocity, which in a field that steep is work done from nothing, and it pumped a body arriving at 165px/s into a surface-skimming orbit at ~1000px/s",
+    "Mutual Gravity: bodies that collide bounce - nothing welds them together",
+    "Mutual Gravity used to weld touching bodies into one (merge-on-contact). That feature was retired: a collision under Mutual Gravity is now the same impulse bounce it is everywhere else, and Collisions=off is the recommended way to avoid contact altogether. This pins the retirement on the JS side - a leftover weld would hold the pair at contact forever",
     function () {
       function c(x) {
         return { type: "circle", x: x, y: 300, angle: 0, radius: 30, vx: 0, vy: 0, w: 0, isAnchored: false };
@@ -2182,34 +2182,28 @@
       var a = scene.bodies[0], b = scene.bodies[1];
       var contact = a.radius + b.radius;
 
-      var touchedAt = null, maxSepAfterTouch = 0, maxRelSpeedAfterTouch = 0;
-      for (var i = 0; i < 1200; i++) {
-        PhysicsEngine.step(scene, DT);
-        var sep = Math.hypot(b.x - a.x, b.y - a.y);
-        if (touchedAt === null && sep <= contact) touchedAt = i;
-        // Measured from the step AFTER they meet: the arrival step itself
-        // still carries the closing speed they came in with, which the merge
-        // is in the middle of absorbing.
+      var flags = [], touchedAt = null, maxSepAfterTouch = 0;
+      for (var i = 0; i < 400; i++) {
+        PhysicsEngine.step(scene, DT, { contactFlags: flags });
+        if (touchedAt === null && flags[0]) touchedAt = i;
         if (touchedAt !== null && i > touchedAt) {
-          maxSepAfterTouch = Math.max(maxSepAfterTouch, sep);
-          maxRelSpeedAfterTouch = Math.max(maxRelSpeedAfterTouch, Math.hypot(b.vx - a.vx, b.vy - a.vy));
+          maxSepAfterTouch = Math.max(maxSepAfterTouch, Math.hypot(b.x - a.x, b.y - a.y));
         }
       }
-      // Released from rest and symmetric, so the merged pair's momentum is
-      // zero: they should meet and simply stop, never separating again.
+      // Released from rest and symmetric: they meet at ~270px/s each, far
+      // above the restitution threshold, so the first bounce is elastic and
+      // throws them well clear of each other again.
       return {
-        pass: touchedAt !== null && maxSepAfterTouch <= contact + 0.5 && maxRelSpeedAfterTouch < 1,
-        detail: "met at step " + touchedAt + "; over the following " + (1200 - touchedAt) +
-          " steps they never parted by more than " + maxSepAfterTouch.toFixed(2) +
-          "px (they touch at " + contact + ") and their relative speed stayed under " +
-          maxRelSpeedAfterTouch.toFixed(3) + "px/s - they are one object",
+        pass: touchedAt !== null && maxSepAfterTouch > contact + 20,
+        detail: "first contact at step " + touchedAt + "; afterwards they parted by up to " +
+          maxSepAfterTouch.toFixed(2) + "px (they touch at " + contact + " - a weld would have held them there)",
       };
     }
   );
 
   addTest(
-    "Mutual Gravity: a merge conserves momentum",
-    "merging is a perfectly inelastic collision, so the pair has to come away with the momentum-weighted velocity - the GLSL port writes this using the reciprocal masses it carries rather than forming a mass, so it is worth pinning the arithmetic",
+    "Mutual Gravity: a collision conserves momentum",
+    "between two free bodies the pull is equal and opposite and so is the contact impulse, so a bounce under Mutual Gravity must leave the pair's total momentum where it was - and must actually be a bounce, not the perfectly inelastic weld this engine used to apply",
     function () {
       // A small fast body into a big stationary one, far from anything else,
       // with the frame off so nothing wraps.
@@ -2224,29 +2218,30 @@
       var a = scene.bodies[0], b = scene.bodies[1];
       a.vx = 400;
       var pBefore = a.mass * a.vx + b.mass * b.vx;
-      var expected = pBefore / (a.mass + b.mass);
-      for (var i = 0; i < 200; i++) PhysicsEngine.step(scene, DT);
+      var flags = [], touched = false, relSpeedAfter = 0;
+      for (var i = 0; i < 60; i++) {
+        PhysicsEngine.step(scene, DT, { contactFlags: flags });
+        if (flags[0]) touched = true;
+        else if (touched && relSpeedAfter === 0) relSpeedAfter = Math.hypot(b.vx - a.vx, b.vy - a.vy);
+      }
       var pAfter = a.mass * a.vx + b.mass * b.vx;
-      var relSpeed = Math.hypot(b.vx - a.vx, b.vy - a.vy);
       return {
-        pass: Math.abs(a.vx - expected) < 1 && Math.abs(b.vx - expected) < 1 &&
-          Math.abs(pAfter - pBefore) / Math.abs(pBefore) < 0.01 && relSpeed < 1,
-        detail: "common velocity " + a.vx.toFixed(2) + " / " + b.vx.toFixed(2) + " (want " +
-          expected.toFixed(2) + "), momentum " + pBefore.toExponential(3) + " -> " +
-          pAfter.toExponential(3) + ", relative speed " + relSpeed.toFixed(3),
+        pass: touched && Math.abs(pAfter - pBefore) / Math.abs(pBefore) < 1e-9 && relSpeedAfter > 100,
+        detail: "momentum " + pBefore.toExponential(6) + " -> " + pAfter.toExponential(6) +
+          "; relative speed once they parted=" + relSpeedAfter.toFixed(1) + "px/s (a weld would leave 0)",
       };
     }
   );
 
   addTest(
-    "Mutual Gravity's merge leaves hinged assemblies free to move",
-    "a hinged pair overlaps at its shared pivot permanently, so welding anything that overlaps would freeze every pendulum solid the moment Mutual Gravity was switched on. The merge skips exactly the pairs collision detection skips - hinge-joined, and two anchored bodies",
+    "Mutual Gravity leaves hinged assemblies free to move",
+    "a hinged pair overlaps at its shared pivot permanently, so anything that treats overlap as contact (the retired merge-on-contact did, and had to skip hinge-joined pairs to avoid it) would freeze every pendulum solid the moment Mutual Gravity was switched on",
     function () {
       // Needs a third body to pull on it: under Mutual Gravity there is no
       // "down", and two hinged links on their own only attract each other
       // along the hinge, which the hinge cancels - such a pendulum sits
       // still for entirely legitimate reasons and would pass this test
-      // whether or not the merge had frozen it.
+      // whether or not something had frozen it.
       var scene = {
         mutualGravity: true,
         bodies: [
@@ -2259,7 +2254,7 @@
           { bodyA: 0, bodyB: 1, localAnchorA: { x: 100, y: 0 }, localAnchorB: { x: -100, y: 0 } },
         ],
       };
-      // What a weld would destroy is the links' freedom to move RELATIVE to
+      // What freezing would destroy is the links' freedom to move RELATIVE to
       // each other - the assembly as a whole could still swing on its world
       // hinge even if the two links had been fused.
       var startAngleGap = scene.bodies[1].angle - scene.bodies[0].angle;
@@ -2272,7 +2267,7 @@
       return {
         pass: maxAngleChange > 0.1,
         detail: "the angle between the two links changed by up to " +
-          maxAngleChange.toFixed(3) + " rad over 300 steps (a weld would hold it at 0)",
+          maxAngleChange.toFixed(3) + " rad over 300 steps (a frozen assembly would hold it at 0)",
       };
     }
   );
@@ -3814,7 +3809,7 @@
 
   addTest(
     "collisionsEnabled:false lets a body pass straight through a wall it would otherwise bounce off",
-    "the Collisions toggle - every detection loop in step() (ordinary contacts, funnel mouth, splitter short side) is gated on PhysicsEngine.collisionsEnabled, and applyContactMerge alongside them",
+    "the Collisions toggle - every detection loop in step() (ordinary contacts, funnel mouth, splitter short side) is gated on PhysicsEngine.collisionsEnabled",
     function () {
       function scene(collisionsEnabled) {
         var s = {
@@ -4580,7 +4575,7 @@
 
   addTest(
     "Grid playback: mutual gravity's state round trip is exact",
-    "Mutual Gravity welds touching bodies inside stepOnce - stateless by design, so nothing beyond the six accumulators should need carrying",
+    "Mutual Gravity's pull is recomputed from the positions every step - stateless by design, so nothing beyond the six accumulators should need carrying",
     function () {
       var scene = {
         mutualGravity: true,

@@ -53,6 +53,7 @@
       mul: function (a, b) { return "(" + a + ") * (" + b + ")"; },
       div: function (a, b) { return "(" + a + ") / (" + b + ")"; },
       abs: function (a) { return "abs(" + a + ")"; },
+      max: function (a, b) { return "max(" + a + ", " + b + ")"; },
       rotate: function (x, y, angle) { return "rotateVec(vec2(" + x + ", " + y + "), " + angle + ")"; },
       absCos: function (a) { return "abs(cos(" + a + "))"; },
       absSin: function (a) { return "abs(sin(" + a + "))"; },
@@ -72,6 +73,7 @@
       mul: function (a, b) { return "dfMul(" + a + ", " + b + ")"; },
       div: function (a, b) { return "dfDiv(" + a + ", " + b + ")"; },
       abs: function (a) { return "dfAbs(" + a + ")"; },
+      max: function (a, b) { return "dfMax(" + a + ", " + b + ")"; },
       rotate: function (x, y, angle) { return "dfRotate(" + x + ", " + y + ", " + angle + ")"; },
       absCos: function (a) { return "dfAbs(dfCos(" + a + "))"; },
       absSin: function (a) { return "dfAbs(dfSin(" + a + "))"; },
@@ -180,17 +182,6 @@
     scene = padded.scene;
     var consts = scene.bodies.map(PhysicsGPU.bodyConst);
     var n = consts.length;
-    // Same restriction as physics-gpu.js's generateStepOnceGLSL, and for the
-    // same reason: the funnel GLSL functions exist only in float32. Checked
-    // here too (not just there) because a funnel that's never in a
-    // collision pair - one alone in a scene, say - would never reach that
-    // guard at all, and a df cascade would still be silently computing this
-    // body's HALF/mass from FUNNEL_MASS_COEFF-shaped math nothing downstream
-    // can actually consume correctly.
-    if (precision === "df" && consts.some(function (c) { return c.type === "funnel" || c.type === "splitter"; })) {
-      throw new Error("Funnel and splitter bodies are not supported in double-float precision mode yet");
-    }
-
     var targets = resolveOffsetTargets(scene.xInput, scene.yInput, B);
 
     // Per-body symbolic state: GLSL expression strings, seeded from the
@@ -485,9 +476,9 @@
             halfY = shapeState[wi].half;
           } else if (consts[wi].type === "funnel") {
             // Max |local x|/|local y| over the 4 rotated vertices - mirrors
-            // PhysicsHingeGeometry.frameHalfExtent's numeric version.
-            // Always f32 here: df+funnel is rejected at the top of this
-            // function, before any of this cascade runs.
+            // PhysicsHingeGeometry.frameHalfExtent's numeric version. A
+            // leading "-" negates a df value too: it is a vec2, and negating
+            // both words is exactly dfNeg.
             var fSize = num(B.mul(shapeState[wi].half, B.lit(2)));
             var fMh = num(B.mul(B.lit(PhysicsEngine.FUNNEL_MOUTH_HALF), fSize));
             var fTh = num(B.mul(B.lit(PhysicsEngine.FUNNEL_THROAT_HALF), fSize));
@@ -496,8 +487,8 @@
             var fv1 = rotateExpr({ x: fMh, y: "-" + fHh }, state[wi].angle);
             var fv2 = rotateExpr({ x: "-" + fTh, y: fHh }, state[wi].angle);
             var fv3 = rotateExpr({ x: fTh, y: fHh }, state[wi].angle);
-            halfX = num("max(max(abs(" + fv0.x + "), abs(" + fv1.x + ")), max(abs(" + fv2.x + "), abs(" + fv3.x + ")))");
-            halfY = num("max(max(abs(" + fv0.y + "), abs(" + fv1.y + ")), max(abs(" + fv2.y + "), abs(" + fv3.y + ")))");
+            halfX = num(B.max(B.max(B.abs(fv0.x), B.abs(fv1.x)), B.max(B.abs(fv2.x), B.abs(fv3.x))));
+            halfY = num(B.max(B.max(B.abs(fv0.y), B.abs(fv1.y)), B.max(B.abs(fv2.y), B.abs(fv3.y))));
           } else {
             halfX = num(B.mul(B.absCos(state[wi].angle), shapeState[wi].half));
             halfY = num(B.mul(B.absSin(state[wi].angle), shapeState[wi].half));
@@ -590,6 +581,9 @@
     // way the BODYn_* names above already do.
     var spawnLocals = PhysicsGPU.generateSpawnSlotLocalsGLSL(result.n, result.spawnBase);
     if (spawnLocals) lines.push(spawnLocals);
+    // A fresh set of bodies is a fresh run - see staticGeometryResetGLSL.
+    var geomReset = PhysicsGPU.staticGeometryResetGLSL(result.precision);
+    if (geomReset) lines.push(geomReset);
     return lines.join("\n");
   }
 

@@ -263,7 +263,7 @@
   // it is bounded by its value there and never approaches the singularity.
   //
   // WITH COLLISIONS OFF, none of that reasoning survives. Nothing supplies the
-  // force being removed (no contact solve, no merge - both are gated off), and
+  // force being removed (there is no contact solve), and
   // bodies pass straight through each other, so the region inside `contact`
   // stops being a one-step transient and becomes a gravity-free cavity they
   // coast through for as long as they like. Switching the pull off at its rim
@@ -342,87 +342,6 @@
       acc[i] = { x: ax, y: ay };
     }
     return acc;
-  }
-
-  // ---- Merge on contact (Mutual Gravity only) ----
-  //
-  // Two bodies that are touching stop being two things and start moving as
-  // one: they take a single momentum-weighted velocity, so nothing can move
-  // relative to anything else in the cluster. Against an anchored body that
-  // velocity is zero - an anchor absorbs whatever lands on it.
-  //
-  // This is what an n-body simulation normally does with a collision, and it
-  // exists here because contact and Mutual Gravity together are the one
-  // regime this engine cannot integrate. Right at contact the field reaches
-  // ~19,600 px/s^2 for a default circle on an anchored one - twenty times
-  // ordinary gravity - so a 1/60s step changes velocity by ~330 px/s inside
-  // a single step, and the contact solver's positional correction (which
-  // moves bodies without touching their velocity, doing work from nothing)
-  // stops being a small correction. Measured on the scene this was reported
-  // from: a body arriving at 165px/s was pumped into a surface-skimming
-  // orbit at ~1000px/s. Merging removes the regime rather than managing it.
-  //
-  // No "merged" flag is stored, and none is needed: the state sustains
-  // itself. Bodies in contact exert no mutual gravity (see
-  // computeAccelerations) and now share one velocity, so nothing drives them
-  // apart; the contact solver's positional correction deliberately
-  // under-corrects, leaving them a hair overlapped and therefore still
-  // touching next step. That matters well beyond tidiness - it means the
-  // GPU port needs no per-body state carried across steps, which the shader
-  // has nowhere to put.
-  //
-  // Applied BEFORE the step's acceleration and velocity are read, so the
-  // merged velocity is what the whole step - both CCD legs and the
-  // detection sweep - actually runs on. Applying it after contact detection
-  // instead does NOT hold: gravity from the start of that step is still in
-  // flight and re-launches the body within the same step (measured: the
-  // reported scene stayed at ~954px/s instead of settling).
-  function weldPair(a, b) {
-    if (a.isAnchored && b.isAnchored) return;
-    if (a.isAnchored) { b.vx = 0; b.vy = 0; b.w = 0; return; }
-    if (b.isAnchored) { a.vx = 0; a.vy = 0; a.w = 0; return; }
-    // Perfectly inelastic: one velocity for both, conserving momentum.
-    var total = a.mass + b.mass;
-    var vx = (a.mass * a.vx + b.mass * b.vx) / total;
-    var vy = (a.mass * a.vy + b.mass * b.vy) / total;
-    var w = (a.mass * a.w + b.mass * b.w) / total;
-    a.vx = vx; a.vy = vy; a.w = w;
-    b.vx = vx; b.vy = vy; b.w = w;
-  }
-
-  // Bodies already overlapping at the start of the step. This is the half
-  // that makes a merge STAY merged.
-  //
-  // Skips exactly the pairs collision detection skips - two anchored bodies,
-  // and anything joined by a hinge. The hinge case matters: a pendulum's
-  // links overlap at their shared pivot permanently, so welding on overlap
-  // would freeze every hinged assembly solid the moment Mutual Gravity was
-  // switched on. They are already one assembly; the hinge solver owns them.
-  function applyContactMerge(scene) {
-    var bodies = scene.bodies, n = bodies.length;
-    for (var i = 0; i < n; i++) {
-      for (var j = i + 1; j < n; j++) {
-        var a = bodies[i], b = bodies[j];
-        if (a.isAnchored && b.isAnchored) continue;
-        if (hingeConnects(scene.hinges, i, j)) continue;
-        var dx = b.x - a.x, dy = b.y - a.y;
-        var contact = halfExtent(a) + halfExtent(b);
-        if (dx * dx + dy * dy > contact * contact) continue;
-        weldPair(a, b);
-      }
-    }
-  }
-
-  // The other half: pairs the swept detection found during this step. A fast
-  // approach can close, touch and rebound entirely between two step
-  // boundaries, so it is never seen overlapping by the check above and would
-  // bounce straight through the merge. Applied after leg 1 has moved the
-  // bodies to the contact instant and before the impulse solver runs, so the
-  // solver finds no relative velocity left to bounce.
-  function mergeDetectedContacts(scene, contacts) {
-    for (var c = 0; c < contacts.length; c++) {
-      weldPair(scene.bodies[contacts[c].a], scene.bodies[contacts[c].b]);
-    }
   }
 
   function computeMass(body) {
@@ -1392,12 +1311,6 @@
     // detection sweep have to agree on what acceleration this step applied,
     // or a body would be swept along a different line than the one it then
     // moves down.
-    // Before anything reads a velocity this step - see applyContactMerge for
-    // why the ordering is load-bearing. Merging IS a collision response (the
-    // "sticky" force the Collisions toggle promises to turn off), so it's
-    // gated on collisionsEnabled the same as every detection loop below.
-    if (scene.mutualGravity && collisionsEnabled(scene)) applyContactMerge(scene);
-
     var maxSpeed = speedCapFor(scene);
     var acc = computeAccelerations(scene);
 
@@ -1491,7 +1404,7 @@
     // The ordinary solid-body pairs - circle/circle, line/circle, a
     // funnel/splitter's own solid edges, etc. Left empty when collisions are
     // off: every consumer below (bodyTHit, contactFlags, the velocity/
-    // position solve loops, mergeDetectedContacts) already handles "nothing
+    // position solve loops) already handles "nothing
     // detected this step" correctly, since that's the everyday case for any
     // body that simply isn't near anything - an empty array here is that
     // same path, just for every body at once.
@@ -1633,12 +1546,6 @@
       var vPre = advanceVelocity(u[i].x, u[i].y, th, acc[i].x, acc[i].y, maxSpeed);
       b1.vx = vPre.x; b1.vy = vPre.y;
     }
-
-    // Bodies are now AT the contact instant with their pre-impulse
-    // velocities - the moment a merge means anything. Doing it here rather
-    // than before leg 1 is what catches a collision fast enough to happen
-    // entirely inside one step.
-    if (scene.mutualGravity) mergeDetectedContacts(scene, contacts);
 
     var iter;
     for (iter = 0; iter < velIter; iter++) {
@@ -1872,12 +1779,12 @@
   }
 
   // Every pair of bodies currently overlapping by the same yardstick
-  // computeAccelerations/applyContactMerge already use for Mutual Gravity -
+  // computeAccelerations already uses for Mutual Gravity -
   // "touching" is geometric (dx²+dy² <= (halfExtent(a)+halfExtent(b))²),
   // nothing to do with whether the collision solver is even running. Skips
-  // the exact pairs applyContactMerge skips (both anchored, or hinge-
-  // connected) so a resting/welded pair already accounted for elsewhere
-  // doesn't also read as a fresh overlap. Returns "i,j" keys (i < j) to
+  // the exact pairs collision detection skips (both anchored, or hinge-
+  // connected) so a pair that overlaps by construction doesn't also read as
+  // a fresh overlap. Returns "i,j" keys (i < j) to
   // match the contacts array's own a<b convention below.
   function overlappingPairs(sim) {
     var bodies = sim.bodies, n = bodies.length, pairs = [];
