@@ -589,7 +589,7 @@
   function speedCapDecls(precision, maxSpeed) {
     var cap = maxSpeed === undefined ? global.PhysicsEngine.MAX_SPEED : maxSpeed;
     var lines = ["const float MAX_SPEED = " + fnum(cap) + ";"];
-    if (precision === "df") lines.push("const vec2 DF_MAX_SPEED = " + global.PhysicsDF.num(cap) + ";");
+    if (global.PhysicsDF.isExtended(precision)) lines.push("const MF DF_MAX_SPEED = " + global.PhysicsDF.num(cap) + ";");
     return lines.join("\n") + "\n";
   }
 
@@ -598,7 +598,12 @@
   // library, and the DBody bridge between the last two. Assembled here so
   // no caller has to remember the order.
   function libraryGLSL(precision, maxSpeed) {
-    if (precision !== "df") return speedCapDecls(precision, maxSpeed) + GLSL_LIBRARY;
+    if (!global.PhysicsDF.isExtended(precision)) return speedCapDecls(precision, maxSpeed) + GLSL_LIBRARY;
+    // Everything multi-float from here to the end of this shader's code
+    // generation is at THIS precision - see PhysicsDF.usePrecision. The
+    // speed cap is declared after the arithmetic (it is an MF constant, and
+    // MF is the arithmetic library's macro).
+    global.PhysicsDF.usePrecision(precision);
     // Order matters: the df arithmetic defines DVec2 and the dv2* helpers
     // the df physics is written against, and the float32 library is still
     // included because the per-pixel cascade's f32 helpers and `Body` are
@@ -673,12 +678,12 @@
   }
 
   function stepOnceParams(n, hingeAnchors, precision, spawnBase) {
-    var df = precision === "df";
+    var df = global.PhysicsDF.isExtended(precision);
     // In df mode the shape constants are df too. They are per-pixel values
     // whenever a size axis is linked, so leaving them float32 would put a
     // ~1e-7 quantization back on exactly that axis - and now that the
     // collision math is df, they are what it multiplies against.
-    var sc = df ? "vec2 " : "float ";
+    var sc = df ? "MF " : "float ";
     var spawnSlots = spawnSlotsFrom(n, spawnBase);
     var isSpawn = {};
     spawnSlots.forEach(function (i) { isSpawn[i] = true; });
@@ -698,11 +703,9 @@
       // localAnchorA there is a point in that OTHER body's own local
       // frame, never affected by world-space wrapping, so it stays a
       // plain (never mutated) parameter.
-      // In df mode only the WORLD anchor is extended-precision. The other
-      // two are offsets in some body's own local frame - bounded by that
-      // body's size, never a world coordinate, and consumed directly by
-      // float32 rotateVec() - so they stay plain vec2 and are collapsed at
-      // the call site.
+      // In df mode every anchor is a DVec2, the local ones included: the df
+      // hinge solvers rotate them about df angles, and a resize-linked
+      // anchor is a per-pixel value like any other.
       params.push((hg.aIsWorld ? "inout " : "") + (df ? "DVec2" : "vec2") + " HINGE" + h + "_A",
         (df ? "DVec2" : "vec2") + " HINGE" + h + "_B");
     });
@@ -730,7 +733,7 @@
   // mode and df (vec2) GLSL text in df mode - whoever built them knows
   // which, and this just has to spell the right constructor.
   function stepOnceCallArgs(n, hingeAnchors, precision, spawnBase) {
-    var df = precision === "df";
+    var df = global.PhysicsDF.isExtended(precision);
     function localVec(a) {
       return df ? "dv2(" + a.x + ", " + a.y + ")" : "vec2(" + a.x + ", " + a.y + ")";
     }
@@ -762,7 +765,7 @@
   // generateBodyLocalsGLSL) - nothing to declare for a hinge to another
   // body, which never needs persistent state.
   function generateHingeAnchorLocalsGLSL(hingeAnchors, precision) {
-    var df = precision === "df";
+    var df = global.PhysicsDF.isExtended(precision);
     var lines = [];
     (hingeAnchors || []).forEach(function (hg, h) {
       if (!hg.aIsWorld) return;
@@ -781,7 +784,7 @@
   // would otherwise carry the previous point's geometry into the next.
   // Nothing to say in float32, which hoists nothing.
   function staticGeometryResetGLSL(precision) {
-    return precision === "df" ? "g_dfStaticGeomReady = false;" : "";
+    return global.PhysicsDF.isExtended(precision) ? "g_dfStaticGeomReady = false;" : "";
   }
 
   // ---- Splitter scenes: pre-allocated spawn slots ----
@@ -869,7 +872,8 @@
   // have a locked frame size yet - this is a per-scene opt-in, not a always
   // -on behavior, so existing scenes/tests with no frameWidth/frameHeight
   // keep exactly their old unbounded-fall behavior.
-  // precision: "f32" (default) or "df". The two differ only in spelling -
+  // precision: "f32" (default), or one of the multi-float ones - "df", "tf",
+  // "qf" (see PhysicsDF). Float32 and multi-float differ only in spelling -
   // same structure, same order of operations, same comments - because a
   // single generator emitting both is the only thing keeping them in step.
   // mutualGravity: bake the n-body attraction in place of the constant
@@ -884,7 +888,8 @@
   // spawnBase: the authored body count of a splitter scene - see
   // padSceneForSplitting and spawnSlotsFrom. Omitted for every other scene.
   function generateStepOnceGLSL(n, consts, pairs, hingeAnchors, frame, precision, mutualGravity, collisions, spawnBase) {
-    var df = precision === "df";
+    var df = global.PhysicsDF.isExtended(precision);
+    if (df) global.PhysicsDF.usePrecision(precision);
     var collisionsOn = collisions !== false;
     // One generator, two spellings. GLSL can't give a user type operators,
     // so the df path has to say dfAdd(a, b) where float32 says a + b - but
@@ -893,7 +898,7 @@
     // reads the same in both modes (a struct field assignment, a bool) is
     // simply not routed through here.
     var E = df ? {
-      body: "dbody", bodyType: "DBody", scalarType: "vec2", vecType: "DVec2",
+      body: "dbody", bodyType: "DBody", scalarType: "MF", vecType: "DVec2",
       DT: "DF_DT", GRAVITY: "DF_GRAVITY",
       zero: "DF_ZERO", one: "DF_ONE",
       vec: function (x, y) { return "dv2(" + x + ", " + y + ")"; },
@@ -1128,11 +1133,11 @@
         var dfnumG = global.PhysicsDF.num;
         for (var mdf = 0; mdf < n; mdf++) {
           var halfDf = "BODY" + mdf + "_HALF";
-          lines.push("  vec2 gravReach" + mdf + " = " +
+          lines.push("  MF gravReach" + mdf + " = " +
             (reachK[mdf] === 1 ? halfDf : "dfMul(" + halfDf + ", " + dfnumG(reachK[mdf]) + ")") + ";");
           // G is folded into the mass here, once per body, so each pair below
           // pays one multiply for it rather than two.
-          lines.push("  vec2 gravGM" + mdf + " = dfMul(" + dfnumG(GRAV_G * gravK[mdf]) + ", " +
+          lines.push("  MF gravGM" + mdf + " = dfMul(" + dfnumG(GRAV_G * gravK[mdf]) + ", " +
             (consts[mdf].type === "circle" ? "dfSqr(" + halfDf + ")" : halfDf) + ");");
         }
         for (var adf = 0; adf < n; adf++) {
@@ -1148,9 +1153,9 @@
             if (consts[pa].isAnchored && consts[pb].isAnchored) continue;
             lines.push("  {");
             lines.push("    DVec2 gd = dv2(dfSub(dbody" + pb + ".x, dbody" + pa + ".x), dfSub(dbody" + pb + ".y, dbody" + pa + ".y));");
-            lines.push("    vec2 gr2 = dv2LengthSq(gd);");
-            lines.push("    vec2 gContact = dfAdd(gravReach" + pa + ", gravReach" + pb + ");");
-            lines.push("    vec2 gContact2 = dfSqr(gContact);");
+            lines.push("    MF gr2 = dv2LengthSq(gd);");
+            lines.push("    MF gContact = dfAdd(gravReach" + pa + ", gravReach" + pb + ");");
+            lines.push("    MF gContact2 = dfSqr(gContact);");
             // Compared in df: this is a branch, and a float32 comparison would
             // put its boundary on a float32 grid.
             var outside = "!dfLess(gr2, gContact2)";
@@ -1161,7 +1166,7 @@
               // Touching bodies pull on each other not at all - see
               // PhysicsEngine.computeAccelerations for why.
               lines.push("    if (" + gravGate(pa, pb, outside) + ") {");
-              lines.push("      vec2 gk = dfDiv(DF_ONE, dfMul(gr2, dfSqrt(gr2)));");
+              lines.push("      MF gk = dfDiv(DF_ONE, dfMul(gr2, dfSqrt(gr2)));");
               applyLines.forEach(function (l) { lines.push("      " + l); });
               lines.push("    }");
             } else {
@@ -1169,12 +1174,12 @@
               // comment as the JS engine's branch.
               var aliveOnly = bothAliveExpr(pa, pb);
               lines.push("    " + (aliveOnly ? "if (" + aliveOnly + ") " : "") + "{");
-              lines.push("      vec2 gk;");
+              lines.push("      MF gk;");
               lines.push("      if (" + outside + ") {");
               lines.push("        gk = dfDiv(DF_ONE, dfMul(gr2, dfSqrt(gr2)));");
               lines.push("      } else {");
-              lines.push("        vec2 gu2 = dfDiv(gr2, gContact2);");
-              lines.push("        vec2 gPoly = dfAdd(dfSub(" + dfnumG(35 / 8) + ", dfMul(" + dfnumG(21 / 4) + ", gu2)), dfMul(" + dfnumG(15 / 8) + ", dfSqr(gu2)));");
+              lines.push("        MF gu2 = dfDiv(gr2, gContact2);");
+              lines.push("        MF gPoly = dfAdd(dfSub(" + dfnumG(35 / 8) + ", dfMul(" + dfnumG(21 / 4) + ", gu2)), dfMul(" + dfnumG(15 / 8) + ", dfSqr(gu2)));");
               lines.push("        gk = dfDiv(gPoly, dfMul(gContact2, gContact));");
               lines.push("      }");
               applyLines.forEach(function (l) { lines.push("      " + l); });
@@ -1584,7 +1589,7 @@
     function trig(idx) { return "sinB" + idx + ", cosB" + idx; }
     if (df) {
       Object.keys(hingeBodies).forEach(function (idx) {
-        lines.push("  vec2 sinB" + idx + ", cosB" + idx + "; dfSinCos(" + B(idx) + ".angle, sinB" + idx + ", cosB" + idx + ");");
+        lines.push("  MF sinB" + idx + ", cosB" + idx + "; dfSinCos(" + B(idx) + ".angle, sinB" + idx + ", cosB" + idx + ");");
       });
       hingeAnchors.forEach(function (hg, hi) {
         lines.push("  DHingePre hingePre" + hi + " = " + (hg.aIsWorld
@@ -1741,8 +1746,8 @@
           // would throw away exactly the low bits that decide WHICH SIDE of
           // the edge a body is on for the pixels nearest it, turning a
           // continuous boundary into a quantized one.
-          lines.push("  if (dfGreater(" + refX + ", vec2(" + frameW + ", 0.0))) " + dxVar + " = -" + frameW + "; else if (dfLess(" + refX + ", vec2(0.0, 0.0))) " + dxVar + " = " + frameW + ";");
-          lines.push("  if (dfGreater(" + refY + ", vec2(" + frameH + ", 0.0))) " + dyVar + " = -" + frameH + "; else if (dfLess(" + refY + ", vec2(0.0, 0.0))) " + dyVar + " = " + frameH + ";");
+          lines.push("  if (dfGreater(" + refX + ", dfFromFloat(" + frameW + "))) " + dxVar + " = -" + frameW + "; else if (dfLess(" + refX + ", DF_ZERO)) " + dxVar + " = " + frameW + ";");
+          lines.push("  if (dfGreater(" + refY + ", dfFromFloat(" + frameH + "))) " + dyVar + " = -" + frameH + "; else if (dfLess(" + refY + ", DF_ZERO)) " + dyVar + " = " + frameH + ";");
         } else {
           lines.push("  if (" + refX + " > " + frameW + ") " + dxVar + " = -" + frameW + "; else if (" + refX + " < 0.0) " + dxVar + " = " + frameW + ";");
           lines.push("  if (" + refY + " > " + frameH + ") " + dyVar + " = -" + frameH + "; else if (" + refY + " < 0.0) " + dyVar + " = " + frameH + ";");
@@ -1822,7 +1827,8 @@
   // whichever body/property is linked (computed from that pixel's world X/Y
   // instead of a literal) and reuses generateStepOnceGLSL unchanged.
   function generateBodyLocalsGLSL(consts, precision) {
-    var df = precision === "df";
+    var df = global.PhysicsDF.isExtended(precision);
+    if (df) global.PhysicsDF.usePrecision(precision);
     // JS numbers are float64, so an authored coordinate already has more
     // precision than a single float32 literal can carry - dfnum splits it
     // across both words instead of rounding it away at codegen time.
@@ -1839,7 +1845,7 @@
           fnum(b.vx) + ", " + fnum(b.vy) + ", " + fnum(b.w) + ");"
       );
       var num = df ? dfnum : fnum;
-      var sc = df ? "vec2 " : "float ";
+      var sc = df ? "MF " : "float ";
       lines.push(sc + "BODY" + i + "_INV_MASS = " + num(b.invMass) + ";");
       lines.push(sc + "BODY" + i + "_INV_INERTIA = " + num(b.invInertia) + ";");
       lines.push(sc + "BODY" + i + "_HALF = " + num(shapeHalf(consts, i)) + ";");
@@ -1864,24 +1870,124 @@
   // [0, frameWidth)/[0, frameHeight) by PhysicsEngine.step's own wrap, not
   // by freezing the simulation and hoping nothing downstream needed it to
   // keep running.)
-  function generateTrajectoryMainGLSL(n, bodyDeclarationsGLSL, hingeAnchors, precision, spawnBase) {
-    var df = precision === "df";
+  // ---- The trajectory program: every body's state at every step ----
+  //
+  // Texel (b, r) of the output is body b after r + 1 steps. The obvious way to
+  // fill it - and what this did for a long time - is for every texel to run
+  // its own r + 1 steps from the start, all in one draw. That is quadratic in
+  // the run length, and worse, the last row's pixels each do the WHOLE run
+  // inside a single invocation: a few hundred steps of a heavy scene (or of
+  // anything at all above float32) is long enough for the OS to abort the
+  // draw, which comes back as zeros.
+  //
+  // So it runs in CHUNKS, carrying the simulation's state between them in a
+  // float texture - the same packing grid playback uses
+  // (playbackStateVariables), laid out as a strip: texel (l, 0) is state
+  // layer l. Each chunk is two kinds of draw by the same program:
+  //   LOG      (u_trajAdvance == 0) - the chunk's rows. Row r starts from the
+  //            saved state at step u_trajBase and runs (r - u_trajBase + 1)
+  //            steps, at most one chunk's worth.
+  //   ADVANCE  (u_trajAdvance  > 0) - the strip: every texel runs that many
+  //            steps from the saved state and keeps its own layer of the
+  //            result. (The texels all repeat the same run. That is the cheap
+  //            way round: they shade in parallel, so the strip takes about
+  //            as long as one texel, and writing a strip needs only the one
+  //            color attachment the LOG draw already uses - several
+  //            attachments would be a second pipeline for the driver to
+  //            build, which above float32 is seconds.)
+  // RGBA32F stores every float exactly, so stopping and resuming lands on the
+  // same bits as running straight through; no invocation ever runs more than
+  // a chunk, and the total work is linear in the run length.
+  //
+  // HOW LONG a chunk may be is a property of the machine, not of this code,
+  // and the limit is far lower than "a few hundred steps": measured on an
+  // Apple-silicon Mac WITH ITS DISPLAY ON, a fragment invocation that runs
+  // past roughly 30-45ms is reported by Metal as a GPU hang
+  // (kIOGPUCommandBufferCallbackErrorHang) and its command buffer thrown
+  // away - the compositor wants the GPU back every frame, and fragment work
+  // cannot be preempted mid-tile. (With the display asleep the same draw is
+  // allowed to run for seconds, which is how this hid for so long; compute
+  // work is preemptible and is not subject to it, but WebGL has none.)
+  // Nothing tells WebGL: no error, no lost context, just a texture that
+  // was never written - and after a few of them the OS ignores everything
+  // the GPU process submits. A 20-slot splitter scene costs 0.4ms a step in
+  // float32, so even 96 steps is too many there, while 96 steps of a small
+  // scene is nothing. So the runner MEASURES: it times every chunk and sizes
+  // the next one to take about TRAJECTORY_TARGET_MS (see
+  // runCompiledTrajectoryOnGPU), starting from a single step.
+  //
+  // The shader's own loop bound - the most steps a chunk can ever be.
+  var TRAJECTORY_MAX_CHUNK = 256;
+  // What a draw's longest run is steered towards. Several times under the
+  // limit above, because the estimate comes from the chunks already run and
+  // a step can get dearer as the run goes on (a split wakes more bodies).
+  var TRAJECTORY_TARGET_MS = 4;
+  // Written beside the data by every draw, so a draw the GPU dropped is
+  // noticed instead of being read back as a trajectory: see
+  // generateTrajectoryMainGLSL.
+  var TRAJECTORY_SENTINEL = 8191;
+
+  function trajectoryChunkInfo(n, consts, hingeAnchors, precision, spawnBase) {
+    // Anchored bodies are left OUT of the carried state (nothing ever writes
+    // one - see playbackStateVariables), which is fine here too: every
+    // invocation re-declares them from the scene before anything else.
+    var vars = playbackStateVariables({ precision: precision, n: n, consts: consts, spawnBase: spawnBase, hingeAnchors: hingeAnchors });
+    return {
+      vars: vars,
+      maxSteps: TRAJECTORY_MAX_CHUNK,
+      layers: playbackStateLayerCount(vars),
+    };
+  }
+
+  // The uniforms and the output the chunked main needs, for the caller's
+  // header (in place of the single `out vec4 fragColor` the old main wrote).
+  function generateTrajectoryHeaderGLSL(chunk) {
+    return [
+      "uniform sampler2D u_trajState;",
+      "uniform bool u_trajInit;",
+      "uniform int u_trajBase;",
+      "uniform int u_trajAdvance;",
+      "const int TRAJECTORY_CHUNK = " + chunk.maxSteps + ";",
+      "const float TRAJECTORY_SENTINEL = " + TRAJECTORY_SENTINEL + ".0;",
+      "layout(location = 0) out vec4 pbOut0;",
+    ].join("\n");
+  }
+
+  function generateTrajectoryMainGLSL(n, bodyDeclarationsGLSL, hingeAnchors, precision, spawnBase, chunk) {
+    var df = global.PhysicsDF.isExtended(precision);
     var isSpawnSlot = {};
     spawnSlotsFrom(n, spawnBase).forEach(function (i) { isSpawnSlot[i] = true; });
     function readField(i, field) { return df ? "dfToFloat(dbody" + i + "." + field + ")" : "body" + i + "." + field; }
+    var stepCall = "stepOnce(" + stepOnceCallArgs(n, hingeAnchors, precision, spawnBase) + ");";
     var lines = [];
     lines.push("void main() {");
     lines.push("  " + bodyDeclarationsGLSL.split("\n").join("\n  "));
+    lines.push("  if (!u_trajInit) {");
+    generatePlaybackStateLoadGLSL(chunk.vars, "u_trajState", null, true).forEach(function (l) { lines.push("    " + l); });
+    lines.push("  }");
     // Row 0 reports the state after 1 step (not 0) so that every row is a
     // real, distinct simulation step and trajectory[maxSteps-1] is the state
     // after exactly maxSteps steps - matching how PhysicsEngine.step() is
     // called maxSteps times, not maxSteps-1.
-    lines.push("  int stepTarget = int(gl_FragCoord.y) + 1;");
-    lines.push("  int bodyIdx = int(gl_FragCoord.x);");
-    lines.push("  for (int i = 0; i < MAX_STEPS; i++) {");
+    //
+    // ONE loop, and so one call site, serves both kinds of draw - only the
+    // step count differs. The compiler inlines stepOnce() wherever it is
+    // called, and it is by far the largest thing in the shader: a second
+    // call site doubles the program, and with it the seconds the driver
+    // spends building it.
+    lines.push("  int stepTarget = u_trajAdvance > 0 ? u_trajAdvance : int(gl_FragCoord.y) - u_trajBase + 1;");
+    lines.push("  for (int i = 0; i < TRAJECTORY_CHUNK; i++) {");
     lines.push("    if (i >= stepTarget) break;");
-    lines.push("    stepOnce(" + stepOnceCallArgs(n, hingeAnchors, precision, spawnBase) + ");");
+    lines.push("    " + stepCall);
     lines.push("  }");
+    lines.push("  if (u_trajAdvance > 0) {");
+    // The texel one past the last layer is the sentinel: how many steps the
+    // state now stands at, and a constant no stale texel would hold.
+    lines.push("    pbOut0 = vec4(float(u_trajBase + u_trajAdvance), TRAJECTORY_SENTINEL, 0.0, 0.0);");
+    generateStateStripStoreGLSL(chunk.vars, "int(gl_FragCoord.x)", "pbOut0").forEach(function (l) { lines.push("    " + l); });
+    lines.push("    return;");
+    lines.push("  }");
+    lines.push("  int bodyIdx = int(gl_FragCoord.x);");
     lines.push("  vec3 outVal = vec3(0.0);");
     // The alpha channel is otherwise unused (nothing about position/angle
     // needs a 4th component) - carrying BODYn_HALF through it costs
@@ -1892,9 +1998,9 @@
     // a use for.
     lines.push("  float outHalf = 0.0;");
     for (var o = 0; o < n; o++) {
-      // BODYn_HALF is a df scalar in df mode, but the alpha channel it
-      // lands in is a plain float either way - this is a rendered size for
-      // the replay to draw with, not state.
+      // BODYn_HALF is a multi-float scalar above float32, but the alpha
+      // channel it lands in is a plain float either way - this is a rendered
+      // size for the replay to draw with, not state.
       var half = df ? "dfToFloat(BODY" + o + "_HALF)" : "BODY" + o + "_HALF";
       // A spawn slot nobody has split into yet reports size 0 - the same
       // signal a reader already uses to draw nothing, and what tells the
@@ -1903,7 +2009,9 @@
       lines.push((o === 0 ? "  if" : "  else if") + " (bodyIdx == " + o + ") { outVal = vec3(" +
         readField(o, "x") + ", " + readField(o, "y") + ", " + readField(o, "angle") + "); outHalf = " + half + "; }");
     }
-    lines.push("  fragColor = vec4(outVal, outHalf);");
+    // The column past the last body is each row's sentinel - see the runner.
+    lines.push("  if (bodyIdx == " + n + ") { outVal = vec3(gl_FragCoord.y + 0.5, TRAJECTORY_SENTINEL, 0.0); }");
+    lines.push("  pbOut0 = vec4(outVal, outHalf);");
     lines.push("}");
     return lines.join("\n");
   }
@@ -1914,7 +2022,8 @@
   // same scene both ways to check the two agree, so it's a parameter here
   // rather than a hardcoded "f32".
   function compileSceneToTrajectoryGLSL(scene, maxSteps, precision) {
-    var df = precision === "df";
+    var df = global.PhysicsDF.isExtended(precision);
+    if (df) global.PhysicsDF.usePrecision(precision);
     var dfnum = df ? global.PhysicsDF.num : null;
     if (scene.bodies.length > MAX_BODIES) {
       throw new Error("GPU physics supports at most " + MAX_BODIES + " bodies (scene has " + scene.bodies.length + ")");
@@ -1956,21 +2065,226 @@
 
     var lines = [];
     lines.push("#version 300 es");
+    var chunk = trajectoryChunkInfo(n, consts, hingeAnchors, precision, spawnBase);
     lines.push("precision highp float;");
-    lines.push("out vec4 fragColor;");
+    lines.push(generateTrajectoryHeaderGLSL(chunk));
     lines.push("");
     lines.push(libraryGLSL(precision, global.PhysicsEngine.speedCapFor(scene)));
     lines.push("");
-    lines.push("const int MAX_STEPS = " + maxSteps + ";");
-    lines.push("");
+    // Nothing in the source depends on maxSteps any more - the runner walks
+    // the run a chunk at a time - so a different run length reuses the
+    // compiled program instead of building another.
     lines.push(generateStepOnceGLSL(n, consts, pairs, hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), spawnBase));
     lines.push("");
     var locals = generateBodyLocalsGLSL(consts, precision) + "\n" + generateHingeAnchorLocalsGLSL(hingeAnchors, precision);
     var spawnLocals = generateSpawnSlotLocalsGLSL(n, spawnBase);
     if (spawnLocals) locals += "\n" + spawnLocals;
-    lines.push(generateTrajectoryMainGLSL(n, locals, hingeAnchors, precision, spawnBase));
+    lines.push(generateTrajectoryMainGLSL(n, locals, hingeAnchors, precision, spawnBase, chunk));
 
-    return { fragmentSource: lines.join("\n"), numBodies: n };
+    return { fragmentSource: lines.join("\n"), numBodies: n, precision: df ? precision : "f32", chunk: chunk };
+  }
+
+  // ---- Carrying a pixel's simulation across draws (grid playback) ----
+  //
+  // The grid's normal render starts every pixel from step 0 and runs it to
+  // the end inside one draw. Playback can't afford that: showing step N+1
+  // would redo all N steps before it, so the work grows with every frame.
+  // Instead each pixel's state is written to float textures at the end of a
+  // draw and read back at the start of the next, so a frame only pays for
+  // the steps it actually adds.
+  //
+  // "State" is exactly what a stepOnce() call can change and the next call
+  // must see: the inout parameters stepOnceParams declares. Everything else
+  // a draw needs (inverse masses, sizes, hinge local anchors, anchored
+  // bodies) is a pure function of the pixel's world X/Y, so each draw
+  // recomputes it from generateGridInitialStateGLSL's declarations instead.
+  //
+  // The textures are RGBA32F, which store float32 values exactly - so as
+  // long as the same program does the stepping, stopping after k steps,
+  // saving, reloading and running the rest lands on the same bits as one
+  // uninterrupted run. physics-tests.js checks that.
+  //
+  // A state variable is { name, type }, where type is how the step loop
+  // declares that local: "Body"/"DBody" (a body's six accumulators), "float",
+  // "df" (one df scalar, a vec2), "vec2", "DVec2", "bool" or "int".
+  // The multi-float kinds ("DBody", "df", "DVec2") are as many floats per
+  // scalar as the precision has words, so their field lists are built for a
+  // word count rather than written out: a df scalar is .x/.y, a tf one
+  // .x/.y/.z, a qf one .x/.y/.z/.w.
+  var WORD_FIELDS = [".x", ".y", ".z", ".w"];
+  function stateTypeFields(type, words) {
+    var w = WORD_FIELDS.slice(0, words);
+    function each(prefixes) {
+      var out = [];
+      prefixes.forEach(function (pre) { w.forEach(function (c) { out.push(pre + c); }); });
+      return out;
+    }
+    if (type === "Body") return [".x", ".y", ".angle", ".vx", ".vy", ".w"];
+    if (type === "DBody") return each([".x", ".y", ".angle", ".vx", ".vy", ".w"]);
+    if (type === "df") return each([""]);
+    if (type === "DVec2") return each([".x", ".y"]);
+    if (type === "vec2") return [".x", ".y"];
+    if (type === "float" || type === "bool" || type === "int") return [""];
+    return null;
+  }
+  // The GLSL type a local of each kind is declared with.
+  var STATE_TYPE_GLSL = { Body: "Body", DBody: "DBody", float: "float", df: "MF", vec2: "vec2", DVec2: "DVec2", bool: "bool", int: "int" };
+  // Four floats per texel, so one texture layer per four state floats.
+  var STATE_FLOATS_PER_LAYER = 4;
+
+  // The state variables of a scene compiled by generateGridInitialStateGLSL.
+  //
+  // Anchored bodies are left out: stepOnce() never writes one (see the
+  // `if (consts[g].isAnchored) continue` guards around every integration
+  // site in generateStepOnceGLSL, and invMass/invInertia of 0 in
+  // every solver), so its value at any step is its starting value, which
+  // each draw recomputes anyway. extraBodies names any that must be carried
+  // regardless - a reader that has no starting state of its own, like the
+  // playback color pass reading an anchored Output body, needs them.
+  //
+  // A world hinge's anchor is carried because the frame wrap moves it in
+  // place (see stepOnceParams). Spawn slots carry the shape constants a split
+  // overwrites, plus alive/lineage, and the scene carries liveCount.
+  function playbackStateVariables(result, extraBodies) {
+    var df = global.PhysicsDF.isExtended(result.precision);
+    var extra = extraBodies || [];
+    var vars = [];
+    for (var i = 0; i < result.n; i++) {
+      if (result.consts[i].isAnchored && extra.indexOf(i) === -1) continue;
+      vars.push({ name: (df ? "dbody" : "body") + i, type: df ? "DBody" : "Body" });
+    }
+    var hasSpawn = result.spawnBase !== null && result.spawnBase !== undefined;
+    if (hasSpawn) {
+      for (var k = result.spawnBase; k < result.n; k++) {
+        ["_INV_MASS", "_INV_INERTIA", "_HALF"].forEach(function (suffix) {
+          vars.push({ name: "BODY" + k + suffix, type: df ? "df" : "float" });
+        });
+        vars.push({ name: "alive" + k, type: "bool" });
+        vars.push({ name: "lineage" + k, type: "int" });
+      }
+      vars.push({ name: "liveCount", type: "int" });
+    }
+    result.hingeAnchors.forEach(function (hg, h) {
+      if (hg.aIsWorld) vars.push({ name: "hingeAnchor" + h, type: df ? "DVec2" : "vec2" });
+    });
+    return withWords(vars, result.precision);
+  }
+
+  // Stamps each state variable with its precision's word count - see
+  // stateFloats. Exported for callers that add state variables of their own
+  // (the grid's sticky-edge bookkeeping).
+  function withWords(vars, precision) {
+    var words = global.PhysicsDF.wordsFor(precision);
+    vars.forEach(function (v) { v.words = words; });
+    return vars;
+  }
+
+  // Every float the variables pack into, in order, as { variable, field }.
+  function stateFloats(vars) {
+    var out = [];
+    vars.forEach(function (v) {
+      // `words` rides on the variable (see withWords): how many floats a
+      // multi-float scalar packs into depends on the precision it was
+      // declared at, and this function is handed variables, not a precision.
+      var fields = stateTypeFields(v.type, v.words || 2);
+      if (!fields) throw new Error("Unknown playback state type: " + v.type);
+      fields.forEach(function (f) { out.push({ variable: v, field: f }); });
+    });
+    return out;
+  }
+
+  function playbackStateLayerCount(vars) {
+    return Math.max(1, Math.ceil(stateFloats(vars).length / STATE_FLOATS_PER_LAYER));
+  }
+
+  // Uninitialized declarations, for a program that has no step loop of its
+  // own to declare them (the playback color pass). Every field is assigned
+  // by the load below before anything reads it.
+  function generatePlaybackStateDeclarationsGLSL(vars) {
+    return vars.map(function (v) { return STATE_TYPE_GLSL[v.type] + " " + v.name + ";"; });
+  }
+
+  // Reads every state variable from a sampler2DArray at an integer texel.
+  // Layer temporaries are prefixed pbState so they can't collide with the
+  // gv_/pair_/probe names the rest of the generated code uses.
+  //
+  // `strip` reads the other layout instead - a sampler2D whose texel (l, 0)
+  // is layer l, which is how the trajectory runner carries one simulation's
+  // state (there is no lattice of them, so no texel to index by).
+  function generatePlaybackStateLoadGLSL(vars, samplerName, texelExpr, strip) {
+    var floats = stateFloats(vars);
+    var lines = [];
+    var layers = playbackStateLayerCount(vars);
+    for (var l = 0; l < layers; l++) {
+      var texel = strip ? "ivec2(" + l + ", 0)" : "ivec3(" + texelExpr + ", " + l + ")";
+      lines.push("vec4 pbState" + l + " = texelFetch(" + samplerName + ", " + texel + ", 0);");
+    }
+    floats.forEach(function (f, i) {
+      var src = "pbState" + Math.floor(i / STATE_FLOATS_PER_LAYER) + "." + "xyzw"[i % STATE_FLOATS_PER_LAYER];
+      if (f.variable.type === "bool") lines.push(f.variable.name + " = " + src + " > 0.5;");
+      else if (f.variable.type === "int") lines.push(f.variable.name + " = int(" + src + ");");
+      else lines.push(f.variable.name + f.field + " = " + src + ";");
+    });
+    return lines;
+  }
+
+  // Fragment outputs for writing state: one per texture layer a single draw
+  // can attach. A WebGL2 draw writes at most MAX_DRAW_BUFFERS attachments, so
+  // a state with more layers than that is written in groups - one draw per
+  // group, each running the same steps and keeping a different slice.
+  function generatePlaybackStateOutputsGLSL(layersPerGroup) {
+    var lines = [];
+    for (var k = 0; k < layersPerGroup; k++) lines.push("layout(location = " + k + ") out vec4 pbOut" + k + ";");
+    return lines;
+  }
+
+  // Writes the slice of state belonging to group `groupExpr` (an int
+  // expression) into the outputs declared above.
+  function generatePlaybackStateStoreGLSL(vars, groupExpr, layersPerGroup) {
+    var floats = stateFloats(vars);
+    var layers = playbackStateLayerCount(vars);
+    var groups = Math.ceil(layers / layersPerGroup);
+    function floatExpr(i) {
+      if (i >= floats.length) return "0.0";
+      var v = floats[i].variable;
+      if (v.type === "bool") return "(" + v.name + " ? 1.0 : 0.0)";
+      if (v.type === "int") return "float(" + v.name + ")";
+      return v.name + floats[i].field;
+    }
+    var lines = [];
+    for (var g = 0; g < groups; g++) {
+      lines.push((g === 0 ? "if" : "} else if") + " (" + groupExpr + " == " + g + ") {");
+      for (var k = 0; k < layersPerGroup; k++) {
+        var layer = g * layersPerGroup + k;
+        if (layer >= layers) break;
+        var base = layer * STATE_FLOATS_PER_LAYER;
+        lines.push("  pbOut" + k + " = vec4(" + [0, 1, 2, 3].map(function (c) { return floatExpr(base + c); }).join(", ") + ");");
+      }
+    }
+    lines.push("}");
+    return lines;
+  }
+
+  // The strip layout's store: writes layer `layerExpr` (an int expression) to
+  // the one output. Flat ifs rather than an else-if chain - a quad-float
+  // splitter scene has a couple of hundred layers, and that deep a nest is
+  // the kind of thing shader translators put a limit on.
+  function generateStateStripStoreGLSL(vars, layerExpr, outName) {
+    var floats = stateFloats(vars);
+    var layers = playbackStateLayerCount(vars);
+    function floatExpr(i) {
+      if (i >= floats.length) return "0.0";
+      var v = floats[i].variable;
+      if (v.type === "bool") return "(" + v.name + " ? 1.0 : 0.0)";
+      if (v.type === "int") return "float(" + v.name + ")";
+      return v.name + floats[i].field;
+    }
+    var lines = ["int pbLayer = " + layerExpr + ";"];
+    for (var l = 0; l < layers; l++) {
+      var base = l * STATE_FLOATS_PER_LAYER;
+      lines.push("if (pbLayer == " + l + ") " + outName + " = vec4(" + [0, 1, 2, 3].map(function (c) { return floatExpr(base + c); }).join(", ") + ");");
+    }
+    return lines;
   }
 
   // ---- WebGL orchestration ----
@@ -2000,85 +2314,234 @@
     return program;
   }
 
-  // Runs an already-compiled { fragmentSource, numBodies } (from either
-  // compileSceneToTrajectoryGLSL or the fractal grid's hover-replay
-  // compiler - same shape, same texture-logging convention) and reads back
-  // the resulting trajectory. Split out from runSceneOnGPU so hover-replay
-  // can reuse this WebGL orchestration (and its context disposal - see the
-  // comment at the bottom) without a scene of its own to compile from.
-  function runCompiledTrajectoryOnGPU(compiled, maxSteps) {
-    var numBodies = compiled.numBodies;
-    if (numBodies === 0) return [];
+  // ---- The trajectory runner: one context and its compiled programs, kept ----
+  //
+  // This used to build everything from nothing on every call - a fresh
+  // OffscreenCanvas and context, a compile, a link - and lose the context on
+  // the way out. That is invisible for a Play click and ruinous for hover
+  // replay, which calls it per mouse move and up to 300 times for one
+  // Inspect line: in df the compile alone is seconds.
+  //
+  // Now there is one context for the life of the page, and programs are
+  // cached by their SOURCE. The hover replay's source no longer depends on
+  // the hovered point (see compileHoverTrajectoryGLSL - the point is a
+  // uniform), so for a given scene, step count and precision every call
+  // after the first is a draw and a readback.
+  //
+  // One context, not one per call, is also what the browser's cap on live
+  // WebGL contexts wants: the old code had to lose each context explicitly
+  // to stay under it, and this never holds more than the one.
+  var TRAJECTORY_PROGRAM_CACHE_SIZE = 6;
+  var trajectoryRunner = null;
 
-    var canvas = new OffscreenCanvas(numBodies, maxSteps);
+  function getTrajectoryRunner() {
+    if (trajectoryRunner && !trajectoryRunner.gl.isContextLost()) return trajectoryRunner;
+    var canvas = new OffscreenCanvas(1, 1);
     var gl = canvas.getContext("webgl2");
     if (!gl) throw new Error("WebGL2 is not available for GPU physics.");
     if (!gl.getExtension("EXT_color_buffer_float")) {
       throw new Error("EXT_color_buffer_float is not available for GPU physics.");
     }
-
-    var vs = compileShader(gl, gl.VERTEX_SHADER, VERTEX_SOURCE);
-    var fs = compileShader(gl, gl.FRAGMENT_SHADER, compiled.fragmentSource);
-    var program = linkProgram(gl, vs, fs);
-    gl.useProgram(program);
-
     var quadBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
-    var posLoc = gl.getAttribLocation(program, "a_position");
-    gl.enableVertexAttribArray(posLoc);
-    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+    trajectoryRunner = {
+      gl: gl,
+      vs: compileShader(gl, gl.VERTEX_SHADER, VERTEX_SOURCE),
+      quadBuffer: quadBuffer,
+      programs: [], // { source, program, posLoc }, most recently used last
+      fbo: gl.createFramebuffer(),
+    };
+    return trajectoryRunner;
+  }
 
-    var texture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, numBodies, maxSteps, 0, gl.RGBA, gl.FLOAT, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  function trajectoryProgramFor(runner, fragmentSource) {
+    var gl = runner.gl, cache = runner.programs;
+    for (var i = 0; i < cache.length; i++) {
+      if (cache[i].source === fragmentSource) {
+        var hit = cache.splice(i, 1)[0];
+        cache.push(hit);
+        return hit;
+      }
+    }
+    var fs = compileShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
+    var program;
+    try {
+      program = linkProgram(gl, runner.vs, fs);
+    } finally {
+      gl.deleteShader(fs);
+    }
+    var entry = { source: fragmentSource, program: program, posLoc: gl.getAttribLocation(program, "a_position") };
+    cache.push(entry);
+    while (cache.length > TRAJECTORY_PROGRAM_CACHE_SIZE) gl.deleteProgram(cache.shift().program);
+    return entry;
+  }
 
-    var fbo = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  // Runs an already-compiled { fragmentSource, numBodies, chunk, uniforms? }
+  // (from either compileSceneToTrajectoryGLSL or the fractal grid's
+  // hover-replay compiler - same shape, same texture-logging convention) and
+  // reads back the resulting trajectory. `uniforms` is { name: [components...] },
+  // all floats - what the hover replay passes its world point in by. See
+  // generateTrajectoryMainGLSL for the chunked LOG / ADVANCE scheme this
+  // drives.
+  function runCompiledTrajectoryOnGPU(compiled, maxSteps) {
+    var numBodies = compiled.numBodies;
+    if (numBodies === 0) return [];
+    var chunk = compiled.chunk;
+
+    var runner = getTrajectoryRunner();
+    var gl = runner.gl;
+    var entry = trajectoryProgramFor(runner, compiled.fragmentSource);
+    var prog = entry.program;
+    gl.useProgram(prog);
+    Object.keys(compiled.uniforms || {}).forEach(function (name) {
+      var loc = gl.getUniformLocation(prog, name);
+      var v = compiled.uniforms[name];
+      if (!loc) return;
+      if (v.length === 1) gl.uniform1f(loc, v[0]);
+      else if (v.length === 2) gl.uniform2f(loc, v[0], v[1]);
+      else if (v.length === 3) gl.uniform3f(loc, v[0], v[1], v[2]);
+      else gl.uniform4f(loc, v[0], v[1], v[2], v[3]);
+    });
+    var u = {
+      state: gl.getUniformLocation(prog, "u_trajState"),
+      init: gl.getUniformLocation(prog, "u_trajInit"),
+      base: gl.getUniformLocation(prog, "u_trajBase"),
+      advance: gl.getUniformLocation(prog, "u_trajAdvance"),
+    };
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, runner.quadBuffer);
+    gl.enableVertexAttribArray(entry.posLoc);
+    gl.vertexAttribPointer(entry.posLoc, 2, gl.FLOAT, false, 0, 0);
+
+    function floatTexture(w, h) {
+      var t = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, w, h, 0, gl.RGBA, gl.FLOAT, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      return t;
+    }
+    // Where the trajectory is logged - a column wider than the bodies, for
+    // each row's sentinel...
+    var logWidth = numBodies + 1;
+    var texture = floatTexture(logWidth, maxSteps);
+    // ...and the pair of state strips the chunks hand the simulation along
+    // in (one read, one written, swapped each chunk), a texel longer than
+    // the layers for the same reason.
+    var stripWidth = chunk.layers + 1;
+    var states = [floatTexture(stripWidth, 1), floatTexture(stripWidth, 1)];
+    var logFbo = runner.fbo, stateFbo = gl.createFramebuffer();
+    var sentinel = new Float32Array(4);
+    var failure = null;
+
+    function release() {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, logFbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, null, 0);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.deleteFramebuffer(stateFbo);
+      gl.deleteTexture(states[0]);
+      gl.deleteTexture(states[1]);
+      gl.deleteTexture(texture);
+    }
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, logFbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
     var status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
     if (status !== gl.FRAMEBUFFER_COMPLETE) {
+      release();
       throw new Error("GPU physics framebuffer incomplete (status " + status + ")");
     }
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform1i(u.state, 0);
 
-    gl.viewport(0, 0, numBodies, maxSteps);
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    function drawLog(base, rows, current) {
+      gl.bindTexture(gl.TEXTURE_2D, states[current]);
+      gl.uniform1i(u.init, base === 0 ? 1 : 0);
+      gl.uniform1i(u.base, base);
+      gl.uniform1i(u.advance, 0);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, logFbo);
+      gl.viewport(0, base, logWidth, rows);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
 
-    var pixels = new Float32Array(numBodies * maxSteps * 4);
-    gl.readPixels(0, 0, numBodies, maxSteps, gl.RGBA, gl.FLOAT, pixels);
+    // The program's first draw is where the driver really builds it, which
+    // can be seconds and says nothing about how long a step takes - so it is
+    // spent on a draw nobody times: row 0, which the loop below draws again.
+    if (!entry.warmed) {
+      drawLog(0, 1, 0);
+      gl.readPixels(numBodies, 0, 1, 1, gl.RGBA, gl.FLOAT, sentinel);
+      entry.warmed = true;
+    }
+
+    // Chunk by chunk, each one timed and the next sized from it (see
+    // TRAJECTORY_TARGET_MS). A chunk is two draws of `rows` steps, and the
+    // time includes the round trip that measured it - both of which make a
+    // step look dearer than it is, which is the safe direction to be wrong
+    // in. Growth is capped at doubling, so one optimistic estimate cannot
+    // jump straight past the limit; the size it settles on is kept with the
+    // program, so the next replay of the same scene starts there.
+    var steps = entry.chunkSteps || 1;
+    var current = 0;
+    for (var base = 0; base < maxSteps && !failure;) {
+      var rows = Math.min(steps, chunk.maxSteps, maxSteps - base);
+      var startedAt = performance.now();
+      drawLog(base, rows, current);
+      if (base + rows < maxSteps) {
+        // ADVANCE: carry the state to the start of the next chunk.
+        gl.bindFramebuffer(gl.FRAMEBUFFER, stateFbo);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, states[1 - current], 0);
+        gl.viewport(0, 0, stripWidth, 1);
+        gl.uniform1i(u.advance, rows);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        gl.readPixels(chunk.layers, 0, 1, 1, gl.RGBA, gl.FLOAT, sentinel);
+        if (sentinel[0] !== base + rows || sentinel[1] !== TRAJECTORY_SENTINEL) {
+          failure = "the state after step " + (base + rows) + " was never written";
+        }
+        var perStep = (performance.now() - startedAt) / (2 * rows);
+        steps = Math.max(1, Math.min(Math.floor(TRAJECTORY_TARGET_MS / perStep), rows * 2, chunk.maxSteps));
+        current = 1 - current;
+      }
+      base += rows;
+    }
+    entry.chunkSteps = steps;
+
+    var pixels = new Float32Array(logWidth * maxSteps * 4);
+    if (!failure) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, logFbo);
+      gl.readPixels(0, 0, logWidth, maxSteps, gl.RGBA, gl.FLOAT, pixels);
+    }
+    // The readback above has already waited for the GPU, so asking for the
+    // error flag costs nothing more.
+    var glError = gl.getError();
 
     var trajectory = new Array(maxSteps);
-    for (var step = 0; step < maxSteps; step++) {
+    for (var step = 0; step < maxSteps && !failure; step++) {
       var row = new Array(numBodies);
       for (var b = 0; b < numBodies; b++) {
-        var idx = (step * numBodies + b) * 4;
+        var idx = (step * logWidth + b) * 4;
         row[b] = { x: pixels[idx], y: pixels[idx + 1], angle: pixels[idx + 2], half: pixels[idx + 3] };
       }
       trajectory[step] = row;
+      var mark = (step * logWidth + numBodies) * 4;
+      if (pixels[mark] !== step + 1 || pixels[mark + 1] !== TRAJECTORY_SENTINEL) failure = "step " + (step + 1) + " was never written";
     }
 
-    gl.deleteTexture(texture);
-    gl.deleteFramebuffer(fbo);
-    gl.deleteBuffer(quadBuffer);
-    gl.deleteProgram(program);
-    gl.deleteShader(vs);
-    gl.deleteShader(fs);
-
-    // Deleting the individual GL objects above frees GPU memory, but the
-    // context itself stays alive until garbage collection gets around to
-    // the canvas - and browsers cap live WebGL contexts per page (single
-    // digits to low teens). A fresh context per Play click is fine for
-    // occasional clicks, but anything that calls this in a loop (bulk runs,
-    // hover scrubbing) would exhaust that budget and start silently losing
-    // older contexts mid-run. Releasing it explicitly avoids relying on GC
-    // timing for something with a hard, small limit.
-    var loseCtx = gl.getExtension("WEBGL_lose_context");
-    if (loseCtx) loseCtx.loseContext();
-
+    release();
+    if (glError !== gl.NO_ERROR) throw new Error("GPU physics draw failed (GL error 0x" + glError.toString(16) + ")");
+    // A draw the GPU gave up on reports nothing - no error, no lost context -
+    // and reads back as whatever the texture held. Every caller would take
+    // that for a trajectory, so it is an error here instead. (Seen when a
+    // single step is itself too long for the GPU's watchdog, which is a
+    // scene too heavy for this precision on this machine; the size the
+    // chunks had reached is forgotten so the next attempt starts over.)
+    if (failure) {
+      entry.chunkSteps = 1;
+      throw new Error("The GPU dropped a physics draw (" + failure + ") - the scene is too heavy for it at this precision.");
+    }
     return trajectory;
   }
 
@@ -2091,6 +2554,8 @@
     runSceneOnGPU: runSceneOnGPU,
     runCompiledTrajectoryOnGPU: runCompiledTrajectoryOnGPU,
     generateTrajectoryMainGLSL: generateTrajectoryMainGLSL,
+    generateTrajectoryHeaderGLSL: generateTrajectoryHeaderGLSL,
+    trajectoryChunkInfo: trajectoryChunkInfo,
     compileSceneToTrajectoryGLSL: compileSceneToTrajectoryGLSL,
     // Exposed so other GLSL-generating code (the per-pixel fractal grid) can
     // reuse the exact same physics formulas and step logic instead of a
@@ -2109,6 +2574,13 @@
     padSceneForSplitting: padSceneForSplitting,
     generateSpawnSlotLocalsGLSL: generateSpawnSlotLocalsGLSL,
     staticGeometryResetGLSL: staticGeometryResetGLSL,
+    playbackStateVariables: playbackStateVariables,
+    withWords: withWords,
+    playbackStateLayerCount: playbackStateLayerCount,
+    generatePlaybackStateDeclarationsGLSL: generatePlaybackStateDeclarationsGLSL,
+    generatePlaybackStateLoadGLSL: generatePlaybackStateLoadGLSL,
+    generatePlaybackStateOutputsGLSL: generatePlaybackStateOutputsGLSL,
+    generatePlaybackStateStoreGLSL: generatePlaybackStateStoreGLSL,
     generateStepOnceGLSL: generateStepOnceGLSL,
     stepOnceCallArgs: stepOnceCallArgs,
     generateBodyLocalsGLSL: generateBodyLocalsGLSL,

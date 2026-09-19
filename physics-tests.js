@@ -1657,24 +1657,40 @@
   // runGridCodegenAtPoint above, factored out because the df tests need
   // several differently-shaped one-off shaders.
   //
-  // A fresh context per call, explicitly lost at the end. Browsers cap how
-  // many WebGL contexts can be live at once and silently drop the oldest,
-  // after which draws stop happening and readPixels returns all zeros with
-  // no error raised - so a suite this shader-hungry has to hand each one
-  // back. It also means these helpers stop working from the console once a
-  // full run has churned through enough of them; measure from a page that
-  // hasn't run the suite.
-  function runFloatShader(fragmentSource, width) {
-    var canvas = new OffscreenCanvas(width, 1);
+  // ONE context, kept for the whole run. This used to make a fresh one per
+  // call and lose it explicitly at the end, because browsers cap how many
+  // WebGL contexts can be live at once and silently drop the oldest - after
+  // which draws stop happening and readPixels returns all zeros with no
+  // error raised. Losing them explicitly was not enough: a lost context is
+  // only really gone once it is garbage-collected, and a suite this
+  // shader-hungry could still run the page out of them before that, at
+  // which point whichever tests happened to come last "failed" with zeros.
+  // A context that is never released cannot be dropped, and the programs
+  // are deleted as they go, so nothing accumulates.
+  var sharedFloatContext = null;
+  function floatContext() {
+    if (sharedFloatContext && !sharedFloatContext.gl.isContextLost()) return sharedFloatContext;
+    var canvas = new OffscreenCanvas(1, 1);
     var gl = canvas.getContext("webgl2");
     if (!gl.getExtension("EXT_color_buffer_float")) throw new Error("EXT_color_buffer_float unavailable");
-    var program = PhysicsGPU.linkProgram(gl,
-      PhysicsGPU.compileShader(gl, gl.VERTEX_SHADER, PhysicsGPU.VERTEX_SOURCE),
-      PhysicsGPU.compileShader(gl, gl.FRAGMENT_SHADER, fragmentSource));
-    gl.useProgram(program);
     var buf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
+    sharedFloatContext = { gl: gl, vs: PhysicsGPU.compileShader(gl, gl.VERTEX_SHADER, PhysicsGPU.VERTEX_SOURCE), quad: buf };
+    return sharedFloatContext;
+  }
+
+  function runFloatShader(fragmentSource, width) {
+    var ctx = floatContext(), gl = ctx.gl;
+    var fs = PhysicsGPU.compileShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
+    var program;
+    try {
+      program = PhysicsGPU.linkProgram(gl, ctx.vs, fs);
+    } finally {
+      gl.deleteShader(fs);
+    }
+    gl.useProgram(program);
+    gl.bindBuffer(gl.ARRAY_BUFFER, ctx.quad);
     var posLoc = gl.getAttribLocation(program, "a_position");
     gl.enableVertexAttribArray(posLoc);
     gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
@@ -1690,8 +1706,10 @@
     gl.drawArrays(gl.TRIANGLES, 0, 6);
     var pixels = new Float32Array(width * 4);
     gl.readPixels(0, 0, width, 1, gl.RGBA, gl.FLOAT, pixels);
-    var loseCtx = gl.getExtension("WEBGL_lose_context");
-    if (loseCtx) loseCtx.loseContext();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(fbo);
+    gl.deleteTexture(tex);
+    gl.deleteProgram(program);
     return pixels;
   }
 
@@ -1725,19 +1743,78 @@
       PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(scene)), "",
       "const " + B.scalar + " worldX = " + B.lit(worldX) + ";",
       "const " + B.scalar + " worldY = " + B.lit(worldY) + ";", "",
-      PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene)), "",
+      PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), initial.spawnBase), "",
       "void main() {",
       "  " + initial.declarationLines.join("\n  "),
       "  " + PhysicsGridCodegen.generateCanonicalBodyDeclarationsGLSL(initial).split("\n").join("\n  "),
       "  " + PhysicsGPU.generateHingeAnchorLocalsGLSL(initial.hingeAnchors, precision).split("\n").join("\n  "),
       "  for (int i = 0; i < " + steps + "; i++) { stepOnce(" +
-        PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, precision) + "); }",
+        PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, precision, initial.spawnBase) + "); }",
       "  fragColor = vec4(" + residual("x", ref.x) + ", " + residual("y", ref.y) + ", " +
         residual("angle", ref.angle) + ", 1.0);",
       "}",
     ].join("\n");
     var px = runFloatShader(src, 1);
     return { dx: px[0], dy: px[1], da: px[2], err: Math.hypot(px[0], px[1]) };
+  }
+
+  // The same measurement for a whole ROW of starting points in one draw:
+  // texel k simulates worldX = x0 + k*dx (df only - the add is the one that
+  // has to survive), all against the same reference. One shader compile and
+  // one WebGL context however many points are asked for, which is what makes
+  // a proportional-response sweep affordable here at all - see
+  // runFloatShader's note on how close this page already runs to the
+  // browser's context ceiling and the GPU's watchdog.
+  function gridResidualRow(scene, steps, x0, dx, count, worldY, bodyIndex, ref) {
+    var B = PhysicsGridCodegen.backendFor("df");
+    var initial = PhysicsGridCodegen.generateGridInitialStateGLSL(scene, "df");
+    var frame = PhysicsEngine.wrapsAtEdges(scene) ? { width: scene.frameWidth, height: scene.frameHeight } : undefined;
+    function residual(axis, value) {
+      return "dfToFloat(dfSub(dbody" + bodyIndex + "." + axis + ", " + PhysicsDF.num(value) + "))";
+    }
+    var src = [
+      "#version 300 es", "precision highp float;", "out vec4 fragColor;", "",
+      PhysicsGPU.libraryGLSL("df", PhysicsEngine.speedCapFor(scene)), "",
+      PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, "df", scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), initial.spawnBase), "",
+      "void main() {",
+      // k*dx is a float32 product, which is fine: its relative error is
+      // ~6e-8 of a quantity that is itself tiny. The ADD onto x0 is the
+      // step that needs df, exactly as in the grid's own shader.
+      "  vec2 worldX = dfAddFloat(" + B.lit(x0) + ", (gl_FragCoord.x - 0.5) * " + PhysicsGPU.fnum(dx) + ");",
+      "  vec2 worldY = " + B.lit(worldY) + ";",
+      "  " + initial.declarationLines.join("\n  "),
+      "  " + PhysicsGridCodegen.generateCanonicalBodyDeclarationsGLSL(initial).split("\n").join("\n  "),
+      "  " + PhysicsGPU.generateHingeAnchorLocalsGLSL(initial.hingeAnchors, "df").split("\n").join("\n  "),
+      "  for (int i = 0; i < " + steps + "; i++) { stepOnce(" +
+        PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, "df", initial.spawnBase) + "); }",
+      "  fragColor = vec4(" + residual("x", ref.x) + ", " + residual("y", ref.y) + ", " +
+        residual("angle", ref.angle) + ", 1.0);",
+      "}",
+    ].join("\n");
+    var px = runFloatShader(src, count);
+    var rows = [];
+    for (var k = 0; k < count; k++) rows.push({ dx: px[k * 4], dy: px[k * 4 + 1], da: px[k * 4 + 2] });
+    return rows;
+  }
+
+  // How faithfully df answers a starting difference of `dx`: the df shader's
+  // response to it (texel 1 minus texel 0) against the float64 engine's
+  // response to the same nudge, as a relative error. ~0 means the dynamics
+  // resolved the distinction; ~1 means they never saw it - which is what a
+  // float32 stage hiding anywhere in the df chain looks like.
+  function dfResponseError(scene, steps, x0, dx, worldY, bodyIndex) {
+    var ref = cpuStateAt(scene, x0, worldY, steps, bodyIndex);
+    var moved = cpuStateAt(scene, x0 + dx, worldY, steps, bodyIndex);
+    var want = { x: moved.x - ref.x, y: moved.y - ref.y };
+    var row = gridResidualRow(scene, steps, x0, dx, 2, worldY, bodyIndex, ref);
+    var got = { x: row[1].dx - row[0].dx, y: row[1].dy - row[0].dy };
+    var scale = Math.hypot(want.x, want.y);
+    return {
+      relErr: scale > 0 ? Math.hypot(got.x - want.x, got.y - want.y) / scale : NaN,
+      want: scale,
+      got: Math.hypot(got.x, got.y),
+      offset: Math.hypot(row[0].dx, row[0].dy),
+    };
   }
 
   // A ball dropped between two static walls: chaotic enough to be a real
@@ -1807,6 +1884,7 @@
     "physics-df.js reaches ~15 decimal digits where float32 reaches ~7",
     "a df library whose low word is always 0 still compiles and runs, just without any of the extra precision",
     function () {
+      PhysicsDF.usePrecision("df");
       var CENTER = 1234.5678901234, TINY = 3.7e-10;
       var cases = [
         { name: "dfAddFloat(center, 3.7e-10)", glsl: "dfAddFloat(" + PhysicsDF.num(CENTER) + ", " + PhysicsGPU.fnum(TINY) + ")", exact: CENTER + TINY },
@@ -1832,6 +1910,104 @@
       // float32 alone is ~6e-8 relative. 1e-12 is a wide margin below df's
       // real ~1e-15 and well above anything float32 could reach by luck.
       return { pass: worst < 1e-12, detail: "worst relative error " + worst.toExponential(2) + " (" + worstName + "); float32 alone would be ~6e-8" };
+    }
+  );
+
+  // ---- df.2b The same, for three and four words ----
+  //
+  // A float64 cannot referee this one: it has 53 bits and the values under
+  // test have 72 and 96. So the references are computed here in BigInt fixed
+  // point (FP_BITS fractional bits, far past anything being checked), handed
+  // to the shader as exact N-word literals, and SUBTRACTED there - what comes
+  // back is the residual, which a float32 readback carries fine however
+  // small it is.
+  var FP_BITS = 300;
+  function fpShift() { return BigInt(FP_BITS); }
+  function fpOne() { return BigInt(1) << fpShift(); }
+  function fpFromDecimal(str) {
+    var neg = str[0] === "-";
+    if (neg) str = str.slice(1);
+    var parts = str.split(".");
+    var v = (BigInt(parts[0] + (parts[1] || "")) << fpShift()) / (BigInt(10) ** BigInt((parts[1] || "").length));
+    return neg ? -v : v;
+  }
+  function fpMul(a, b) { return (a * b) >> fpShift(); }
+  function fpDiv(a, b) { return (a << fpShift()) / b; }
+  function fpSqrt(a) {
+    var n = a << fpShift();
+    var x = BigInt(1) << BigInt((n.toString(2).length + 1) >> 1);
+    for (;;) { var y = (x + n / x) >> BigInt(1); if (y >= x) return x; x = y; }
+  }
+  function fpAbs(a) { return a < BigInt(0) ? -a : a; }
+  var FP_PI = fpFromDecimal("3.14159265358979323846264338327950288419716939937510582097494459230781640628620899862803482534211706798");
+  // sin and cos of a fixed-point angle: exact reduction by quarter turns,
+  // then the Taylor series run until its terms vanish.
+  function fpSinCos(x) {
+    var halfPi = FP_PI >> BigInt(1);
+    var k = (x + (halfPi >> BigInt(1))) / halfPi;
+    if ((x + (halfPi >> BigInt(1))) < BigInt(0) && (x + (halfPi >> BigInt(1))) % halfPi !== BigInt(0)) k -= BigInt(1);
+    var r = x - k * halfPi, r2 = fpMul(r, r);
+    var sn = BigInt(0), cs = BigInt(0), term = fpOne();
+    for (var n = 0; n < 200 && term !== BigInt(0); n++) {
+      if (n % 2 === 0) cs += (n % 4 === 0 ? term : -term);
+      else sn += (n % 4 === 1 ? term : -term);
+      term = fpMul(term, r) / BigInt(n + 1);
+    }
+    var q = Number(((k % BigInt(4)) + BigInt(4)) % BigInt(4));
+    if (q === 0) return { sin: sn, cos: cs };
+    if (q === 1) return { sin: cs, cos: -sn };
+    if (q === 2) return { sin: -sn, cos: -cs };
+    return { sin: -cs, cos: sn };
+  }
+  function fpToNumber(v) { return Number(v >> BigInt(FP_BITS - 60)) / Math.pow(2, 60); }
+
+  addTest(
+    "Triple- and quad-float arithmetic reach ~21 and ~28 digits",
+    "past two words nothing about the arithmetic is hand-written - physics-df.js generates the add/mul/div/sqrt cascades and their constants - and the failure mode is the usual one for this file: a kernel that drops a carry, or a constant that only had a float64's 53 bits to begin with, still compiles and runs, and is simply a few words less precise than it claims",
+    function () {
+      if (!PhysicsDF.isSupported("qf")) return { pass: true, detail: "no BigInt in this browser - the multi-word precisions are unavailable here, so there is nothing to check" };
+      var A = fpFromDecimal("1234.56789012345678901234567890123456789");
+      var B = fpFromDecimal("0.00000000000000000000370000000001234567890123");
+      var C = fpFromDecimal("3.1415926535897932384626433832795028841971");
+      var D = fpFromDecimal("10000.0000000010000000001230000000045");
+      var trig = fpSinCos(D);
+      var report = [], ok = true;
+      ["tf", "qf"].forEach(function (precision) {
+        var N = PhysicsDF.usePrecision(precision);
+        function lit(v) { return PhysicsDF.literal(PhysicsDF.rationalWords(v, fpOne(), N)); }
+        var cases = [
+          { name: "add", glsl: "dfAdd(" + lit(A) + ", " + lit(B) + ")", exact: A + B },
+          { name: "sub", glsl: "dfSub(" + lit(A) + ", " + lit(C) + ")", exact: A - C },
+          { name: "mul", glsl: "dfMul(" + lit(A) + ", " + lit(C) + ")", exact: fpMul(A, C) },
+          { name: "sqr", glsl: "dfSqr(" + lit(A) + ")", exact: fpMul(A, A) },
+          { name: "div", glsl: "dfDiv(" + lit(A) + ", " + lit(C) + ")", exact: fpDiv(A, C) },
+          { name: "sqrt", glsl: "dfSqrt(" + lit(A) + ")", exact: fpSqrt(A) },
+          { name: "mulFloat", glsl: "dfMulFloat(" + lit(C) + ", 1234.5)", exact: fpMul(C, fpFromDecimal("1234.5")) },
+          { name: "addFloat", glsl: "dfAddFloat(" + lit(A) + ", 0.015625)", exact: A + fpFromDecimal("0.015625") },
+          { name: "sin", glsl: "dfSin(" + lit(D) + ")", exact: trig.sin },
+          { name: "cos", glsl: "dfCos(" + lit(D) + ")", exact: trig.cos },
+          { name: "mod", glsl: "dfMod(" + lit(A) + ", 800.0)", exact: A - fpFromDecimal("800") },
+        ];
+        var lines = ["#version 300 es", "precision highp float;", PhysicsDF.UNIFORM_DECL, "out vec4 fragColor;", "",
+          PhysicsDF.GLSL_LIBRARY, "", "void main() {", "  int i = int(gl_FragCoord.x);", "  float residual = 0.0;"];
+        cases.forEach(function (c, i) {
+          lines.push("  " + (i === 0 ? "if" : "else if") + " (i == " + i + ") residual = dfToFloat(dfSub(" + c.glsl + ", " + lit(c.exact) + "));");
+        });
+        lines.push("  fragColor = vec4(residual, 0.0, 0.0, 1.0);", "}");
+        var px = runFloatShader(lines.join("\n"), cases.length);
+        var worst = 0, worstName = "";
+        cases.forEach(function (c, i) {
+          var rel = Math.abs(px[i * 4]) / Math.abs(fpToNumber(c.exact));
+          if (!(rel <= worst)) { worst = rel; worstName = c.name; }
+        });
+        // 24 bits a word, less the few the sloppy cascades give up: 2^-62
+        // and 2^-84. A double-float in disguise would show ~2^-47 here.
+        var bar = Math.pow(2, -(24 * N - 10));
+        if (!(worst < bar)) ok = false;
+        report.push(precision + ": worst relative error " + worst.toExponential(2) + " (" + worstName + "), bar " + bar.toExponential(1));
+      });
+      PhysicsDF.usePrecision("df");
+      return { pass: ok, detail: report.join("; ") };
     }
   );
 
@@ -1888,6 +2064,189 @@
           dfSpread.toExponential(2) + " under df, " + f32Spread.toExponential(2) +
           " under float32 (float32 must be exactly 0 - that IS the wall)",
       };
+    }
+  );
+
+  // ---- df.4b The same question, asked of the FORCE rather than the state ----
+  addTest(
+    "Mutual Gravity under df answers a 1e-8 nudge in proportion, like the float64 engine",
+    "the df pass used to collapse each pairwise separation to float32 and run the force math there, 'because only the accumulators need the digits'. A float32 separation cannot see a nudge smaller than its own ULP (~1e-5px here), so every pixel in that block got an identical acceleration: the nudge was carried along faithfully and never amplified, which is the one thing a chaotic picture is made of. With the force in df the shader's response to the nudge matches the float64 engine's; with a float32 force it comes out several times too small",
+    function () {
+      var scene = {
+        mutualGravity: true,
+        bodies: [
+          PhysicsEngine.createCircle(400, 300, 30, false),
+          PhysicsEngine.createCircle(760, 380, 30, false),
+          PhysicsEngine.createCircle(400, 140, 5, false),
+        ],
+        hinges: [],
+        xInput: { body: 2, property: "x" }, yInput: { body: 2, property: "y" },
+        output: { body: 2, property: "y" },
+        frameWidth: 1192, frameHeight: 809, edgeMode: "infinite",
+      };
+      scene.bodies[2].vx = 150;
+      var STEPS = 60, DX = 1e-8;
+      var r = dfResponseError(scene, STEPS, 3.3, DX, -2.1, 2);
+      // The tidal field here grows a separation by about half over one
+      // second, so an unamplified nudge (what a float32 force produces)
+      // would read as a relative error of ~0.3 - six times the bar. The
+      // second condition keeps that true if the scene is ever retuned.
+      return {
+        pass: r.relErr < 0.05 && r.want > DX * 1.25,
+        detail: "a " + DX + "px nudge grows to " + r.want.toExponential(3) + "px in the float64 engine over " + STEPS +
+          " steps and " + r.got.toExponential(3) + "px in the df shader (relative error " + r.relErr.toExponential(2) +
+          "; the two engines' common offset is " + r.offset.toExponential(2) + "px)",
+      };
+    }
+  );
+
+  // ---- mf.2 The rungs above df: is the precision there at the END of a run? ----
+  //
+  // The arithmetic test above shows three and four words can hold ~21 and
+  // ~28 digits. This asks the question that matters to a picture: after a
+  // whole simulation - collisions, hinge solves, trig, the gravity sum - is
+  // a starting difference far below the rung beneath still there, grown by
+  // the right amount? One stage anywhere in the chain that quietly rounds
+  // to fewer words erases it, exactly as a float32 stage used to in df.
+  //
+  // Texel k starts at x0 + NUDGES[k]. Each texel's position comes back WORD
+  // BY WORD (a word is a float32, which RGBA32F stores exactly), so the
+  // difference between two texels is formed exactly in float64 however
+  // small it is - no reference value, no residual, nothing for the readback
+  // to round. Dividing by the nudge gives a slope, and the float64 engine
+  // supplies what that slope should be from a nudge IT can resolve (1e-7):
+  // the map from start to finish is smooth at these scales, so the slope is
+  // the same at 1e-7 as at 1e-19.
+  //
+  // Returns, per nudge, the relative error of that slope: ~1e-6 (the
+  // float64 reference's own noise) when the dynamics carried the nudge, and
+  // ~1 when they never saw it.
+  function ladderSlopeErrors(scene, steps, x0, y0, precision, nudges, bodyIndex) {
+    var words = PhysicsDF.wordsFor(precision);
+    var B = PhysicsGridCodegen.backendFor(precision);
+    var initial = PhysicsGridCodegen.generateGridInitialStateGLSL(scene, precision);
+    var frame = PhysicsEngine.wrapsAtEdges(scene) ? { width: scene.frameWidth, height: scene.frameHeight } : undefined;
+    var count = nudges.length + 1;
+    function wordsOf(expr) {
+      var c = [];
+      for (var w = 0; w < 4; w++) c.push(w < words ? expr + "." + "xyzw"[w] : "0.0");
+      return "vec4(" + c.join(", ") + ")";
+    }
+    var nudgeLines = nudges.map(function (dx, k) { return "  if (k == " + (k + 1) + ") nudge = " + PhysicsGPU.fnum(dx) + ";"; });
+    var src = [
+      "#version 300 es", "precision highp float;", "out vec4 fragColor;", "",
+      PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(scene)), "",
+      PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), initial.spawnBase), "",
+      "void main() {",
+      "  int texel = int(gl_FragCoord.x); int k = texel % " + count + "; bool wantY = texel >= " + count + ";",
+      "  float nudge = 0.0;",
+    ].concat(nudgeLines, [
+      "  " + B.scalar + " worldX = dfAddFloat(" + B.lit(x0) + ", nudge);",
+      "  " + B.scalar + " worldY = " + B.lit(y0) + ";",
+      "  " + initial.declarationLines.join("\n  "),
+      "  " + PhysicsGridCodegen.generateCanonicalBodyDeclarationsGLSL(initial).split("\n").join("\n  "),
+      "  " + PhysicsGPU.generateHingeAnchorLocalsGLSL(initial.hingeAnchors, precision).split("\n").join("\n  "),
+      "  for (int i = 0; i < " + steps + "; i++) { stepOnce(" +
+        PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, precision, initial.spawnBase) + "); }",
+      "  fragColor = wantY ? " + wordsOf("dbody" + bodyIndex + ".y") + " : " + wordsOf("dbody" + bodyIndex + ".x") + ";",
+      "}",
+    ]).join("\n");
+    var px = runFloatShader(src, 2 * count);
+    // Smallest words first, so the sum loses nothing to the largest.
+    function difference(a, b) {
+      var sum = 0;
+      for (var w = 3; w >= 0; w--) sum += px[b * 4 + w] - px[a * 4 + w];
+      return sum;
+    }
+    var REF_DX = 1e-7;
+    var ref = cpuStateAt(scene, x0, y0, steps, bodyIndex), moved = cpuStateAt(scene, x0 + REF_DX, y0, steps, bodyIndex);
+    var slope = { x: (moved.x - ref.x) / REF_DX, y: (moved.y - ref.y) / REF_DX };
+    var size = Math.hypot(slope.x, slope.y);
+    return {
+      slope: slope,
+      errors: nudges.map(function (dx, k) {
+        var got = { x: difference(0, k + 1) / dx, y: difference(count, count + k + 1) / dx };
+        return Math.hypot(got.x - slope.x, got.y - slope.y) / size;
+      }),
+    };
+  }
+
+  // Three runs, one per kind of machinery, each with a slope that is NOT
+  // (1, 0) - the signature of a start that merely rode along untouched,
+  // which would test nothing but addition. (The pinball start is aimed AT a
+  // wall for that reason; from the grid's usual corner the ball drops
+  // through the gap and never meets one.)
+  function ladderScenes() {
+    // samples/double_pendulum.json and samples/binary_star.json, hardcoded
+    // (the suite loads no files): the scenes these numbers were measured on.
+    var pendulum = {
+      bodies: [
+        PhysicsEngine.createLine(409, 288, 140, -1.5708, false),
+        PhysicsEngine.createLine(480, 217, 140, 0, false),
+      ],
+      hinges: [
+        { bodyA: null, bodyB: 0, localAnchorA: { x: 408, y: 358 }, localAnchorB: { x: -70, y: -1 } },
+        { bodyA: 0, bodyB: 1, localAnchorA: { x: 70, y: 0 }, localAnchorB: { x: -71, y: -1 } },
+      ],
+      xInput: { body: 0, property: "angle" }, yInput: { body: 1, property: "angle" },
+      output: { body: 1, property: "angle" },
+      frameWidth: 1192, frameHeight: 819,
+    };
+    var stars = {
+      mutualGravity: true,
+      bodies: [
+        PhysicsEngine.createCircle(651, 318, 30, false),
+        PhysicsEngine.createCircle(489, 521, 30, false),
+        PhysicsEngine.createCircle(202, 165, 5, false),
+      ],
+      hinges: [],
+      xInput: { body: 2, property: "x" }, yInput: { body: 2, property: "y" },
+      output: { body: 2, property: "y" },
+      frameWidth: 1192, frameHeight: 809, edgeMode: "infinite",
+    };
+    [[87, 49], [-87, -57], [34, -28]].forEach(function (v, i) { stars.bodies[i].vx = v[0]; stars.bodies[i].vy = v[1]; });
+    return [
+      // Two bounces inside 150 steps: the right wall at step 59, the left by 140.
+      { name: "two wall bounces", scene: buildDeepZoomScene(), steps: 150, x0: 229.13, y0: -0.21 },
+      { name: "hinged double pendulum", scene: pendulum, steps: 24, x0: 0.37, y0: -0.21 },
+      { name: "mutual gravity", scene: stars, steps: 100, x0: 0.37, y0: -0.21 },
+    ];
+  }
+
+  addTest(
+    "Triple-float still resolves, at the END of a run, a nudge double-float cannot see (collisions, hinges, gravity)",
+    "the point of a third word. A 1e-15 nudge moves a ~500px coordinate by a few hundred times less than double-float can resolve there (2^-48 x 500 is about 2e-12), so df's answer to it is noise - which this checks too, since a harness that df could pass would be measuring nothing. Triple-float has to return the float64 engine's slope",
+    function () {
+      var NUDGE = 1e-15, details = [], pass = true;
+      ladderScenes().forEach(function (c) {
+        var body = c.scene.output.body;
+        var tf = ladderSlopeErrors(c.scene, c.steps, c.x0, c.y0, "tf", [NUDGE], body);
+        var df = ladderSlopeErrors(c.scene, c.steps, c.x0, c.y0, "df", [NUDGE], body);
+        var moved = Math.hypot(tf.slope.x - 1, tf.slope.y) > 0.05;
+        // The bar sits between two clusters a long way apart: a rung that
+        // resolves the nudge measures 1e-3 or better, one that cannot
+        // measures ~1.
+        if (!(tf.errors[0] < 0.05 && df.errors[0] > 0.5 && moved)) pass = false;
+        details.push(c.name + " (" + c.steps + " steps, slope " + tf.slope.x.toFixed(3) + ", " + tf.slope.y.toFixed(3) + "): tf error " +
+          tf.errors[0].toExponential(1) + ", df error " + df.errors[0].toExponential(1));
+      });
+      return { pass: pass, detail: "answering a " + NUDGE + "px nudge - " + details.join(" | ") + " (want tf < 0.05, and df > 0.5 as the control)" };
+    }
+  );
+
+  addTest(
+    "Quad-float still resolves, at the END of a run, a nudge triple-float cannot see (collisions, hinges, gravity)",
+    "the point of a fourth word, by the same method one rung up: a 1e-21 nudge is a hundred times below triple-float's resolution of a ~500px coordinate (2^-72 x 500 is about 1e-19), so tf is the control here and quad-float has to return the float64 engine's slope",
+    function () {
+      var NUDGE = 1e-21, details = [], pass = true;
+      ladderScenes().forEach(function (c) {
+        var body = c.scene.output.body;
+        var qf = ladderSlopeErrors(c.scene, c.steps, c.x0, c.y0, "qf", [NUDGE], body);
+        var tf = ladderSlopeErrors(c.scene, c.steps, c.x0, c.y0, "tf", [NUDGE], body);
+        if (!(qf.errors[0] < 0.05 && tf.errors[0] > 0.5)) pass = false;
+        details.push(c.name + ": qf error " + qf.errors[0].toExponential(1) + ", tf error " + tf.errors[0].toExponential(1));
+      });
+      return { pass: pass, detail: "answering a " + NUDGE + "px nudge - " + details.join(" | ") + " (want qf < 0.05, and tf > 0.5 as the control)" };
     }
   );
 
@@ -2948,25 +3307,61 @@
   );
 
   addTest(
-    "Compiling a funnel scene in double-float mode fails loudly instead of emitting wrong GLSL",
-    "the funnel GLSL functions (sweptCapsuleCircleContact, collideFunnelMouthTHit, etc.) exist only in float32 - generateStepOnceGLSL must throw in df mode rather than reference undefined df functions or silently drop the funnel's physics",
+    "A funnel teleport and a leg bounce run in double-float, in step with the float64 engine",
+    "funnels and splitters used to be float32-only: a df compile threw, and the grid quietly fell back to float32 however deep the zoom. physics-gpu-df.js now ports the trapezoid functions (dfSweptCapsuleCircleContact, dfTrapezoid, dfCollideFunnelMouthTHit) and generateStepOnceGLSL emits its funnel block at either precision - this pins both halves of that block, the mouth teleport and the solid-edge contacts, against the JS engine, where a float32 stage left in the chain shows up as an error ~1000x larger",
     function () {
-      var scene = {
-        bodies: [
-          PhysicsEngine.createFunnel(400, 400, 120, 0, true),
-          PhysicsEngine.createCircle(400, 250, 10, false),
-        ],
-        hinges: [],
-      };
-      var threw = false, message = "";
-      try {
-        PhysicsGPU.compileSceneToTrajectoryGLSL(scene, 5, "df");
-      } catch (err) {
-        threw = true;
-        message = err && err.message || String(err);
+      function sceneWith(circleX, circleY, radius) {
+        return {
+          bodies: [
+            PhysicsEngine.createFunnel(400, 400, 120, 0, true),
+            PhysicsEngine.createCircle(circleX, circleY, radius, false),
+          ],
+          hinges: [], xInput: null, yInput: null, output: { body: 1, property: "y" },
+        };
       }
-      var detail = threw ? ("threw as expected: " + message) : "did NOT throw - a df compile of a funnel scene silently produced something";
-      return { pass: threw, detail: detail };
+      var STEPS = 60;
+      function errorOf(scene, precision) {
+        var ref = cpuStateAt(scene, 0, 0, STEPS, 1);
+        return { err: gridResidualAtPoint(scene, STEPS, 0, 0, precision, 1, ref).err, ref: ref };
+      }
+      var teleport = errorOf(sceneWith(400, 250, 10), "df");
+      var bounce = errorOf(sceneWith(450, 400, 8), "df");
+      var bounce32 = errorOf(sceneWith(450, 400, 8), "f32");
+      // The teleport is the visible proof the mouth fired: the ball starts
+      // 150px above the funnel's center and can only get below it (the throat
+      // is on the far side of a solid edge) by being moved there.
+      var teleported = teleport.ref.y > 400;
+      return {
+        pass: teleported && teleport.err < 1e-6 && bounce.err < 1e-6 && bounce.err * 20 < bounce32.err,
+        detail: "after " + STEPS + " steps: teleport run off by " + teleport.err.toExponential(2) + "px in df (ball ended at y=" +
+          teleport.ref.y.toFixed(1) + ", past the funnel's center=" + teleported + "); leg bounce off by " +
+          bounce.err.toExponential(2) + "px in df vs " + bounce32.err.toExponential(2) + "px in float32",
+      };
+    }
+  );
+
+  addTest(
+    "A splitter scene runs in double-float, in step with the float64 engine",
+    "the splitter shares the funnel's trapezoid port, plus its own end-of-step machinery - spawn slots waking as DBody values, df alive-gating, the split offsets applied in df. The body checked is the one that stays in the parent's slot, so this passes only if the split itself landed where the JS engine put it",
+    function () {
+      // buildSplitterScene's own geometry (its ball splits at step 27), with
+      // the slot ceiling pulled down to what this run needs: every spawn slot
+      // is a whole extra body of df pair tests, and this page has a GPU
+      // watchdog to stay under.
+      var scene = buildSplitterScene(385);
+      scene.xInput = null; scene.yInput = null; scene.output = { body: 1, property: "y" };
+      scene.maxSimulationBodies = 4;
+      var STEPS = 40;
+      var js = PhysicsEngine.cloneScene(scene);
+      js.bodies.forEach(PhysicsEngine.computeMass);
+      for (var i = 0; i < STEPS; i++) PhysicsEngine.step(js, DT);
+      var ref = js.bodies[1];
+      var df = gridResidualAtPoint(scene, STEPS, 0, 0, "df", 1, ref);
+      return {
+        pass: js.bodies.length === 3 && df.err < 1e-6,
+        detail: "after " + STEPS + " steps the JS engine has " + js.bodies.length + " bodies (want 3: the ball split once); " +
+          "the df shader's parent half is off by " + df.err.toExponential(2) + "px",
+      };
     }
   );
 

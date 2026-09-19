@@ -63,10 +63,13 @@
       toFloat: function (a) { return a; },
       fromFloat: function (a) { return a; },
     },
+    // Every multi-float precision - "df", "tf", "qf" - spells its arithmetic
+    // the same way: the library's functions keep their df names whatever the
+    // word count, and the scalar type is the MF macro (see physics-df.js).
     df: {
-      scalar: "vec2",
+      scalar: "MF",
       vecType: "DVec2",
-      zero: "vec2(0.0, 0.0)",
+      zero: "MF(0.0)",
       lit: function (n) { return global.PhysicsDF.num(n); },
       add: function (a, b) { return "dfAdd(" + a + ", " + b + ")"; },
       sub: function (a, b) { return "dfSub(" + a + ", " + b + ")"; },
@@ -86,7 +89,12 @@
       fromFloat: function (a) { return "dfFromFloat(" + a + ")"; },
     },
   };
-  function backendFor(precision) { return BACKENDS[precision === "df" ? "df" : "f32"]; }
+  function backendFor(precision) {
+    if (!global.PhysicsDF.isExtended(precision)) return BACKENDS.f32;
+    // Literals this backend writes (B.lit) are at this precision from here on.
+    global.PhysicsDF.usePrecision(precision);
+    return BACKENDS.df;
+  }
 
   // An angle link moves the WHOLE circle in radians per world unit, same as
   // a position link moves it in pixels per world unit - but 2*PI world
@@ -533,7 +541,7 @@
       // Carried along so every downstream helper (canonical declarations,
       // the step-loop call args) spells its half of the seam the same way
       // without the caller having to pass the mode twice.
-      precision: precision === "df" ? "df" : "f32",
+      precision: global.PhysicsDF.isExtended(precision) ? precision : "f32",
     };
   }
 
@@ -550,7 +558,7 @@
   // result.declarationLines, since these expressions can reference locals
   // declared there.
   function generateCanonicalBodyDeclarationsGLSL(result) {
-    var df = result.precision === "df";
+    var df = global.PhysicsDF.isExtended(result.precision);
     var B = backendFor(result.precision);
     var lines = [];
     for (var i = 0; i < result.n; i++) {
@@ -570,7 +578,7 @@
       // collapsed to float32 here because the collision library was
       // float32; now that it isn't, collapsing would put a ~1e-7
       // quantization back on any size-linked axis for no reason.
-      var scalarDecl = df ? "vec2 " : "float ";
+      var scalarDecl = df ? "MF " : "float ";
       lines.push(scalarDecl + "BODY" + i + "_INV_MASS = " + sh.invMass + ";");
       lines.push(scalarDecl + "BODY" + i + "_INV_INERTIA = " + sh.invInertia + ";");
       lines.push(scalarDecl + "BODY" + i + "_HALF = " + sh.half + ";");
@@ -589,23 +597,30 @@
 
   // The hover-replay feature's entry point: "run the grid's WebGL code,
   // but with logging on" for the ONE specific (worldX, worldY) point under
-  // the cursor. worldX/worldY are baked as literal constants here - unlike
-  // the grid shader's per-pixel gl_FragCoord-derived version, there's
-  // exactly one point to compile for - so generateGridInitialStateGLSL
-  // needs no changes at all: its expressions just reference `worldX`/
-  // `worldY` as globals the same way, and a GLSL global can be a literal
-  // constant just as well as a runtime one. Reuses
-  // PhysicsGPU.generateTrajectoryMainGLSL - the exact same texture-logging
-  // convention (redundant re-simulation per texel) as the single-scene
-  // player, so the readback/replay code on the JS side doesn't need to
-  // know or care that this scene came from an offset instead of being
-  // authored directly.
+  // the cursor. Reuses PhysicsGPU.generateTrajectoryMainGLSL - the exact same
+  // texture-logging convention (redundant re-simulation per texel) as the
+  // single-scene player, so the readback/replay code on the JS side doesn't
+  // need to know or care that this scene came from an offset instead of
+  // being authored directly.
+  //
+  // The point arrives as UNIFORMS, not as baked constants. It used to be
+  // baked - generateGridInitialStateGLSL only needs `worldX`/`worldY` to be
+  // in scope, and a literal is as good as anything - but that made every
+  // hovered point its own shader: a compile, a link and (in df) a
+  // pipeline build measured in seconds, per mouse move, and up to 300 of
+  // them for one Inspect line or grid. As uniforms the source depends only
+  // on (scene, maxSteps, precision), so PhysicsGPU.runCompiledTrajectoryOnGPU
+  // compiles it once and every point after that is a draw and a readback.
+  // It is also closer to what the grid itself does, whose pixels build their
+  // world point from uniforms too.
+  //
   // `precision` must match whatever the grid itself is currently rendering
   // with, or the replay stops agreeing with the pixel it is replaying -
   // which is the one property this feature exists to have.
-  function compileHoverTrajectoryGLSL(scene, worldX, worldY, maxSteps, precision) {
-    var df = precision === "df";
-    var B = backendFor(precision);
+  // worldXLo/worldYLo are the low halves of a double-double point - omitted
+  // (zero) by every caller that only has a float64 to give.
+  function compileHoverTrajectoryGLSL(scene, worldX, worldY, maxSteps, precision, worldXLo, worldYLo) {
+    var df = global.PhysicsDF.isExtended(precision);
     var initial = generateGridInitialStateGLSL(scene, precision);
     // undefined in Infinite Space: no frame means the step loop emits no
     // wrap at all, which is exactly what that mode is.
@@ -614,25 +629,41 @@
     var lines = [];
     lines.push("#version 300 es");
     lines.push("precision highp float;");
-    lines.push("out vec4 fragColor;");
+    // One uniform per WORD of the point, exactly like the grid's own view
+    // centre (see PhysicsDF.wordUniformDecls): the hovered point arrives as a
+    // double-double, and rounding it to one float32 would replay a
+    // measurably different point than the one under the cursor at any zoom
+    // deep enough to need more than float32 in the first place. Each
+    // precision reads as many of the words as it carries.
+    global.PhysicsDF.wordUniformDecls("u_hoverWorld").forEach(function (l) { lines.push(l); });
+    // The chunked LOG / ADVANCE scheme - see PhysicsGPU.generateTrajectoryMainGLSL.
+    var chunk = PhysicsGPU.trajectoryChunkInfo(initial.n, initial.consts, initial.hingeAnchors, precision, initial.spawnBase);
+    lines.push(PhysicsGPU.generateTrajectoryHeaderGLSL(chunk));
     lines.push("");
     lines.push(PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(scene)));
     lines.push("");
-    lines.push("const int MAX_STEPS = " + maxSteps + ";");
-    // Baked as a df literal in df mode: the hovered point is a float64 JS
-    // number, and rounding it to one float32 here would replay a
-    // measurably different point than the one under the cursor at any zoom
-    // deep enough to need df in the first place.
-    lines.push("const " + B.scalar + " worldX = " + B.lit(worldX) + ";");
-    lines.push("const " + B.scalar + " worldY = " + B.lit(worldY) + ";");
-    lines.push("");
     lines.push(PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), initial.spawnBase));
     lines.push("");
-    var bodyDecl = initial.declarationLines.join("\n") + "\n" + generateCanonicalBodyDeclarationsGLSL(initial) +
+    // Locals rather than globals: a global's initializer has to be a constant
+    // expression, which a uniform is not. They are declared first, so every
+    // expression generateGridInitialStateGLSL built finds them in scope.
+    var B = backendFor(precision);
+    var worldDecl = B.scalar + " worldX = " + global.PhysicsDF.wordUniformValue("u_hoverWorld", "x", precision) + ";\n" +
+      B.scalar + " worldY = " + global.PhysicsDF.wordUniformValue("u_hoverWorld", "y", precision) + ";";
+    var bodyDecl = worldDecl + "\n" + initial.declarationLines.join("\n") + "\n" + generateCanonicalBodyDeclarationsGLSL(initial) +
       "\n" + PhysicsGPU.generateHingeAnchorLocalsGLSL(initial.hingeAnchors, precision);
-    lines.push(PhysicsGPU.generateTrajectoryMainGLSL(initial.n, bodyDecl, initial.hingeAnchors, precision, initial.spawnBase));
+    lines.push(PhysicsGPU.generateTrajectoryMainGLSL(initial.n, bodyDecl, initial.hingeAnchors, precision, initial.spawnBase, chunk));
 
-    return { fragmentSource: lines.join("\n"), numBodies: initial.n, precision: df ? "df" : "f32" };
+    var words = global.PhysicsDF.wordUniformValues(worldX, worldXLo, worldY, worldYLo);
+    var uniforms = {};
+    global.PhysicsDF.WORD_SUFFIXES.forEach(function (sfx, k) { uniforms["u_hoverWorld" + sfx] = [words[0][k], words[1][k]]; });
+    return {
+      fragmentSource: lines.join("\n"),
+      numBodies: initial.n,
+      precision: df ? precision : "f32",
+      uniforms: uniforms,
+      chunk: chunk,
+    };
   }
 
   // Same grouping/sign rule as resolveOffsetTargets's add() (negate only
@@ -711,159 +742,10 @@
     return result;
   }
 
-  // ---- Carrying a pixel's simulation across draws (grid playback) ----
-  //
-  // The grid's normal render starts every pixel from step 0 and runs it to
-  // the end inside one draw. Playback can't afford that: showing step N+1
-  // would redo all N steps before it, so the work grows with every frame.
-  // Instead each pixel's state is written to float textures at the end of a
-  // draw and read back at the start of the next, so a frame only pays for
-  // the steps it actually adds.
-  //
-  // "State" is exactly what a stepOnce() call can change and the next call
-  // must see: the inout parameters stepOnceParams declares. Everything else
-  // a draw needs (inverse masses, sizes, hinge local anchors, anchored
-  // bodies) is a pure function of the pixel's world X/Y, so each draw
-  // recomputes it from generateGridInitialStateGLSL's declarations instead.
-  //
-  // The textures are RGBA32F, which store float32 values exactly - so as
-  // long as the same program does the stepping, stopping after k steps,
-  // saving, reloading and running the rest lands on the same bits as one
-  // uninterrupted run. physics-tests.js checks that.
-  //
-  // A state variable is { name, type }, where type is how the step loop
-  // declares that local: "Body"/"DBody" (a body's six accumulators), "float",
-  // "df" (one df scalar, a vec2), "vec2", "DVec2", "bool" or "int".
-  var STATE_TYPE_FIELDS = {
-    Body: [".x", ".y", ".angle", ".vx", ".vy", ".w"],
-    DBody: [".x.x", ".x.y", ".y.x", ".y.y", ".angle.x", ".angle.y", ".vx.x", ".vx.y", ".vy.x", ".vy.y", ".w.x", ".w.y"],
-    float: [""],
-    df: [".x", ".y"],
-    vec2: [".x", ".y"],
-    DVec2: [".x.x", ".x.y", ".y.x", ".y.y"],
-    bool: [""],
-    int: [""],
-  };
-  // The GLSL type a local of each kind is declared with.
-  var STATE_TYPE_GLSL = { Body: "Body", DBody: "DBody", float: "float", df: "vec2", vec2: "vec2", DVec2: "DVec2", bool: "bool", int: "int" };
-  // Four floats per texel, so one texture layer per four state floats.
-  var STATE_FLOATS_PER_LAYER = 4;
-
-  // The state variables of a scene compiled by generateGridInitialStateGLSL.
-  //
-  // Anchored bodies are left out: stepOnce() never writes one (see the
-  // `if (consts[g].isAnchored) continue` guards around every integration
-  // site in PhysicsGPU.generateStepOnceGLSL, and invMass/invInertia of 0 in
-  // every solver), so its value at any step is its starting value, which
-  // each draw recomputes anyway. extraBodies names any that must be carried
-  // regardless - a reader that has no starting state of its own, like the
-  // playback color pass reading an anchored Output body, needs them.
-  //
-  // A world hinge's anchor is carried because the frame wrap moves it in
-  // place (see stepOnceParams). Spawn slots carry the shape constants a split
-  // overwrites, plus alive/lineage, and the scene carries liveCount.
-  function playbackStateVariables(result, extraBodies) {
-    var df = result.precision === "df";
-    var extra = extraBodies || [];
-    var vars = [];
-    for (var i = 0; i < result.n; i++) {
-      if (result.consts[i].isAnchored && extra.indexOf(i) === -1) continue;
-      vars.push({ name: (df ? "dbody" : "body") + i, type: df ? "DBody" : "Body" });
-    }
-    var hasSpawn = result.spawnBase !== null && result.spawnBase !== undefined;
-    if (hasSpawn) {
-      for (var k = result.spawnBase; k < result.n; k++) {
-        ["_INV_MASS", "_INV_INERTIA", "_HALF"].forEach(function (suffix) {
-          vars.push({ name: "BODY" + k + suffix, type: df ? "df" : "float" });
-        });
-        vars.push({ name: "alive" + k, type: "bool" });
-        vars.push({ name: "lineage" + k, type: "int" });
-      }
-      vars.push({ name: "liveCount", type: "int" });
-    }
-    result.hingeAnchors.forEach(function (hg, h) {
-      if (hg.aIsWorld) vars.push({ name: "hingeAnchor" + h, type: df ? "DVec2" : "vec2" });
-    });
-    return vars;
-  }
-
-  // Every float the variables pack into, in order, as { variable, field }.
-  function stateFloats(vars) {
-    var out = [];
-    vars.forEach(function (v) {
-      var fields = STATE_TYPE_FIELDS[v.type];
-      if (!fields) throw new Error("Unknown playback state type: " + v.type);
-      fields.forEach(function (f) { out.push({ variable: v, field: f }); });
-    });
-    return out;
-  }
-
-  function playbackStateLayerCount(vars) {
-    return Math.max(1, Math.ceil(stateFloats(vars).length / STATE_FLOATS_PER_LAYER));
-  }
-
-  // Uninitialized declarations, for a program that has no step loop of its
-  // own to declare them (the playback color pass). Every field is assigned
-  // by the load below before anything reads it.
-  function generatePlaybackStateDeclarationsGLSL(vars) {
-    return vars.map(function (v) { return STATE_TYPE_GLSL[v.type] + " " + v.name + ";"; });
-  }
-
-  // Reads every state variable from a sampler2DArray at an integer texel.
-  // Layer temporaries are prefixed pbState so they can't collide with the
-  // gv_/pair_/probe names the rest of the generated code uses.
-  function generatePlaybackStateLoadGLSL(vars, samplerName, texelExpr) {
-    var floats = stateFloats(vars);
-    var lines = [];
-    var layers = playbackStateLayerCount(vars);
-    for (var l = 0; l < layers; l++) {
-      lines.push("vec4 pbState" + l + " = texelFetch(" + samplerName + ", ivec3(" + texelExpr + ", " + l + "), 0);");
-    }
-    floats.forEach(function (f, i) {
-      var src = "pbState" + Math.floor(i / STATE_FLOATS_PER_LAYER) + "." + "xyzw"[i % STATE_FLOATS_PER_LAYER];
-      if (f.variable.type === "bool") lines.push(f.variable.name + " = " + src + " > 0.5;");
-      else if (f.variable.type === "int") lines.push(f.variable.name + " = int(" + src + ");");
-      else lines.push(f.variable.name + f.field + " = " + src + ";");
-    });
-    return lines;
-  }
-
-  // Fragment outputs for writing state: one per texture layer a single draw
-  // can attach. A WebGL2 draw writes at most MAX_DRAW_BUFFERS attachments, so
-  // a state with more layers than that is written in groups - one draw per
-  // group, each running the same steps and keeping a different slice.
-  function generatePlaybackStateOutputsGLSL(layersPerGroup) {
-    var lines = [];
-    for (var k = 0; k < layersPerGroup; k++) lines.push("layout(location = " + k + ") out vec4 pbOut" + k + ";");
-    return lines;
-  }
-
-  // Writes the slice of state belonging to group `groupExpr` (an int
-  // expression) into the outputs declared above.
-  function generatePlaybackStateStoreGLSL(vars, groupExpr, layersPerGroup) {
-    var floats = stateFloats(vars);
-    var layers = playbackStateLayerCount(vars);
-    var groups = Math.ceil(layers / layersPerGroup);
-    function floatExpr(i) {
-      if (i >= floats.length) return "0.0";
-      var v = floats[i].variable;
-      if (v.type === "bool") return "(" + v.name + " ? 1.0 : 0.0)";
-      if (v.type === "int") return "float(" + v.name + ")";
-      return v.name + floats[i].field;
-    }
-    var lines = [];
-    for (var g = 0; g < groups; g++) {
-      lines.push((g === 0 ? "if" : "} else if") + " (" + groupExpr + " == " + g + ") {");
-      for (var k = 0; k < layersPerGroup; k++) {
-        var layer = g * layersPerGroup + k;
-        if (layer >= layers) break;
-        var base = layer * STATE_FLOATS_PER_LAYER;
-        lines.push("  pbOut" + k + " = vec4(" + [0, 1, 2, 3].map(function (c) { return floatExpr(base + c); }).join(", ") + ");");
-      }
-    }
-    lines.push("}");
-    return lines;
-  }
+  // The state-carrying helpers (playbackStateVariables and friends) live in
+  // physics-gpu.js now - the trajectory runner needs them too, and that file
+  // loads first. They are re-exported below under the names every caller of
+  // this module already uses.
 
   global.PhysicsGridCodegen = {
     // Exposed so fractal-grid.js's own shader assembly (the world-X/Y
@@ -875,11 +757,12 @@
     generateCanonicalBodyDeclarationsGLSL: generateCanonicalBodyDeclarationsGLSL,
     compileHoverTrajectoryGLSL: compileHoverTrajectoryGLSL,
     computeOffsetSceneNumeric: computeOffsetSceneNumeric,
-    playbackStateVariables: playbackStateVariables,
-    playbackStateLayerCount: playbackStateLayerCount,
-    generatePlaybackStateDeclarationsGLSL: generatePlaybackStateDeclarationsGLSL,
-    generatePlaybackStateLoadGLSL: generatePlaybackStateLoadGLSL,
-    generatePlaybackStateOutputsGLSL: generatePlaybackStateOutputsGLSL,
-    generatePlaybackStateStoreGLSL: generatePlaybackStateStoreGLSL,
+    playbackStateVariables: PhysicsGPU.playbackStateVariables,
+    withWords: PhysicsGPU.withWords,
+    playbackStateLayerCount: PhysicsGPU.playbackStateLayerCount,
+    generatePlaybackStateDeclarationsGLSL: PhysicsGPU.generatePlaybackStateDeclarationsGLSL,
+    generatePlaybackStateLoadGLSL: PhysicsGPU.generatePlaybackStateLoadGLSL,
+    generatePlaybackStateOutputsGLSL: PhysicsGPU.generatePlaybackStateOutputsGLSL,
+    generatePlaybackStateStoreGLSL: PhysicsGPU.generatePlaybackStateStoreGLSL,
   };
 })(window);

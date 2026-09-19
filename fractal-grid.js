@@ -63,11 +63,12 @@
   // Not a precision-derived floor - just small enough that the real limit
   // is what you hit first, as visible pixelation/aliasing rather than an
   // artificial hard stop. That limit used to be highp float's ~7 decimal
-  // digits in the GLSL computing worldX/worldY; with the double-float path
-  // (physics-df.js) it's ~15 digits instead, so this floor moved down with
-  // it - see the precision readout in the Settings panel, which reports
-  // which of the two is actually running at the current zoom.
-  var MIN_SCALE = 1e-12;
+  // digits in the GLSL computing worldX/worldY; each multi-float precision
+  // (physics-df.js) moves it down by about seven more - ~14 digits at two
+  // words, ~21 at three, ~28 at four - so this floor sits just past the
+  // last of them. See the precision readout in the Settings panel, which
+  // reports which one is actually running at the current zoom.
+  var MIN_SCALE = 1e-22;
   var MAX_SCALE = 1e6;
 
   // How far each pixel's own simulation is run before its Output value is
@@ -635,12 +636,16 @@
   // the project's rainbow color formula (see colorMap below). ----
 
   // precision is "f32" or "df". The two shaders are the same program with
-  // the same physics - only the six per-body accumulators (and the world
-  // X/Y that seeds them) change representation. See physics-df.js and
-  // physics-gpu-df.js for the df physics library; see pickPrecision()
-  // below for when each one is used.
-  function buildFragmentShader(sceneToCompile, precision) {
-    return compileScenePieces(sceneToCompile, precision).gridSource;
+  // the same physics, carried at a different precision from end to end: the
+  // world X/Y that seeds a pixel, its starting-state cascade, every step of
+  // the simulation (collisions, both solvers, gravity) and the Output read
+  // at the end. See physics-df.js and physics-gpu-df.js for the df
+  // libraries; see pickPrecision() below for when each one is used.
+  // variant is "standard" or "derived" - see the bottom of
+  // compileScenePieces for what each holds.
+  function buildFragmentShader(sceneToCompile, precision, variant) {
+    var pieces = compileScenePieces(sceneToCompile, precision);
+    return variant === "derived" ? pieces.derivedSource : pieces.gridSource;
   }
 
   // Everything one scene compiles to, in named pieces: the grid's own
@@ -649,7 +654,10 @@
   // One function builds both, so playback can't drift from the physics,
   // Output reading and color ramp the grid itself runs.
   function compileScenePieces(sceneToCompile, precision) {
-    var df = precision === "df";
+    // "df" here, as everywhere in the code generators, means "any of the
+    // multi-float precisions" - double-, triple- or quad-float. They are
+    // spelled identically (see PhysicsDF); only the word count differs.
+    var df = PhysicsDF.isExtended(precision);
     var B = PhysicsGridCodegen.backendFor(precision);
     var initial = PhysicsGridCodegen.generateGridInitialStateGLSL(sceneToCompile, precision);
     var outProp = sceneToCompile.output.property; // "x" | "y" | "angle" | "distance" | "lifespan" | "bounces"
@@ -721,28 +729,30 @@
       // the width of the frame the instant either body crossed an edge, for
       // a pair that never moved apart.
       //
-      // The two subtractions happen at the pass's precision and only the
-      // (small) separations collapse to float32 for the length() - the same
-      // ordering the mutual-gravity code uses, and for the same reason:
-      // collapsing two full-magnitude coordinates first would throw away
-      // exactly the distinction between neighbouring pixels that a df pass
-      // exists to keep.
+      // Kept at the pass's precision all the way through the length(). The
+      // colour ramp itself needs nothing like this many digits, but the
+      // derived display modes DIFFERENCE this value between neighbouring
+      // pixels, and at a deep zoom those differ by far less than one
+      // float32 ULP of a distance of order 100 - so a float32 length() here
+      // handed them quantization steps to take the gradient of.
       outputLines = [];
       emitBodyValue("outAx", outputBodies[0], "x").forEach(function (l) { outputLines.push(l); });
       emitBodyValue("outAy", outputBodies[0], "y").forEach(function (l) { outputLines.push(l); });
       emitBodyValue("outBx", outputBodies[1], "x").forEach(function (l) { outputLines.push(l); });
       emitBodyValue("outBy", outputBodies[1], "y").forEach(function (l) { outputLines.push(l); });
-      outputLines.push("  float outDx = " + B.toFloat(B.sub("outBx", "outAx")) + ";");
-      outputLines.push("  float outDy = " + B.toFloat(B.sub("outBy", "outAy")) + ";");
+      outputLines.push("  " + B.scalar + " outDx = " + B.sub("outBx", "outAx") + ";");
+      outputLines.push("  " + B.scalar + " outDy = " + B.sub("outBy", "outAy") + ";");
       if (PhysicsEngine.wrapsAtEdges(sceneToCompile)) {
         // floor(x + 0.5), not round(): GLSL's round() breaks ties to even,
         // JS's Math.round breaks them upward, and the two engines have to
-        // fold the same way at exactly half a frame.
+        // fold the same way at exactly half a frame. The fold COUNT is a
+        // small whole number, so float32 decides it; what it is multiplied
+        // back out against, and subtracted from, stays at full precision.
         var fw = PhysicsGPU.fnum(sceneToCompile.frameWidth), fh = PhysicsGPU.fnum(sceneToCompile.frameHeight);
-        outputLines.push("  outDx -= " + fw + " * floor(outDx / " + fw + " + 0.5);");
-        outputLines.push("  outDy -= " + fh + " * floor(outDy / " + fh + " + 0.5);");
+        outputLines.push("  outDx = " + B.sub("outDx", B.mul(B.lit(sceneToCompile.frameWidth), B.fromFloat("floor(" + B.toFloat("outDx") + " / " + fw + " + 0.5)"))) + ";");
+        outputLines.push("  outDy = " + B.sub("outDy", B.mul(B.lit(sceneToCompile.frameHeight), B.fromFloat("floor(" + B.toFloat("outDy") + " / " + fh + " + 0.5)"))) + ";");
       }
-      outputLines.push("  outputValue = " + B.fromFloat("length(vec2(outDx, outDy))") + ";");
+      outputLines.push("  outputValue = " + (df ? "dv2Length(dv2(outDx, outDy))" : "length(vec2(outDx, outDy))") + ";");
     } else if (outputBodies.length === 2) {
       // The mean of the two, each already its own lineage average.
       outputLines = [];
@@ -878,7 +888,16 @@
         // DT+1.0 sentinel: strictly greater than any real tFrac (which is
         // clamped into [0, DT]), so the first real crossing this step always
         // wins the comparison below regardless of watch order.
+        //
+        // tFrac is carried at the pass's precision (tFracHi below), with a
+        // float32 shadow (bestTFrac) for the two places that only ever
+        // needed one: picking the earliest crossing, and the lifespan. The
+        // extrapolated OUTPUT is tFrac times a velocity of order 1e2-1e3, so
+        // a float32 tFrac put a ~1e-6px quantization on it - nothing the
+        // colour ramp can see, and exactly what the derived display modes
+        // difference between neighbouring pixels at a deep zoom.
         lines.push("    float bestTFrac = DT + 1.0;");
+        lines.push("    " + B.scalar + " bestTFracHi = " + B.zero + ";");
         watchedIndices.forEach(function (idx) {
           lines.push("    {");
           // The crossing TEST is coarse by nature (did this step move most of
@@ -891,18 +910,25 @@
           lines.push("      if (abs(wrapDx) > " + halfW + " || abs(wrapDy) > " + halfH + ") {");
           lines.push("        bool xCrossed = abs(wrapDx) > " + halfW + ";");
           lines.push("        float span = xCrossed ? " + fullW + " : " + fullH + ";");
-          lines.push("        float vAxis = " + B.toFloat("xCrossed ? " + bodyVar + idx + ".vx : " + bodyVar + idx + ".vy") + ";");
+          lines.push("        " + B.scalar + " vAxisHi = xCrossed ? " + bodyVar + idx + ".vx : " + bodyVar + idx + ".vy;");
+          lines.push("        float vAxis = " + B.toFloat("vAxisHi") + ";");
           lines.push("        " + B.scalar + " prevAxis = xCrossed ? frozenX" + idx + " : frozenY" + idx + ";");
           lines.push("        float boundary = vAxis > 0.0 ? span : 0.0;");
-          lines.push("        float tFrac = clamp(" + B.toFloat(B.sub(B.fromFloat("boundary"), "prevAxis")) + " / vAxis, 0.0, DT);");
+          if (df) {
+            lines.push("        MF tFracHi = dfClamp(dfDiv(dfSub(dfFromFloat(boundary), prevAxis), vAxisHi), DF_ZERO, DF_DT);");
+            lines.push("        float tFrac = dfToFloat(tFracHi);");
+          } else {
+            lines.push("        float tFrac = clamp(((boundary) - (prevAxis)) / vAxis, 0.0, DT);");
+            lines.push("        float tFracHi = tFrac;");
+          }
           // Earliest continuous crossing wins when more than one watched body
           // registers a crossing on the same discrete step.
-          lines.push("        if (tFrac < bestTFrac) bestTFrac = tFrac;");
+          lines.push("        if (tFrac < bestTFrac) { bestTFrac = tFrac; bestTFracHi = tFracHi; }");
           lines.push("      }");
           lines.push("    }");
         });
         lines.push("    if (bestTFrac <= DT) {");
-        lines.push("      float tTarget = bestTFrac - DT;");
+        lines.push("      " + B.scalar + " tTarget = " + B.sub("bestTFracHi", df ? "DF_DT" : "DT") + ";");
         lines.push("      lifespanValue = " + loop.stepIndex + " + bestTFrac / DT;");
         outputIndices.forEach(function (out) {
           // frozen + (frozen - prevFrozen)/DT * tTarget, kept whole at the
@@ -911,8 +937,10 @@
           // base it is added onto is a full-magnitude coordinate that must
           // not be rounded.
           function extrapolate(axis) {
-            var vel = B.mul(B.sub("frozen" + axis + out, "prevFrozen" + axis + out), B.fromFloat("(1.0 / DT)"));
-            return B.add("frozen" + axis + out, B.mul(vel, B.fromFloat("tTarget")));
+            // 1/DT is 60 exactly, so the literal carries it without the
+            // float32 division the old "(1.0 / DT)" spent on it.
+            var vel = B.mul(B.sub("frozen" + axis + out, "prevFrozen" + axis + out), df ? B.lit(1 / PhysicsGPU.FIXED_DT) : "(1.0 / DT)");
+            return B.add("frozen" + axis + out, B.mul(vel, "tTarget"));
           }
           lines.push("      if (hasPrevFrozen) {");
           lines.push("        " + bodyVar + out + ".x = " + extrapolate("X") + ";");
@@ -965,6 +993,7 @@
     if (isBounces) {
       loopStateVariables.push({ name: "bounceCount", type: "float" }, { name: "bounceTouching", type: "bool" });
     }
+    PhysicsGridCodegen.withWords(loopStateVariables, precision);
 
     // ---- Derived display modes ----
     //
@@ -1094,8 +1123,35 @@
       // ~1e-4 of ONE PIXEL's worth of world distance - far below anything
       // visible. The catastrophic step is the ADD onto the center, and
       // that is the one done in df.
-      df ? "  vec2 worldX = dfAddFloat(vec2(u_centerHi.x, u_centerLo.x), uv.x * u_scale);" : "  float worldX = u_centerHi.x + uv.x * u_scale;",
-      df ? "  vec2 worldY = dfAddFloat(vec2(u_centerHi.y, u_centerLo.y), uv.y * u_scale);" : "  float worldY = u_centerHi.y + uv.y * u_scale;",
+      df ? "  MF worldX = dfAddFloat(" + PhysicsDF.wordUniformValue("u_center", "x", precision) + ", uv.x * u_scale);" : "  float worldX = u_centerHi.x + uv.x * u_scale;",
+      df ? "  MF worldY = dfAddFloat(" + PhysicsDF.wordUniformValue("u_center", "y", precision) + ", uv.y * u_scale);" : "  float worldY = u_centerHi.y + uv.y * u_scale;",
+    ];
+
+    // The same mapping for the two STATE-CARRYING programs (playback's step
+    // pass, which is also what draws the grid itself at df and above - see
+    // "Sliced rendering"). Two things the grid program's own version has no
+    // need of:
+    //   u_tileOrigin - the state texture holds one TILE of a lattice, so
+    //                  texel (0, 0) is lattice pixel u_tileOrigin.
+    //   u_stencil    - 1, or 5 for the derived display modes: each lattice
+    //                  pixel then owns five neighbouring texels, its own
+    //                  starting point and the four a full-res pixel away from
+    //                  it, in STATE_STENCIL's order. That is the same
+    //                  five-point stencil shadeDerived() re-simulates inline;
+    //                  here the five are simply simulated side by side.
+    // With u_stencil 1 and u_tileOrigin (0, 0) this is worldCoordLines to the
+    // bit: texel index, times stride, plus origin, plus a half.
+    var stateWorldCoordLines = [
+      "  ivec2 stateTexel = ivec2(gl_FragCoord.xy);",
+      "  int stencilIndex = stateTexel.x % u_stencil;",
+      "  vec2 latticeIndex = vec2(float(stateTexel.x / u_stencil), float(stateTexel.y)) + u_tileOrigin;",
+      "  vec2 fullCoord = latticeIndex * u_gridStride + u_gridOrigin + 0.5;",
+      "  vec2 uv = (fullCoord - 0.5 * u_resolution) / u_resolution.y;",
+      "  vec2 stencilOffset = STATE_STENCIL[stencilIndex] * (u_scale / u_resolution.y);",
+      df ? "  MF worldX = dfAddFloat(dfAddFloat(" + PhysicsDF.wordUniformValue("u_center", "x", precision) + ", uv.x * u_scale), stencilOffset.x);"
+         : "  float worldX = (u_centerHi.x + uv.x * u_scale) + stencilOffset.x;",
+      df ? "  MF worldY = dfAddFloat(dfAddFloat(" + PhysicsDF.wordUniformValue("u_center", "y", precision) + ", uv.y * u_scale), stencilOffset.y);"
+         : "  float worldY = (u_centerHi.y + uv.y * u_scale) + stencilOffset.y;",
     ];
 
     var gridHeaderLines = [
@@ -1120,14 +1176,15 @@
       // the finished image unchanged by any of this.
       "uniform float u_gridStride;",
       "uniform vec2 u_gridOrigin;",
-      // The view center arrives pre-split into two float32 words. JS
-      // numbers are float64 and view.center has always carried the full
-      // precision - uploading it as a single float32 uniform was throwing
-      // ~8 decimal digits away at the door, which no amount of care later
-      // in the shader could get back. The f32 pass simply ignores the low
-      // word, so both programs take the same uniforms.
-      "uniform vec2 u_centerHi;",
-      "uniform vec2 u_centerLo;",
+      // The view center arrives pre-split into float32 WORDS, one uniform
+      // per word (u_centerHi, u_centerLo, u_centerLo2, u_centerLo3 - see
+      // PhysicsDF.wordUniformDecls). The page holds the center to ~106 bits
+      // (see view.center); uploading it as a single float32 uniform was
+      // throwing all but 24 of them away at the door, which no amount of
+      // care later in the shader could get back. Every program declares all
+      // four and reads as many as its precision carries, so they all take
+      // the same uniforms.
+    ].concat(PhysicsDF.wordUniformDecls("u_center"), [
       "uniform float u_scale;",
       "uniform bool u_colorZoom;",
       // How many steps each pixel runs. A uniform rather than a baked
@@ -1161,7 +1218,7 @@
       "",
       PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(sceneToCompile)),
       "",
-    ];
+    ]);
 
     // Everything that turns a t - or a derivative of one - into a color.
     // Playback's color pass includes this same block, so a value can't look
@@ -1374,7 +1431,11 @@
       "",
       stepOnceSource,
       "",
+    ];
 
+    // Everything from here to gridTailLines belongs to the DERIVED program
+    // only - see the variants at the bottom of this function.
+    var sampleOutputLines = [
       // ---- One pixel's whole simulation ----
       //
       // From a starting (worldX, worldY) to the raw Output value at the end
@@ -1518,9 +1579,33 @@
       "  " + outScalar + " outputValue = " + outZero + ";",
       outputLines.join("\n"),
       tLine,
-      // The block samplerFor() rewrites, to read t back as a raw float
-      // instead of a color - both halves at once, so the program it builds
-      // measures the field and never runs a stencil. Keep it literal.
+    ];
+
+    // ---- Two programs from the same pieces ----
+    //
+    // STANDARD is what the grid shows by default, and the only thing most
+    // sessions ever draw: the header, the color ramp, ONE copy of the step
+    // function (inline in main(), see gridMainLines' comment) and nothing
+    // else. It doubles as the sampler: with u_sampleField set it writes the
+    // raw t into a float target instead of a color, so every measurement of
+    // the field (Color Zoom's spread check, the bounce-count divisor, the
+    // superlatives, Global Stats) reads the very program that drew the
+    // picture rather than a second compile of it.
+    //
+    // DERIVED adds sampleOutput() - a second copy of the whole simulation -
+    // plus the stencil and the three derived color formulas. It is built only
+    // when a derived display mode is first picked.
+    //
+    // They used to be one program, which meant every compile - and in df
+    // every multi-second pipeline build on the first draw - paid for two
+    // copies of the step function to serve a mode most views never enter,
+    // and the sampler paid for them a second time over.
+    var standardTailLines = [
+      "  if (u_sampleField) { fragColor = vec4(t, 0.0, 0.0, 1.0); return; }",
+      "  fragColor = vec4(colorMap(t), 1.0);",
+      "}",
+    ];
+    var derivedTailLines = [
       "  if (u_displayMode != MODE_STANDARD) {",
       "    fragColor = vec4(shadeDerived(worldX, worldY, outputValue, t), 1.0);",
       "    return;",
@@ -1530,8 +1615,10 @@
     ];
 
     return {
-      gridSource: [].concat(gridHeaderLines, colorLibraryLines, gridPhysicsLines, deltaTLines,
-        gridTailLines, worldCoordLines, gridMainLines).join("\n"),
+      gridSource: [].concat(gridHeaderLines, ["uniform bool u_sampleField;", ""], colorLibraryLines, gridPhysicsLines,
+        ["void main() {"], worldCoordLines, gridMainLines, standardTailLines).join("\n"),
+      derivedSource: [].concat(gridHeaderLines, colorLibraryLines, gridPhysicsLines, sampleOutputLines, deltaTLines,
+        gridTailLines, worldCoordLines, gridMainLines, derivedTailLines).join("\n"),
       precision: df ? "df" : "f32",
       initial: initial,
       outScalar: outScalar,
@@ -1546,6 +1633,7 @@
       loopStateVariables: loopStateVariables,
       physicsDeclarationLines: physicsDeclarationLines,
       worldCoordLines: worldCoordLines,
+      stateWorldCoordLines: stateWorldCoordLines,
       colorLibraryLines: colorLibraryLines,
       deltaTLines: deltaTLines,
       libraryLines: [PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(sceneToCompile))],
@@ -1579,70 +1667,292 @@
     return;
   }
 
-  // ---- The two shader passes ----
+  // ---- Building a program without stalling the page ----
   //
-  // The same scene compiled twice: once with float32 body state, once with
-  // double-float. They compute the same physics and differ only in how much
-  // of a pixel's starting conditions survives into it, so which one is
-  // bound is purely a function of the current zoom (see pickPrecision) and
-  // nothing else in the page has to know which is running.
+  // A df program is expensive to build twice over. The GLSL compile and link
+  // are the small part; on ANGLE's Metal backend the real cost lands on the
+  // program's FIRST DRAW, when the pipeline is finally compiled for the
+  // target it is drawing into - measured at 0.5 to 11 seconds for a df
+  // physics shader, against ~0.1s for the link. Done the obvious way (link,
+  // check the status, draw) both halves block the page outright, which is
+  // the freeze that used to greet the first zoom past the float32 wall.
   //
-  // The df pass costs real ALU, so it is compiled lazily - a session that
-  // never zooms past the float32 wall never pays for it, and (because both
-  // are the same program otherwise) at any zoom just ABOVE that wall the
-  // two must render identically, which is the cheapest correctness check
-  // this code has.
-  function buildPass(precision) {
-    var prog = PhysicsGPU.linkProgram(gl, vs,
-      PhysicsGPU.compileShader(gl, gl.FRAGMENT_SHADER, buildFragmentShader(scene, precision)));
-    return {
-      precision: precision,
-      program: prog,
-      posLoc: gl.getAttribLocation(prog, "a_position"),
-      uniforms: {
-        resolution: gl.getUniformLocation(prog, "u_resolution"),
-        gridStride: gl.getUniformLocation(prog, "u_gridStride"),
-        gridOrigin: gl.getUniformLocation(prog, "u_gridOrigin"),
-        centerHi: gl.getUniformLocation(prog, "u_centerHi"),
-        centerLo: gl.getUniformLocation(prog, "u_centerLo"),
-        scale: gl.getUniformLocation(prog, "u_scale"),
-        colorZoom: gl.getUniformLocation(prog, "u_colorZoom"),
-        maxSteps: gl.getUniformLocation(prog, "u_maxSteps"),
-        durationSteps: gl.getUniformLocation(prog, "u_durationSteps"),
-        bounceMax: gl.getUniformLocation(prog, "u_bounceMax"),
-        displayMode: gl.getUniformLocation(prog, "u_displayMode"),
-      },
-      sampler: null,      // filled in by setUpColorSpreadSampler, below
-      samplerBuilt: false,
-    };
+  // So a build is a small state machine that is only ever POLLED:
+  //   linking - compile + link issued, status not asked for. With
+  //             KHR_parallel_shader_compile the driver works on it in the
+  //             background and COMPLETION_STATUS_KHR says when it is done
+  //             without waiting for it. (Without the extension the first
+  //             poll blocks for the link, which is the old behaviour.)
+  //   warming - linked. A 1x1 draw per target format has been queued to
+  //             force the pipeline build, with a fence behind it. Draws are
+  //             asynchronous to the page, so the GPU process chews on that
+  //             while the page carries on; the fence says when it is through.
+  //   ready / failed
+  // Until a program is ready the grid keeps drawing with the one it has.
+  var parallelCompileExt = gl.getExtension("KHR_parallel_shader_compile");
+
+  function startProgramBuild(fragmentSource) {
+    var shader = gl.createShader(gl.FRAGMENT_SHADER);
+    gl.shaderSource(shader, fragmentSource);
+    gl.compileShader(shader);
+    var program = gl.createProgram();
+    gl.attachShader(program, vs);
+    gl.attachShader(program, shader);
+    gl.linkProgram(program);
+    return { status: "linking", program: program, shader: shader, sync: null, error: null };
   }
 
-  var passes = {};
-  // Returns null (and leaves the current pass in place) if this precision
-  // can't be built on this device, rather than blanking the page.
-  function getPass(precision) {
-    if (!(precision in passes)) {
-      try {
-        passes[precision] = buildPass(precision);
-      } catch (err) {
-        passes[precision] = null;
-        if (precision === "df") setStatus(false, "High-precision shader unavailable: " + (err.message || err));
+  function discardProgramBuild(build) {
+    if (!build) return;
+    if (build.sync) gl.deleteSync(build.sync);
+    if (build.shader) gl.deleteShader(build.shader);
+    if (build.program) gl.deleteProgram(build.program);
+    build.sync = null; build.shader = null; build.program = null;
+  }
+
+  // One 1x1 draw per format this program will ever render into, so the
+  // pipeline for each is built now rather than on the first real frame.
+  // Every uniform is still at its default, so the step loop runs zero steps:
+  // the draw itself is free, only the compile behind it is not. Leaves the
+  // framebuffer, viewport, scissor and 2D texture binding as it found them -
+  // the bound program is the caller's to restore (see useCurrentPass).
+  function warmUpProgram(program, formats) {
+    if (gl.isContextLost()) return;
+    var prevViewport = gl.getParameter(gl.VIEWPORT);
+    var prevFramebuffer = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+    var prevTexture = gl.getParameter(gl.TEXTURE_BINDING_2D);
+    var hadScissor = gl.isEnabled(gl.SCISSOR_TEST);
+    if (hadScissor) gl.disable(gl.SCISSOR_TEST);
+    gl.useProgram(program);
+    bindQuad(gl.getAttribLocation(program, "a_position"));
+    gl.viewport(0, 0, 1, 1);
+    formats.forEach(function (entry) {
+      // A bare format is one attachment; { format, count } is a program that
+      // writes `count` outputs at once (playback's state pass) - the number
+      // of attachments is part of the pipeline, so it has to match too.
+      var format = entry.format || entry, count = entry.count || 1;
+      // Blending is part of the pipeline too: antialiasing averages its
+      // samples in with exactly this blend function (see drawAaBand).
+      if (entry.blend) { gl.enable(gl.BLEND); gl.blendFunc(gl.CONSTANT_ALPHA, gl.ONE_MINUS_CONSTANT_ALPHA); }
+      var textures = [], attachments = [];
+      var fbo = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      for (var k = 0; k < count; k++) {
+        var texture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texStorage2D(gl.TEXTURE_2D, 1, format, 1, 1);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + k, gl.TEXTURE_2D, texture, 0);
+        textures.push(texture);
+        attachments.push(gl.COLOR_ATTACHMENT0 + k);
+      }
+      gl.drawBuffers(attachments);
+      // Deliberately no checkFramebufferStatus: it is a round trip to the GPU
+      // process, which by the second format is busy with the first one's
+      // pipeline build - so it would block the page for exactly the stall
+      // this whole arrangement exists to avoid. Both formats are ones this
+      // context is known to render to (RGBA8 always; RGBA32F only when the
+      // caller has checked for EXT_color_buffer_float), and a draw into an
+      // incomplete framebuffer is simply dropped.
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      if (entry.blend) gl.disable(gl.BLEND);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.deleteFramebuffer(fbo);
+      textures.forEach(function (t) { gl.deleteTexture(t); });
+    });
+    gl.bindFramebuffer(gl.FRAMEBUFFER, prevFramebuffer);
+    gl.bindTexture(gl.TEXTURE_2D, prevTexture);
+    if (prevViewport) gl.viewport(prevViewport[0], prevViewport[1], prevViewport[2], prevViewport[3]);
+    if (hadScissor) gl.enable(gl.SCISSOR_TEST);
+  }
+
+  // Moves a build one stage along if it can, without ever waiting - unless
+  // `wait` is set, which is for the programs the page cannot draw anything
+  // without (the float32 ones): those block for the link exactly as they
+  // always did and skip the warm-up, since there is nothing to show meanwhile.
+  function pumpProgramBuild(build, warmFormats, wait) {
+    if (build.status === "linking") {
+      if (!wait && parallelCompileExt &&
+          !gl.getProgramParameter(build.program, parallelCompileExt.COMPLETION_STATUS_KHR)) return build.status;
+      if (!gl.getProgramParameter(build.program, gl.LINK_STATUS)) {
+        // A failed compile surfaces as a failed link; the shader's own log is
+        // the one that says why.
+        build.error = gl.getShaderInfoLog(build.shader) || gl.getProgramInfoLog(build.program) || "unknown shader error";
+        discardProgramBuild(build);
+        build.status = "failed";
+        return build.status;
+      }
+      // A linked program keeps what it needs; the shader object would
+      // otherwise stay alive for the life of the context, one per build.
+      gl.deleteShader(build.shader);
+      build.shader = null;
+      if (wait) { build.status = "ready"; return build.status; }
+      warmUpProgram(build.program, warmFormats);
+      build.sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+      gl.flush();
+      build.status = "warming";
+      return build.status;
+    }
+    if (build.status === "warming") {
+      if (wait || gl.getSyncParameter(build.sync, gl.SYNC_STATUS) === gl.SIGNALED) {
+        gl.deleteSync(build.sync);
+        build.sync = null;
+        build.status = "ready";
       }
     }
-    return passes[precision];
+    return build.status;
   }
 
-  var basePass;
-  try {
-    basePass = buildPass("f32");
-    passes.f32 = basePass;
-  } catch (err) {
+  // ---- The grid's programs ----
+  //
+  // One per (precision, variant): "f32"/"df" by "standard"/"derived" - see
+  // the bottom of compileScenePieces for the two variants. Which one is
+  // bound is a function of the zoom (pickPrecision) and the display mode
+  // (wantedVariant), and nothing else in the page has to know.
+  //
+  // The float32 programs are the ones the page falls back on, so they are
+  // built on the spot, blocking, the first time they are needed. The df ones
+  // build in the background (see above) while the float32 one of the same
+  // variant keeps drawing; when one comes ready the view is simply redrawn
+  // with it. Because both precisions are the same physics, at any zoom just
+  // ABOVE the float32 wall the two must render identically - which is the
+  // cheapest correctness check this code has, and what makes showing
+  // float32 for the moment it takes df to build an honest stand-in.
+  var passes = {};
+  function passKey(precision, variant) { return precision + ":" + variant; }
+
+  function finalizePass(pass) {
+    var prog = pass.build.program;
+    pass.program = prog;
+    pass.build = null;
+    pass.posLoc = gl.getAttribLocation(prog, "a_position");
+    pass.uniforms = {
+      resolution: gl.getUniformLocation(prog, "u_resolution"),
+      gridStride: gl.getUniformLocation(prog, "u_gridStride"),
+      gridOrigin: gl.getUniformLocation(prog, "u_gridOrigin"),
+      centerHi: gl.getUniformLocation(prog, "u_centerHi"),
+      centerLo: gl.getUniformLocation(prog, "u_centerLo"),
+      centerLo2: gl.getUniformLocation(prog, "u_centerLo2"),
+      centerLo3: gl.getUniformLocation(prog, "u_centerLo3"),
+      scale: gl.getUniformLocation(prog, "u_scale"),
+      colorZoom: gl.getUniformLocation(prog, "u_colorZoom"),
+      maxSteps: gl.getUniformLocation(prog, "u_maxSteps"),
+      durationSteps: gl.getUniformLocation(prog, "u_durationSteps"),
+      bounceMax: gl.getUniformLocation(prog, "u_bounceMax"),
+      displayMode: gl.getUniformLocation(prog, "u_displayMode"),
+      // Standard variant only (null, and so ignored, on the derived one).
+      sampleField: gl.getUniformLocation(prog, "u_sampleField"),
+    };
+    pass.status = "ready";
+  }
+
+  function pumpPass(pass, wait) {
+    if (pass.status !== "building") return;
+    // A standard program draws the picture (RGBA8) and measures it (RGBA32F,
+    // see currentSampler); a derived one only ever draws.
+    var formats = [gl.RGBA8];
+    if (pass.variant === "standard" && hasFloatColorBuffer) formats.push(gl.RGBA32F);
+    if (antialiasSupported()) formats.push({ format: gl.RGBA16F, blend: true });
+    var status = pumpProgramBuild(pass.build, formats, wait);
+    if (status === "ready") {
+      finalizePass(pass);
+      onPassReady(pass);
+    } else if (status === "failed") {
+      pass.status = "failed";
+      pass.error = pass.build.error;
+      pass.build = null;
+      if (pass.precision !== "f32") setStatus(false, "High-precision shader unavailable: " + pass.error);
+      updatePrecisionReadout();
+    }
+  }
+
+  // The pass if it is ready, otherwise null - having made sure a build for
+  // it is under way. `wait` blocks until that build finishes.
+  function requestPass(precision, variant, wait) {
+    var key = passKey(precision, variant);
+    if (!passes[key]) {
+      var pass = { key: key, precision: precision, variant: variant, status: "building", build: null,
+        program: null, posLoc: -1, uniforms: null, error: null };
+      try {
+        pass.build = startProgramBuild(buildFragmentShader(scene, precision, variant));
+      } catch (err) {
+        // Thrown by the code generator itself, before any GLSL existed.
+        pass.status = "failed";
+        pass.error = err.message || String(err);
+        if (precision !== "f32") setStatus(false, "High-precision shader unavailable: " + pass.error);
+      }
+      passes[key] = pass;
+    }
+    if (wait) pumpPass(passes[key], true);
+    return passes[key].status === "ready" ? passes[key] : null;
+  }
+
+  // Every frame, from the render loop: moves each build in flight along.
+  // Done here rather than inside requestPass so a warm-up draw can never
+  // land in the middle of the ladder's own draw sequence.
+  function pumpPassBuilds() {
+    Object.keys(passes).forEach(function (k) { pumpPass(passes[k], false); });
+  }
+
+  function onPassReady(pass) {
+    // The very first program is built before the page has an active pass, a
+    // view or a precision mode - there is nothing yet to update or redraw.
+    if (!activePass) return;
+    updatePrecisionReadout();
+    // If this is the program the current view has been waiting for, draw the
+    // view again with it. (activePass is still the stand-in at this point.)
+    if (pass.precision === pickPrecision() && pass.variant === wantedVariant() && pass !== activePass) markDirty();
+  }
+
+  // Every frame, from the render loop - the step + color programs' twin of
+  // pumpPassBuilds. When a set the view has been waiting for comes ready, the
+  // view is redrawn with it.
+  function pumpPlaybackBuilds() {
+    Object.keys(playbackGpu.programs).forEach(function (precision) {
+      var entry = playbackGpu.programs[precision];
+      if (entry.status !== "building") return;
+      pumpPlaybackBuild(entry, false);
+      if (entry.status === "ready" && precision === pickPrecision() && precision !== "f32") {
+        updatePrecisionReadout();
+        markDirty();
+      }
+    });
+  }
+
+  // The status line while something the view is waiting on is still
+  // building, and "Ready" again once nothing is. Every frame, from the render
+  // loop - which is what makes it correct however the wait ends: the program
+  // arriving, the view zooming back out to where it is no longer wanted, or
+  // Play being paused.
+  var buildStatusShowing = false;
+  function refreshBuildStatus() {
+    var message = null;
+    if (pickPrecision() !== "f32" && precisionPending(pickPrecision())) message = "Preparing high precision\u2026";
+    else if (timeline.playing && playbackProgramsPending(effectivePrecision())) message = "Preparing playback\u2026";
+    if (message) {
+      setStatus(true, message);
+      buildStatusShowing = true;
+    } else if (buildStatusShowing) {
+      setStatus(true, "Ready");
+      buildStatusShowing = false;
+    }
+  }
+
+  function discardAllPasses() {
+    Object.keys(passes).forEach(function (k) {
+      var pass = passes[k];
+      if (pass.build) discardProgramBuild(pass.build);
+      if (pass.program) gl.deleteProgram(pass.program);
+      delete passes[k];
+    });
+  }
+
+  if (!requestPass("f32", "standard", true)) {
     setStatus(false, "Compile error");
-    showEmptyState("Couldn't build the grid shader: " + (err.message || err));
+    showEmptyState("Couldn't build the grid shader: " + (passes[passKey("f32", "standard")].error || "unknown error"));
     return;
   }
-  var activePass = basePass;
-  gl.useProgram(basePass.program);
+  var activePass = passes[passKey("f32", "standard")];
+  gl.useProgram(activePass.program);
   var isBouncesOutput = scene.output.property === "bounces";
   // Page-level twin of buildFragmentShader's isInfinitePosition, for the
   // hover panel's own copy of the color formula.
@@ -1683,83 +1993,135 @@
     gl.enableVertexAttribArray(posLoc);
     gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
   }
-  bindQuad(basePass.posLoc);
+  bindQuad(activePass.posLoc);
 
-  // The view center's two float32 words. JS numbers are float64, so this
-  // is where the precision that was previously lost at upload time is
-  // actually handed over.
+  // The view center's float32 words - four per axis, from the double-double
+  // the page holds it as (see view.center). This is where precision that a
+  // single float32 uniform would throw away at upload is actually handed
+  // over. A program that carries fewer words never declared the uniforms
+  // for the rest, so their locations are null and setting them is a no-op.
   function setCenterUniforms(u) {
-    var hx = PhysicsDF.split(view.center.x), hy = PhysicsDF.split(view.center.y);
-    gl.uniform2f(u.centerHi, hx[0], hy[0]);
-    gl.uniform2f(u.centerLo, hx[1], hy[1]);
+    var words = PhysicsDF.wordUniformValues(view.center.x, view.center.xLo, view.center.y, view.center.yLo);
+    gl.uniform2f(u.centerHi, words[0][0], words[1][0]);
+    gl.uniform2f(u.centerLo, words[0][1], words[1][1]);
+    gl.uniform2f(u.centerLo2, words[0][2], words[1][2]);
+    gl.uniform2f(u.centerLo3, words[0][3], words[1][3]);
   }
 
-  // ---- Color Zoom suggestion: sample the currently visible output values
-  // into a tiny offscreen texture, so the tip below can tell when they're
-  // all bunched into a narrow slice of the rainbow. ----
+  // ---- Measuring the field: the standard program, in sample mode ----
   //
-  // Reuses buildFragmentShader's own real output verbatim (same physics,
-  // same wrap handling) rather than re-deriving anything - the only change
-  // is swapping the final color-mapping line for one that writes the raw
-  // pre-color t value straight into the red channel of an RGBA32F texture,
-  // so reading it back needs no reverse color math (and none of the 8-bit
-  // quantization noise that would introduce near hue boundaries).
+  // Everything that reads the picture back as numbers - the Color Zoom
+  // suggestion, the bounce-count divisor, the superlatives, Global Stats -
+  // draws the STANDARD program into an RGBA32F target with u_sampleField set,
+  // which makes it write the raw pre-color t into the red channel instead of
+  // a color (see compileScenePieces). Reading t needs no reverse color math
+  // and none of the 8-bit quantization noise that would introduce near hue
+  // boundaries - and because it is the very program that draws the grid,
+  // there is no second compile of the scene's physics to wait for, and no
+  // way for the measurement to disagree with the picture.
+  //
+  // Always the standard variant, whatever display mode is showing: every
+  // number on the Global Stats card is described in terms of the Output
+  // property, and the card's own gradient/orientation sections would
+  // otherwise be reporting the derivative of a derivative.
   var SAMPLE_SIZE = 24;
   var hasFloatColorBuffer = !!gl.getExtension("EXT_color_buffer_float");
-  // One sampler per precision, built alongside (and lazily, like) its pass
-  // - a sampler reading the f32 shader while the grid displays the df one
-  // would answer questions about a picture nobody is looking at.
-  function samplerFor(pass) {
-    if (pass.samplerBuilt) return pass.sampler;
-    pass.samplerBuilt = true;
+  // Null when there is nothing to measure with right now: no float render
+  // targets on this device, or the grid is showing a df picture whose
+  // standard program is still building. Never falls back across precisions -
+  // a sampler reading the f32 shader while the grid displays the df one
+  // would answer questions about a picture nobody is looking at. Every
+  // caller already treats null as "no measurement this time".
+  function currentSampler() {
     if (!hasFloatColorBuffer) return null; // heuristic only - skip quietly if this GPU/browser can't render float textures
-    try {
-      // Replaces the shade-and-write pair at the end of main(), so this
-      // program measures the FIELD (t) whatever display mode the grid is
-      // showing - and, because shadeDerived() then goes uncalled, never runs
-      // a derived mode's stencil for samples nothing reads. Measuring the
-      // field rather than the displayed picture is the deliberate choice:
-      // every number on the Global Stats card is described in terms of the
-      // Output property, and the card's own gradient/orientation sections
-      // would otherwise be reporting the derivative of a derivative.
-      var COLOR_TAIL = "  if (u_displayMode != MODE_STANDARD) {\n" +
-        "    fragColor = vec4(shadeDerived(worldX, worldY, outputValue, t), 1.0);\n" +
-        "    return;\n" +
-        "  }\n" +
-        "  fragColor = vec4(colorMap(t), 1.0);";
-      var full = buildFragmentShader(scene, pass.precision);
-      // Throwing rather than carrying on with an unreplaced shader: that
-      // shader compiles perfectly well and writes a COLOUR into the float
-      // target, which every caller would then read back as if it were a
-      // value. The catch below turns this into a quiet "no sampler",
-      // which is a path they all already handle.
-      if (full.indexOf(COLOR_TAIL) === -1) throw new Error("sampler: main()'s color tail moved");
-      var src = full.replace(COLOR_TAIL, "  fragColor = vec4(t, 0.0, 0.0, 1.0);");
-      var prog = PhysicsGPU.linkProgram(gl, vs, PhysicsGPU.compileShader(gl, gl.FRAGMENT_SHADER, src));
-      pass.sampler = {
-        program: prog,
-        posLoc: gl.getAttribLocation(prog, "a_position"),
-        uniforms: {
-          resolution: gl.getUniformLocation(prog, "u_resolution"),
-          gridStride: gl.getUniformLocation(prog, "u_gridStride"),
-          gridOrigin: gl.getUniformLocation(prog, "u_gridOrigin"),
-          centerHi: gl.getUniformLocation(prog, "u_centerHi"),
-          centerLo: gl.getUniformLocation(prog, "u_centerLo"),
-          scale: gl.getUniformLocation(prog, "u_scale"),
-          maxSteps: gl.getUniformLocation(prog, "u_maxSteps"),
-          durationSteps: gl.getUniformLocation(prog, "u_durationSteps"),
-          bounceMax: gl.getUniformLocation(prog, "u_bounceMax"),
-        },
-      };
-    } catch (err) {
-      pass.sampler = null; // heuristic only - never let a problem here affect the real grid
-    }
-    return pass.sampler;
+    // Above float32 the field is measured by the sliced renderer's own
+    // programs instead (see drawSampleBandSliced), so this is only ever the
+    // float32 grid program - and only while float32 is what is on screen.
+    if (effectivePrecision() !== "f32") return null;
+    return requestPass("f32", "standard", true);
+  }
+
+  // Can the field be measured right now, by either route?
+  function canSampleField() {
+    return !!(hasFloatColorBuffer && (slicedProgramsForGrid() || currentSampler()));
   }
 
   setStatus(true, "Ready");
 
-  var view = { center: { x: DEFAULT_CENTER.x, y: DEFAULT_CENTER.y }, scale: DEFAULT_SCALE };
+  // center.x/.y are the view centre as they always were. xLo/yLo are the
+  // rest of it: past about 1e-13 a float64 can no longer tell one pixel's
+  // world coordinate from the next, so the centre is held as a
+  // DOUBLE-DOUBLE - x + xLo, ~106 bits - which is more than the deepest
+  // precision the shaders have (four float32 words, ~96 bits) can use.
+  // Everything that only needs to know roughly where the view is (the
+  // readouts, the float64 hover preview) goes on reading .x/.y; everything
+  // that has to land on the right PIXEL goes through the helpers below.
+  var view = { center: { x: DEFAULT_CENTER.x, y: DEFAULT_CENTER.y, xLo: 0, yLo: 0 }, scale: DEFAULT_SCALE };
+
+  // (hi + lo) + delta, renormalized - one axis of a pan. delta is a float64
+  // and small, which is the easy case for a double-double: twoSum keeps
+  // exactly what adding it to `hi` alone would have rounded away.
+  function ddAddNumber(hi, lo, delta) {
+    var s = PhysicsDF.twoSum64(hi, delta);
+    return PhysicsDF.twoSum64(s[0], s[1] + lo);
+  }
+  function shiftViewCenter(dx, dy) {
+    var nx = ddAddNumber(view.center.x, view.center.xLo, dx);
+    var ny = ddAddNumber(view.center.y, view.center.yLo, dy);
+    view.center.x = nx[0]; view.center.xLo = nx[1];
+    view.center.y = ny[0]; view.center.yLo = ny[1];
+  }
+  // The same, by the exact products ax*bx and ay*by. For a shift that has to
+  // be right to far more digits than a float64 product keeps - see
+  // zoomAtClientPoint.
+  function shiftViewCenterByProducts(ax, bx, ay, by) {
+    var px = PhysicsDF.twoProd64(ax, bx), py = PhysicsDF.twoProd64(ay, by);
+    shiftViewCenter(px[0], py[0]);
+    shiftViewCenter(px[1], py[1]);
+  }
+  function setViewCenter(x, y) {
+    view.center.x = x; view.center.xLo = 0;
+    view.center.y = y; view.center.yLo = 0;
+  }
+  // Every digit of the centre, for the keys that decide whether saved state
+  // still belongs to the view on screen. With only .x/.y in them, a pan at a
+  // deep zoom - which moves nothing but the low halves - looked like no
+  // move at all.
+  function viewCenterKey() {
+    return [view.center.x, view.center.xLo, view.center.y, view.center.yLo].join(" ");
+  }
+  // The world point `uvx, uvy` view-heights from the centre, as a
+  // double-double: { x, y, xLo, yLo }. A plain { x, y } is still a valid
+  // world point everywhere one is accepted - its low halves read as zero.
+  function worldPointAtUV(uvx, uvy) {
+    var px = ddAddNumber(view.center.x, view.center.xLo, uvx * view.scale);
+    var py = ddAddNumber(view.center.y, view.center.yLo, uvy * view.scale);
+    return { x: px[0], y: py[0], xLo: px[1], yLo: py[1] };
+  }
+  // The CENTRE of the rendered cell a view-relative point falls in, by the
+  // shader's own mapping (pixel index, plus a half, over the canvas height)
+  // - so a snapped point is exactly a point some pixel simulates. `cell`
+  // names that pixel, for callers that only want to know whether the cursor
+  // has moved to a different one.
+  function snappedWorldPointAtUV(uvx, uvy) {
+    var col = Math.floor(uvx * canvas.height + 0.5 * canvas.width);
+    var row = Math.floor(uvy * canvas.height + 0.5 * canvas.height);
+    var point = worldPointAtUV((col + 0.5 - 0.5 * canvas.width) / canvas.height, (row + 0.5 - 0.5 * canvas.height) / canvas.height);
+    point.cell = col + "," + row;
+    return point;
+  }
+  // b - a along one axis, for two double-double world points. The high and
+  // low halves are differenced separately: at a deep zoom the whole
+  // difference lives in the low halves.
+  function worldPointDelta(a, b, axis) {
+    return (b[axis] - a[axis]) + ((b[axis + "Lo"] || 0) - (a[axis + "Lo"] || 0));
+  }
+  // a + (b - a) * t per axis, staying a double-double.
+  function lerpWorldPoint(ax, bx, tx, ay, by, ty) {
+    var px = ddAddNumber(ax.x, ax.xLo || 0, worldPointDelta(ax, bx, "x") * tx);
+    var py = ddAddNumber(ay.y, ay.yLo || 0, worldPointDelta(ay, by, "y") * ty);
+    return { x: px[0], y: py[0], xLo: px[1], yLo: py[1] };
+  }
 
   // ---- Progressive refinement state ----
   //
@@ -1786,6 +2148,11 @@
     // that can't average at all); from 1 up, how many whole-screen samples
     // have been averaged together so far.
     aaSample: 0,
+    // Sliced rendering only (see that section): the tile whose steps are
+    // still being run, and how far along the current row it starts when a
+    // tile is narrower than the level.
+    tile: null,
+    tileX: 0,
   };
 
   // ---- The playback timeline ----
@@ -1871,19 +2238,39 @@
   // float32 ULPs. Measured on the samples, float32 is still clean at ~3
   // ULPs per pixel (0.4% of neighbouring pixel pairs identical) and gone by
   // ~0.3 (77%), so the wall really is at about 1 - this leaves a 20x
-  // margin. Not larger: the df pass costs ~3x the render time, which is
-  // paid for in how far down the refinement ladder a view gets before the
-  // user moves again, so switching hundreds of times earlier than
-  // necessary is not free. Not smaller: the
+  // margin. Not larger: a df pixel costs 5x to 25x a float32 one (measured
+  // per scene - hinges at the low end, swept collisions and gravity at the
+  // high end), which is paid for in how far down the refinement ladder a
+  // view gets before the user moves again, so switching hundreds of times
+  // earlier than necessary is not free. Not smaller: the
   // crossover wants to happen while both passes still agree, which is what
   // makes comparing them (Settings > Numeric precision) a real check.
   var DF_SWITCH_MARGIN_ULPS = 64;
-  // "auto" | "f32" | "df" - the last two are the Settings panel's manual
-  // override, for comparing the two passes at the same view.
+  // Every precision the grid can draw at, coarsest first: float32, then
+  // two, three and four float32 words per number (see physics-df.js). The
+  // rungs above df need exact constants this page builds with BigInt, so on
+  // a browser without it the ladder simply stops at df.
+  var PRECISION_LADDER = ["f32", "df", "tf", "qf"].filter(function (precision) {
+    return PhysicsDF.isSupported(precision);
+  });
+  var PRECISION_LABELS = {
+    f32: "float32 (~7 digits)",
+    df: "double-float (~15 digits)",
+    tf: "triple-float (~21 digits)",
+    qf: "quad-float (~28 digits)",
+  };
+  // Per scene, per precision, filled in by calibrateSliceSteps: how many
+  // steps one sliced draw runs, and which precisions turned out to need
+  // longer for a single step than the GPU will allow a draw at all.
+  var sliceSteps = {};
+  var sliceCalibrated = {};
+  var sliceTooHeavy = {};
+  // "auto" or one of PRECISION_LADDER - the latter being the Settings
+  // panel's manual override, for comparing two passes at the same view.
   //
   // Starts at f32, and (being page state, never persisted) is back at f32
   // every time this page is opened - including on the way back from the
-  // physics editor. The df pass costs several times the render time, so a
+  // physics editor. The df pass costs many times the render time, so a
   // session that doesn't need it shouldn't quietly inherit it from an
   // earlier one; the deep-zoom tip below is what offers Auto at the point
   // where it actually starts to buy something.
@@ -1905,18 +2292,43 @@
   }
   // The distance in world units between two adjacent simulated points.
   function worldPixelSpacing() { return view.scale / referenceHeightPx(); }
-  function autoPrecision() {
-    var ulp = float32UlpAt(Math.max(Math.abs(view.center.x), Math.abs(view.center.y), sceneCoordinateSpan));
-    return worldPixelSpacing() < ulp * DF_SWITCH_MARGIN_ULPS ? "df" : "f32";
+  // The smallest step a coordinate of this size can take at `precision`:
+  // each float32 word carries 24 bits, and a multi-float number's words do
+  // not overlap, so N words is 24N bits. (Measured rather than assumed - the
+  // arithmetic's worst relative error is 1.8e-22 at three words and 6.6e-30
+  // at four, within a bit or two of 2^-72 and 2^-96; see the multi-float
+  // arithmetic test.)
+  function precisionUlpAt(precision, magnitude) {
+    return float32UlpAt(magnitude) * Math.pow(2, -24 * (PhysicsDF.wordsFor(precision) - 1));
   }
+  // The coarsest rung that still has DF_SWITCH_MARGIN_ULPS of its own ULPs
+  // per `spacing` - the same margin at every rung, for the same reason it
+  // is the margin at the first. Past the last rung there is nothing finer
+  // to switch to, and the last rung it is.
+  function precisionForSpacing(spacing) {
+    var magnitude = Math.max(Math.abs(view.center.x), Math.abs(view.center.y), sceneCoordinateSpan);
+    for (var i = 0; i < PRECISION_LADDER.length; i++) {
+      if (spacing >= precisionUlpAt(PRECISION_LADDER[i], magnitude) * DF_SWITCH_MARGIN_ULPS) return PRECISION_LADDER[i];
+    }
+    return PRECISION_LADDER[PRECISION_LADDER.length - 1];
+  }
+  function autoPrecision() { return precisionForSpacing(worldPixelSpacing()); }
   function pickPrecision() {
     return precisionMode === "auto" ? autoPrecision() : precisionMode;
   }
 
   function updatePrecisionReadout() {
-    if (!precisionReadout) return;
-    var active = activePass.precision;
-    precisionReadout.textContent = active === "df" ? "double-float (~15 digits)" : "float32 (~7 digits)";
+    if (!precisionReadout || !activePass) return;
+    var active = effectivePrecision(), wanted = pickPrecision();
+    var text = PRECISION_LABELS[active];
+    // A coarser rung standing in for programs that are still on their way
+    // (or that this device couldn't build, or can't run fast enough) says
+    // so, rather than reading as a choice.
+    if (active !== wanted) {
+      var name = PRECISION_LABELS[wanted].replace(/ \(.*$/, "");
+      text += " \u2014 " + name + (precisionPending(wanted) ? " compiling\u2026" : sliceTooHeavy[wanted] ? " too slow for this scene on this GPU" : " unavailable");
+    }
+    precisionReadout.textContent = text;
   }
   if (precisionSelect) {
     // Explicit, rather than trusting the markup's own `selected`: browsers
@@ -1924,6 +2336,10 @@
     // would otherwise leave the dropdown showing whatever it was set to last
     // visit while precisionMode had genuinely reset to f32.
     precisionSelect.value = precisionMode;
+    // A rung this browser cannot build (see PRECISION_LADDER) is not offered.
+    Array.prototype.slice.call(precisionSelect.options).forEach(function (option) {
+      if (option.value !== "auto" && PRECISION_LADDER.indexOf(option.value) === -1) precisionSelect.removeChild(option);
+    });
     precisionSelect.addEventListener("change", function () {
       precisionMode = precisionSelect.value;
       markDirty();
@@ -1955,7 +2371,7 @@
     deepZoomTipStage = 2;
     settingsMenu.set(true);
     retargetTip(precisionSelect,
-      "Set this to Auto and the grid uses double precision only where the zoom needs it. Click OK to switch it.",
+      "Set this to Auto and the grid uses higher precision only where the zoom needs it. Click OK to switch it.",
       { onOk: function () {
           precisionMode = "auto";
           precisionSelect.value = "auto";
@@ -2019,25 +2435,91 @@
     if (precisionMode !== "f32") return false;
     if (view.scale >= DEEP_ZOOM_TIP_MAX_SCALE) return false;
     var shown = showTip(DEEP_ZOOM_TIP_ID, settingsMenu.anchor(),
-      "Try enabling double precision to unlock more zoom, but at slower render speed",
+      "Try enabling higher precision to unlock more zoom, but at slower render speed",
       { onOk: showDeepZoomPrecisionStep2 });
     if (shown) deepZoomTipStage = 1;
     return shown;
   }
-  // Binds whichever pass the current view calls for, falling back to f32 if
-  // the df one couldn't be built. Returns the pass actually bound.
-  function useCurrentPass() {
+  // Which of a scene's two programs the display mode calls for.
+  function wantedVariant() {
+    return displayMode && displayMode.id !== 0 ? "derived" : "standard";
+  }
+
+  // Is the machinery that draws the grid at `precision` built and ready?
+  // Above float32 that is the sliced renderer's step + color programs (see
+  // "Sliced rendering") - or, on a device with no float render targets to
+  // carry state in, the single-draw grid program at that precision, which is
+  // the only way left to draw it. Asking also STARTS the build if there is
+  // none, so this doubles as the way to request one.
+  function precisionReady(precision) {
+    if (precision === "f32") return true;
+    if (sliceTooHeavy[precision]) return false;
+    if (hasFloatColorBuffer) return !!playbackProgramsFor(precision);
+    return !!requestPass(precision, wantedVariant(), false);
+  }
+  // The same question WITHOUT starting anything - for the rungs below the
+  // one the view wants, which are worth using if the user has already been
+  // through them and not worth a seconds-long build just to stand in.
+  function precisionBuilt(precision) {
+    if (precision === "f32") return true;
+    if (sliceTooHeavy[precision]) return false;
+    if (hasFloatColorBuffer) {
+      var entry = playbackGpu.programs[precision];
+      return !!entry && entry.status === "ready";
+    }
+    var pass = passes[passKey(precision, wantedVariant())];
+    return !!pass && pass.status === "ready";
+  }
+  function precisionPending(precision) {
+    if (precision === "f32") return false;
+    if (hasFloatColorBuffer) return playbackProgramsPending(precision);
+    var pass = passes[passKey(precision, wantedVariant())];
+    return !!pass && pass.status === "building";
+  }
+
+  // The precision the grid is ACTUALLY drawing with right now: what the zoom
+  // calls for, unless that is still building (or couldn't be built), in
+  // which case the finest rung below it that is already built stands in -
+  // float32 if there is none. Everything that has to agree with the picture
+  // - the hover replay, playback, the samplers - asks this rather than
+  // pickPrecision().
+  function effectivePrecision() {
     var wanted = pickPrecision();
-    var pass = getPass(wanted) || basePass;
-    // Switching passes used to have to invalidate a cached cost prediction
-    // here - the df pass costs several times the ALU of the f32 one, so a
-    // resolution chosen against one of them missed badly for the other.
-    // The progressive budget needs no such notice: it is a feedback loop
-    // against measured frame times, so a pass that suddenly costs four
-    // times as much simply produces a few slow frames and the budget walks
-    // itself down. That is the same mechanism that already absorbs a
-    // deeper zoom, a heavier scene, or a throttling GPU.
-    activePass = pass;
+    if (precisionReady(wanted)) return wanted;
+    for (var i = PRECISION_LADDER.indexOf(wanted) - 1; i > 0; i--) {
+      if (precisionBuilt(PRECISION_LADDER[i])) return PRECISION_LADDER[i];
+    }
+    return "f32";
+  }
+
+  // How much earlier than a switch to START building the next rung's
+  // programs, as a multiple of DF_SWITCH_MARGIN_ULPS. A wheel notch zooms by
+  // well under 2x, so 16x is several notches of warning - usually enough for
+  // them to be ready by the time the view actually needs them.
+  var DF_PREWARM_FACTOR = 16;
+  function prewarmPasses() {
+    if (precisionMode !== "auto") return;
+    precisionReady(precisionForSpacing(worldPixelSpacing() / DF_PREWARM_FACTOR));
+  }
+
+  // Binds the single-draw grid program the current view calls for. Returns
+  // the pass actually bound, or null if this scene has no usable program at
+  // all. Above float32 the grid is normally drawn by the sliced renderer
+  // instead and this is never asked for that precision; the exception is a
+  // device that cannot carry state in float textures (see precisionReady).
+  function useCurrentPass() {
+    var variant = wantedVariant();
+    var precision = effectivePrecision();
+    var pass = null;
+    if (precision !== "f32" && !hasFloatColorBuffer) pass = requestPass(precision, variant, false);
+    if (!pass) pass = requestPass("f32", variant, true);
+    // A derived program that won't build still leaves the field itself.
+    if (!pass) pass = requestPass("f32", "standard", true);
+    if (!pass) return null;
+    if (pass !== activePass) {
+      activePass = pass;
+      updatePrecisionReadout();
+    }
     gl.useProgram(pass.program);
     bindQuad(pass.posLoc);
     return pass;
@@ -2148,8 +2630,9 @@
   // it found them, because unlike the ladder's own banding this can run
   // BETWEEN two of the ladder's frames.
   function drawSampleBand(target, blockWidth, blockHeight, rowStart, rowCount, rawBounces) {
-    var sampler = samplerFor(getPass(pickPrecision()) || basePass);
-    if (!sampler) return 0;
+    var slicedPrograms = hasFloatColorBuffer ? slicedProgramsForGrid() : null;
+    var sampler = slicedPrograms ? null : currentSampler();
+    if (!slicedPrograms && !sampler) return 0;
     rowCount = Math.min(rowCount, target.height, blockHeight - rowStart);
     if (rowCount <= 0) return 0;
     // Every gl.getParameter returns null once the context is lost, and this
@@ -2161,6 +2644,12 @@
     // thing that throws.
     var prevViewport = gl.isContextLost() ? null : gl.getParameter(gl.VIEWPORT);
     if (!prevViewport) return 0;
+    if (slicedPrograms) {
+      drawSampleBandSliced(slicedPrograms, target, blockWidth, blockHeight, rowStart, rowCount, rawBounces);
+      gl.viewport(prevViewport[0], prevViewport[1], prevViewport[2], prevViewport[3]);
+      useCurrentPass(); // same contract as below: the ladder's own program/attribute state, restored
+      return rowCount;
+    }
     gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
     gl.viewport(0, 0, target.width, target.height);
     // Only the rows actually wanted: the quad covers the whole target, and
@@ -2169,6 +2658,7 @@
     gl.enable(gl.SCISSOR_TEST);
     gl.scissor(0, 0, blockWidth, rowCount);
     gl.useProgram(sampler.program);
+    gl.uniform1i(sampler.uniforms.sampleField, 1);
     // The FULL block, not the band - this is what the shader divides by to
     // get uv, so it has to describe the grid being sampled rather than the
     // slice of it being drawn (exactly as u_resolution is always the
@@ -2220,7 +2710,7 @@
   // the bounce-count divisor, the superlative buttons). Global Stats, whose
   // block can be orders of magnitude larger, drives drawSampleBand itself.
   function sampleValueGrid(w, h, rawBounces) {
-    if (!samplerFor(getPass(pickPrecision()) || basePass)) return null;
+    if (!canSampleField()) return null;
     var target = createSampleTarget(w, h);
     // A refused draw would leave the target untouched, and reading it back
     // would hand every caller a grid of zeros as though it were a
@@ -2298,7 +2788,7 @@
   function sampleCoordToWorld(grid, col, row) {
     var uvx = (col + 0.5 - 0.5 * grid.width) / grid.height;
     var uvy = (row + 0.5 - 0.5 * grid.height) / grid.height;
-    return { x: view.center.x + uvx * view.scale, y: view.center.y + uvy * view.scale };
+    return worldPointAtUV(uvx, uvy);
   }
 
   // A SEPARATE wrap seam from valueDistance/pairCrossesWrapBorder's - that
@@ -2546,6 +3036,79 @@
   // of one refinement run is what makes the coarse levels honest previews
   // of the fine one rather than differently-colored pictures of it.
   var BOUNCE_MAX_SAMPLE_SIZE = 32;
+
+  // ASYNCHRONOUS, unlike every other measurement here. This one runs on every
+  // view change - every frame of a drag - and a gl.readPixels is a hard
+  // CPU-waits-for-GPU sync: in float32 the 1024 samples behind it cost
+  // nothing worth noticing, but at df prices that sync was a fixed stall
+  // stapled to the front of every frame of every gesture.
+  //
+  // So the samples are drawn as before, read into a pixel-pack buffer (which
+  // does not wait), and a fence says when that buffer can be mapped without
+  // waiting either. Until then the picture keeps the divisor it had. When the
+  // measurement lands and the divisor really has changed, the view is redrawn
+  // with it - one restart, a frame or two after the view stopped moving,
+  // instead of a stall on every frame while it moved. The pinning described
+  // above still holds: the divisor only ever changes BETWEEN refinement runs.
+  var bounceMaxProbe = { target: null, pbo: null, sync: null, key: null, measuredKey: null,
+    values: new Float32Array(BOUNCE_MAX_SAMPLE_SIZE * BOUNCE_MAX_SAMPLE_SIZE * 4) };
+
+  function bounceMaxViewKey() {
+    return [viewCenterKey(), view.scale, canvas.width, canvas.height, simulationSteps, effectivePrecision()].join(" ");
+  }
+
+  function requestBounceMax() {
+    var key = bounceMaxViewKey();
+    // Already measured, or already being measured, for exactly this view.
+    if (key === bounceMaxProbe.measuredKey || (bounceMaxProbe.sync && key === bounceMaxProbe.key)) return;
+    if (!canSampleField()) return; // no float targets to measure into - keep what we had
+    var n = BOUNCE_MAX_SAMPLE_SIZE;
+    if (!bounceMaxProbe.target) bounceMaxProbe.target = createSampleTarget(n, n);
+    if (drawSampleBand(bounceMaxProbe.target, n, n, 0, n, true) === 0) return;
+    if (bounceMaxProbe.sync) { gl.deleteSync(bounceMaxProbe.sync); bounceMaxProbe.sync = null; }
+    if (!bounceMaxProbe.pbo) {
+      bounceMaxProbe.pbo = gl.createBuffer();
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, bounceMaxProbe.pbo);
+      gl.bufferData(gl.PIXEL_PACK_BUFFER, bounceMaxProbe.values.byteLength, gl.STREAM_READ);
+    } else {
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, bounceMaxProbe.pbo);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, bounceMaxProbe.target.fbo);
+    gl.readPixels(0, 0, n, n, gl.RGBA, gl.FLOAT, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+    bounceMaxProbe.sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    bounceMaxProbe.key = key;
+    gl.flush();
+  }
+
+  // Every frame, from the render loop.
+  function pollBounceMax() {
+    if (!bounceMaxProbe.sync) return;
+    if (gl.getSyncParameter(bounceMaxProbe.sync, gl.SYNC_STATUS) !== gl.SIGNALED) return;
+    gl.deleteSync(bounceMaxProbe.sync);
+    bounceMaxProbe.sync = null;
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, bounceMaxProbe.pbo);
+    gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, bounceMaxProbe.values);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+    // A measurement of a view that has since moved on says nothing about the
+    // one on screen; the move already queued its own.
+    if (bounceMaxProbe.key !== bounceMaxViewKey()) return;
+    bounceMaxProbe.measuredKey = bounceMaxProbe.key;
+    var max = 0, values = bounceMaxProbe.values;
+    for (var i = 0; i < values.length; i += 4) max = Math.max(max, values[i]);
+    // Never 0: an all-quiet view would otherwise divide by zero, and "nothing
+    // bounced anywhere" and "everything bounced 0 times" want the same flat
+    // color anyway.
+    max = Math.max(1, max);
+    if (max !== bounceMaxValue) {
+      bounceMaxValue = max;
+      markDirty();
+    }
+  }
+
+  // The blocking form, for the one caller that cannot draw a first frame
+  // without it (see its call site). Same samples, same answer.
   function findBounceMax() {
     var grid = sampleValueGrid(BOUNCE_MAX_SAMPLE_SIZE, BOUNCE_MAX_SAMPLE_SIZE, true);
     if (!grid) return bounceMaxValue; // no float-texture support - keep whatever we had
@@ -2564,6 +3127,8 @@
   // target being drawn into - see the shader's own comment on why.
   function drawSublattice(stride, originX, originY) {
     var pass = useCurrentPass();
+    if (!pass) return;
+    gl.uniform1i(pass.uniforms.sampleField, 0);
     gl.uniform2f(pass.uniforms.resolution, canvas.width, canvas.height);
     gl.uniform1f(pass.uniforms.gridStride, stride);
     gl.uniform2f(pass.uniforms.gridOrigin, originX, originY);
@@ -2677,7 +3242,7 @@
     var points = [];
     for (var i = 0; i < count; i++) {
       var t = count > 1 ? i / (count - 1) : 0;
-      points.push({ x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t });
+      points.push(lerpWorldPoint(start, end, t, start, end, t));
     }
     return points;
   }
@@ -2688,14 +3253,21 @@
   // filter/lookup (see below) can still find points by (row,col). Each
   // point keeps its own col/row for inspectGridPointColor.
   function evenlySpacedGrid(corner1, corner2, cols, rows) {
-    var minX = Math.min(corner1.x, corner2.x), maxX = Math.max(corner1.x, corner2.x);
-    var minY = Math.min(corner1.y, corner2.y), maxY = Math.max(corner1.y, corner2.y);
+    // Which corner is the low one per axis - decided on the double-double
+    // difference, since at a deep zoom the two corners' .x can be the very
+    // same float64.
+    var xFirst = worldPointDelta(corner1, corner2, "x") >= 0;
+    var yFirst = worldPointDelta(corner1, corner2, "y") >= 0;
+    var minXc = xFirst ? corner1 : corner2, maxXc = xFirst ? corner2 : corner1;
+    var minYc = yFirst ? corner1 : corner2, maxYc = yFirst ? corner2 : corner1;
     var points = [];
     for (var row = 0; row < rows; row++) {
       var ty = rows > 1 ? row / (rows - 1) : 0;
       for (var col = 0; col < cols; col++) {
         var tx = cols > 1 ? col / (cols - 1) : 0;
-        points.push({ x: minX + (maxX - minX) * tx, y: minY + (maxY - minY) * ty, col: col, row: row });
+        var point = lerpWorldPoint(minXc, maxXc, tx, minYc, maxYc, ty);
+        point.col = col; point.row = row;
+        points.push(point);
       }
     }
     return points;
@@ -2806,9 +3378,14 @@
   // #inspect-preview coordinate, are positioned against). gl_FragCoord has
   // a bottom-left origin (Y increases upward); CSS/DOM coordinates have a
   // top-left origin, hence the height-flip on fy below.
-  function worldToCanvasAreaPixel(worldX, worldY) {
-    var uvx = (worldX - view.center.x) / view.scale;
-    var uvy = (worldY - view.center.y) / view.scale;
+  // worldXLo/worldYLo are the low halves of a double-double point (see
+  // worldPointAtUV) - optional, zero for a plain float64 one. The high and
+  // low differences are taken separately and only then added: subtracting
+  // two nearly equal 1e3-sized numbers first would leave nothing of a
+  // difference that lives entirely in the low halves.
+  function worldToCanvasAreaPixel(worldX, worldY, worldXLo, worldYLo) {
+    var uvx = ((worldX - view.center.x) + ((worldXLo || 0) - view.center.xLo)) / view.scale;
+    var uvy = ((worldY - view.center.y) + ((worldYLo || 0) - view.center.yLo)) / view.scale;
     var fx = uvx * canvas.height + 0.5 * canvas.width;
     var fy = 0.5 * canvas.height - uvy * canvas.height;
     var canvasRect = canvas.getBoundingClientRect();
@@ -2867,7 +3444,7 @@
       inspectMarkerEls.pop().remove();
     }
     flatPoints.forEach(function (entry, i) {
-      var p = worldToCanvasAreaPixel(entry.worldPoint.x, entry.worldPoint.y);
+      var p = worldToCanvasAreaPixel(entry.worldPoint.x, entry.worldPoint.y, entry.worldPoint.xLo, entry.worldPoint.yLo);
       var el = inspectMarkerEls[i];
       el.style.left = p.x + "px";
       el.style.top = p.y + "px";
@@ -2883,8 +3460,8 @@
     inspectedGroups.forEach(function (group) {
       if (group.type !== "grid") return;
       group.segments.forEach(function (pair, i) {
-        var a = worldToCanvasAreaPixel(group.points[pair[0]].worldPoint.x, group.points[pair[0]].worldPoint.y);
-        var b = worldToCanvasAreaPixel(group.points[pair[1]].worldPoint.x, group.points[pair[1]].worldPoint.y);
+        var a = worldToCanvasAreaPixel(group.points[pair[0]].worldPoint.x, group.points[pair[0]].worldPoint.y, group.points[pair[0]].worldPoint.xLo, group.points[pair[0]].worldPoint.yLo);
+        var b = worldToCanvasAreaPixel(group.points[pair[1]].worldPoint.x, group.points[pair[1]].worldPoint.y, group.points[pair[1]].worldPoint.xLo, group.points[pair[1]].worldPoint.yLo);
         var lineEl = group.meshLineEls[i];
         lineEl.setAttribute("x1", a.x); lineEl.setAttribute("y1", a.y);
         lineEl.setAttribute("x2", b.x); lineEl.setAttribute("y2", b.y);
@@ -2925,15 +3502,15 @@
   }
 
   function updateInspectLinePreview(startWorld, endWorld) {
-    var startPx = worldToCanvasAreaPixel(startWorld.x, startWorld.y);
-    var endPx = worldToCanvasAreaPixel(endWorld.x, endWorld.y);
+    var startPx = worldToCanvasAreaPixel(startWorld.x, startWorld.y, startWorld.xLo, startWorld.yLo);
+    var endPx = worldToCanvasAreaPixel(endWorld.x, endWorld.y, endWorld.xLo, endWorld.yLo);
     inspectLinePreviewLine.setAttribute("x1", startPx.x);
     inspectLinePreviewLine.setAttribute("y1", startPx.y);
     inspectLinePreviewLine.setAttribute("x2", endPx.x);
     inspectLinePreviewLine.setAttribute("y2", endPx.y);
     var points = evenlySpacedPoints(startWorld, endWorld, inspectLineSampleCount);
     points.forEach(function (worldPoint, i) {
-      var px = worldToCanvasAreaPixel(worldPoint.x, worldPoint.y);
+      var px = worldToCanvasAreaPixel(worldPoint.x, worldPoint.y, worldPoint.xLo, worldPoint.yLo);
       inspectLinePreviewDots[i].setAttribute("cx", px.x);
       inspectLinePreviewDots[i].setAttribute("cy", px.y);
       inspectLinePreviewDots[i].setAttribute("fill", inspectLinePointColor(i).fill);
@@ -2966,8 +3543,8 @@
   inspectPreviewSvg.appendChild(inspectGridPreviewRect);
 
   function updateInspectGridPreview(startWorld, endWorld) {
-    var startPx = worldToCanvasAreaPixel(startWorld.x, startWorld.y);
-    var endPx = worldToCanvasAreaPixel(endWorld.x, endWorld.y);
+    var startPx = worldToCanvasAreaPixel(startWorld.x, startWorld.y, startWorld.xLo, startWorld.yLo);
+    var endPx = worldToCanvasAreaPixel(endWorld.x, endWorld.y, endWorld.xLo, endWorld.yLo);
     inspectGridPreviewRect.setAttribute("x", Math.min(startPx.x, endPx.x));
     inspectGridPreviewRect.setAttribute("y", Math.min(startPx.y, endPx.y));
     inspectGridPreviewRect.setAttribute("width", Math.abs(endPx.x - startPx.x));
@@ -3105,7 +3682,7 @@
       // Compiled at whatever precision the grid itself is currently
       // showing, so the replay is of the pixel actually under the cursor
       // rather than of a float32 approximation to it.
-      compiled = PhysicsGridCodegen.compileHoverTrajectoryGLSL(scene, worldPoint.x, worldPoint.y, steps, pickPrecision());
+      compiled = PhysicsGridCodegen.compileHoverTrajectoryGLSL(scene, worldPoint.x, worldPoint.y, steps, effectivePrecision(), worldPoint.xLo, worldPoint.yLo);
       trajectory = PhysicsGPU.runCompiledTrajectoryOnGPU(compiled, steps);
     } catch (err) {
       return null;
@@ -3494,9 +4071,60 @@
       lastWorkAt: 0,
     };
   }
-  var ladderBudget = makeWorkBudget(INITIAL_PIXEL_BUDGET, MIN_PIXEL_BUDGET, MAX_PIXEL_BUDGET);
+  // One per program the ladder can draw with, keyed like `passes` - so
+  // switching precision or display mode picks up where that program last
+  // left off instead of spending an f32-sized budget on a df frame (or a
+  // standard-sized one on a five-simulation derived frame) and then walking
+  // it down over several slow frames. `ladderBudget` is whichever belongs to
+  // the active pass; useCurrentPass swaps it.
+  //
+  // A program that has never drawn is seeded from float32-standard's
+  // measured throughput and a prior for how much dearer this one is. The
+  // prior is deliberately pessimistic - measured, a df pixel costs 5x to
+  // 60x a float32 one depending on the scene (trig-heavy hinges at the low
+  // end, swept collisions at the high end), and this takes the high end.
+  // Guessing too dear only means the first few frames refine a little less
+  // than they could have while the budget climbs 10% a frame; guessing too
+  // cheap queues more GPU work than fits and the canvas visibly hangs for
+  // however many frames that was - 600ms, the first time this was tried
+  // with a prior of 12.
+  var DF_COST_PRIOR = 64;
+  // The rungs above df, as multiples of df's prior. Measured on the three
+  // samples (512x512 pixels, 8 steps a draw, so the GPU is saturated and no
+  // run is long): three words cost 3.4x to 5.0x what two do, and four words
+  // 6.5x to 7.9x - the hinged double pendulum at the high end of both, as
+  // it is for df itself. These take the high end for the reason above, and
+  // like DF_COST_PRIOR they only seed the first frames: the budget is
+  // steered by measured frame times from then on.
+  var PRECISION_COST_PRIOR = { df: DF_COST_PRIOR, tf: DF_COST_PRIOR * 5, qf: DF_COST_PRIOR * 8 };
+  var DERIVED_COST_PRIOR = 5;
+  var ladderBudgets = {};
+  // `key` is precision:variant, as in `passes` - for whatever is about to
+  // draw, which above float32 is the sliced renderer rather than a pass.
+  function budgetFor(precision, variant) {
+    var key = passKey(precision, variant);
+    if (!ladderBudgets[key]) {
+      var sliced = precision !== "f32";
+      var floor = sliced ? SLICE_MIN_PIXEL_BUDGET : MIN_PIXEL_BUDGET;
+      var seed = INITIAL_PIXEL_BUDGET;
+      var reference = ladderBudgets[passKey("f32", "standard")];
+      if (reference && reference.throughput > 0) {
+        var ratio = (sliced ? PRECISION_COST_PRIOR[precision] || DF_COST_PRIOR : 1) * (variant === "derived" ? DERIVED_COST_PRIOR : 1);
+        seed = clamp(reference.throughput * BUDGET_SAFETY / ratio, floor, MAX_PIXEL_BUDGET);
+      } else if (sliced) {
+        seed = INITIAL_PIXEL_BUDGET / (PRECISION_COST_PRIOR[precision] || DF_COST_PRIOR);
+      }
+      ladderBudgets[key] = makeWorkBudget(seed, floor, MAX_PIXEL_BUDGET);
+    }
+    return ladderBudgets[key];
+  }
+  var ladderBudget = budgetFor("f32", "standard");
 
+  // Returns how many refresh periods the previous work frame took (0 when
+  // there was none to time), for the one caller that steers something
+  // besides the budget by it - see adaptSliceSteps.
   function noteFrameTiming(b, now) {
+    var tookPeriods = 0;
     if (b.lastWorkAt > 0 && b.lastSpent > 0) {
       var dt = now - b.lastWorkAt;
       // Deliberately NOT rounded to whole periods. Under strict vsync an
@@ -3509,6 +4137,7 @@
       // actually overran. Left continuous, the same interval is a straight
       // measurement of how much work fits in one period.
       var periods = Math.max(1, dt / displayPeriodMs);
+      tookPeriods = periods;
       if (periods > OVERRUN_RATIO) {
         // A real measurement of how much work fits in one period.
         var measured = b.lastSpent / periods;
@@ -3542,6 +4171,7 @@
       b.budget = clamp(b.budget, b.min, b.max);
     }
     b.lastWorkAt = now;
+    return tookPeriods;
   }
 
   // ---- Where the user's two resolution handles land on the ladder ----
@@ -3873,11 +4503,17 @@
   // computes new*(1/n) + old*(1 - 1/n), which is precisely the running mean
   // after n samples. That keeps this to ONE full-res float target instead of
   // two, and costs no extra pass.
-  function drawAaBand(maxRows) {
-    var rows = Math.min(maxRows, canvas.height - progressive.band);
-    if (rows <= 0) return 0;
+  function drawAaBand(pixelsAvailable) {
+    if (progressive.band >= canvas.height) return 0;
     var n = progressive.aaSample + 1;         // the sample being added
     var off = aaOffset(progressive.aaSample); // 0-based index of that sample
+    var slicedPrograms = slicedProgramsForGrid();
+    if (slicedPrograms) {
+      return drawSlicedTile(slicedPrograms, { target: aaAccum, w: canvas.width, h: canvas.height, stride: 1,
+        originX: off.x, originY: off.y, blend: n }, pixelsAvailable);
+    }
+    var rows = Math.min(Math.max(MIN_BAND_ROWS, Math.floor(pixelsAvailable / Math.max(canvas.width, 1))),
+      canvas.height - progressive.band);
     gl.bindFramebuffer(gl.FRAMEBUFFER, aaAccum.fbo);
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.enable(gl.SCISSOR_TEST);
@@ -3890,7 +4526,7 @@
     gl.disable(gl.SCISSOR_TEST);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     progressive.band += rows;
-    return rows;
+    return rows * canvas.width;
   }
 
   // How many sample points a level of the given stride has, in each
@@ -4013,6 +4649,9 @@
     progressive.complete = false;
     progressive.accumStride = 0;
     progressive.aaSample = 0;
+    // A half-simulated tile belongs to the view that was just abandoned.
+    progressive.tile = null;
+    progressive.tileX = 0;
     updateRenderProgressRing();
   }
 
@@ -4028,7 +4667,7 @@
   // bounce-count divisor is measured - see findBounceMax for why it must
   // not happen again until the next view change.
   function beginProgressive() {
-    if (isBouncesOutput) bounceMaxValue = findBounceMax();
+    if (isBouncesOutput) requestBounceMax();
     progressive.stride = startStride();
     progressive.sublattice = 0;   // 0 = the base level, drawn straight into the accumulator
     progressive.band = 0;
@@ -4062,21 +4701,21 @@
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
   }
 
-  // Draws up to `maxRows` more rows of whatever is currently in progress -
-  // either the base level (sub-lattice 0, straight into the accumulator) or
-  // one of the three sub-lattices that refine it. Returns how many rows it
-  // actually drew, so the budget loop can charge itself the real pixel
-  // count rather than what it asked for.
+  // Draws about `pixelsAvailable` simulated pixels' worth more of whatever
+  // is currently in progress - either the base level (sub-lattice 0,
+  // straight into the accumulator) or one of the three sub-lattices that
+  // refine it. Returns what it actually cost, in those same pixels, so the
+  // budget loop can charge itself the real figure rather than what it asked
+  // for; 0 means the level has nothing left to draw.
   //
   // The three sub-lattices of a step from stride s to s/2 are exactly the
   // new sample positions the coarser grid didn't already cover: offset by
   // half a cell across, down, or both.
-  function drawSublatticeBand(maxRows) {
+  function drawSublatticeBand(pixelsAvailable) {
     var k = progressive.sublattice;
     var w = levelWidth(progressive.stride);
     var h = levelHeight(progressive.stride);
-    var rows = Math.min(maxRows, h - progressive.band);
-    if (rows <= 0) return 0;
+    if (progressive.band >= h) return 0;
     var half = progressive.stride / 2;
     var target, originX, originY;
     if (k === 0) {
@@ -4087,6 +4726,14 @@
       originX = (k === 2) ? 0 : half;   // sub-lattices 1 and 3 are shifted across
       originY = (k === 1) ? 0 : half;   // sub-lattices 2 and 3 are shifted down
     }
+    // Above float32: a slice of a tile rather than a band of whole
+    // simulations - see "Sliced rendering".
+    var slicedPrograms = slicedProgramsForGrid();
+    if (slicedPrograms) {
+      return drawSlicedTile(slicedPrograms, { target: target, w: w, h: h, stride: progressive.stride,
+        originX: originX, originY: originY, blend: 0 }, pixelsAvailable);
+    }
+    var rows = Math.min(Math.max(MIN_BAND_ROWS, Math.floor(pixelsAvailable / Math.max(w, 1))), h - progressive.band);
     gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
     gl.viewport(0, 0, w, h);
     gl.enable(gl.SCISSOR_TEST);
@@ -4095,7 +4742,7 @@
     gl.disable(gl.SCISSOR_TEST);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     progressive.band += rows;
-    return rows;
+    return rows * w;
   }
 
   // Gathers the accumulator plus `shown` of the current level's sub-lattices
@@ -4174,7 +4821,17 @@
       return;
     }
 
-    noteFrameTiming(ladderBudget, now);
+    // Each (precision, display mode) has its own measured throughput - a df
+    // pixel costs many times a float32 one, and a derived mode five times a
+    // standard one - so each keeps its own budget rather than inheriting one
+    // tuned to something else and spending its first frames finding out.
+    var drawingWith = budgetFor(effectivePrecision(), wantedVariant());
+    if (drawingWith !== ladderBudget) {
+      ladderBudget = drawingWith;
+      ladderBudget.lastWorkAt = 0;
+      ladderBudget.lastSpent = 0;
+    }
+    adaptSliceSteps(noteFrameTiming(ladderBudget, now));
     var pixelBudget = ladderBudget.budget;
     var spent = 0;
 
@@ -4183,10 +4840,9 @@
     // ladder that preceded it, so it emphatically cannot be one draw.
     if (progressive.aaSample > 0) {
       while (spent < pixelBudget || spent === 0) {
-        var aaRows = drawAaBand(Math.max(MIN_BAND_ROWS,
-          Math.floor((pixelBudget - spent) / Math.max(canvas.width, 1))));
-        if (aaRows === 0) break;
-        spent += aaRows * canvas.width;
+        var aaCost = drawAaBand(pixelBudget - spent);
+        if (aaCost === 0) break;
+        spent += aaCost;
         if (progressive.band < canvas.height) continue;
         progressive.aaSample += 1;
         progressive.band = 0;
@@ -4206,10 +4862,9 @@
     // completely, and forward progress matters more than hitting the frame
     // target exactly on a machine that cannot.
     while (spent < pixelBudget || spent === 0) {
-      var rowBudget = Math.max(MIN_BAND_ROWS, Math.floor((pixelBudget - spent) / Math.max(width, 1)));
-      var rows = drawSublatticeBand(rowBudget);
-      if (rows === 0) break;
-      spent += rows * width;
+      var bandCost = drawSublatticeBand(pixelBudget - spent);
+      if (bandCost === 0) break;
+      spent += bandCost;
       if (progressive.band < levelHeight(progressive.stride)) continue;
 
       if (progressive.sublattice === 0) {
@@ -4334,11 +4989,22 @@
   // three lines.
   function zoomAtClientPoint(clientX, clientY, factor) {
     var uv = pixelToUV(clientX, clientY);
-    var worldX = view.center.x + uv.uvx * view.scale;
-    var worldY = view.center.y + uv.uvy * view.scale;
+    var oldScale = view.scale;
     view.scale = clamp(view.scale * factor, MIN_SCALE, MAX_SCALE);
-    view.center.x = worldX - uv.uvx * view.scale;
-    view.center.y = worldY - uv.uvy * view.scale;
+    // The anchored point is center + uv*oldScale before and center' +
+    // uv*newScale after, so center' = center + uv*(oldScale - newScale) -
+    // written as that SHIFT rather than by forming the world point and
+    // subtracting again, which would round the point to a float64.
+    //
+    // And the shift is formed EXACTLY, not as a float64 product. A rounded
+    // product is off by ~1e-16 of itself, which is nothing at the zoom where
+    // it happens (1e-13 of a pixel) - but it is a permanent error in where
+    // the centre is, and every later notch magnifies it. Measured with the
+    // cursor held still: the point under it had slid half a pixel after
+    // zooming in by 2e13, and two million pixels after 1e20 - exactly the
+    // range the precisions above double-float exist for. (oldScale -
+    // newScale is itself exact: the two are within a factor of two.)
+    shiftViewCenterByProducts(uv.uvx, oldScale - view.scale, uv.uvy, oldScale - view.scale);
   }
 
   canvas.addEventListener("wheel", function (e) {
@@ -4356,8 +5022,7 @@
   function panByClientDelta(dxPix, dyPix) {
     var scaleFactor = canvas.width / canvas.getBoundingClientRect().width;
     var worldPerPixel = (view.scale / canvas.height) * scaleFactor;
-    view.center.x -= dxPix * worldPerPixel;
-    view.center.y += dyPix * worldPerPixel;
+    shiftViewCenter(-dxPix * worldPerPixel, dyPix * worldPerPixel);
   }
 
   var dragging = false, lastClientX = 0, lastClientY = 0, dragDistance = 0;
@@ -4378,11 +5043,7 @@
   // carries exactly those same two fields and needs no adapting.
   function snappedWorldPointFromEvent(e) {
     var uv = pixelToUV(e.clientX, e.clientY);
-    var worldPerCell = view.scale / canvas.height;
-    return {
-      x: Math.round((view.center.x + uv.uvx * view.scale) / worldPerCell) * worldPerCell,
-      y: Math.round((view.center.y + uv.uvy * view.scale) / worldPerCell) * worldPerCell,
-    };
+    return snappedWorldPointAtUV(uv.uvx, uv.uvy);
   }
 
   // ---- One-finger drag: mouse and single-touch share this exact logic ----
@@ -4578,8 +5239,7 @@
   window.addEventListener("touchcancel", onTouchEnd, { passive: false });
 
   btnResetView.addEventListener("click", function () {
-    view.center.x = DEFAULT_CENTER.x;
-    view.center.y = DEFAULT_CENTER.y;
+    setViewCenter(DEFAULT_CENTER.x, DEFAULT_CENTER.y);
     view.scale = DEFAULT_SCALE;
     colorZoomEnabled = false;
     colorZoomCheckbox.checked = false;
@@ -6112,7 +6772,7 @@
       // Compiled at whatever precision the grid itself is currently
       // showing, so the replay is of the pixel actually under the cursor
       // rather than of a float32 approximation to it.
-      compiled = PhysicsGridCodegen.compileHoverTrajectoryGLSL(scene, worldPoint.x, worldPoint.y, steps, pickPrecision());
+      compiled = PhysicsGridCodegen.compileHoverTrajectoryGLSL(scene, worldPoint.x, worldPoint.y, steps, effectivePrecision(), worldPoint.xLo, worldPoint.yLo);
       trajectory = PhysicsGPU.runCompiledTrajectoryOnGPU(compiled, steps);
     } catch (err) {
       showHoverEmpty("Couldn't replay this point: " + (err.message || err));
@@ -6194,12 +6854,10 @@
     // jitter within the same rendered grid cell doesn't trigger redundant
     // work - matches the actual resolution the main view is sampling at, so
     // "the cell under the cursor" is well-defined.
-    var worldPerCell = view.scale / canvas.height;
-    var world = {
-      x: Math.round((view.center.x + uv.uvx * view.scale) / worldPerCell) * worldPerCell,
-      y: Math.round((view.center.y + uv.uvy * view.scale) / worldPerCell) * worldPerCell,
-    };
-    var key = world.x.toFixed(6) + "," + world.y.toFixed(6);
+    var world = snappedWorldPointAtUV(uv.uvx, uv.uvy);
+    // Which CELL of which view, not the point's own digits: past float64's
+    // resolution every cell on screen prints the same six decimals.
+    var key = world.cell + " " + viewCenterKey() + " " + view.scale;
     if (key === hoverKey) return; // already showing (or about to show) this exact cell
     hoverKey = key;
     hoverWorldPoint = world;
@@ -6614,7 +7272,7 @@
     // while it ran; starting anyway would measure one view and label it
     // with another's.
     if (dirty || !progressive.complete) return;
-    if (!samplerFor(getPass(pickPrecision()) || basePass)) {
+    if (!canSampleField()) {
       statsPanel.setStatus("This browser can't read floating-point values back from the GPU, so Global Stats can't measure anything here.", "stale");
       return;
     }
@@ -7048,8 +7706,7 @@
       "uniform vec2 u_resolution;",
       "uniform float u_gridStride;",
       "uniform vec2 u_gridOrigin;",
-      "uniform vec2 u_centerHi;",
-      "uniform vec2 u_centerLo;",
+    ].concat(PhysicsDF.wordUniformDecls("u_center"), [
       "uniform float u_scale;",
       "uniform sampler2DArray u_state;",
       "uniform bool u_init;",
@@ -7057,11 +7714,18 @@
       "uniform int u_baseStep;",
       "uniform int u_steps;",
       "uniform int u_group;",
-    ].concat(
+      // Which tile of the lattice the state texture holds, and how many
+      // stencil points each lattice pixel owns - see stateWorldCoordLines.
+      // Playback proper always runs with (0, 0) and 1.
+      "uniform vec2 u_tileOrigin;",
+      "uniform int u_stencil;",
+      // The centre, then the grid program's own STENCIL[] in its order.
+      "const vec2 STATE_STENCIL[5] = vec2[5](vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(-1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, -1.0));",
+    ]).concat(
       PhysicsGridCodegen.generatePlaybackStateOutputsGLSL(layersPerGroup),
       [""], pieces.libraryLines, [""], pieces.constantLines,
       ["", pieces.stepOnceSource, "", "void main() {"],
-      pieces.worldCoordLines,
+      pieces.stateWorldCoordLines,
       pieces.physicsDeclarationLines,
       loop.declarations,
       ["  if (!u_init) {"],
@@ -7097,6 +7761,14 @@
       "uniform int u_durationSteps;",
       "uniform float u_bounceMax;",
       "uniform int u_displayMode;",
+      // Where in the TARGET the state's texel (0, 0) lands, and how many
+      // state texels each target pixel owns (see stateWorldCoordLines).
+      // Playback proper always runs with (0, 0) and 1.
+      "uniform ivec2 u_targetOrigin;",
+      "uniform int u_stencil;",
+      // Write the raw t instead of a colour - the grid program's own
+      // u_sampleField, for the same readers.
+      "uniform bool u_sampleField;",
       "out vec4 fragColor;",
       "",
     ].concat(
@@ -7138,12 +7810,30 @@
         "  return gradientColor(g);",
         "}",
         "",
+        // The same three pictures from a pixel's OWN five-point stencil,
+        // when the state carries one (u_stencil == 5): texel + 1..4 are the
+        // neighbours one full-res pixel away, in STENCIL's order, so this is
+        // shadeDerived()'s arithmetic exactly - differences per full-res
+        // pixel, whatever the lattice's stride - rather than playback's
+        // approximation from whichever texels happen to be adjacent.
+        "vec3 shadeStencilDerived(ivec2 texel, " + outScalar + " outputValue, float t) {",
+        "  float d[4];",
+        "  for (int k = 0; k < 4; k++) d[k] = deltaT(outputValue, outputAt(texel + ivec2(k + 1, 0)));",
+        "  if (u_displayMode == MODE_LAPLACIAN) return laplacianColor(d[0] + d[1] + d[2] + d[3]);",
+        "  vec2 g = vec2(d[0] - d[1], d[2] - d[3]) * 0.5;",
+        "  if (u_displayMode == MODE_CONTOURS) return contourColor(t, g);",
+        "  return gradientColor(g);",
+        "}",
+        "",
         "void main() {",
-        "  ivec2 texel = ivec2(gl_FragCoord.xy);",
+        "  ivec2 targetPixel = ivec2(gl_FragCoord.xy) - u_targetOrigin;",
+        "  ivec2 texel = ivec2(targetPixel.x * u_stencil, targetPixel.y);",
         "  " + outScalar + " outputValue = outputAt(texel);",
         pieces.tLine,
+        "  if (u_sampleField) { fragColor = vec4(t, 0.0, 0.0, 1.0); return; }",
         "  if (u_displayMode != MODE_STANDARD) {",
-        "    fragColor = vec4(shadePlaybackDerived(texel, outputValue, t), 1.0);",
+        "    fragColor = vec4(u_stencil == 5 ? shadeStencilDerived(texel, outputValue, t)",
+        "                                    : shadePlaybackDerived(texel, outputValue, t), 1.0);",
         "    return;",
         "  }",
         "  fragColor = vec4(colorMap(t), 1.0);",
@@ -7152,55 +7842,471 @@
     ).join("\n");
   }
 
-  function linkPlaybackProgram(source, uniformNames) {
-    var fs = PhysicsGPU.compileShader(gl, gl.FRAGMENT_SHADER, source);
-    var prog;
-    try {
-      prog = PhysicsGPU.linkProgram(gl, vs, fs);
-    } finally {
-      // A linked program keeps what it needs; the shader object would
-      // otherwise stay alive for the life of the context, one per build.
-      gl.deleteShader(fs);
-    }
+  var PLAYBACK_STEP_UNIFORMS = ["resolution", "gridStride", "gridOrigin", "centerHi", "centerLo", "centerLo2", "centerLo3", "scale", "state", "init", "baseStep", "steps", "group", "tileOrigin", "stencil"];
+  var PLAYBACK_COLOR_UNIFORMS = ["state", "stateSize", "stateSteps", "gridStride", "colorZoom", "durationSteps", "bounceMax", "displayMode", "targetOrigin", "stencil", "sampleField"];
+
+  function finishedPlaybackProgram(build, uniformNames) {
+    var prog = build.program;
     var uniforms = {};
     uniformNames.forEach(function (name) { uniforms[name] = gl.getUniformLocation(prog, "u_" + name); });
     return { program: prog, posLoc: gl.getAttribLocation(prog, "a_position"), uniforms: uniforms };
   }
 
-  function buildPlaybackPrograms(precision) {
+  // Both of playback's programs for one precision, as a build in flight - the
+  // same state machine the grid's own programs use (see startProgramBuild),
+  // and for the same reason: the step pass is a whole copy of the scene's
+  // physics, and in df compiling it on the spot froze the page for seconds
+  // the moment Play was pressed.
+  function startPlaybackBuild(precision) {
     var pieces = compileScenePieces(scene, precision);
     var vars = PhysicsGridCodegen.playbackStateVariables(pieces.initial, pieces.outputBodyIndices)
       .concat(pieces.loopStateVariables);
     var layers = PhysicsGridCodegen.playbackStateLayerCount(vars);
     return {
+      status: "building",
+      programs: null,
       layers: layers,
       groups: Math.ceil(layers / MAX_STATE_ATTACHMENTS),
-      step: linkPlaybackProgram(buildPlaybackStepShader(pieces, vars, MAX_STATE_ATTACHMENTS),
-        ["resolution", "gridStride", "gridOrigin", "centerHi", "centerLo", "scale", "state", "init", "baseStep", "steps", "group"]),
-      color: linkPlaybackProgram(buildPlaybackColorShader(pieces, vars),
-        ["state", "stateSize", "stateSteps", "gridStride", "colorZoom", "durationSteps", "bounceMax", "displayMode"]),
+      stepBuild: startProgramBuild(buildPlaybackStepShader(pieces, vars, MAX_STATE_ATTACHMENTS)),
+      colorBuild: startProgramBuild(buildPlaybackColorShader(pieces, vars)),
     };
   }
 
-  // Null when this precision's programs can't be built here - the same
-  // quiet fallback getPass uses, plus a status line, since unlike the df
-  // pass there is nothing else to show in its place.
+  function pumpPlaybackBuild(entry, wait) {
+    if (entry.status !== "building") return;
+    // The step pass writes a group of state layers at once: warm it for a
+    // full group, and for the short last group if there is one.
+    var stepFormats = [{ format: gl.RGBA32F, count: Math.min(entry.layers, MAX_STATE_ATTACHMENTS) }];
+    var lastGroup = entry.layers - (entry.groups - 1) * MAX_STATE_ATTACHMENTS;
+    if (entry.groups > 1 && lastGroup !== MAX_STATE_ATTACHMENTS) stepFormats.push({ format: gl.RGBA32F, count: lastGroup });
+    // The color pass paints the picture (RGBA8), measures it (RGBA32F, see
+    // drawSampleBandSliced) and averages antialiasing samples (RGBA16F,
+    // blended) - three pipelines, all built now.
+    var colorFormats = [gl.RGBA8, gl.RGBA32F];
+    if (antialiasSupported()) colorFormats.push({ format: gl.RGBA16F, blend: true });
+    var a = pumpProgramBuild(entry.stepBuild, stepFormats, wait);
+    var b = pumpProgramBuild(entry.colorBuild, colorFormats, wait);
+    if (a === "failed" || b === "failed") {
+      entry.status = "failed";
+      setStatus(false, "Playback unavailable: " + (entry.stepBuild.error || entry.colorBuild.error));
+      discardProgramBuild(entry.stepBuild);
+      discardProgramBuild(entry.colorBuild);
+      return;
+    }
+    if (a === "ready" && b === "ready") {
+      entry.programs = {
+        layers: entry.layers,
+        groups: entry.groups,
+        step: finishedPlaybackProgram(entry.stepBuild, PLAYBACK_STEP_UNIFORMS),
+        color: finishedPlaybackProgram(entry.colorBuild, PLAYBACK_COLOR_UNIFORMS),
+      };
+      entry.status = "ready";
+    }
+  }
+
+  // The programs, or null while there are none to use - either because this
+  // precision's can't be built here (status "failed", with a status line,
+  // since unlike the df pass there is nothing else to show in its place) or
+  // because they are still building (status "building": ask again next
+  // frame). playbackPlan tells the two apart. Float32 builds on the spot, as
+  // it always did; df builds in the background.
   function playbackProgramsFor(precision) {
-    if (!(precision in playbackGpu.programs)) {
+    var entry = playbackGpu.programs[precision];
+    if (!entry) {
       try {
-        playbackGpu.programs[precision] = buildPlaybackPrograms(precision);
+        entry = startPlaybackBuild(precision);
       } catch (err) {
-        playbackGpu.programs[precision] = null;
+        entry = { status: "failed", programs: null };
         setStatus(false, "Playback unavailable: " + (err.message || err));
       }
+      playbackGpu.programs[precision] = entry;
     }
-    return playbackGpu.programs[precision];
+    pumpPlaybackBuild(entry, precision === "f32");
+    return entry.programs;
+  }
+
+  function playbackProgramsPending(precision) {
+    var entry = playbackGpu.programs[precision];
+    return !!entry && entry.status === "building";
+  }
+
+  // ---- Sliced rendering: no draw ever runs more than a slice of the steps ----
+  //
+  // The grid program runs a pixel's WHOLE simulation inside one draw. At
+  // float32 prices that is nothing. At df prices a single step of a hinged
+  // scene is ~60 microseconds of strictly sequential work per pixel, so a
+  // 1000-step draw cannot finish in under ~60ms however few pixels it
+  // covers - banding by rows, which is all the ladder could do about a slow
+  // draw, does not touch that floor. Draws that long get worse than slow.
+  // Fragment work cannot be preempted in the middle of a tile, and the
+  // compositor wants the GPU back every frame, so on an Apple-silicon Mac
+  // WITH ITS DISPLAY ON a tile that shades for more than roughly 30-45ms is
+  // reported by Metal as a GPU hang and its command buffer discarded.
+  // (Measured with a bare Metal program as well as through the browser: a
+  // 4x4 target survives a 33ms fragment loop and not a 58ms one, while a
+  // 1024x1024 pass of short fragments runs 326ms untroubled - it is the
+  // longest single run that counts, not the draw's total. A compute kernel
+  // ran 13s. With the display asleep the same fragment draws are allowed
+  // seconds, which is why this first looked like "gives out somewhere past
+  // 350 steps".) WebGL is told nothing - no error, no lost context, just
+  // pixels that were never written - and after a few of them the OS ignores
+  // everything the GPU process submits until the page is reloaded.
+  //
+  // Playback already has the cure, for a different reason: a STEP pass that
+  // carries every pixel's state in float textures between draws, and a
+  // COLOR pass that paints from that state. So above float32 the grid is
+  // drawn with those same two programs (playbackProgramsFor), a tile at a
+  // time: run the tile's steps a slice per draw, then paint it into the
+  // level exactly where the grid program would have drawn it. Every
+  // consumer of the grid program has a sliced twin here - the ladder,
+  // antialiasing, and the samplers - so nothing above float32 ever issues a
+  // whole-simulation draw. (The hover replay is the one exception, and the
+  // one remaining place a long run can still overstay.)
+  //
+  // The derived display modes ride along: a tile is simulated with five
+  // state texels per pixel, the grid program's own five-point stencil laid
+  // side by side (see stateWorldCoordLines / shadeStencilDerived), so the
+  // picture is the same one shadeDerived() paints - not playback's
+  // neighbouring-texel approximation of it.
+  //
+  // Float32 keeps the single-draw grid program, where one draw per band is
+  // cheaper than a dozen. That is safe for the sample scenes and NOT for
+  // every scene: a splitter scene's 20 body slots cost ~0.4ms a step even in
+  // float32, so a few hundred steps of it overruns the limit above exactly
+  // as df did. (True of this page before slicing existed, too. Routing
+  // float32 through these same programs whenever a calibration like the
+  // one below says its whole run is too long is the fix, and is not done
+  // yet.)
+  var MAX_TEXTURE_SIZE = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+  // The most state texels one tile may hold. Two textures of this, times
+  // the scene's state layers, times 16 bytes: ~30MB for a typical scene.
+  var SLICE_MAX_TEXELS = 131072;
+  // Steps per draw (sliceSteps, per precision) are MEASURED, once per scene
+  // and precision - see calibrateSliceSteps. What one draw's longest run is
+  // steered towards is several times under the limit above, because the
+  // measurement is of a handful of pixels at the start of their runs and a
+  // tile shades as slowly as its slowest pixel at its dearest step.
+  var SLICE_TARGET_MS = 5;
+  var SLICE_STEPS_MIN = 1;
+  var SLICE_STEPS_MAX = 256;
+  // A precision whose SINGLE step measures longer than this cannot be drawn
+  // at all - there is no smaller slice than one step - so the ladder treats
+  // it as unavailable for the scene rather than hang the GPU finding out.
+  var SLICE_SINGLE_STEP_LIMIT_MS = 15;
+  // The calibration stops doubling once a slice takes this long: enough to
+  // stand clear of the ~1ms a timed round trip costs by itself.
+  var SLICE_CALIBRATION_STOP_MS = 3;
+  // Far below the ladder's own floor: a sliced frame's smallest unit of work
+  // is one slice of a small tile, not a whole simulated row.
+  var SLICE_MIN_PIXEL_BUDGET = 16;
+
+  // Named state-texture pairs: "ladder" for the tile the refinement ladder is
+  // working on (which lives across frames), "sampler" for measurements (which
+  // start and finish inside one call, and so must not share the ladder's).
+  var sliceStates = {};
+
+  function releaseSliceState(name) {
+    var st = sliceStates[name];
+    if (!st) return;
+    gl.deleteFramebuffer(st.fbo);
+    gl.deleteTexture(st.textures[0]);
+    gl.deleteTexture(st.textures[1]);
+    delete sliceStates[name];
+  }
+  function releaseAllSliceStates() {
+    Object.keys(sliceStates).forEach(releaseSliceState);
+    progressive.tile = null;
+    progressive.tileX = 0;
+    // What a step costs is the scene's.
+    sliceSteps = {};
+    sliceCalibrated = {};
+    sliceTooHeavy = {};
+  }
+
+  // Grow-only: a tile's size follows the budget from frame to frame, and
+  // reallocating two float array textures every time it changed would cost
+  // more than the tile.
+  function ensureSliceState(name, w, h, layers) {
+    var st = sliceStates[name];
+    if (st && st.w >= w && st.h >= h && st.layers === layers) return st;
+    var newW = Math.max(w, st && st.layers === layers ? st.w : 0);
+    var newH = Math.max(h, st && st.layers === layers ? st.h : 0);
+    releaseSliceState(name);
+    var textures = [];
+    for (var i = 0; i < 2; i++) {
+      var tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
+      gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA32F, newW, newH, layers);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      textures.push(tex);
+    }
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
+    st = { textures: textures, fbo: gl.createFramebuffer(), w: newW, h: newH, layers: layers, current: 0 };
+    sliceStates[name] = st;
+    return st;
+  }
+
+  // A tile of a lattice: `cols` x `rows` pixels starting at lattice pixel
+  // (tileX, tileY), `stencil` state texels per pixel. The rest of `spec` is
+  // the grid program's own pixel -> world mapping (stride, origin, the
+  // resolution the lattice divides) and how many steps the run is.
+  function beginSliceJob(stateName, programs, spec) {
+    var st = ensureSliceState(stateName, spec.cols * spec.stencil, spec.rows, programs.layers);
+    return { state: st, programs: programs, spec: spec, done: 0, started: false };
+  }
+
+  // One step draw: up to `steps` more of the run. The first also builds each
+  // pixel's starting state (and is issued even for a zero-step run, which
+  // still needs a state to paint from). Returns how many steps it ran.
+  function advanceSliceJob(job, steps) {
+    var spec = job.spec, st = job.state, prog = job.programs.step, u = prog.uniforms;
+    var k = Math.max(0, Math.min(steps, spec.totalSteps - job.done));
+    if (k === 0 && job.started) return 0;
+    var target = st.textures[1 - st.current];
+    gl.useProgram(prog.program);
+    bindQuad(prog.posLoc);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, st.textures[st.current]);
+    gl.uniform1i(u.state, 0);
+    gl.uniform2f(u.resolution, spec.resW, spec.resH);
+    gl.uniform1f(u.gridStride, spec.stride);
+    gl.uniform2f(u.gridOrigin, spec.originX, spec.originY);
+    setCenterUniforms(u);
+    gl.uniform1f(u.scale, view.scale);
+    gl.uniform1i(u.init, job.started ? 0 : 1);
+    gl.uniform1i(u.baseStep, job.done);
+    gl.uniform1i(u.steps, k);
+    gl.uniform2f(u.tileOrigin, spec.tileX, spec.tileY);
+    gl.uniform1i(u.stencil, spec.stencil);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, st.fbo);
+    // The viewport IS the tile: gl_FragCoord is in framebuffer pixels either
+    // way, so texel (0, 0) is the tile's first point and nothing outside the
+    // tile's rectangle is shaded.
+    gl.viewport(0, 0, spec.cols * spec.stencil, spec.rows);
+    gl.disable(gl.SCISSOR_TEST);
+    var layers = job.programs.layers;
+    for (var g = 0; g < job.programs.groups; g++) {
+      var buffers = [];
+      for (var a = 0; a < MAX_STATE_ATTACHMENTS; a++) {
+        var layer = g * MAX_STATE_ATTACHMENTS + a;
+        var used = layer < layers;
+        gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + a, used ? target : null, 0, used ? layer : 0);
+        buffers.push(used ? gl.COLOR_ATTACHMENT0 + a : gl.NONE);
+      }
+      gl.drawBuffers(buffers);
+      gl.uniform1i(u.group, g);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    st.current = 1 - st.current;
+    job.done += k;
+    job.started = true;
+    return k;
+  }
+
+  // The color pass: paint the finished tile into `fbo` with its first pixel
+  // at (x, y). opts.sample writes the raw t instead (into a float target);
+  // opts.blend = n averages the tile in as the n-th antialiasing sample.
+  function resolveSliceJob(job, fbo, x, y, opts) {
+    opts = opts || {};
+    var spec = job.spec, st = job.state, prog = job.programs.color, u = prog.uniforms;
+    gl.useProgram(prog.program);
+    bindQuad(prog.posLoc);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, st.textures[st.current]);
+    gl.uniform1i(u.state, 0);
+    gl.uniform2i(u.stateSize, spec.cols * spec.stencil, spec.rows);
+    gl.uniform1i(u.stateSteps, spec.totalSteps);
+    gl.uniform1f(u.gridStride, spec.stride);
+    gl.uniform1i(u.colorZoom, colorZoomEnabled ? 1 : 0);
+    gl.uniform1i(u.durationSteps, simulationSteps);
+    gl.uniform1f(u.bounceMax, opts.bounceMax === undefined ? bounceMaxValue : opts.bounceMax);
+    gl.uniform1i(u.displayMode, displayMode.id);
+    gl.uniform2i(u.targetOrigin, x, y);
+    gl.uniform1i(u.stencil, spec.stencil);
+    gl.uniform1i(u.sampleField, opts.sample ? 1 : 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.viewport(x, y, spec.cols, spec.rows);
+    gl.disable(gl.SCISSOR_TEST);
+    if (opts.blend) {
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.CONSTANT_ALPHA, gl.ONE_MINUS_CONSTANT_ALPHA);
+      gl.blendColor(0, 0, 0, 1 / opts.blend);
+    }
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    if (opts.blend) gl.disable(gl.BLEND);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  // How many steps one sliced draw may run at `precision`, by timing it: a
+  // small tile spread across the view (so its pixels do not all take the
+  // same branches), advanced 1, 2, 4, ... steps with the clock stopped on a
+  // one-texel readback after each, until a slice takes long enough to
+  // measure. Every timed slice is at most double one that was already seen
+  // to be short, so the measurement cannot itself be the draw that hangs.
+  // The time includes the readback's round trip, which makes a step look
+  // dearer than it is - the safe direction.
+  //
+  // This blocks the page while it runs: a few round trips of a few ms, once
+  // per scene and precision. Cheap next to the seconds the programs took to
+  // build, and there is no way to learn the number without waiting for it.
+  function calibrateSliceSteps(precision, programs) {
+    var CAL = 8;
+    var job = beginSliceJob("calibrate", programs, {
+      cols: CAL, rows: CAL, stencil: 1, tileX: 0, tileY: 0,
+      stride: Math.max(1, Math.floor(Math.min(canvas.width, canvas.height) / CAL)), originX: 0, originY: 0,
+      resW: canvas.width, resH: canvas.height, totalSteps: 1 << 20,
+    });
+    var texel = new Float32Array(4);
+    function timedSlice(k) {
+      var startedAt = performance.now();
+      advanceSliceJob(job, k);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, job.state.fbo);
+      gl.readBuffer(gl.COLOR_ATTACHMENT0);
+      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, texel);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      return performance.now() - startedAt;
+    }
+    // Untimed: builds each pixel's starting state, and absorbs whatever the
+    // driver still had left to do for this program.
+    timedSlice(1);
+    var k = 1, took = timedSlice(1);
+    if (took > SLICE_SINGLE_STEP_LIMIT_MS) {
+      sliceTooHeavy[precision] = true;
+    } else {
+      while (took < SLICE_CALIBRATION_STOP_MS && k < SLICE_STEPS_MAX) {
+        k *= 2;
+        took = timedSlice(k);
+      }
+    }
+    sliceSteps[precision] = clamp(Math.floor(SLICE_TARGET_MS * k / Math.max(took, 1e-3)), SLICE_STEPS_MIN, SLICE_STEPS_MAX);
+    sliceCalibrated[precision] = sliceSteps[precision];
+    releaseSliceState("calibrate");
+  }
+
+  // The step + color programs to draw the GRID with, or null when the grid
+  // program itself should (float32, or no float render targets to carry
+  // state in, or the programs are still building - see effectivePrecision).
+  function slicedProgramsForGrid() {
+    var precision = effectivePrecision();
+    if (precision === "f32" || !hasFloatColorBuffer) return null;
+    var entry = playbackGpu.programs[precision];
+    if (!entry || entry.status !== "ready") return null;
+    if (!sliceSteps[precision]) {
+      calibrateSliceSteps(precision, entry.programs);
+      // One step alone was too long: this precision is off the ladder for
+      // this scene, and the next frame falls back down it.
+      if (sliceTooHeavy[precision]) { updatePrecisionReadout(); markDirty(); return null; }
+    }
+    return entry.programs;
+  }
+
+  // The ladder's (and antialiasing's) unit of work under sliced rendering:
+  // one more slice of the tile in flight - starting the next tile of
+  // `lattice` first if there is none - and, when that finishes the tile's
+  // run, the color pass that lands it in lattice.target. Returns what the
+  // slice cost in the budget's own unit, whole simulated pixels, so a slice
+  // of k steps out of n costs k/n of the tile; and never 0, which the
+  // callers read as "nothing left to draw".
+  //
+  // A tile is sized so that ONE slice of it is about what this frame can
+  // still afford: whole rows of the level when that many pixels cover at
+  // least one, a run of one row when they don't.
+  function drawSlicedTile(programs, lattice, pixelsAvailable) {
+    var total = renderedSteps();
+    var perDraw = sliceSteps[effectivePrecision()] || SLICE_STEPS_MIN;
+    var job = progressive.tile;
+    if (!job) {
+      var stencil = displayMode.id !== 0 ? 5 : 1;
+      var slices = Math.max(1, Math.ceil(total / perDraw));
+      var maxPixels = Math.max(1, Math.floor(SLICE_MAX_TEXELS / stencil));
+      var maxCols = Math.max(1, Math.floor(MAX_TEXTURE_SIZE / stencil));
+      var pixels = clamp(Math.floor(pixelsAvailable * slices), 64, maxPixels);
+      var cols, rows;
+      if (progressive.tileX === 0 && pixels >= lattice.w && lattice.w <= maxCols) {
+        cols = lattice.w;
+        rows = Math.min(lattice.h - progressive.band, Math.floor(pixels / lattice.w));
+      } else {
+        rows = 1;
+        cols = Math.min(lattice.w - progressive.tileX, pixels, maxCols);
+      }
+      job = beginSliceJob("ladder", programs, {
+        cols: cols, rows: rows, stencil: stencil, tileX: progressive.tileX, tileY: progressive.band,
+        stride: lattice.stride, originX: lattice.originX, originY: lattice.originY,
+        resW: canvas.width, resH: canvas.height, totalSteps: total,
+      });
+      progressive.tile = job;
+    }
+    var ran = advanceSliceJob(job, perDraw);
+    var area = job.spec.cols * job.spec.rows;
+    var cost = total > 0 ? area * ran / total : area;
+    if (job.done >= total) {
+      resolveSliceJob(job, lattice.target.fbo, job.spec.tileX, job.spec.tileY, { blend: lattice.blend });
+      if (job.spec.cols === lattice.w) {
+        progressive.band += job.spec.rows;
+      } else {
+        progressive.tileX += job.spec.cols;
+        if (progressive.tileX >= lattice.w) { progressive.tileX = 0; progressive.band += 1; }
+      }
+      progressive.tile = null;
+    }
+    return Math.max(cost, 1e-6);
+  }
+
+  // drawSampleBand's twin: the same block of samples into the same target,
+  // simulated in slices. Every draw is only QUEUED here - nothing waits on
+  // the GPU until the caller reads the target back - so however many slices
+  // it takes, this costs the page no more than the single draw did.
+  function drawSampleBandSliced(programs, target, blockWidth, blockHeight, rowStart, rowCount, rawBounces) {
+    var total = rawBounces ? simulationSteps : renderedSteps();
+    var perDraw = sliceSteps[effectivePrecision()] || SLICE_STEPS_MIN;
+    var maxRows = Math.max(1, Math.floor(SLICE_MAX_TEXELS / Math.max(blockWidth, 1)));
+    for (var r = 0; r < rowCount; r += maxRows) {
+      var rows = Math.min(maxRows, rowCount - r);
+      var job = beginSliceJob("sampler", programs, {
+        cols: blockWidth, rows: rows, stencil: 1, tileX: 0, tileY: rowStart + r,
+        stride: 1, originX: 0, originY: 0, resW: blockWidth, resH: blockHeight, totalSteps: total,
+      });
+      do { advanceSliceJob(job, perDraw); } while (job.done < total);
+      resolveSliceJob(job, target.fbo, 0, r, { sample: true, bounceMax: rawBounces ? 1 : bounceMaxValue });
+    }
+  }
+
+  // The calibration times a run's first steps, and a step can get dearer
+  // later on (a split wakes more bodies). That shows up as a frame that
+  // overruns badly even though the budget is already at its floor - there
+  // are no pixels left to take away, so what is too long is the draw
+  // itself. Halve it. It is never raised again: a scene that needed the
+  // smaller slice still does.
+  //
+  // But only down to a quarter of what was measured. An overrun at the floor
+  // is not proof the slice was too long - a frame also runs long for a
+  // garbage collection, a program still building, or a tab that was in the
+  // background - and the rungs above df START at the floor, so there every
+  // such hiccup used to count. Unbounded, a few of them ratcheted triple-
+  // float down to one step per draw for good (seen: a 10s picture took 50s).
+  // A quarter still leaves a real mis-measurement a further 4x of relief, on
+  // top of the several-fold margin SLICE_TARGET_MS already keeps under the
+  // limit.
+  function adaptSliceSteps(tookPeriods) {
+    var precision = effectivePrecision();
+    if (!sliceSteps[precision] || tookPeriods <= HARD_OVERRUN_RATIO) return;
+    if (ladderBudget.budget > ladderBudget.min * 1.5) return;
+    var floor = Math.max(SLICE_STEPS_MIN, Math.ceil((sliceCalibrated[precision] || sliceSteps[precision]) / 4));
+    sliceSteps[precision] = Math.max(floor, Math.floor(sliceSteps[precision] / 2));
   }
 
   function releasePlaybackPrograms() {
     Object.keys(playbackGpu.programs).forEach(function (k) {
-      var p = playbackGpu.programs[k];
-      if (p) { gl.deleteProgram(p.step.program); gl.deleteProgram(p.color.program); }
+      var entry = playbackGpu.programs[k];
+      if (entry.programs) {
+        gl.deleteProgram(entry.programs.step.program);
+        gl.deleteProgram(entry.programs.color.program);
+      } else if (entry.status === "building") {
+        discardProgramBuild(entry.stepBuild);
+        discardProgramBuild(entry.colorBuild);
+      }
     });
     playbackGpu.programs = {};
   }
@@ -7235,7 +8341,7 @@
   // or precision - those are only known once programs exist, and this is
   // checked every frame, playing or not.
   function playbackViewKey() {
-    return [view.center.x, view.center.y, view.scale, canvas.width, canvas.height].join(" ");
+    return [viewCenterKey(), view.scale, canvas.width, canvas.height].join(" ");
   }
 
   // State built for a view is worthless once the view moves: every pixel's
@@ -7306,9 +8412,11 @@
   // frame, which is enough to crash the browser's GPU process.
   function playbackPlan() {
     if (!hasFloatColorBuffer || !ensureTargets()) return null;
-    var precision = (getPass(pickPrecision()) || basePass).precision;
+    var precision = effectivePrecision();
     var programs = playbackProgramsFor(precision);
-    if (!programs) return null;
+    // Still building: not "can't", just "not yet" - the caller lets the
+    // ladder keep the frame and asks again on the next one.
+    if (!programs) return playbackProgramsPending(precision) ? { pending: true } : null;
     var stride = playbackStride(programs.layers);
     var w = levelWidth(stride), h = levelHeight(stride);
     return {
@@ -7316,7 +8424,7 @@
       stride: stride,
       w: w,
       h: h,
-      key: [view.center.x, view.center.y, view.scale, canvas.width, canvas.height, stride, precision].join(" "),
+      key: [viewCenterKey(), view.scale, canvas.width, canvas.height, stride, precision].join(" "),
     };
   }
 
@@ -7348,6 +8456,10 @@
     gl.uniform1i(u.init, pass.init ? 1 : 0);
     gl.uniform1i(u.baseStep, pass.from);
     gl.uniform1i(u.steps, pass.steps);
+    // The whole lattice, one point per pixel - see "Sliced rendering" for
+    // the caller that uses these two for something else.
+    gl.uniform2f(u.tileOrigin, 0, 0);
+    gl.uniform1i(u.stencil, 1);
     gl.bindFramebuffer(gl.FRAMEBUFFER, playbackGpu.fbo);
     gl.viewport(0, 0, res.w, res.h);
     gl.enable(gl.SCISSOR_TEST);
@@ -7388,6 +8500,9 @@
     gl.uniform1i(u.durationSteps, simulationSteps);
     gl.uniform1f(u.bounceMax, bounceMaxValue);
     gl.uniform1i(u.displayMode, displayMode.id);
+    gl.uniform2i(u.targetOrigin, 0, 0);
+    gl.uniform1i(u.stencil, 1);
+    gl.uniform1i(u.sampleField, 0);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     presentLevel(target, res.w, res.h, res.stride);
@@ -7403,6 +8518,13 @@
     var dt = timeline.lastTickAt > 0 ? (now - timeline.lastTickAt) / 1000 : 0;
     timeline.lastTickAt = now;
     var res = playbackPlan();
+    if (res && res.pending) {
+      // The programs are on their way (see playbackProgramsFor). Hold the
+      // clock where it is rather than letting it run on ahead of a picture
+      // that cannot follow yet.
+      timeline.lastTickAt = 0;
+      return false;
+    }
     if (!res) {
       stopTimelineClock();
       timeline.following = false;
@@ -7539,7 +8661,7 @@
   function seedLadderFromPlayback() {
     if (displayMode !== DISPLAY_MODES[0] || !timeline.presentedKey) return false;
     var res = playbackPlan();
-    if (!res || timeline.stateKey !== res.key || timeline.stateStep !== timeline.step) return false;
+    if (!res || res.pending || timeline.stateKey !== res.key || timeline.stateStep !== timeline.step) return false;
     if (timeline.presentedKey !== playbackLookKey(res)) return false;
     dirty = false;
     progressive.stride = res.stride;
@@ -7889,6 +9011,11 @@
     // Every frame, working or idle - see noteFrameCadence on why the idle
     // ones are the important ones.
     noteFrameCadence(now);
+    pumpPassBuilds();
+    pumpPlaybackBuilds();
+    prewarmPasses();
+    pollBounceMax();
+    refreshBuildStatus();
     if (dirty) { resetProgressive(); dirty = false; }
     releasePlaybackIfViewMoved();
     if (!stepPlayback(now)) stepProgressive(now);
@@ -7918,8 +9045,7 @@
     markDirty();
   };
   global.FractalGrid.resetView = function () {
-    view.center.x = DEFAULT_CENTER.x;
-    view.center.y = DEFAULT_CENTER.y;
+    setViewCenter(DEFAULT_CENTER.x, DEFAULT_CENTER.y);
     view.scale = DEFAULT_SCALE;
     updateZoomReadout();
     markDirty();
@@ -7978,17 +9104,16 @@
     hueRangeMaxValue = isCircularOutput ? 360 : 300;
     relabelSuperlativeExtremeButtons();
     sceneCoordinateSpan = computeSceneCoordinateSpan();
-    // Compiled against the OLD scene - dropped, not reused. buildPass and
-    // buildSampler both rebuild lazily on next use.
-    Object.keys(passes).forEach(function (k) {
-      var pass = passes[k];
-      if (pass && pass.program) gl.deleteProgram(pass.program);
-      if (pass && pass.sampler && pass.sampler.program) gl.deleteProgram(pass.sampler.program);
-      delete passes[k];
-    });
+    // Compiled against the OLD scene - dropped, not reused, including any
+    // build still in flight. requestPass rebuilds each lazily on next use.
+    discardAllPasses();
+    releaseAllSliceStates();
+    // Its key names a view, not a scene, so the same view of a different
+    // scene would otherwise read as already measured.
+    bounceMaxProbe.measuredKey = null;
+    bounceMaxProbe.key = null;
     clearInspected();
-    view.center.x = DEFAULT_CENTER.x;
-    view.center.y = DEFAULT_CENTER.y;
+    setViewCenter(DEFAULT_CENTER.x, DEFAULT_CENTER.y);
     view.scale = DEFAULT_SCALE;
     // Display mode and Color Zoom are this page's own view of the field,
     // not part of the scene - carrying them over from whatever the last
