@@ -3906,8 +3906,8 @@
   );
 
   addTest(
-    "Mutual Gravity with collisions off: the pull is continuous across the contact shell, and linear inside it",
-    "the touching-bodies rule switched the pull from ~1963px/s^2 to exactly 0 at r=contact. With collisions on that's fine (the contact solver answers for it, and the overlap lasts a step) but with collisions off nothing answers for it and bodies coast through, making the shell a step discontinuity in the field itself. Inside, the pull now follows the uniform-density interior solution G*m*r/contact^3 instead",
+    "Mutual Gravity with collisions off: the pull is continuous across the contact shell, and smooth inside it",
+    "the touching-bodies rule switched the pull from ~1963px/s^2 to exactly 0 at r=contact. With collisions on that's fine (the contact solver answers for it, and the overlap lasts a step) but with collisions off nothing answers for it and bodies coast through, making the shell a step discontinuity in the field itself. Its first replacement, the uniform-density ramp G*m*r/contact^3, was continuous but turned sharply from rising to falling at the shell - a corner the fixed step catches at a different phase for every starting state, which came out as a sawtooth across neighbouring pixels. The interior now meets G*m/r^2 at the shell in value, slope and curvature",
     function () {
       function pullAt(r, collisions) {
         var scene = {
@@ -3926,20 +3926,39 @@
       // Continuity at the shell: the two branches must meet there. (The tiny
       // residual is just the 1e-6 probe offset riding the 1/r^2 curve.)
       var jump = Math.abs(outside - inside);
-      // Linearity inside: a(r) = k*r means a(r)/r is the same constant at every
-      // interior radius. Comparing two interior points tests the ramp itself,
-      // with no dependence on where outside the shell the other probe sat.
-      var k1 = pullAt(C / 2, false) / (C / 2);
-      var k2 = pullAt(C / 4, false) / (C / 4);
-      var linearityErr = Math.abs(k1 - k2) / k1;
-      var atOrigin = pullAt(1e-9, false); // ramp reaches zero, so no singularity
+      // Slope and curvature from one-sided differences, so each side is
+      // measured purely on its own branch. The old ramp failed both outright:
+      // slope -65 outside against +33 inside, curvature 3.3 against 0.
+      var h = 1e-3;
+      var slopeOut = (pullAt(C + 2 * h, false) - pullAt(C + h, false)) / h;
+      var slopeIn = (pullAt(C - h, false) - pullAt(C - 2 * h, false)) / h;
+      var slopeErr = Math.abs(slopeOut - slopeIn) / Math.abs(slopeOut);
+      var H = 1e-2;
+      var bendOut = (pullAt(C + 3 * H, false) - 2 * pullAt(C + 2 * H, false) + pullAt(C + H, false)) / (H * H);
+      var bendIn = (pullAt(C - H, false) - 2 * pullAt(C - 2 * H, false) + pullAt(C - 3 * H, false)) / (H * H);
+      var bendErr = Math.abs(bendOut - bendIn) / Math.abs(bendOut);
+      // The interior law itself, against its closed form at two radii.
+      var GM = PhysicsEngine.MUTUAL_GRAVITY_CONSTANT *
+        PhysicsEngine.gravitationalMass(PhysicsEngine.createCircle(0, 0, 30, false));
+      function expected(r) {
+        var u2 = (r / C) * (r / C);
+        return GM * r / (C * C * C) * (35 / 8 - 21 / 4 * u2 + 15 / 8 * u2 * u2);
+      }
+      var lawErr = Math.max(Math.abs(pullAt(C / 2, false) / expected(C / 2) - 1),
+                            Math.abs(pullAt(C / 4, false) / expected(C / 4) - 1));
+      var atOrigin = pullAt(1e-9, false); // reaches zero, so no singularity
       var detail = "collisions off: pull just outside=" + outside.toFixed(4) +
         ", just inside=" + inside.toFixed(4) + " (jump=" + jump.toExponential(2) +
-        "px/s^2, was ~1963 - the whole bug); interior a(r)/r=" + k1.toFixed(6) + " at r=C/2 and " +
-        k2.toFixed(6) + " at r=C/4 (linear ramp, rel err=" + linearityErr.toExponential(2) +
-        "); a(1e-9px)=" + atOrigin.toExponential(2) + " (no singularity); collisions ON just inside=" +
+        "px/s^2, was ~1963 - the whole bug); slope " + slopeOut.toFixed(3) + " outside vs " +
+        slopeIn.toFixed(3) + " inside (rel err=" + slopeErr.toExponential(2) + "); curvature " +
+        bendOut.toFixed(4) + " vs " + bendIn.toFixed(4) + " (rel err=" + bendErr.toExponential(2) +
+        "); interior law vs closed form rel err=" + lawErr.toExponential(2) +
+        "; a(1e-9px)=" + atOrigin.toExponential(2) + " (no singularity); collisions ON just inside=" +
         onInside.toFixed(4) + " (want exactly 0, unchanged)";
-      return { pass: jump < 1e-3 && linearityErr < 1e-12 && atOrigin < 1e-6 && onInside === 0, detail: detail };
+      return {
+        pass: jump < 1e-3 && slopeErr < 1e-3 && bendErr < 2e-2 && lawErr < 1e-12 && atOrigin < 1e-6 && onInside === 0,
+        detail: detail,
+      };
     }
   );
 
@@ -3979,8 +3998,49 @@
   );
 
   addTest(
+    "Mutual Gravity with collisions off: a pass through another body no longer turns a smooth sweep into a sawtooth",
+    "reported on a scene where a 6.18px circle passes through a free 30px one: 30 samples along a 10px line came out as a sawtooth - falling for ~5 samples, then jumping back up by as much as 67px, every ~6 samples. Not a discontinuity (the jumps shrank under refinement) and not chaos (a 1/128th-size step gave a smooth line): the old interior ramp met 1/r^2 at the contact shell with a sharp corner, and each start caught that corner at a different step phase. This pins the sweep itself - no slope reversals, no sharp bends",
+    function () {
+      // The reported scene, in engine space (authored in a 1044x862 frame).
+      var SCENE = {
+        mutualGravity: true, collisionsEnabled: false,
+        bodies: [
+          { type: "circle", x: 480, y: 431, angle: 0, isAnchored: false, radius: 30, vx: 0, vy: 0, w: 0 },
+          { type: "circle", x: 181, y: 105, angle: 0, isAnchored: false, radius: 6.1838, vx: -46, vy: 38, w: 0 },
+        ],
+        hinges: [], xInput: { body: 1, property: "x" }, yInput: { body: 1, property: "y" },
+        output: { body: 1, property: "y" }, frameWidth: 1044, frameHeight: 862, edgeMode: "infinite",
+      };
+      var A = [486.519103, -395.488076], B = [495.396947, -400.099254], N = 30;
+      var ys = [], closest = Infinity;
+      for (var i = 0; i < N; i++) {
+        var t = i / (N - 1);
+        var s = PhysicsGridCodegen.computeOffsetSceneNumeric(SCENE, A[0] + t * (B[0] - A[0]), A[1] + t * (B[1] - A[1]));
+        for (var k = 0; k < 200; k++) {
+          PhysicsEngine.step(s, DT);
+          closest = Math.min(closest, Math.hypot(s.bodies[1].x - s.bodies[0].x, s.bodies[1].y - s.bodies[0].y));
+        }
+        ys.push(s.bodies[1].y);
+      }
+      var reversals = 0, worstBend = 0;
+      for (var j = 2; j < N; j++) {
+        var d1 = ys[j - 1] - ys[j - 2], d2 = ys[j] - ys[j - 1];
+        if ((d1 > 0) !== (d2 > 0)) reversals++;
+        worstBend = Math.max(worstBend, Math.abs(d2 - d1));
+      }
+      // Guards the test itself: if the pass stopped reaching inside the
+      // shell, a smooth sweep here would prove nothing about the interior.
+      var wentInside = closest < 30 + 6.1838;
+      var detail = "closest approach " + closest.toFixed(1) + "px (shell at 36.2px, so the interior was exercised=" +
+        wentInside + "); across 30 samples the output's slope reversed " + reversals +
+        " times (was 10) and the sharpest bend between neighbours was " + worstBend.toFixed(2) + "px (was 91.7)";
+      return { pass: wentInside && reversals === 0 && worstBend < 5, detail: detail };
+    }
+  );
+
+  addTest(
     "Mutual Gravity with collisions off: JS engine and GPU compiler agree through an overlapping pass",
-    "the interior ramp is a second hand-synced pair of implementations (PhysicsEngine.computeAccelerations and its GLSL port in generateStepOnceGLSL). generateStepOnceGLSL learns collisions are off from a new argument rather than from `pairs` being empty, since the Mutual Gravity accel loop walks every body rather than the pair list - this proves that argument is actually threaded through from every caller",
+    "the interior law is a second hand-synced pair of implementations (PhysicsEngine.computeAccelerations and its GLSL port in generateStepOnceGLSL). generateStepOnceGLSL learns collisions are off from a new argument rather than from `pairs` being empty, since the Mutual Gravity accel loop walks every body rather than the pair list - this proves that argument is actually threaded through from every caller",
     function () {
       function buildScene() {
         return {
@@ -3993,7 +4053,8 @@
         };
       }
       // Aim them straight at each other so they pass well inside contact (60px)
-      // and spend several steps on the ramp, where the two ports must agree.
+      // and spend several steps on the interior law, where the two ports must
+      // agree.
       var jsScene = buildScene(); jsScene.bodies[0].vx = 140; jsScene.bodies[1].vx = -140;
       var gpuScene = buildScene(); gpuScene.bodies[0].vx = 140; gpuScene.bodies[1].vx = -140;
       var STEPS = 90;
@@ -4009,7 +4070,7 @@
         maxErr = Math.max(maxErr, Math.abs(jsScene.bodies[b].x - row[b].x), Math.abs(jsScene.bodies[b].y - row[b].y));
       }
       var wentInside = minSep < 60;
-      var detail = "closest center separation=" + minSep.toFixed(2) + "px (contact is 60px, so the ramp was exercised=" +
+      var detail = "closest center separation=" + minSep.toFixed(2) + "px (contact is 60px, so the interior law was exercised=" +
         wentInside + "); max JS/GPU position error after " + STEPS + " steps=" + maxErr.toFixed(4) + "px";
       return { pass: wentInside && maxErr < 0.05, detail: detail };
     }
