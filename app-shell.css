@@ -73,7 +73,7 @@
   height: 100%;
 }
 
-/* Bottom-centre, out of the way of both views' panels (editor's is docked
+/* Bottom-center, out of the way of both views' panels (editor's is docked
    left, the grid's floats top-left; in portrait both sit at the bottom, so
    this rides above them on z-index rather than dodging them). */
 #transition-skip {

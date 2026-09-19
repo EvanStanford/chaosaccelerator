@@ -367,7 +367,7 @@ button:hover { background: var(--accent-hover); }
   padding: 6px 10px;
 }
 button.secondary:hover { background: var(--bg-input); }
-/* btnInspectLine/btnInspectGrid only: grey/outlined at rest, same as every
+/* btnInspectLine/btnInspectGrid only: gray/outlined at rest, same as every
    other idle button on the first page - matches .tool-btn's own default
    over there. Its own rule rather than .secondary, which also shrinks
    padding and would resize the button the moment it arms; this keeps the

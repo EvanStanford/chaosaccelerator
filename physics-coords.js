@@ -1,0 +1,168 @@
+// This file is part of Chaos Accelerator, licensed under the Common Public
+// Attribution License, Version 1.0 (CPAL-1.0) - see LICENSE in the project
+// root, or https://chaosaccelerator.com/license for a hosted copy.
+
+// The one place the project's two coordinate systems meet.
+//
+// ENGINE SPACE is what every other file means by x/y, and none of this
+// changes it: canvas pixels with the origin in the frame's TOP-LEFT corner
+// and +y pointing DOWN, wrapping over [0, frameWidth) x [0, frameHeight)
+// (see PhysicsEngine.step's frame wrap). The engine, the GPU compiler, the
+// grid's shader codegen and every regression test still run on exactly that.
+//
+// AUTHORED SPACE is what a person reads and writes: the origin at the CENTER
+// of the frame and +y pointing UP - the way a plot is drawn rather than the
+// way a canvas is indexed. It is the space every scene JSON is written in
+// (Export, Import, the sample files, the editor's own auto-save), and the
+// space the editor and the fractal grid report positions in. Two things
+// follow from the origin being the center rather than a corner, and both
+// are the point of it: a scene is described relative to the middle of the
+// frame, so opening it in a differently-sized window keeps it framed instead
+// of pushing it off the bottom-right; and a fractal grid driven by a body's
+// x/y lands its wrap tiling around the origin instead of off to one side.
+//
+// The map, for a frame fw x fh:
+//
+//   engine.x = authored.x + fw/2        authored.x = engine.x - fw/2
+//   engine.y = fh/2 - authored.y        authored.y = fh/2 - engine.y
+//
+// The y half is a reflection, so it also reverses every quantity whose sign
+// depends on which way is up or which way is round. angle, angular velocity
+// (w) and vy all negate; vx and every size (radius/length/size) are
+// untouched. Reflecting the angle is what makes a positive rotation read
+// counter-clockwise on screen, which is what "+y is up" has to mean for it
+// to be worth doing.
+//
+// A body's LOCAL frame reflects along with it, and needs no half-frame
+// added: flipping y and negating the angle are the same operation on a local
+// offset, since flipY(R(a) v) === R(-a) flipY(v). So a hinge's local anchor
+// only ever has its own y negated. A hinge to the WORLD (bodyA === null) is
+// the exception - its localAnchorA is a world point, not a local one (see
+// PhysicsEngine.hingeBodyA's WORLD_BODY), so it takes the full position map.
+(function (global) {
+  "use strict";
+
+  // Stamped into every scene JSON written in authored space, and the only
+  // thing that tells the two apart on the way back in. JSON without it
+  // predates this file and IS engine space - it is read unchanged, which is
+  // what keeps an old export, an old sample, or an auto-save written by the
+  // previous version of the editor loading exactly as it always did.
+  var CENTERED = "centered-y-up";
+
+  // Same precision serializeScene rounds to; re-applied after a conversion
+  // so a round trip through authored space doesn't leave 408 sitting in the
+  // file as 407.99999999999994.
+  function round(n) {
+    return Math.round(n * 10000) / 10000;
+  }
+
+  function isAuthored(json) {
+    return !!json && json.coordinateSpace === CENTERED;
+  }
+
+  // Half the frame, i.e. where the authored origin sits in engine space.
+  // A scene with no locked frame (nothing in the editor has one until the
+  // canvas has a size) degenerates to a plain y-flip about 0, which is
+  // still self-inverse - the only requirement is that both directions use
+  // the same frame.
+  function halfFrame(frame) {
+    return {
+      x: (Number(frame && frame.frameWidth) || 0) / 2,
+      y: (Number(frame && frame.frameHeight) || 0) / 2,
+    };
+  }
+
+  function toAuthoredX(x, frame) { return x - halfFrame(frame).x; }
+  function toAuthoredY(y, frame) { return halfFrame(frame).y - y; }
+  function toEngineX(x, frame) { return x + halfFrame(frame).x; }
+  function toEngineY(y, frame) { return halfFrame(frame).y - y; }
+  // Both spaces measure rotation from the same axis; only its direction
+  // differs, so this is its own inverse and serves both ways.
+  function flipAngle(a) { return -a; }
+
+  function toAuthoredPoint(x, y, frame) {
+    return { x: toAuthoredX(x, frame), y: toAuthoredY(y, frame) };
+  }
+  function toEnginePoint(x, y, frame) {
+    return { x: toEngineX(x, frame), y: toEngineY(y, frame) };
+  }
+
+  // The two directions differ only in how a position maps, so both are this
+  // one walk over the scene with a different pair of position functions -
+  // there is no second copy of the "which fields flip" list to drift out of
+  // sync with the first.
+  function convert(json, frame, mapX, mapY) {
+    var out = {};
+    Object.keys(json).forEach(function (k) { out[k] = json[k]; });
+
+    out.bodies = (json.bodies || []).map(function (b) {
+      var body = {};
+      Object.keys(b).forEach(function (k) { body[k] = b[k]; });
+      body.x = round(mapX(Number(b.x) || 0, frame));
+      body.y = round(mapY(Number(b.y) || 0, frame));
+      if (b.angle !== undefined) body.angle = round(flipAngle(Number(b.angle) || 0));
+      if (b.vy !== undefined) body.vy = round(-(Number(b.vy) || 0));
+      if (b.w !== undefined) body.w = round(flipAngle(Number(b.w) || 0));
+      return body;
+    });
+
+    out.hinges = (json.hinges || []).map(function (h) {
+      var hinge = {};
+      Object.keys(h).forEach(function (k) { hinge[k] = h[k]; });
+      var worldAnchored = h.bodyA === null || h.bodyA === undefined;
+      var ax = Number(h.localAnchorA && h.localAnchorA.x) || 0;
+      var ay = Number(h.localAnchorA && h.localAnchorA.y) || 0;
+      hinge.localAnchorA = worldAnchored
+        ? { x: round(mapX(ax, frame)), y: round(mapY(ay, frame)) }
+        : { x: round(ax), y: round(-ay) };
+      hinge.localAnchorB = {
+        x: round(Number(h.localAnchorB && h.localAnchorB.x) || 0),
+        y: round(-(Number(h.localAnchorB && h.localAnchorB.y) || 0)),
+      };
+      return hinge;
+    });
+
+    return out;
+  }
+
+  // Engine-space scene JSON (what serializeScene produces) -> the authored
+  // JSON that gets exported, auto-saved, or written into a sample file.
+  // `frame` defaults to the scene's own locked frame, which is what every
+  // caller wants: the scene is being described relative to the frame it was
+  // actually built in.
+  function toAuthoredJSON(json, frame) {
+    var out = convert(json, frame || json, toAuthoredX, toAuthoredY);
+    out.coordinateSpace = CENTERED;
+    return out;
+  }
+
+  // The way back. `frame` is deliberately NOT defaulted to the JSON's own
+  // frameWidth/frameHeight: a scene arriving in authored space should land
+  // centered in whatever frame is receiving it (the editor's live canvas),
+  // which is the whole reason for describing it from the center. Callers
+  // pass the frame they are loading INTO.
+  //
+  // JSON that isn't in authored space is already engine space and comes back
+  // untouched, so every caller can hand its raw parse straight to this
+  // without first asking which kind it has.
+  function toEngineJSON(json, frame) {
+    if (!isAuthored(json)) return json;
+    var out = convert(json, frame || json, toEngineX, toEngineY);
+    delete out.coordinateSpace;
+    return out;
+  }
+
+  global.PhysicsCoords = {
+    CENTERED: CENTERED,
+    isAuthored: isAuthored,
+    toAuthoredJSON: toAuthoredJSON,
+    toEngineJSON: toEngineJSON,
+    toAuthoredPoint: toAuthoredPoint,
+    toEnginePoint: toEnginePoint,
+    toAuthoredX: toAuthoredX,
+    toAuthoredY: toAuthoredY,
+    toEngineX: toEngineX,
+    toEngineY: toEngineY,
+    flipAngle: flipAngle,
+  };
+})(window);

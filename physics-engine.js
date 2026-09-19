@@ -97,10 +97,9 @@
   // bounced).
   //
   // What the cap still does is silently delete the energy of anything that
-  // would legitimately exceed it. Under ordinary downward gravity nothing
-  // does, so 1000 stays - leaving every existing scene, and every fractal
-  // image already rendered from one, bit-for-bit unchanged.
-  var MAX_SPEED = 1000;
+  // would legitimately exceed it. Ordinary downward gravity rarely needs
+  // this much, but leaves headroom for the faster scenes that do.
+  var MAX_SPEED = 2000;
   // Under Mutual Gravity a real orbit does exceed it: a close perihelion
   // passage legitimately runs to ~2000px/s, and clamping that to 1000 threw
   // the body into a far lower orbit on its first pass - once, and then never
@@ -1211,9 +1210,9 @@
   // Space where a coordinate has no range to divide by any more. `v` is the
   // position already divided by the frame dimension, so the frame itself
   // spans 0..1 and everything beyond it is what this has to fit: v=0.5 (dead
-  // centre) maps to exactly 0.5, the frame's own edges to 0.076 and 0.924,
+  // center) maps to exactly 0.5, the frame's own edges to 0.076 and 0.924,
   // and a body two frames out to 0.9995 - arbitrarily far still lands inside
-  // the colour range, just ever closer to its end.
+  // the color range, just ever closer to its end.
   var OUTPUT_SIGMOID_STEEPNESS = 5;
   function frameSigmoid(v) {
     return 1 / (1 + Math.exp(-OUTPUT_SIGMOID_STEEPNESS * (v - 0.5)));
@@ -1337,7 +1336,7 @@
   }
 
   // What this scene's Output mapping currently reads, whatever shape it is.
-  // The single JS definition of it: physics-ui.js's playback colouring and
+  // The single JS definition of it: physics-ui.js's playback coloring and
   // fractal-grid.js's instant hover preview both go through here, and the
   // grid shader's GLSL is written to match it term for term.
   function computeOutputValue(scene, output) {
@@ -1540,7 +1539,7 @@
     // The same rule for a splitter, and for the same reason - a body going
     // THROUGH a portal must not also bounce off it. A splitter's mouth and
     // legs are solid, and their capsules reach LINE_THICKNESS/2 past the
-    // short side's own corners, so a ball entering anywhere but dead centre
+    // short side's own corners, so a ball entering anywhere but dead center
     // clips a leg end-cap on the very step it splits. The split then carries
     // that bounce's velocity out with it, which is what "the halves come out
     // at weird angles" is: the two spawn points are right, the velocity

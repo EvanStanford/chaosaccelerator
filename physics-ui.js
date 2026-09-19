@@ -34,7 +34,7 @@
   var canvas = document.getElementById("physics-canvas");
   var ctx = canvas.getContext("2d");
   var canvasArea = document.getElementById("canvas-area");
-  // Floats over the canvas at top centre - read for its RECT, not grabbed
+  // Floats over the canvas at top center - read for its RECT, not grabbed
   // for hiding: it is what decides how far down the drag-to-delete zone has
   // to sit. See deleteZoneCenter.
   var playbackToolbar = document.getElementById("playback-toolbar");
@@ -273,16 +273,30 @@
 
   // ---- Rendering ----
 
+  // Ruled from the ORIGIN out, rather than from the top-left corner in: the
+  // coordinate system a scene is authored and read in puts (0, 0) at the
+  // center of the frame with +y pointing up (see physics-coords.js), and a
+  // mesh that starts counting from a corner quietly says otherwise. Every
+  // line is the same weight - the two through the origin are deliberately
+  // NOT emphasized, so this stays a sense of scale behind the scene rather
+  // than a pair of marks competing with it.
+  //
+  // Still drawn in engine space (the same space body.x/y is in, and the
+  // space this whole file draws in): this is a picture OF the authored
+  // system, not a second copy of it.
+  var GRID_STEP = 50;
   function drawGrid(w, h) {
-    ctx.strokeStyle = "rgba(255,255,255,0.05)";
+    var originX = w / 2, originY = h / 2;
     ctx.lineWidth = 1;
-    var step = 50;
-    for (var x = 0; x < w; x += step) {
-      ctx.beginPath(); ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, h); ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,0.05)";
+    ctx.beginPath();
+    for (var x = originX % GRID_STEP; x < w; x += GRID_STEP) {
+      ctx.moveTo(Math.round(x) + 0.5, 0); ctx.lineTo(Math.round(x) + 0.5, h);
     }
-    for (var y = 0; y < h; y += step) {
-      ctx.beginPath(); ctx.moveTo(0, y + 0.5); ctx.lineTo(w, y + 0.5); ctx.stroke();
+    for (var y = originY % GRID_STEP; y < h; y += GRID_STEP) {
+      ctx.moveTo(0, Math.round(y) + 0.5); ctx.lineTo(w, Math.round(y) + 0.5);
     }
+    ctx.stroke();
   }
 
   // A circle smaller than this is drawn AT this size during playback - a
@@ -318,7 +332,7 @@
   // a ball teleports to the throat), a splitter's is the short throat (1->2,
   // where a ball becomes two on the mouth). The other three are ordinary
   // walls in both cases - so drawing only has to know which single edge to
-  // pull out and what colour it gets.
+  // pull out and what color it gets.
   function trapezoidEdgeRoles(type) {
     var isSplitter = type === "splitter";
     var special = isSplitter ? [1, 2] : [3, 0];
@@ -1001,7 +1015,7 @@
   var DELETE_ZONE_ARMED_SCALE = 1.3; // drawn this much bigger once the dragged body actually overlaps it
   var DELETE_ZONE_TOOLBAR_GAP = 14; // clear air between the transport's bottom edge and the zone's
 
-  // Top centre of the frame is also where the playback transport floats, and
+  // Top center of the frame is also where the playback transport floats, and
   // that is a DOM element painted over the canvas - so the zone was drawn
   // underneath it and the user had nothing to drop onto. This drops below
   // the transport instead.
@@ -1093,7 +1107,7 @@
 
   // An arrow whose TIP sits on the frame edge, pointing outward at a body
   // that has left the view - the tail trails back inside, growing with how
-  // far out the body is. One per body, in the body's own outline colour, so
+  // far out the body is. One per body, in the body's own outline color, so
   // it reads as "that object went this way".
   function drawOffscreenArrow(pointer, color) {
     // Pull the tip a little inside the frame so the head isn't half-clipped
@@ -1166,7 +1180,7 @@
   // visibilitychange safety net below - see there for why that net exists.
   function saveEditorAutosave() {
     try {
-      localStorage.setItem(EDITOR_STORAGE_KEY, JSON.stringify(serializeScene()));
+      localStorage.setItem(EDITOR_STORAGE_KEY, JSON.stringify(PhysicsCoords.toAuthoredJSON(serializeScene())));
     } catch (err) {
       // Full/unavailable storage shouldn't break editing - auto-save is a
       // convenience, not a requirement.
@@ -1233,8 +1247,18 @@
   function resizeCanvas() {
     dpr = Math.min(window.devicePixelRatio || 1, 2);
     if (!isPlaying && canvasArea.clientWidth > 0 && canvasArea.clientHeight > 0) {
+      // The authored origin is the frame's center (see physics-coords.js),
+      // so a frame that changes size moves every engine-space coordinate
+      // with it: what the scene is described as - its position relative to
+      // the middle - is what has to hold still. Without this, resizing the
+      // window would silently re-author the whole scene, sliding it toward
+      // the top-left exactly the way a corner origin always did.
+      var prevW = scene.frameWidth, prevH = scene.frameHeight;
       scene.frameWidth = canvasArea.clientWidth;
       scene.frameHeight = canvasArea.clientHeight;
+      translateWholeScene(
+        (scene.frameWidth - prevW) / 2,
+        (scene.frameHeight - prevH) / 2);
     }
     var fw = scene.frameWidth || canvasArea.clientWidth || 1;
     var fh = scene.frameHeight || canvasArea.clientHeight || 1;
@@ -1981,7 +2005,7 @@
   // ---- "Not ready yet" guidance for the Fractal-ize button ----
   //
   // The button is ALWAYS the same bright color (see .fractalize-btn in
-  // physics.css) - it only ever greys out, with an explanation, while the
+  // physics.css) - it only ever grays out, with an explanation, while the
   // pointer is actually over it or briefly after a click that couldn't
   // proceed. That rules out the native `disabled` attribute: a genuinely
   // disabled button stops reliably firing the hover events this depends on
@@ -2097,6 +2121,35 @@
 
   function roundNum(n) {
     return Math.round(n * 10000) / 10000;
+  }
+
+  // The frame an authored scene is being loaded INTO - see
+  // PhysicsCoords.toEngineJSON for why it is the receiving frame that
+  // matters rather than the one the JSON was written at. scene.frameWidth
+  // is already live-synced to the canvas by resizeCanvas; the fallback
+  // covers the one moment it isn't, the very first load, where canvasArea
+  // is exactly what resizeCanvas is about to set it to anyway.
+  function liveFrame() {
+    return {
+      frameWidth: scene.frameWidth || canvasArea.clientWidth || 0,
+      frameHeight: scene.frameHeight || canvasArea.clientHeight || 0,
+    };
+  }
+
+  // Moves the whole scene rigidly - every body plus every hinge-to-world
+  // anchor, which is a world point rather than a local offset (see
+  // PhysicsEngine.hingeBodyA). Nothing relative changes, so there is no
+  // hinge geometry to re-establish afterward; this is not an edit of any
+  // one body and deliberately doesn't go through
+  // PhysicsHingeGeometry.translateBodyPreservingHinges, whose whole job is
+  // moving one body WITHOUT its neighbors.
+  function translateWholeScene(dx, dy) {
+    if (!dx && !dy) return;
+    scene.bodies.forEach(function (b) { b.x += dx; b.y += dy; });
+    scene.hinges.forEach(function (h) {
+      if (h.bodyA !== null) return;
+      h.localAnchorA = { x: h.localAnchorA.x + dx, y: h.localAnchorA.y + dy };
+    });
   }
 
   function serializeScene() {
@@ -2327,7 +2380,7 @@
     }
     var data;
     try {
-      data = parseSceneData(parsed);
+      data = parseSceneData(PhysicsCoords.toEngineJSON(parsed, liveFrame()));
     } catch (err) {
       importJsonErrorEl.textContent = err.message;
       importJsonErrorEl.className = "readout error";
@@ -2349,7 +2402,7 @@
         return res.json();
       })
       .then(function (parsed) {
-        applySceneData(parseSceneData(parsed));
+        applySceneData(parseSceneData(PhysicsCoords.toEngineJSON(parsed, liveFrame())));
         finishSceneReplace();
       })
       .catch(function (err) {
@@ -2384,7 +2437,7 @@
     var raw = localStorage.getItem(EDITOR_STORAGE_KEY);
     if (!raw) return false;
     try {
-      applySceneData(parseSceneData(JSON.parse(raw)));
+      applySceneData(parseSceneData(PhysicsCoords.toEngineJSON(JSON.parse(raw), liveFrame())));
       return true;
     } catch (err) {
       return false;
@@ -2410,7 +2463,7 @@
     // No indent argument: a compact one-liner (no newlines/tabs) rather
     // than the pretty-printed shape the old live-synced textarea used -
     // this is meant to be pasted around whole, not read in place.
-    exportJsonTextarea.value = JSON.stringify(serializeScene());
+    exportJsonTextarea.value = JSON.stringify(PhysicsCoords.toAuthoredJSON(serializeScene()));
     openModal("Export Scene", exportModalContent);
     exportJsonTextarea.focus();
     exportJsonTextarea.select();
@@ -2432,7 +2485,7 @@
 
   // ---- Play / reset ----
 
-  // Used to grey out every editing control the instant Play started (an
+  // Used to gray out every editing control the instant Play started (an
   // enabled=false call below), since a run in flight was launched against
   // whatever they held and changing them silently wouldn't do anything
   // until a fresh Play. That hid the fact that they were still real,
@@ -2449,12 +2502,12 @@
     refreshMappingUI();
   }
 
-  // ---- Keep these usable during playback instead of greying out ----
+  // ---- Keep these usable during playback instead of graying out ----
   //
   // Every real editing control in #panel, including Mutual Gravity/
-  // Collisions (which never greyed out, but silently changing physics
+  // Collisions (which never grayed out, but silently changing physics
   // properties mid-run without resetting was just as stale a no-op as the
-  // greyed-out controls were - see the mutualGravityCheckbox/
+  // grayed-out controls were - see the mutualGravityCheckbox/
   // collisionsCheckbox change handlers, which only assign into `scene`).
   // Now any of them can be touched mid-run: the first effect is exactly
   // what Reset does (snap back to the pre-play scene), and only then does
@@ -2565,7 +2618,7 @@
     if (property === "y") return scene.frameHeight;
     // Also not circular: two bodies at the greatest separation the world
     // allows are as far apart as they get, and mod()-ing that back to 0
-    // would paint "maximally apart" the same colour as "touching".
+    // would paint "maximally apart" the same color as "touching".
     if (property === "distance") return PhysicsEngine.outputDistanceMax(scene);
     // Not circular like x/y/angle - see outputColorForNormalized's own
     // comment on why lifespan uses a clamp, not this range's usual mod().
@@ -2618,7 +2671,7 @@
       if (scene.edgeMode === "infinite" && (prop === "x" || prop === "y")) {
         // Nothing wraps this coordinate back into the frame any more, so
         // there is no range to divide it into - the sigmoid squashes the
-        // whole infinite line into the colour range instead. Angle is left
+        // whole infinite line into the color range instead. Angle is left
         // alone: it is genuinely circular whatever the edges do.
         t = PhysicsEngine.frameSigmoid(value / rangeMax);
       } else {
@@ -3048,6 +3101,15 @@
   // load, and only showed up by actually reloading the page - every
   // automated test constructs scenes directly and never exercises this
   // startup ordering at all.)
+  // The frame has to be known BEFORE the scene is restored or seeded.
+  // Restoring reads authored, center-relative coordinates and needs a frame
+  // to place them in; seeding writes engine coordinates straight from the
+  // canvas size, which the first resizeCanvas() below must then see as
+  // already matching rather than as a frame change to re-center for.
+  if (canvasArea.clientWidth > 0 && canvasArea.clientHeight > 0) {
+    scene.frameWidth = canvasArea.clientWidth;
+    scene.frameHeight = canvasArea.clientHeight;
+  }
   if (!loadPersistedScene()) seedDefaultScene();
   // Redundant when loadPersistedScene ran applySceneData above, but harmless
   // and cheap - and it's what keeps a fresh (seeded) scene's slider in sync

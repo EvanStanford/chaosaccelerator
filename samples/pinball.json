@@ -6,9 +6,9 @@
   "bodies": [
     {
       "type": "circle",
-      "x": 463.8958,
-      "y": 83.0615,
-      "angle": -0.0021,
+      "x": -132.1042,
+      "y": 321.4385,
+      "angle": 0.0021,
       "isAnchored": false,
       "radius": 30,
       "vx": 0,
@@ -17,9 +17,9 @@
     },
     {
       "type": "line",
-      "x": 262,
-      "y": 578,
-      "angle": 0.7679,
+      "x": -334,
+      "y": -173.5,
+      "angle": -0.7679,
       "isAnchored": true,
       "length": 479,
       "vx": 0,
@@ -28,9 +28,9 @@
     },
     {
       "type": "line",
-      "x": 856,
-      "y": 565,
-      "angle": -0.6632,
+      "x": 260,
+      "y": -160.5,
+      "angle": 0.6632,
       "isAnchored": true,
       "length": 505,
       "vx": 0,
@@ -53,5 +53,6 @@
   },
   "frameWidth": 1192,
   "frameHeight": 809,
-  "edgeMode": "wrap"
+  "edgeMode": "wrap",
+  "coordinateSpace": "centered-y-up"
 }

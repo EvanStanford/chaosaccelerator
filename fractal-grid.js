@@ -242,7 +242,7 @@
     // fixed spot on the popover: the clamp above can push the body far from
     // the control it's about (most visibly for the Settings gear, which sits
     // at the right edge - the body lands to its left, so a left-side arrow
-    // pointed at nothing). ARROW_SIZE/2 centres the rotated square on the
+    // pointed at nothing). ARROW_SIZE/2 centers the rotated square on the
     // anchor; the clamp keeps it clear of the rounded corners at either end.
     var ARROW_SIZE = 10, CORNER_INSET = 10;
     var arrowLeft = rect.left + rect.width / 2 - left - ARROW_SIZE / 2;
@@ -652,7 +652,7 @@
   // program (gridSource), plus the parts playback's two programs are
   // assembled from (see buildPlaybackStepShader/buildPlaybackColorShader).
   // One function builds both, so playback can't drift from the physics,
-  // Output reading and colour ramp the grid itself runs.
+  // Output reading and color ramp the grid itself runs.
   function compileScenePieces(sceneToCompile, precision) {
     var df = precision === "df";
     var B = PhysicsGridCodegen.backendFor(precision);
@@ -981,7 +981,7 @@
     // the way it used to be.
     //
     // Why a stencil in WORLD space rather than a post-process over the
-    // rendered image: the ladder's accumulators hold 8-bit colour that has
+    // rendered image: the ladder's accumulators hold 8-bit color that has
     // already been through a hue ramp, so differencing them would report a
     // false edge at every one of the ramp's RGB breakpoints and go blind
     // wherever the field steps a whole hue wrap - the same reason Global
@@ -1001,7 +1001,7 @@
     // whose t goes through frameSigmoid: that squash is a display transform
     // for an unbounded quantity, not a property of the field, and
     // differencing through it would report the sigmoid's own flattening
-    // far from centre as the field itself going smooth.
+    // far from center as the field itself going smooth.
     var deltaDenom = isBounces ? "max(u_bounceMax, 1.0)"
       : isLifespan ? "float(u_durationSteps)"
         : "OUTPUT_RANGE_MAX";
@@ -1027,7 +1027,7 @@
       ? " * (" + PhysicsGPU.fnum(PhysicsEngine.OUTPUT_SIGMOID_STEEPNESS) + " * t * (1.0 - t))"
       : "";
 
-    // ---- Raw Output value -> the t the colour ramp reads ----
+    // ---- Raw Output value -> the t the color ramp reads ----
     var tLine =
     // OUTPUT_RANGE_MAX is the Output property's own exact range (see
     // outputRangeMax) - a wrapped x/y is already guaranteed inside it, and
@@ -1052,10 +1052,10 @@
     // raw count - clamping would flatten every count above 1 to 1 there.
     // Infinite Space has no wrap to fold a coordinate back into the frame,
     // so there is no range to divide it into - mod() would report a body
-    // two frames out as if it were barely off-centre, and dividing without
-    // one would run t past 1 and off the end of the colour range. The
+    // two frames out as if it were barely off-center, and dividing without
+    // one would run t past 1 and off the end of the color range. The
     // sigmoid squashes the whole infinite line into [0,1] instead: dead
-    // centre is 0.5, the frame's own edges 0.076 and 0.924, two frames out
+    // center is 0.5, the frame's own edges 0.076 and 0.924, two frames out
     // 0.9995 - arbitrarily distant still lands inside the range, just ever
     // closer to its end. Only x/y take it; angle is genuinely circular
     // whatever the edges do, and the two run tallies aren't positions.
@@ -1068,7 +1068,7 @@
           // Distance clamps for the same reason lifespan does: its maximum
           // is a value the pair can legitimately sit at (exact antipodes),
           // and mod()-ing that back to 0 would paint "as far apart as this
-          // world allows" the same colour as "touching".
+          // world allows" the same color as "touching".
           : isDistance
             ? "  float t = clamp(" + B.toFloat(B.div("outputValue", B.fromFloat("OUTPUT_RANGE_MAX"))) + ", 0.0, 1.0);"
             : "  float t = " + B.toFloat(B.div(B.mod("outputValue", "OUTPUT_RANGE_MAX"), B.fromFloat("OUTPUT_RANGE_MAX"))) + ";";
@@ -1143,7 +1143,7 @@
       // The Simulation Duration, i.e. the far end of the playback timeline -
       // which is what Scene Lifespan is measured against, including while
       // u_maxSteps above is showing some step short of it. Measuring against
-      // the step shown instead would recolour every pixel that stopped long
+      // the step shown instead would recolor every pixel that stopped long
       // ago on every frame of playback. The two are equal whenever the
       // timeline sits at its end, which is the only place it ever sat before
       // playback existed.
@@ -1168,8 +1168,8 @@
       "",
     ];
 
-    // Everything that turns a t - or a derivative of one - into a colour.
-    // Playback's colour pass includes this same block, so a value can't look
+    // Everything that turns a t - or a derivative of one - into a color.
+    // Playback's color pass includes this same block, so a value can't look
     // different depending on which of the two drew it.
     var colorLibraryLines = [
       "vec3 hsl2rgb(float h, float s, float l) {",
@@ -1214,7 +1214,7 @@
       // visible.
       "const float HUE_RANGE_MAX = " + PhysicsGPU.fnum(hueRangeMax) + ";",
       // The GLSL twin of PhysicsEngine.frameSigmoid - same constant, so the
-      // grid and the hover panel beside it agree on the colour.
+      // grid and the hover panel beside it agree on the color.
       "float frameSigmoid(float v) {",
       "  return 1.0 / (1.0 + exp(" + PhysicsGPU.fnum(-PhysicsEngine.OUTPUT_SIGMOID_STEEPNESS) + " * (v - 0.5)));",
       "}",
@@ -1237,7 +1237,7 @@
       // Zoom exists to tell nearby values apart in one sweep of the plain
       // rainbow, which is a question only Standard's filled picture poses -
       // Contours already separates its values into discrete lines, and the
-      // other two modes are not colouring the value at all. Toggling it
+      // other two modes are not coloring the value at all. Toggling it
       // also switches the display back to Standard (see its change handler)
       // so that flipping it always does something visible.
       "vec3 colorMap(float t) {",
@@ -1252,14 +1252,14 @@
       "}",
       "",
 
-      // ---- The derived modes' own colour formulas ----
+      // ---- The derived modes' own color formulas ----
       "const int MODE_STANDARD = 0;",
       "const int MODE_GRADIENT = 1;",
       "const int MODE_LAPLACIAN = 2;",
       "const int MODE_CONTOURS = 3;",
       // Every derived quantity below is in "t units per full-res pixel",
       // and that quantity spans several DECADES across one picture: a
-      // folded difference cannot exceed 0.5 (half the colour range is as
+      // folded difference cannot exceed 0.5 (half the color range is as
       // far apart as two values on a circular output can get), a chaotic
       // filament runs close to that ceiling, and a broad smooth wash is a
       // few thousandths. Which decade dominates depends on the zoom, too -
@@ -1288,10 +1288,10 @@
       // seam and no need for HUE_RANGE_MAX's 300-degree compromise.
       // Magnitude rides lightness instead of saturation: a smooth region
       // goes black, which reads as "nothing is happening here" rather than
-      // as a pale colour of its own.
+      // as a pale color of its own.
       "vec3 gradientColor(vec2 g) {",
       // atan(0, 0) is undefined in GLSL, and a NaN hue would come out of
-      // hsl2rgb as a NaN colour rather than as the black this should be -
+      // hsl2rgb as a NaN color rather than as the black this should be -
       // an exactly flat neighbourhood is common on the two integer-valued
       // outputs (a step count is the same on both sides of a pixel almost
       // everywhere), so this is the ordinary case, not a corner one.
@@ -1305,7 +1305,7 @@
       // Signed, so a diverging ramp rather than the rainbow: the sign says
       // whether the pixel sits in a dip of the field or on a ridge of it,
       // and a cyclic hue ramp would paint those two opposite extremes the
-      // same colour. The 0.5 is because a five-point Laplacian sums four
+      // same color. The 0.5 is because a five-point Laplacian sums four
       // differences, so its natural scale is that much larger than the
       // single differences DERIVED_GAIN is calibrated against.
       "vec3 laplacianColor(float lap) {",
@@ -1313,11 +1313,11 @@
       "}",
       "",
       // Isolines of the field at CONTOUR_LEVELS evenly spaced values: the
-      // field is painted in its own Standard colour ON its level sets, and
+      // field is painted in its own Standard color ON its level sets, and
       // everything between them is black. So this shows the same picture
       // Standard does, but sampled down to a set of curves instead of
       // filling the plane - and each line carries the value it is a level
-      // of, which is what makes a line's own colour readable as its height.
+      // of, which is what makes a line's own color readable as its height.
       //
       // Each line is a constant width on SCREEN rather than a constant
       // width in t: its thickness in pixels is its distance-to-the-level
@@ -1445,7 +1445,7 @@
 
     var gridTailLines = [
       // The four axial neighbours, in units of one full-res pixel. Every
-      // derived mode is a five-point stencil (these four plus the centre),
+      // derived mode is a five-point stencil (these four plus the center),
       // so this is the whole footprint any of them reads.
       "const vec2 STENCIL[4] = vec2[4](",
       "  vec2( 1.0,  0.0), vec2(-1.0,  0.0), vec2( 0.0,  1.0), vec2( 0.0, -1.0)",
@@ -1479,17 +1479,17 @@
       "  }",
       "",
       // Five-point Laplacian: every term a wrapped difference from the
-      // centre, summed. Positive where the pixel sits in a dip of the
+      // center, summed. Positive where the pixel sits in a dip of the
       // field, negative where it sits on a ridge.
       "  if (u_displayMode == MODE_LAPLACIAN) return laplacianColor(d[0] + d[1] + d[2] + d[3]);",
       "",
       // Central differences, in t per full-res pixel. d[0] and d[1] are the
-      // two opposite neighbours each one pixel from the centre, so their
+      // two opposite neighbours each one pixel from the center, so their
       // difference spans two pixels and the 0.5 is the whole correction.
-      // Taken as a difference of two centre-relative deltas rather than
+      // Taken as a difference of two center-relative deltas rather than
       // directly between the two neighbours, which is what keeps it
       // seam-free: either neighbour can be a whole range away from the
-      // other on a circular output without the centre being.
+      // other on a circular output without the center being.
       "  vec2 g = vec2(d[0] - d[1], d[2] - d[3]) * 0.5;",
       "  if (u_displayMode == MODE_CONTOURS) return contourColor(t, g);",
       // Gradient is the last mode, so it is the fall-through rather than a
@@ -1507,7 +1507,7 @@
       // sampleOutput(), even though that function holds an identical copy of
       // it and calling it would halve the size of this shader.
       //
-      // Measured, not assumed: routing the centre sample through the
+      // Measured, not assumed: routing the center sample through the
       // function changed 3.5% of the pixels of a colliding scene. The
       // generated GLSL is identical either way, so the cause is the driver,
       // which is free to contract and schedule float arithmetic differently
@@ -1525,7 +1525,7 @@
       outputLines.join("\n"),
       tLine,
       // The block samplerFor() rewrites, to read t back as a raw float
-      // instead of a colour - both halves at once, so the program it builds
+      // instead of a color - both halves at once, so the program it builds
       // measures the field and never runs a stencil. Keep it literal.
       "  if (u_displayMode != MODE_STANDARD) {",
       "    fragColor = vec4(shadeDerived(worldX, worldY, outputValue, t), 1.0);",
@@ -1544,7 +1544,7 @@
       outZero: outZero,
       outputLines: outputLines,
       tLine: tLine,
-      // Output bodies the colour pass reads - carried in playback's state
+      // Output bodies the color pass reads - carried in playback's state
       // even when anchored, since that pass has no starting state of its own.
       outputBodyIndices: outputIndices,
       stepOnceSource: stepOnceSource,
@@ -1740,7 +1740,7 @@
       // target, which every caller would then read back as if it were a
       // value. The catch below turns this into a quiet "no sampler",
       // which is a path they all already handle.
-      if (full.indexOf(COLOR_TAIL) === -1) throw new Error("sampler: main()'s colour tail moved");
+      if (full.indexOf(COLOR_TAIL) === -1) throw new Error("sampler: main()'s color tail moved");
       var src = full.replace(COLOR_TAIL, "  fragColor = vec4(t, 0.0, 0.0, 1.0);");
       var prog = PhysicsGPU.linkProgram(gl, vs, PhysicsGPU.compileShader(gl, gl.FRAGMENT_SHADER, src));
       pass.sampler = {
@@ -1822,7 +1822,7 @@
     // view to hold still before rebuilding state for it.
     seenKey: null,
     seenAt: 0,
-    // What the playback colour pass last put in the accumulator, so a pause
+    // What the playback color pass last put in the accumulator, so a pause
     // can tell whether that image is still the one it would ask the ladder
     // to refine.
     presentedKey: null,
@@ -2065,7 +2065,7 @@
   // "Derived display modes" section for the shader side.
   //
   // `samples` is how many simulations one pixel costs in that mode,
-  // including the centre one every mode needs. It is what the refinement
+  // including the center one every mode needs. It is what the refinement
   // ladder will feel: the adaptive pixel budget absorbs it automatically
   // (a 5x mode simply settles about five times slower), and it is also the
   // last line of every row in the Display Mode menu, since it is the one
@@ -2076,7 +2076,7 @@
   //
   // A blurb only has to be SHORT enough: the row is a flex line with
   // align-items: center and a fixed-aspect thumbnail, so the thumbnail sets
-  // the row's height and a shorter sentence just centres against it with
+  // the row's height and a shorter sentence just centers against it with
   // more air. Rows therefore stay the same height as each other whatever
   // the blurbs do, and they need not match each other in length. What they
   // must not do is run LONGER than the thumbnail is tall, which at the
@@ -2188,7 +2188,7 @@
     // What's on screen - the timeline's step - for every measurement of the
     // picture. The one exception is the bounce-count divisor (rawBounces,
     // see findBounceMax), which is taken over the whole Simulation Duration
-    // so that colours stay put while the timeline plays toward it.
+    // so that colors stay put while the timeline plays toward it.
     gl.uniform1i(sampler.uniforms.maxSteps, rawBounces ? simulationSteps : renderedSteps());
     gl.uniform1i(sampler.uniforms.durationSteps, simulationSteps);
     gl.uniform1f(sampler.uniforms.bounceMax, rawBounces ? 1 : bounceMaxValue);
@@ -2488,7 +2488,7 @@
     if (colorZoomEnabled) return; // nothing to suggest - it's already on
     // Only about the finished picture. Partway along the timeline a narrow
     // spread is often just early - step 0 of a Scene Lifespan scene is one
-    // flat colour by definition - and Color Zoom is no answer to that.
+    // flat color by definition - and Color Zoom is no answer to that.
     if (timeline.playing || renderedSteps() < simulationSteps) return;
     var grid = sampleValueGrid(SAMPLE_SIZE, SAMPLE_SIZE);
     if (!grid) return;
@@ -2512,7 +2512,7 @@
   // take it wins: past the float32 wall the precision limit is the thing
   // actually flattening the image, which makes a Color Zoom suggestion about
   // that same flatness misleading. The speed cap goes ahead of it for the
-  // same reason - a picture whose colour spread has collapsed into a fan of
+  // same reason - a picture whose color spread has collapsed into a fan of
   // rays has a cause, and "try Color Zoom" is not it. It cannot compete with
   // the precision tip either way: that one needs a deep zoom IN, this one a
   // zoom OUT.
@@ -2535,7 +2535,7 @@
   // rather than the real render, which is 8-bit color and can't be read back
   // as a number. Measured over the whole Simulation Duration whatever step
   // the timeline shows (see drawSampleBand's rawBounces), so a pixel's
-  // colour only ever moves when its own count does.
+  // color only ever moves when its own count does.
   // Never returns 0: an all-quiet view would otherwise divide by zero, and
   // "nothing bounced anywhere" and "everything bounced 0 times" want the same
   // flat color anyway.
@@ -3265,7 +3265,7 @@
   // "neither armed" short of dragging one to completion or clearing
   // everything. Grey means "idle, click me"; the blue .inspect-armed look
   // (see fractal-grid.css) means "now go drag the grid" - the same
-  // grey-idle/blue-active convention the first page's own .tool-btn uses,
+  // gray-idle/blue-active convention the first page's own .tool-btn uses,
   // so the color signals which button (if either) is waiting the same way
   // it does everywhere else in the app.
   function armInspect(mode) {
@@ -3758,7 +3758,7 @@
   // of a pixel, averaged together. That is an estimate of each pixel's true
   // area average rather than a guess at what lies between samples - no
   // interpolation is involved and nothing is invented, which matters here
-  // because interpolating a chaotic field would produce colours belonging
+  // because interpolating a chaotic field would produce colors belonging
   // to no simulation at all.
   //
   // What it does is not uniform across the image, and it is worth knowing
@@ -3771,14 +3771,14 @@
   //  - In regions that are chaotic below pixel scale, neighbouring samples
   //    are uncorrelated, so the average converges on the mean of the whole
   //    output range. Because output is mapped through a HUE ramp before any
-  //    averaging happens, averaging opposing hues in RGB tends toward grey,
+  //    averaging happens, averaging opposing hues in RGB tends toward gray,
   //    and those regions visibly calm down. That is the truthful rendering
   //    - it says "there is nothing resolvable here", the same thing the
   //    precision readout says in words - rather than a bug to be tuned out.
   //
   // Two things keep this from ever costing the user anything. It runs only
   // once the ladder has fully settled, so it never competes with panning;
-  // and sample 0 is the pixel centre, i.e. exactly the image the ladder
+  // and sample 0 is the pixel center, i.e. exactly the image the ladder
   // already produced, so it starts from the finished render and adds to it
   // rather than restarting anything.
   var MAX_AA_SAMPLES = 4;
@@ -3797,7 +3797,7 @@
   // without the clumping a random jitter gives or the axis-alignment a
   // regular grid gives (a regular grid is the worst case for exactly the
   // near-horizontal and near-vertical edges antialiasing is meant to fix).
-  // i=0 returns (0,0), the pixel centre.
+  // i=0 returns (0,0), the pixel center.
   var R2_A1 = 0.7548776662466927;   // 1/phi2,   phi2 = the plastic number
   var R2_A2 = 0.5698402909980532;   // 1/phi2^2
   function aaOffset(i) {
@@ -3861,7 +3861,7 @@
   }
 
   // Seeds the running average with the finished ladder render - sample 0,
-  // the pixel centre - and hands the AA phase something to build on.
+  // the pixel center - and hands the AA phase something to build on.
   function beginAntialias() {
     if (!ensureAaTarget()) return false;
     gl.bindFramebuffer(gl.FRAMEBUFFER, aaAccum.fbo);
@@ -3915,7 +3915,7 @@
   // per-level jumps the text readout above uses - so the ring visibly creeps
   // forward band by band instead of snapping in a handful of big steps.
   //
-  // The grey ring's checkpoints are pinned to specific strides (32px down to
+  // The gray ring's checkpoints are pinned to specific strides (32px down to
   // 1 sim/px, one fifth of the ring per halving) rather than to wherever the
   // resolution sliders currently sit - everything coarser than 32px reads as
   // 0%, since on a standard scene that phase is a handful of cheap levels
@@ -3999,11 +3999,11 @@
   }
   function updateRenderProgressRing() {
     var playback = timeline.playing && timeline.drawing;
-    var grey = playback ? playbackRingFraction() : renderRingGreyFraction();
+    var gray = playback ? playbackRingFraction() : renderRingGreyFraction();
     var aa = playback ? 0 : renderRingAaFraction();
-    setRenderRingFraction(renderProgressRingCoarse, grey);
+    setRenderRingFraction(renderProgressRingCoarse, gray);
     setRenderRingFraction(renderProgressRingAa, aa);
-    setRenderRingFraction(renderProgressRingCoarseOpen, grey);
+    setRenderRingFraction(renderProgressRingCoarseOpen, gray);
     setRenderRingFraction(renderProgressRingAaOpen, aa);
     renderProgressLabel.textContent = playback ? playbackProgressLabelText() : renderProgressLabelText();
   }
@@ -5232,8 +5232,8 @@
   //
   // In Standard mode, that is. A derived display mode paints a DERIVATIVE
   // of the field, so no single pixel's own Output value determines its
-  // colour there and this swatch cannot match the grid whatever it does -
-  // it deliberately keeps showing the Output value's own colour, since that
+  // color there and this swatch cannot match the grid whatever it does -
+  // it deliberately keeps showing the Output value's own color, since that
   // is what the panel around it is about (the value, its trajectory, its
   // place in the range) rather than the derivative on screen.
   function hoverOutputColorFinal(t) {
@@ -5372,7 +5372,7 @@
 
   // colorOverride, when given, is an inspected point's own {fill, stroke}
   // - the arrow then matches that playback's bodies instead of the hovered
-  // scene's default colouring, exactly as drawHoverBody does.
+  // scene's default coloring, exactly as drawHoverBody does.
   function drawOffscreenMappingArrows(row, colorOverride) {
     var mapped = {};
     [scene.xInput, scene.yInput, scene.output].forEach(function (m) {
@@ -5418,7 +5418,7 @@
     hoverCtx.save();
     hoverCtx.lineCap = "round";
     // An inspected point's own outline, drawn underneath and wider - the same
-    // "coloured body, dark outline" treatment drawHoverBody gives that
+    // "colored body, dark outline" treatment drawHoverBody gives that
     // point's bodies, so the arrow belongs to the same playback visually.
     if (outline) {
       hoverCtx.strokeStyle = outline;
@@ -5482,16 +5482,16 @@
       hoverCtx.fill();
       hoverCtx.stroke();
     } else if (isTrapezoidType(spec.type)) {
-      // Deliberately one flat colour for the whole outline. #editor-view
-      // colours each of the four edges by its ROLE - which side teleports,
+      // Deliberately one flat color for the whole outline. #editor-view
+      // colors each of the four edges by its ROLE - which side teleports,
       // which side splits, which are plain walls - because that is the view
       // where you build the thing. This panel is a thumbnail of one pixel's
       // starting state; the edge roles aren't what you're reading it for,
-      // and four colours at this size is just noise.
+      // and four colors at this size is just noise.
       hoverCtx.lineCap = "round";
       hoverCtx.lineJoin = "round";
       if (colorOverride) {
-        // Same two-pass outline a line gets under an inspected colour, and for
+        // Same two-pass outline a line gets under an inspected color, and for
         // the same reason - see the line branch below.
         hoverCtx.strokeStyle = colorOverride.stroke;
         hoverCtx.lineWidth = PhysicsEngine.LINE_THICKNESS + 2;
@@ -6270,7 +6270,7 @@
   //
   // What gets measured is a re-render of the view into an offscreen float
   // target (the same drawSampleRows the superlative buttons use), NOT a
-  // readback of the canvas. The canvas is 8-bit colour that has already
+  // readback of the canvas. The canvas is 8-bit color that has already
   // been through a hue ramp; turning that back into values would be lossy
   // where the ramp is steep, ambiguous under Color Zoom's repeats, and
   // wrong wherever antialiasing averaged two hues into a third that no
@@ -6425,20 +6425,44 @@
     return isBouncesOutput ? bounceMaxValue : currentOutputRangeMax();
   }
 
+  // Every number this page REPORTS is in the coordinate system the scene is
+  // authored and read in - origin at the frame's center, +y up, and so
+  // +rotation counter-clockwise (see physics-coords.js) - while everything
+  // upstream of here, the shader included, is still engine space. This is
+  // the single step between the two, so the colours and the labels stay two
+  // views of one measurement rather than two measurements.
+  //
+  // Distance Apart, Scene lifespan and Bounce Count pass straight through:
+  // a separation, a step count and a tally have no origin to be measured
+  // from and no direction to reverse.
+  function authoredOutputValue(v) {
+    var prop = scene.output.property;
+    if (prop === "x") return PhysicsCoords.toAuthoredX(v, scene);
+    if (prop === "y") return PhysicsCoords.toAuthoredY(v, scene);
+    if (prop === "angle") return PhysicsCoords.flipAngle(v);
+    return v;
+  }
+
   // The inverse of outputColorT: a sampled t back into the Output's own
   // units. Every branch mirrors one of that function's, in the same order.
+  //
+  // Note that this is not monotonic in t for every Output any more: with +y
+  // up, t = 0 is the TOP of the frame and so the largest Center Y. Callers
+  // that want a span or an ordered pair out of two of these have to say so
+  // themselves rather than assume t's own order carries over - see the
+  // Range and percentile rows in fractal-stats-panel.js.
   function statsValueForT(t) {
-    if (isBouncesOutput) return t * bounceMaxValue;
+    if (isBouncesOutput) return authoredOutputValue(t * bounceMaxValue);
     var rangeMax = currentOutputRangeMax();
-    if (scene.output.property === "lifespan") return t * rangeMax;
+    if (scene.output.property === "lifespan") return authoredOutputValue(t * rangeMax);
     if (isInfinitePositionOutput) {
       // frameSigmoid's own inverse. Clamped off both ends first: the
       // sigmoid only reaches 0 and 1 at infinity, so a t that has rounded
       // onto either would come back as one.
       var clamped = Math.min(1 - 1e-6, Math.max(1e-6, t));
-      return rangeMax * (0.5 - Math.log(1 / clamped - 1) / PhysicsEngine.OUTPUT_SIGMOID_STEEPNESS);
+      return authoredOutputValue(rangeMax * (0.5 - Math.log(1 / clamped - 1) / PhysicsEngine.OUTPUT_SIGMOID_STEEPNESS));
     }
-    return t * rangeMax;
+    return authoredOutputValue(t * rangeMax);
   }
 
   function statsFormatValue(v) {
@@ -6575,8 +6599,8 @@
     // reads as the panel being disabled.
     if (statsHasResult) statsPanel.markStale();
     statsPanel.setStatus(statsHasResult
-      ? "The view moved - these numbers describe the previous one. Re-measuring once the fractal has finished rendering."
-      : "Waiting for the fractal to finish rendering.", "stale");
+      ? "Metrics will be calculated after rendering completes."
+      : "Waiting for the fractal to finish rendering.", "loading");
   }
 
   // Called from finishRun - the one place that knows the ladder has reached
@@ -6671,7 +6695,7 @@
         // Nothing drawn on the very first band means the sampler went away
         // between beginStatsRun's check and here (a precision switch
         // dropping its program, say). Reading the target back now would
-        // analyse an untouched texture - all zeros - and present that as a
+        // analyze an untouched texture - all zeros - and present that as a
         // measurement.
         if (drawn === 0) {
           abandonStatsRun();
@@ -6795,9 +6819,9 @@
       host: {
         valueForT: statsValueForT,
         formatValue: statsFormatValue,
-        // The grid's own colour for this value - hoverOutputColorFinal is
+        // The grid's own color for this value - hoverOutputColorFinal is
         // already an exact JS copy of the shader's colorMap, Color Zoom
-        // included, so a swatch here is the colour on screen and not an
+        // included, so a swatch here is the color on screen and not an
         // approximation of it. Bounce Count's t can exceed 1 (the divisor
         // comes from a coarser sample than this one), which would run the
         // hue past the end of the ramp.
@@ -6823,13 +6847,13 @@
           statsPanel.setStatus("Measuring the view on screen…", "working");
           statsOnRenderSettled();
         } else {
-          statsPanel.setStatus("Waiting for the fractal to finish rendering.", "stale");
+          statsPanel.setStatus("Waiting for the fractal to finish rendering.", "loading");
         }
       },
       onEnabledChange: function () {
         if (!statsWantsWork()) {
           abandonStatsRun();
-          statsPanel.setStatus("Every measurement below is off. Switch one on to analyse the view currently on screen.");
+          statsPanel.setStatus("Every measurement below is off. Switch one on to analyze the view currently on screen.");
           return;
         }
         // Switching a section OFF invalidates nothing, so it neither starts
@@ -6851,11 +6875,11 @@
           statsPanel.setStatus("Measuring the view on screen…", "working");
           statsOnRenderSettled();
         } else {
-          statsPanel.setStatus("Waiting for the fractal to finish rendering.", "stale");
+          statsPanel.setStatus("Waiting for the fractal to finish rendering.", "loading");
         }
       },
     });
-    statsPanel.setStatus("Every measurement below is off. Switch one on to analyse the view currently on screen.");
+    statsPanel.setStatus("Every measurement below is off. Switch one on to analyze the view currently on screen.");
 
     // A chart sizes itself to the card's width, which only exists once the
     // card is laid out - and changes when a portrait window is resized.
@@ -6878,14 +6902,14 @@
     if (!open) { abandonStatsRun(); return; }
     statsPanel.relayout();
     if (!statsPanel.anyEnabled()) {
-      statsPanel.setStatus("Every measurement below is off. Switch one on to analyse the view currently on screen.");
+      statsPanel.setStatus("Every measurement below is off. Switch one on to analyze the view currently on screen.");
     } else if (statsResultIsCurrent && !statsPanel.needsMeasurement()) {
       statsPanel.setStatus(statsLastStatus);
     } else if (progressive.complete && !dirty) {
       statsPanel.setStatus("Measuring the view on screen…", "working");
       statsOnRenderSettled();
     } else {
-      statsPanel.setStatus("Waiting for the fractal to finish rendering.", "stale");
+      statsPanel.setStatus("Waiting for the fractal to finish rendering.", "loading");
     }
   }
 
@@ -6938,7 +6962,7 @@
   // PhysicsGridCodegen.playbackStateVariables for exactly what that is), and
   // a frame pays only for the steps it adds: a step pass reads the state,
   // runs a few steps and writes the other texture of a ping-pong pair, then a
-  // colour pass paints the result.
+  // color pass paints the result.
   //
   // What that costs, and what takes over where it can't reach:
   //  - Resolution. Two full copies of the state is a lot of video memory,
@@ -7059,8 +7083,8 @@
     ).join("\n");
   }
 
-  // The colour pass: each texel's Output value from its saved state, through
-  // exactly the grid program's own t and colour code.
+  // The color pass: each texel's Output value from its saved state, through
+  // exactly the grid program's own t and color code.
   function buildPlaybackColorShader(pieces, vars) {
     var outScalar = pieces.outScalar;
     var carriesLifespan = vars.some(function (v) { return v.name === "lifespanValue"; });
@@ -7075,7 +7099,7 @@
       // Full-res pixels between two neighbouring texels - see
       // shadePlaybackDerived.
       "uniform float u_gridStride;",
-      // The grid program's own colouring uniforms - see its header.
+      // The grid program's own coloring uniforms - see its header.
       "uniform bool u_colorZoom;",
       "uniform int u_durationSteps;",
       "uniform float u_bounceMax;",
@@ -7103,10 +7127,10 @@
         // than from re-simulating a stencil around each one - the texels are
         // already simulated, and five simulations a pixel is exactly the cost
         // playback exists to avoid. The grid's own program can't do this (its
-        // accumulators hold hue-ramped colour, see shadeDerived), but these
+        // accumulators hold hue-ramped color, see shadeDerived), but these
         // are raw values. Neighbours are u_gridStride full-res pixels apart,
         // so each difference is scaled back to "per full-res pixel", the unit
-        // the colour formulas are calibrated in; the Laplacian's sum of
+        // the color formulas are calibrated in; the Laplacian's sum of
         // differences grows with the square of the spacing. An edge texel
         // reuses itself for its missing neighbour, which reads as flat.
         "vec3 shadePlaybackDerived(ivec2 texel, " + outScalar + " outputValue, float t) {",
@@ -7303,7 +7327,7 @@
     };
   }
 
-  // Everything the colour pass's picture depends on besides the state
+  // Everything the color pass's picture depends on besides the state
   // itself - if any of it changes, the same state has to be painted again.
   function playbackLookKey(res) {
     return [res.key, timeline.stateStep, displayMode.id, colorZoomEnabled, simulationSteps, bounceMaxValue].join(" ");
@@ -7851,7 +7875,7 @@
   // Inspect is the one menu open on arrival. The other two configure and
   // measure the fractal; this one is how you read it, and landing on a page
   // of nothing but icons would hide the preview that explains what the
-  // colours mean. Deliberately here rather than in the markup, so the
+  // colors mean. Deliberately here rather than in the markup, so the
   // opening runs through the same path a click does.
   //
   // This covers the FIRST arrival only - boot() runs once and every later

@@ -33,7 +33,7 @@
 // That makes this a THIRD hand-synced implementation of the same physics,
 // alongside physics-engine.js and the float32 GLSL. The project already
 // accepts that trade for the first two (see the README's "Two
-// implementations, kept in lockstep on purpose"), and the same defence
+// implementations, kept in lockstep on purpose"), and the same defense
 // applies here: physics-tests.js cross-checks this against both of them,
 // and the grid's own precision override renders the float32 and df passes
 // at the same view so they can be compared directly.

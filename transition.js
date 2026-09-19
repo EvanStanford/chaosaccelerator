@@ -182,9 +182,9 @@
   // Stamps the cell across the whole viewport at `cellPx` per copy, but only
   // paints inside `clip` - the toolbar's own screen rect, left untouched
   // rather than papered over (see its computation in runTransition). Tiles
-  // are centred on (centerX, centerY) - the point that should read as world
+  // are centered on (centerX, centerY) - the point that should read as world
   // (0, 0), i.e. the exact, unperturbed scene - rather than on a tile's own
-  // boundary, so it's really that point converging on the grid's own centre
+  // boundary, so it's really that point converging on the grid's own center
   // (see zoomOrigin's comment) driving the lattice, not some corner of it.
   // Each tile is backed by a white rect slightly larger than the inset
   // image, so every shared edge between neighbours gets a white seam - a
@@ -227,7 +227,7 @@
   // ---- Where the zoom starts ----
   //
   // The first tile drawn has to land exactly on top of the editor's own
-  // canvas - not the viewport's centre - or the very first frame jumps: an
+  // canvas - not the viewport's center - or the very first frame jumps: an
   // instant before the transition starts, that rect is the whole picture,
   // and #panel (docked beside it, or below it in portrait) takes up real
   // space the tile must NOT claim. Read fresh every run rather than cached,
@@ -238,12 +238,12 @@
   // reads as world (0, 0), the exact unperturbed scene (see
   // physics-grid-codegen.js's resolveOffsetTargets: worldX/worldY are
   // ADDED to the scene's own authored position, so (0, 0) is "no offset at
-  // all", and that's rendered at the centre of whatever frame the scene's
+  // all", and that's rendered at the center of whatever frame the scene's
   // own canvas fills - which IS canvasArea, since resizeCanvas sizes it to
-  // exactly canvasArea's box). stampTiles centres its tiling lattice there
+  // exactly canvasArea's box). stampTiles centers its tiling lattice there
   // (see its own comment for why that has to be the tile's CENTRE and not a
   // boundary) rather than at canvasArea's corner, so the point the zoom is
-  // actually landing on is the one that's SUPPOSED to end up centred, not
+  // actually landing on is the one that's SUPPOSED to end up centered, not
   // some arbitrary tile edge a half-cell-width away from it.
   //
   // startPx is canvasArea's WIDTH, not height, despite feeding a variable
@@ -257,13 +257,13 @@
   // The grid has no such offset - its own menu column FLOATS over its
   // canvas (see #grid-menu-column in fractal-grid.css), so it always fills the
   // full viewport, and it never pans (transition.js only ever calls
-  // setScale, never touches centre) - world (0, 0) sits at the viewport's
-  // own centre for the ENTIRE run, start to finish. That's the far end
+  // setScale, never touches center) - world (0, 0) sits at the viewport's
+  // own center for the ENTIRE run, start to finish. That's the far end
   // (centerX, centerY) walks toward, LINEARLY in `u`, across the whole run
   // (see `centerT` in renderAt for why linear, not eased): the point
   // standing in for world (0, 0) glides from where it actually starts to
-  // where the grid has had it centred all along, landing exactly on the
-  // centre PIXEL - not whichever one happened to be nearest a corner - the
+  // where the grid has had it centered all along, landing exactly on the
+  // center PIXEL - not whichever one happened to be nearest a corner - the
   // instant the tiles hand off to the grid.
   //
   // left/top/right/bottom describe the same rect and feed a SEPARATE thing
@@ -383,8 +383,8 @@
       var fade = Math.min(1, Math.max(0, (cellPx - MIN_LEGIBLE_CELL_PX) / (startPx * 0.25)));
 
       // Walks the point standing in for world (0, 0) from where it actually
-      // sits at the start (canvasArea's own on-screen centre) to where the
-      // grid has it centred for the WHOLE run (the viewport's own centre) -
+      // sits at the start (canvasArea's own on-screen center) to where the
+      // grid has it centered for the WHOLE run (the viewport's own center) -
       // see zoomOrigin's comment for why these two points differ.
       //
       // Driven by `u` directly - LINEARLY, not eased - rather than by fade
@@ -392,12 +392,12 @@
       // starts falling near the end, so tying the pan to it left this
       // frozen while the cell-size shrink (cellPxAt, below) was already well
       // underway, then suddenly catching up. Anything not exactly at the
-      // frame's own centre reads that mismatch as a reversal: on screen it's
-      // centreX/Y PLUS an offset scaled by the current cell size, and early
+      // frame's own center reads that mismatch as a reversal: on screen it's
+      // centerX/Y PLUS an offset scaled by the current cell size, and early
       // on, with the pan frozen, that offset term is all that moves it -
       // shrinking fast, in whichever direction the offset points. Once the
-      // pan starts, it pulls the opposite way (centreX/Y is walking toward
-      // the viewport's centre, typically the other direction), hard enough
+      // pan starts, it pulls the opposite way (centerX/Y is walking toward
+      // the viewport's center, typically the other direction), hard enough
       // to overturn the drift already in progress.
       //
       // ease(u) alone doesn't fix this: it has zero velocity at u = 0 too
@@ -408,7 +408,7 @@
       // actual curve numerically and confirmed the peak deviation drops
       // substantially versus ease(u). It's not a mathematical guarantee of
       // zero reversal for every possible layout (an object sitting far
-      // enough off the frame's own centre could still show a faint, smooth
+      // enough off the frame's own center could still show a faint, smooth
       // change of direction) - but what made the old version look BROKEN
       // wasn't the reversal existing at all, it was fade's frozen-then-
       // catch-up curve turning it into a sudden kink. A linear pan has no
@@ -480,7 +480,7 @@
       // the user has since panned or zoomed off to. renderAt's per-frame
       // setScale (see runTransition) only ever touches scale, not pan, so
       // without this a pan left over from browsing the grid would have the
-      // whole zoom-in animate centred on the wrong spot for the entire run,
+      // whole zoom-in animate centered on the wrong spot for the entire run,
       // only snapping to the right one at the very last instant (finish()
       // calls resetView() too, but that's the far end of the animation, not
       // the frame it starts from). Scale gets reset here as a side effect -
