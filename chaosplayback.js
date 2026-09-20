@@ -40,7 +40,7 @@
   var messageBox = $("player-message"), messageText = $("player-message-text");
   var btnPlayPause = $("play-pause"), scrubber = $("scrubber"), timeReadout = $("time-readout");
   var btnSpeed = $("speed"), btnLoop = $("loop"), btnRestart = $("restart");
-  var movieFacts = $("movie-facts");
+  var movieFacts = $("movie-facts"), btnDownload = $("download");
   var screenCtx = screen.getContext("2d");
 
   function fail(message) {
@@ -121,7 +121,37 @@
   var copy = document.createElement("canvas");
   var copyCtx = copy.getContext("2d");
   var recentFrameMs = [];
+  // What has been packed so far, for estimating what the whole movie will
+  // come to. Counted per frame of the MOVIE, so a picture shared by several
+  // identical frames is counted as often as it plays - an estimate of the
+  // movie, which is what a reader expects, a little over what is held.
+  var packedBytes = 0, packedFrames = 0;
+  function formatBytes(bytes) {
+    var units = ["B", "KB", "MB", "GB"], u = 0;
+    while (bytes >= 1024 && u < units.length - 1) { bytes /= 1024; u++; }
+    return (u === 0 || bytes >= 100 ? Math.round(bytes) : bytes.toFixed(1)) + " " + units[u];
+  }
   var renderStartedAt = 0, frameStartedAt = 0;
+
+  // The app's own watermark (see #watermark in app-shell.css), drawn INTO
+  // every frame rather than laid over the player, so it is still there in a
+  // downloaded file. Sized against the frame, not in fixed pixels: the same
+  // 12px that reads well on a full-resolution frame would fill a quarter of
+  // a 1/8-resolution one's width.
+  function stampWatermark() {
+    var size = Math.max(7, Math.round(copy.height * 0.022));
+    var inset = Math.round(size);
+    copyCtx.save();
+    copyCtx.font = size + "px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+    copyCtx.textAlign = "right";
+    copyCtx.textBaseline = "alphabetic";
+    copyCtx.shadowColor = "rgba(0, 0, 0, 0.8)";
+    copyCtx.shadowBlur = Math.max(2, size / 4);
+    copyCtx.shadowOffsetY = Math.max(1, size / 12);
+    copyCtx.fillStyle = "#fff";
+    copyCtx.fillText("chaosaccelerator.com", copy.width - inset, copy.height - inset);
+    copyCtx.restore();
+  }
 
   function formatDuration(seconds) {
     seconds = Math.max(0, Math.round(seconds));
@@ -140,6 +170,7 @@
       var mean = recentFrameMs.reduce(function (a, b) { return a + b; }, 0) / recentFrameMs.length;
       detail += "  \u00b7  about " + formatDuration(mean * (frames.length - done) / 1000) + " left";
     }
+    if (packedFrames > 0) detail += "  \u00b7  about " + formatBytes(packedBytes / packedFrames * frames.length) + " in all";
     renderDetail.textContent = detail + "  \u00b7  pauses while this tab is in the background";
   }
 
@@ -181,9 +212,15 @@
           copy.height = frameHeight = canvas.height;
         }
         copyCtx.drawImage(canvas, 0, 0);
+        stampWatermark();
         // toBlob packs a snapshot taken now, so `copy` is free for the next
         // frame straight away.
         blobPromises[i] = new Promise(function (resolve) { copy.toBlob(resolve, "image/jpeg", JPEG_QUALITY); });
+        blobPromises[i].then(function (blob) {
+          if (!blob) return;
+          packedBytes += blob.size;
+          packedFrames += 1;
+        });
         show(copy);
         recentFrameMs.push(performance.now() - frameStartedAt);
         if (recentFrameMs.length > 12) recentFrameMs.shift();
@@ -333,7 +370,8 @@
     renderPanel.hidden = true;
     maxDecoded = Math.min(90, Math.max(8, Math.floor(DECODED_BUDGET_BYTES / (frameWidth * frameHeight * 4))));
     movieFacts.textContent = frames.length.toLocaleString() + " frames  \u00b7  " + (frames.length / FPS).toFixed(1) + " s  \u00b7  " +
-      frameWidth + " \u00d7 " + frameHeight + "  \u00b7  rendered in " + formatDuration((performance.now() - renderStartedAt) / 1000);
+      frameWidth + " \u00d7 " + frameHeight + "  \u00b7  " +
+      formatBytes(blobs.reduce(function (sum, blob) { return sum + blob.size; }, 0)) + "  \u00b7  rendered in " + formatDuration((performance.now() - renderStartedAt) / 1000);
     scrubber.max = String(frames.length - 1);
     [btnPlayPause, scrubber, btnSpeed, btnLoop, btnRestart].forEach(function (control) { control.disabled = false; });
 
@@ -361,8 +399,88 @@
       else if (event.key === "Home") seek(0);
     });
 
+    btnDownload.hidden = false;
+    btnDownload.addEventListener("click", downloadMovie);
+
     setPlaying(true);
     requestAnimationFrame(tick);
+  }
+
+  // ---- Saving it as a file ----
+  //
+  // The frames are replayed once, off screen, into a canvas the browser's own
+  // MediaRecorder is filming - so this takes as long as the movie runs, and
+  // produces whatever video format this browser records (WebM in Chrome and
+  // Firefox, MP4 in Safari). That is the price of having no encoder of our
+  // own: a real one would mean shipping a muxer library. Every frame is held
+  // for exactly one frame's time, paced against the clock rather than by
+  // counting timeouts, so the file runs at the movie's own speed.
+  var DOWNLOAD_LABEL = "Download";
+  function downloadMovie() {
+    if (btnDownload.disabled) return;
+    if (typeof MediaRecorder !== "function" || !HTMLCanvasElement.prototype.captureStream) {
+      btnDownload.textContent = "Not supported in this browser";
+      btnDownload.disabled = true;
+      return;
+    }
+    var film = document.createElement("canvas");
+    film.width = frameWidth;
+    film.height = frameHeight;
+    var filmCtx = film.getContext("2d");
+    var type = ["video/mp4;codecs=avc1", "video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].filter(function (t) {
+      return MediaRecorder.isTypeSupported(t);
+    })[0];
+    var recorder;
+    try {
+      // Generous on purpose: this picture is mostly fine noise, which a
+      // default bitrate turns to mush.
+      recorder = new MediaRecorder(film.captureStream(FPS), { mimeType: type, videoBitsPerSecond: Math.min(60e6, Math.max(8e6, frameWidth * frameHeight * 12)) });
+    } catch (err) {
+      btnDownload.textContent = "Not supported in this browser";
+      btnDownload.disabled = true;
+      return;
+    }
+    var chunks = [];
+    recorder.ondataavailable = function (event) { if (event.data && event.data.size) chunks.push(event.data); };
+    recorder.onstop = function () {
+      var file = new Blob(chunks, { type: recorder.mimeType || type });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(file);
+      a.download = "chaosaccelerator-movie." + (/mp4/.test(file.type) ? "mp4" : "webm");
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 60000);
+      btnDownload.textContent = DOWNLOAD_LABEL;
+      btnDownload.disabled = false;
+    };
+    btnDownload.disabled = true;
+    var startedAt = 0;
+    function film1(i) {
+      if (i >= blobs.length) {
+        // One more frame's time, or the last frame is cut short.
+        setTimeout(function () { recorder.stop(); }, 1000 / FPS);
+        return;
+      }
+      createImageBitmap(blobs[i]).then(function (bitmap) {
+        var due = startedAt + i * 1000 / FPS;
+        setTimeout(function () {
+          filmCtx.drawImage(bitmap, 0, 0);
+          bitmap.close();
+          btnDownload.textContent = "Recording " + Math.round(100 * (i + 1) / blobs.length) + "%";
+          film1(i + 1);
+        }, Math.max(0, due - performance.now()));
+      }, function () { recorder.stop(); });
+    }
+    // The first frame is on the canvas before filming starts, so the file
+    // doesn't open on a blank.
+    createImageBitmap(blobs[0]).then(function (bitmap) {
+      filmCtx.drawImage(bitmap, 0, 0);
+      bitmap.close();
+      recorder.start();
+      startedAt = performance.now();
+      film1(1);
+    });
   }
 
   startEngine();
