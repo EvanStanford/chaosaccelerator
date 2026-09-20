@@ -477,6 +477,14 @@
                       <option value="qf">Force quad-float</option>
                     </select>
                   </label>
+                  <label class="toggle-field" id="reuse-picture-field"
+                         title="While a new view renders, keep showing the last picture moved and scaled into place, and reuse its pixels outright when panning. Off: every pan and zoom starts again from the coarsest level.">
+                    <span>Reuse Last Picture</span>
+                    <span class="toggle-switch">
+                      <input type="checkbox" id="reuse-picture-checkbox">
+                      <span class="toggle-slider"></span>
+                    </span>
+                  </label>
                   <label class="field">
                     <span>Resolution Limits: <b id="resolution-bounds-readout">&hellip;</b></span>
                     <div class="dual-range">

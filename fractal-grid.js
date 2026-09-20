@@ -60,15 +60,22 @@
   // rather than the product (1176.47) so the relationship to the old
   // framing stays legible.
   var DEFAULT_SCALE = 200 / 0.17;
-  // Not a precision-derived floor - just small enough that the real limit
-  // is what you hit first, as visible pixelation/aliasing rather than an
-  // artificial hard stop. That limit used to be highp float's ~7 decimal
-  // digits in the GLSL computing worldX/worldY; each multi-float precision
-  // (physics-df.js) moves it down by about seven more - ~14 digits at two
-  // words, ~21 at three, ~28 at four - so this floor sits just past the
-  // last of them. See the precision readout in the Settings panel, which
-  // reports which one is actually running at the current zoom.
-  var MIN_SCALE = 1e-22;
+  // The zoom readout's 1e26x, written as the zoom it is rather than as the
+  // scale that happens to produce it (~1.18e-23).
+  //
+  // Deliberately PAST the last precision's limit, not at it. Each
+  // multi-float precision (physics-df.js) buys about seven more digits -
+  // ~14 at two words, ~21 at three, ~28 at four - and the last of them has
+  // its full margin (64 of its own smallest steps per pixel, the same
+  // margin every switch on the way down is made at) until about 1e24x. By
+  // 1e26x a pixel is down to a step or less, so neighbouring pixels start
+  // from the same world point and the picture goes to blocks: the wall
+  // float32 hits at ~1e5x, met again 21 digits later. Stopping short of it
+  // would make the limit look arbitrary; letting the last decade or two
+  // show is what explains it. (Going further would take a fifth word, and
+  // a view centre held to more than the ~32 digits it has now.) The
+  // precision readout in the Settings panel says which one is running.
+  var MIN_SCALE = DEFAULT_SCALE / 1e26;
   var MAX_SCALE = 1e6;
 
   // How far each pixel's own simulation is run before its Output value is
@@ -134,6 +141,7 @@
   var stepsReadout = document.getElementById("steps-readout");
   var precisionReadout = document.getElementById("precision-readout");
   var precisionSelect = document.getElementById("precision-select");
+  var reusePictureCheckbox = document.getElementById("reuse-picture-checkbox");
   var inspectLineSampleCountSlider = document.getElementById("inspect-line-sample-count-slider");
   var inspectLineSampleCountReadout = document.getElementById("inspect-line-sample-count-readout");
   var inspectGridSizeSlider = document.getElementById("inspect-grid-size-slider");
@@ -980,15 +988,45 @@
     // PhysicsGridCodegen.playbackStateVariables). Lifespan is only state in
     // the sticky loop: nowhere else can a pixel stop early, so its lifespan
     // is simply however many steps have run.
+    //
+    // Only the half that cannot be had any other way, though, because every
+    // float carried is paid for twice over: in bandwidth, and - past the 32
+    // floats one draw can write - in whole extra draws, each re-running the
+    // same steps to keep a different slice of the result (see
+    // advanceSliceJob). The df double pendulum carried 55 floats, so every
+    // slice of it was simulated twice; it needs 31. What is NOT carried:
+    //   frozenX/Y/Angle - between two steps of a pixel still running they
+    //     are simply the body's own x, y and angle (the loop's last act
+    //     each step is to copy them), and a pixel that has stopped never
+    //     reads them again. Re-derived on load.
+    //   prevFrozen* for a body, or a field of one, that the Output does not
+    //     read: they exist only to extrapolate the Output's body to the
+    //     stopping instant, and the extrapolated value of a field nothing
+    //     reads is dead. (Output reads fields as plain "body.field" text -
+    //     see emitBodyValue - which is what is searched for.)
+    //   hasPrevFrozen - true from the first step on for a pixel still
+    //     running, i.e. u_baseStep > 0, and unread once it has stopped.
+    //   lifespanValue - unless it IS the Output.
+    // loopStateRestoreLines puts the re-derived ones back after a load.
     var loopStateVariables = [];
+    var loopStateRestoreLines = [];
     if (isStickyLoop) {
+      var stickyBodyVar = df ? "dbody" : "body";
+      var outputText = outputLines.join("\n");
+      function outputReads(idx, field) {
+        return new RegExp("\\b" + stickyBodyVar + idx + "\\." + field + "\\b").test(outputText);
+      }
       trackedIndices.forEach(function (idx) {
-        ["frozenX", "frozenY", "frozenAngle", "prevFrozenX", "prevFrozenY", "prevFrozenAngle"].forEach(function (name) {
-          loopStateVariables.push({ name: name + idx, type: df ? "df" : "float" });
+        [["X", "x"], ["Y", "y"], ["Angle", "angle"]].forEach(function (f) {
+          loopStateRestoreLines.push("frozen" + f[0] + idx + " = " + stickyBodyVar + idx + "." + f[1] + ";");
+          if (outputIndices.indexOf(idx) !== -1 && outputReads(idx, f[1])) {
+            loopStateVariables.push({ name: "prevFrozen" + f[0] + idx, type: df ? "df" : "float" });
+          }
         });
       });
-      loopStateVariables.push({ name: "hasPrevFrozen", type: "bool" }, { name: "wrapStopped", type: "bool" },
-        { name: "lifespanValue", type: "float" });
+      loopStateRestoreLines.push("hasPrevFrozen = u_baseStep > 0;");
+      loopStateVariables.push({ name: "wrapStopped", type: "bool" });
+      if (/\blifespanValue\b/.test(outputText)) loopStateVariables.push({ name: "lifespanValue", type: "float" });
     }
     if (isBounces) {
       loopStateVariables.push({ name: "bounceCount", type: "float" }, { name: "bounceTouching", type: "bool" });
@@ -1631,6 +1669,7 @@
       stepOnceSource: stepOnceSource,
       stepLoop: stepLoop,
       loopStateVariables: loopStateVariables,
+      loopStateRestoreLines: loopStateRestoreLines,
       physicsDeclarationLines: physicsDeclarationLines,
       worldCoordLines: worldCoordLines,
       stateWorldCoordLines: stateWorldCoordLines,
@@ -1911,7 +1950,7 @@
       var entry = playbackGpu.programs[precision];
       if (entry.status !== "building") return;
       pumpPlaybackBuild(entry, false);
-      if (entry.status === "ready" && precision === pickPrecision() && precision !== "f32") {
+      if (entry.status === "ready" && precision === effectivePrecision() && (precision !== "f32" || f32NeedsSlicing())) {
         updatePrecisionReadout();
         markDirty();
       }
@@ -1927,6 +1966,7 @@
   function refreshBuildStatus() {
     var message = null;
     if (pickPrecision() !== "f32" && precisionPending(pickPrecision())) message = "Preparing high precision\u2026";
+    else if (f32SlicedPending()) message = "Preparing a heavy scene\u2026";
     else if (timeline.playing && playbackProgramsPending(effectivePrecision())) message = "Preparing playback\u2026";
     if (message) {
       setStatus(true, message);
@@ -2037,7 +2077,7 @@
     // Above float32 the field is measured by the sliced renderer's own
     // programs instead (see drawSampleBandSliced), so this is only ever the
     // float32 grid program - and only while float32 is what is on screen.
-    if (effectivePrecision() !== "f32") return null;
+    if (effectivePrecision() !== "f32" || f32NeedsSlicing()) return null;
     return requestPass("f32", "standard", true);
   }
 
@@ -2154,6 +2194,74 @@
     tile: null,
     tileX: 0,
   };
+
+  // ---- Picture reuse (Settings > Reuse Last Picture; off by default) ----
+  //
+  // Every view change used to throw the picture away and start the ladder
+  // again from its coarsest level, which above float32 means seconds to a
+  // minute of looking at blocks. But the last picture is still sitting in a
+  // texture, and most of a pan or a zoom is a view of the same world points
+  // it already shows. So, with the setting on, a full-resolution copy of the
+  // best picture so far is kept (`source`, with the view it is a picture
+  // OF), and each new run works out how it maps onto the view being
+  // rendered (`run` - see reusePlanRun). That buys two different things:
+  //
+  //   A PREVIEW, for any view change. Until the ladder has a finished level
+  //   at least as fine as the old picture looks from here, the screen shows
+  //   the old picture moved and magnified into place (presentWithSource),
+  //   and the ladder's output where the old picture has nothing - a pan's
+  //   newly exposed edge, the border of a zoom out. Zoom in 2x and the
+  //   screen is at half resolution at once, where the ladder alone would
+  //   have been at a 32nd. Nothing is saved: every pixel is still rendered.
+  //
+  //   EXACT reuse, for a pan. Pans are snapped to whole device pixels while
+  //   the setting is on (panByClientDelta), so a panned view's pixels are
+  //   the old view's pixels, moved - the same world points, to within the
+  //   ~1e-4 of a pixel that any two renders differ by. Those are copied into
+  //   each level (reuseFillCovered) instead of being simulated, and only the
+  //   strips the pan exposed are drawn (levelSimRegion). This one IS a
+  //   saving, and it is permanent: a small pan at quad-float costs its strip
+  //   rather than the whole screen again.
+  //
+  // What is reused is COLORS, so the source is only used for a run that
+  // would color the same world point the same way - reuseLookKey is
+  // everything that goes into that besides the view. The derived display
+  // modes difference neighbouring pixels, which makes their colors depend on
+  // the zoom too, so they get the pan reuse and not the zoom preview.
+  //
+  // Declared up here for the same reason `progressive` is: resetProgressive
+  // reads it, and that is reachable long before the ladder's own section.
+  var reuseEnabled = false;
+  var reuse = {
+    source: null,        // {tex, fbo, width, height}, full resolution
+    center: null,        // the view the source is a picture of...
+    scale: 0,
+    stride: 0,           // ...the spacing of its samples, in its own pixels...
+    // ...which of its pixels antialiasing had FINISHED with, as {x0, y0, x1,
+    // y1} in its own pixels, or null for none. Usually all or nothing, but a
+    // pan that interrupts antialiasing leaves a picture that is both: the
+    // pixels it copied from a finished source are finished, and the strip
+    // it drew itself is plain samples still waiting for theirs...
+    aaRect: null,
+    look: "",            // ...and the look and precision it was rendered with
+    precision: "",
+    // What the accumulator currently holds a picture OF, noted as each run
+    // starts - by the time a run is abandoned the view has already moved
+    // on. null when it is not the ladder's picture (playback painted it).
+    image: null,
+    // How the source maps onto the run in progress; null when it doesn't.
+    run: null,
+    // The fractions of a device pixel that snapping a pan has set aside.
+    panCarryX: 0,
+    panCarryY: 0,
+  };
+  var sceneGeneration = 0;
+  // Below this much of the screen, a source the ladder has not yet bettered
+  // is dropped for the ladder's own picture anyway: it is mostly off screen.
+  var REUSE_KEEP_COVERAGE = 0.15;
+  // What a level with nothing to simulate reports as its cost - not 0, which
+  // the budget loop reads as "nothing left to draw".
+  var REUSE_FREE_COST = 1e-6;
 
   // ---- The playback timeline ----
   //
@@ -2342,6 +2450,28 @@
     });
     precisionSelect.addEventListener("change", function () {
       precisionMode = precisionSelect.value;
+      markDirty();
+    });
+  }
+
+  // Picture reuse (see `reuse`). Page state like the precision above, and
+  // off on every arrival for the same reason: it changes what the screen
+  // shows while a render is under way, which should be asked for.
+  if (reusePictureCheckbox) {
+    reusePictureCheckbox.checked = reuseEnabled;
+    reusePictureCheckbox.addEventListener("change", function () {
+      reuseEnabled = reusePictureCheckbox.checked;
+      reuse.panCarryX = reuse.panCarryY = 0;
+      if (reuseEnabled) {
+        // The picture on screen is of this view, if a run has got anywhere
+        // with it - so the very next pan or zoom has something to reuse.
+        if (!dirty && progressive.stride > 0) reuseNoteImage();
+        return;
+      }
+      // Off mid-run: a run that was reusing pixels has only drawn part of
+      // each level, so it cannot simply carry on without them.
+      reuse.image = null;
+      reuseDropSource();
       markDirty();
     });
   }
@@ -3125,7 +3255,7 @@
   //
   // u_resolution is always the FULL-res canvas size, never the size of the
   // target being drawn into - see the shader's own comment on why.
-  function drawSublattice(stride, originX, originY) {
+  function drawSublattice(stride, originX, originY, steps) {
     var pass = useCurrentPass();
     if (!pass) return;
     gl.uniform1i(pass.uniforms.sampleField, 0);
@@ -3135,7 +3265,7 @@
     setCenterUniforms(pass.uniforms);
     gl.uniform1f(pass.uniforms.scale, view.scale);
     gl.uniform1i(pass.uniforms.colorZoom, colorZoomEnabled ? 1 : 0);
-    gl.uniform1i(pass.uniforms.maxSteps, renderedSteps());
+    gl.uniform1i(pass.uniforms.maxSteps, steps === undefined ? renderedSteps() : steps);
     gl.uniform1i(pass.uniforms.durationSteps, simulationSteps);
     gl.uniform1f(pass.uniforms.bounceMax, bounceMaxValue);
     gl.uniform1i(pass.uniforms.displayMode, displayMode.id);
@@ -4042,6 +4172,76 @@
   var MIN_PIXEL_BUDGET = 1000;
   var MAX_PIXEL_BUDGET = 32000000;
 
+  // ---- ...and, where the browser offers it, measuring the GPU after all ----
+  //
+  // EXT_disjoint_timer_query_webgl2 reports how long the GPU spent on a span
+  // of commands, a few frames later and without a stall. Chrome on desktop
+  // has it; Safari does not, so everything above stays and is what runs
+  // there. Where it IS available the ladder's budget is steered by it
+  // instead (see noteGpuTime), because the feedback loop above can only
+  // find the ceiling by hitting it: measured with these same queries, a
+  // float32 render overran its frame on 38% of frames and a df one on
+  // 30-40%, with 20ms of GPU work queued into a 16.7ms period as the steady
+  // state. That is the page stuttering at 30-40fps for the length of every
+  // render - the sliders and panels with it, since the browser draws them
+  // on the same GPU.
+  //
+  // The query says how many ms a frame's pixels took, so the budget can be
+  // set straight to the number that takes the time wanted, with no probing
+  // and no overshoot. What is wanted depends on who is watching: most of
+  // the period while the page is left alone to render, about half of it
+  // while the user is doing something (moving the pointer counts - hovering
+  // the grid replays a simulation per move), so that what they are doing
+  // stays smooth and the render gives way rather than the reverse.
+  var GPU_SHARE_IDLE = 0.85;
+  var GPU_SHARE_INTERACTING = 0.5;
+  var INTERACTION_HOLD_MS = 300;
+  var lastInteractionAt = -1e9;
+  ["pointerdown", "pointermove", "wheel", "keydown", "touchstart", "touchmove"].forEach(function (type) {
+    window.addEventListener(type, function () { lastInteractionAt = performance.now(); }, { passive: true, capture: true });
+  });
+  var gpuTimer = { ext: gl.getExtension("EXT_disjoint_timer_query_webgl2"), active: null, pending: [] };
+
+  function gpuTimerBegin() {
+    if (!gpuTimer.ext || gpuTimer.active || gpuTimer.pending.length > 8) return;
+    gpuTimer.active = gl.createQuery();
+    gl.beginQuery(gpuTimer.ext.TIME_ELAPSED_EXT, gpuTimer.active);
+  }
+  // `spent` of budget `b`'s units were dispatched inside the span.
+  function gpuTimerEnd(b, spent) {
+    if (!gpuTimer.active) return;
+    gl.endQuery(gpuTimer.ext.TIME_ELAPSED_EXT);
+    gpuTimer.pending.push({ query: gpuTimer.active, b: b, spent: spent, budget: b.budget });
+    gpuTimer.active = null;
+  }
+  function gpuTimerPoll(now) {
+    while (gpuTimer.pending.length && gl.getQueryParameter(gpuTimer.pending[0].query, gl.QUERY_RESULT_AVAILABLE)) {
+      var rec = gpuTimer.pending.shift();
+      // A disjoint reading (the GPU was reset or throttled mid-span) is void.
+      var ok = !gl.getParameter(gpuTimer.ext.GPU_DISJOINT_EXT);
+      var ms = gl.getQueryParameter(rec.query, gl.QUERY_RESULT) / 1e6;
+      gl.deleteQuery(rec.query);
+      if (ok) noteGpuTime(rec.b, rec.spent, rec.budget, ms, now);
+    }
+  }
+  function noteGpuTime(b, spent, budgetThen, ms, now) {
+    var share = now - lastInteractionAt < INTERACTION_HOLD_MS ? GPU_SHARE_INTERACTING : GPU_SHARE_IDLE;
+    var targetMs = displayPeriodMs * share;
+    // Only a frame that spent most of its budget says what a budget's worth
+    // costs. One cut short - the last band of a level, or a sliced frame
+    // that stopped at its slice-time cap with pixels to spare - is mostly
+    // fixed costs, and would read as a GPU many times slower than it is.
+    // Unless it ran LONG anyway: then whatever it spent was too much, and
+    // that is never to be ignored.
+    if (!(ms > 0.2) || (spent < budgetThen * 0.5 && ms < targetMs)) return;
+    var perMs = spent / ms;
+    // Too slow is believed at once; faster is eased into.
+    b.gpuPerMs = b.gpuPerMs > 0 && perMs > b.gpuPerMs ? b.gpuPerMs * (1 - BUDGET_SMOOTHING) + perMs * BUDGET_SMOOTHING : perMs;
+    b.budget = clamp(b.gpuPerMs * targetMs, b.min, b.max);
+    // What one period holds - the figure other budgets are seeded from.
+    b.throughput = b.gpuPerMs * displayPeriodMs;
+  }
+
   // One work budget and the measurements that steer it. There are two: the
   // refinement ladder's (counted in simulated pixels) and playback's
   // (counted in pixel-steps, since a playback draw costs its step count as
@@ -4059,6 +4259,9 @@
       growMinUse: growMinUse || 0,
       // How much work fits in one refresh period, as last measured.
       throughput: 0,
+      // The same from GPU timer queries, per millisecond; 0 until one has
+      // reported, and for good where there are none - see noteGpuTime.
+      gpuPerMs: 0,
       // Work dispatched during the previous work frame - the other half of
       // the measurement, since the interval alone says nothing without
       // knowing what was being timed.
@@ -4102,9 +4305,11 @@
   // `key` is precision:variant, as in `passes` - for whatever is about to
   // draw, which above float32 is the sliced renderer rather than a pass.
   function budgetFor(precision, variant) {
-    var key = passKey(precision, variant);
+    // Sliced rendering has its own floor and growth rule, and float32 can be
+    // on either side of it depending on the scene (see f32NeedsSlicing).
+    var sliced = precision !== "f32" || f32NeedsSlicing();
+    var key = passKey(precision, variant) + (sliced && precision === "f32" ? ":sliced" : "");
     if (!ladderBudgets[key]) {
-      var sliced = precision !== "f32";
       var floor = sliced ? SLICE_MIN_PIXEL_BUDGET : MIN_PIXEL_BUDGET;
       var seed = INITIAL_PIXEL_BUDGET;
       var reference = ladderBudgets[passKey("f32", "standard")];
@@ -4114,7 +4319,9 @@
       } else if (sliced) {
         seed = INITIAL_PIXEL_BUDGET / (PRECISION_COST_PRIOR[precision] || DF_COST_PRIOR);
       }
-      ladderBudgets[key] = makeWorkBudget(seed, floor, MAX_PIXEL_BUDGET);
+      // Sliced frames can stop at their slice-time cap with most of the
+      // budget unspent (see SLICE_FRAME_SHARE); fitting says nothing then.
+      ladderBudgets[key] = makeWorkBudget(seed, floor, MAX_PIXEL_BUDGET, sliced ? 0.5 : 0);
     }
     return ladderBudgets[key];
   }
@@ -4138,6 +4345,13 @@
       // measurement of how much work fits in one period.
       var periods = Math.max(1, dt / displayPeriodMs);
       tookPeriods = periods;
+      // Steered by measured GPU time instead (noteGpuTime): a long interval
+      // then is the page's own doing - a compile, a garbage collection -
+      // and no reason to touch the budget.
+      if (b.gpuPerMs > 0) {
+        b.lastWorkAt = now;
+        return tookPeriods;
+      }
       if (periods > OVERRUN_RATIO) {
         // A real measurement of how much work fits in one period.
         var measured = b.lastSpent / periods;
@@ -4504,20 +4718,27 @@
   // after n samples. That keeps this to ONE full-res float target instead of
   // two, and costs no extra pass.
   function drawAaBand(pixelsAvailable) {
-    if (progressive.band >= canvas.height) return 0;
+    // The whole screen, unless a pan reused pixels that had ALREADY been
+    // antialiased - those arrived with the accumulator this average was
+    // seeded from, and are left as they are. (A sample's sub-pixel offset
+    // doesn't move it to another pixel, so the region is the pixel's own.)
+    var region = levelSimRegion(1, 0, 0, true);
+    if (region.rows === 0 && progressive.band === 0) return REUSE_FREE_COST;
+    var at = locateBand(region, progressive.band);
+    if (!at) return 0;
     var n = progressive.aaSample + 1;         // the sample being added
     var off = aaOffset(progressive.aaSample); // 0-based index of that sample
     var slicedPrograms = slicedProgramsForGrid();
     if (slicedPrograms) {
       return drawSlicedTile(slicedPrograms, { target: aaAccum, w: canvas.width, h: canvas.height, stride: 1,
-        originX: off.x, originY: off.y, blend: n }, pixelsAvailable);
+        originX: off.x, originY: off.y, blend: n, region: region }, pixelsAvailable);
     }
-    var rows = Math.min(Math.max(MIN_BAND_ROWS, Math.floor(pixelsAvailable / Math.max(canvas.width, 1))),
-      canvas.height - progressive.band);
+    var rect = at.rect;
+    var rows = Math.min(Math.max(MIN_BAND_ROWS, Math.floor(pixelsAvailable / Math.max(rect.w, 1))), rect.h - at.row);
     gl.bindFramebuffer(gl.FRAMEBUFFER, aaAccum.fbo);
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.enable(gl.SCISSOR_TEST);
-    gl.scissor(0, progressive.band, canvas.width, rows);
+    gl.scissor(rect.x, rect.y + at.row, rect.w, rows);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.CONSTANT_ALPHA, gl.ONE_MINUS_CONSTANT_ALPHA);
     gl.blendColor(0, 0, 0, 1 / n);
@@ -4526,7 +4747,7 @@
     gl.disable(gl.SCISSOR_TEST);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     progressive.band += rows;
-    return rows * canvas.width;
+    return rows * rect.w;
   }
 
   // How many sample points a level of the given stride has, in each
@@ -4561,7 +4782,7 @@
   // sub-lattices or (only for the very first, coarsest level of a run) the
   // single base draw.
   function renderRingSublatticeFraction() {
-    var height = Math.max(1, levelHeight(progressive.stride));
+    var height = Math.max(1, currentPassRows());
     var bandFraction = Math.min(1, progressive.band / height);
     if (progressive.sublattice <= 0) return bandFraction;
     return Math.min(1, ((progressive.sublattice - 1) + bandFraction) / 3);
@@ -4578,7 +4799,7 @@
   function renderRingAaFraction() {
     if (progressive.aaSample <= 0) return 0;
     if (progressive.complete) return 1;
-    var bandFraction = Math.min(1, progressive.band / Math.max(1, canvas.height));
+    var bandFraction = Math.min(1, progressive.band / Math.max(1, currentPassRows()));
     return Math.min(1, ((progressive.aaSample - 1) + bandFraction) / MAX_AA_SAMPLES);
   }
 
@@ -4643,6 +4864,10 @@
   // image being dragged and re-resolved rather than flickering through
   // black between frames.
   function resetProgressive() {
+    // Picture reuse: first, while the run's state still says what it had
+    // reached, decide whether its picture is the one to keep.
+    if (reuseEnabled) reuseCapture();
+    reuse.run = null;
     progressive.stride = 0;
     progressive.sublattice = 1;
     progressive.band = 0;
@@ -4667,8 +4892,17 @@
   // bounce-count divisor is measured - see findBounceMax for why it must
   // not happen again until the next view change.
   function beginProgressive() {
+    if (reuseEnabled) { reuseNoteImage(); reusePlanRun(); }
     if (isBouncesOutput) requestBounceMax();
     progressive.stride = startStride();
+    // See SLICE_FIRST_LEVEL_SAMPLES: under sliced rendering the coarsest
+    // levels cost as much as a useful one and show nothing.
+    if (slicedProgramsForGrid()) {
+      while (progressive.stride > endStride() &&
+             levelWidth(progressive.stride) * levelHeight(progressive.stride) < SLICE_FIRST_LEVEL_SAMPLES) {
+        progressive.stride /= 2;
+      }
+    }
     progressive.sublattice = 0;   // 0 = the base level, drawn straight into the accumulator
     progressive.band = 0;
     progressive.complete = false;
@@ -4701,6 +4935,315 @@
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
   }
 
+  // ---- Picture reuse: the machinery (see the state's own comment, above) ----
+
+  // Everything besides the view that decides what color a world point is
+  // drawn. Two pictures with the same key are pictures of the same thing.
+  function reuseLookKey() {
+    return [sceneGeneration, renderedSteps(), simulationSteps, displayMode ? displayMode.id : 0,
+      colorZoomEnabled ? 1 : 0, bounceMaxValue, canvas.width, canvas.height].join(" ");
+  }
+
+  function reuseDropSource() {
+    freeTarget(reuse.source);
+    reuse.source = null;
+    reuse.run = null;
+  }
+
+  // Called as a run starts: the accumulator is about to become a picture of
+  // THIS view. Not while the timeline is moving - a run drawn across several
+  // steps is a picture of no one step.
+  function reuseNoteImage() {
+    if (timeline.playing || timeline.following) { reuse.image = null; return; }
+    reuse.image = {
+      center: { x: view.center.x, xLo: view.center.xLo, y: view.center.y, yLo: view.center.yLo },
+      scale: view.scale, look: reuseLookKey(), precision: effectivePrecision(),
+    };
+  }
+
+  // to - from along one axis of two double-double centres, keeping the
+  // digits a plain (hi - hi) + (lo - lo) rounds away: at the zoom limit a
+  // whole pan lives in the low halves, and whether it was a whole number of
+  // pixels is exactly what is being asked.
+  function reuseCentreDelta(from, to, axis) {
+    var lows = PhysicsDF.twoSum64(to[axis + "Lo"], -from[axis + "Lo"]);
+    return ((to[axis] - from[axis]) + lows[0]) + lows[1];
+  }
+
+  // Works out how the source maps onto the view about to be rendered.
+  //
+  // A pixel p of this view (its center at p + 0.5, which is what
+  // gl_FragCoord reports) shows the source's texel floor(a * (p + 0.5) + b):
+  // both views place pixel centers at centre + ((p + 0.5 - size/2) / height)
+  // * scale, so a is the ratio of the scales and b is what is left over.
+  function reusePlanRun() {
+    reuse.run = null;
+    if (!reuse.source || timeline.playing || timeline.following) return;
+    var W = canvas.width, H = canvas.height;
+    if (reuse.source.width !== W || reuse.source.height !== H) { reuseDropSource(); return; }
+    if (reuse.look !== reuseLookKey()) return;
+    var a = view.scale / reuse.scale;
+    if (!(a > 0) || !isFinite(a)) return;
+    // See the state's comment: their colors depend on the zoom.
+    if (displayMode.id !== 0 && a !== 1) return;
+    var perWorld = H / reuse.scale;
+    var bx = 0.5 * W * (1 - a) + perWorld * reuseCentreDelta(reuse.center, view.center, "x");
+    var by = 0.5 * H * (1 - a) + perWorld * reuseCentreDelta(reuse.center, view.center, "y");
+    var samePrecision = reuse.precision === effectivePrecision();
+    // The same view at a different precision is the user asking what the
+    // OTHER arithmetic makes of it; the old answer is no preview of that.
+    if (a === 1 && bx === 0 && by === 0 && !samePrecision) return;
+    var exact = a === 1 && reuse.stride === 1 && samePrecision &&
+      Math.abs(bx - Math.round(bx)) < 1e-4 && Math.abs(by - Math.round(by)) < 1e-4;
+    if (exact) { bx = Math.round(bx); by = Math.round(by); }
+    // The pixels of this view the source has something for.
+    var x0 = clamp(Math.ceil(-bx / a - 0.5), 0, W), x1 = clamp(Math.ceil((W - bx) / a - 0.5), 0, W);
+    var y0 = clamp(Math.ceil(-by / a - 0.5), 0, H), y1 = clamp(Math.ceil((H - by) / a - 0.5), 0, H);
+    if (x1 <= x0 || y1 <= y0) return;
+    // Of those, the ones whose source texel (p + b, for an exact run) had
+    // been antialiased - see levelSimRegion.
+    var aa = null, r = reuse.aaRect;
+    if (exact && r) {
+      aa = { x0: Math.max(x0, r.x0 - bx), y0: Math.max(y0, r.y0 - by), x1: Math.min(x1, r.x1 - bx), y1: Math.min(y1, r.y1 - by) };
+      if (aa.x1 <= aa.x0 || aa.y1 <= aa.y0) aa = null;
+    }
+    reuse.run = {
+      a: a, bx: bx, by: by, exact: exact, aa: aa,
+      // How coarse the source looks from here, in this view's pixels.
+      effStride: reuse.stride / a,
+      x0: x0, y0: y0, x1: x1, y1: y1,
+      coverage: ((x1 - x0) * (y1 - y0)) / (W * H),
+      ladderWon: false,
+    };
+  }
+
+  // Whether the ladder's own picture should be on screen rather than the
+  // source: once it has a finished level at least as fine as the source
+  // looks from here. Ties go to the ladder - its samples sit exactly on this
+  // view's pixels, where the source's were resampled - and so does reaching
+  // the end of the ladder, which is as good as this view gets.
+  function reuseLadderWins() {
+    var run = reuse.run;
+    if (!run) return true;
+    if (run.ladderWon) return true;
+    if (progressive.accumStride > 0 && progressive.accumStride <= Math.max(run.effStride, endStride())) run.ladderWon = true;
+    return run.ladderWon;
+  }
+
+  // Called as a run is abandoned, BEFORE its state is cleared: decides
+  // whether the picture the ladder had reached should replace the source.
+  // It does when the ladder had bettered the source (or there was none), and
+  // when the source has slid mostly off screen; otherwise the source is
+  // still the best picture there is of this neighbourhood, and stays.
+  function reuseCapture() {
+    var image = reuse.image;
+    if (!image || !accum[accumIndex]) return;
+    var fromAa = progressive.complete && progressive.aaSample > 0 && !!aaAccum;
+    var stride = fromAa ? 1 : progressive.accumStride;
+    if (!(stride > 0)) return;
+    var run = reuse.run;
+    if (run && !reuseLadderWins() && run.coverage >= REUSE_KEEP_COVERAGE) return;
+    var W = canvas.width, H = canvas.height;
+    if (reuse.source && (reuse.source.width !== W || reuse.source.height !== H)) reuseDropSource();
+    try {
+      if (!reuse.source) reuse.source = makeTarget(W, H);
+      if (!presentProgram) presentProgram = buildPresentProgram();
+    } catch (err) {
+      reuseDropSource();
+      return;
+    }
+    gl.disable(gl.BLEND);
+    gl.disable(gl.SCISSOR_TEST);
+    if (fromAa) {
+      // The finished average. A float target, so not something a blit can
+      // read - the same reason presentFrame draws it rather than blits it.
+      gl.bindFramebuffer(gl.FRAMEBUFFER, reuse.source.fbo);
+      drawPresent(aaAccum.tex, W, H);
+    } else {
+      // The last finished level, magnified exactly as presentLevel puts it
+      // on the canvas. While antialiasing is still under way this is the
+      // accumulator rather than the half-built average: pure pixel-center
+      // samples, which a pan can reuse and antialias afresh.
+      var w = levelWidth(stride), h = levelHeight(stride);
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, accum[accumIndex].fbo);
+      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, reuse.source.fbo);
+      gl.blitFramebuffer(0, 0, w, h, 0, 0, w * stride, h * stride, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, W, H);
+    reuse.center = image.center;
+    reuse.scale = image.scale;
+    reuse.look = image.look;
+    reuse.precision = image.precision;
+    reuse.stride = stride;
+    // Finished everywhere if the run was (either the average is in, or this
+    // run had none to do). Otherwise only where this run's own pixels were
+    // copies of finished ones - which, the picture being this run's view,
+    // is just the rectangle it skipped.
+    reuse.aaRect = progressive.complete ? { x0: 0, y0: 0, x1: W, y1: H }
+      : (stride === 1 && run && run.exact ? run.aa : null);
+    reuse.image = null;
+  }
+
+  // The part of a level that still has to be SIMULATED, as rectangles in the
+  // level's own coordinates, plus the one rectangle the source covers.
+  // Without exact reuse that is simply the whole level.
+  //
+  // Sample i of a level stands for full-resolution pixel i * stride + origin
+  // (see worldCoordLines), so it is covered when that pixel is. The covered
+  // samples of any level form a rectangle, and what is left around it is at
+  // most four more: below, left, right, above.
+  function levelSimRegion(stride, originX, originY, forAntialias) {
+    var w = levelWidth(stride), h = levelHeight(stride);
+    var whole = { rects: [{ x: 0, y: 0, w: w, h: h }], covered: null, rows: h };
+    var run = reuse.run;
+    if (!run || !run.exact) return whole;
+    // An antialiasing pass is only skipped where the source's pixels had
+    // already been antialiased; its other pixels are plain samples like any
+    // the ladder draws, and get their average the usual way.
+    var have = forAntialias ? run.aa : run;
+    if (!have) return whole;
+    var cx0 = clamp(Math.ceil((have.x0 - originX) / stride), 0, w);
+    var cx1 = clamp(Math.floor((have.x1 - 1 - originX) / stride) + 1, 0, w);
+    var cy0 = clamp(Math.ceil((have.y0 - originY) / stride), 0, h);
+    var cy1 = clamp(Math.floor((have.y1 - 1 - originY) / stride) + 1, 0, h);
+    if (cx1 <= cx0 || cy1 <= cy0) return whole;
+    var rects = [];
+    if (cy0 > 0) rects.push({ x: 0, y: 0, w: w, h: cy0 });
+    if (cx0 > 0) rects.push({ x: 0, y: cy0, w: cx0, h: cy1 - cy0 });
+    if (cx1 < w) rects.push({ x: cx1, y: cy0, w: w - cx1, h: cy1 - cy0 });
+    if (cy1 < h) rects.push({ x: 0, y: cy1, w: w, h: h - cy1 });
+    var rows = 0;
+    rects.forEach(function (r) { rows += r.h; });
+    return { rects: rects, covered: { x: cx0, y: cy0, w: cx1 - cx0, h: cy1 - cy0 }, rows: rows };
+  }
+
+  // progressive.band counts rows through a region's rectangles one after
+  // another, so that "band = 0" still means "start of the pass" and "band =
+  // rows" still means "done" whatever shape the region is. This is which
+  // rectangle a band falls in and how far down it, or null past the end.
+  function locateBand(region, band) {
+    for (var i = 0; i < region.rects.length; i++) {
+      if (band < region.rects[i].h) return { rect: region.rects[i], row: band };
+      band -= region.rects[i].h;
+    }
+    return null;
+  }
+
+  // Where sub-lattice k of a step from `stride` to stride/2 sits: the new
+  // sample positions the coarser grid didn't already cover - offset by half
+  // a cell across, down, or both. (0 is the base level, at no offset.)
+  function sublatticeOrigin(k, stride) {
+    var half = stride / 2;
+    return { x: (k === 0 || k === 2) ? 0 : half, y: (k === 0 || k === 1) ? 0 : half };
+  }
+
+  // How many rows the pass in progress has to draw - what progressive.band
+  // is counting towards.
+  function currentPassRows() {
+    if (progressive.aaSample > 0) return levelSimRegion(1, 0, 0, true).rows;
+    var stride = progressive.stride || startStride();
+    var origin = sublatticeOrigin(progressive.sublattice, stride);
+    return levelSimRegion(stride, origin.x, origin.y, false).rows;
+  }
+
+  var REUSE_FILL_FRAGMENT_SOURCE = [
+    "#version 300 es",
+    "precision highp float;",
+    "uniform sampler2D u_source;",
+    "uniform int u_stride;",
+    "uniform ivec2 u_origin;",   // the level's origin plus the pan, in source texels
+    "out vec4 fragColor;",
+    "void main() {",
+    "  fragColor = texelFetch(u_source, ivec2(gl_FragCoord.xy) * u_stride + u_origin, 0);",
+    "}",
+  ].join("\n");
+  // The screen while the source is still the better picture: the source
+  // wherever it has a texel for the pixel, the ladder's latest level where
+  // it has not, and black where neither has anything yet.
+  var REUSE_PRESENT_FRAGMENT_SOURCE = [
+    "#version 300 es",
+    "precision highp float;",
+    "uniform sampler2D u_source;",
+    "uniform sampler2D u_ladder;",
+    "uniform int u_ladderStride;",   // 0: the ladder has no finished level yet
+    "uniform float u_a;",
+    "uniform vec2 u_b;",
+    "uniform ivec2 u_sourceSize;",
+    "out vec4 fragColor;",
+    "void main() {",
+    "  ivec2 q = ivec2(floor(u_a * gl_FragCoord.xy + u_b));",
+    "  if (all(greaterThanEqual(q, ivec2(0))) && all(lessThan(q, u_sourceSize))) {",
+    "    fragColor = vec4(texelFetch(u_source, q, 0).rgb, 1.0);",
+    "  } else if (u_ladderStride > 0) {",
+    "    fragColor = vec4(texelFetch(u_ladder, ivec2(gl_FragCoord.xy) / u_ladderStride, 0).rgb, 1.0);",
+    "  } else {",
+    "    fragColor = vec4(0.0, 0.0, 0.0, 1.0);",
+    "  }",
+    "}",
+  ].join("\n");
+  var reusePrograms = null;
+  function ensureReusePrograms() {
+    if (reusePrograms) return reusePrograms;
+    function build(source, names) {
+      var prog = PhysicsGPU.linkProgram(gl, vs, PhysicsGPU.compileShader(gl, gl.FRAGMENT_SHADER, source));
+      var out = { program: prog, posLoc: gl.getAttribLocation(prog, "a_position"), uniforms: {} };
+      names.forEach(function (n) { out.uniforms[n] = gl.getUniformLocation(prog, "u_" + n); });
+      return out;
+    }
+    reusePrograms = {
+      fill: build(REUSE_FILL_FRAGMENT_SOURCE, ["source", "stride", "origin"]),
+      present: build(REUSE_PRESENT_FRAGMENT_SOURCE, ["source", "ladder", "ladderStride", "a", "b", "sourceSize"]),
+    };
+    return reusePrograms;
+  }
+
+  // Exact reuse: writes the source's pixels into the covered part of a
+  // level's target, in place of simulating them.
+  function reuseFillCovered(target, stride, originX, originY, region) {
+    if (!region.covered) return;
+    var prog = ensureReusePrograms().fill, c = region.covered;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
+    gl.viewport(0, 0, levelWidth(stride), levelHeight(stride));
+    gl.disable(gl.BLEND);
+    gl.enable(gl.SCISSOR_TEST);
+    gl.scissor(c.x, c.y, c.w, c.h);
+    gl.useProgram(prog.program);
+    bindQuad(prog.posLoc);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, reuse.source.tex);
+    gl.uniform1i(prog.uniforms.source, 0);
+    gl.uniform1i(prog.uniforms.stride, stride);
+    gl.uniform2i(prog.uniforms.origin, originX + reuse.run.bx, originY + reuse.run.by);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  // `level` is what presentLevel would have been handed, or null when the
+  // ladder has nothing finished yet.
+  function presentWithSource(level) {
+    var prog = ensureReusePrograms().present, run = reuse.run;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.disable(gl.BLEND);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.useProgram(prog.program);
+    bindQuad(prog.posLoc);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, level ? level.target.tex : reuse.source.tex);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, reuse.source.tex);
+    gl.uniform1i(prog.uniforms.source, 0);
+    gl.uniform1i(prog.uniforms.ladder, 1);
+    gl.uniform1i(prog.uniforms.ladderStride, level ? level.stride : 0);
+    gl.uniform1f(prog.uniforms.a, run.a);
+    gl.uniform2f(prog.uniforms.b, run.bx, run.by);
+    gl.uniform2i(prog.uniforms.sourceSize, reuse.source.width, reuse.source.height);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+  }
+
   // Draws about `pixelsAvailable` simulated pixels' worth more of whatever
   // is currently in progress - either the base level (sub-lattice 0,
   // straight into the accumulator) or one of the three sub-lattices that
@@ -4715,34 +5258,35 @@
     var k = progressive.sublattice;
     var w = levelWidth(progressive.stride);
     var h = levelHeight(progressive.stride);
-    if (progressive.band >= h) return 0;
-    var half = progressive.stride / 2;
-    var target, originX, originY;
-    if (k === 0) {
-      target = accum[accumIndex];
-      originX = originY = 0;
-    } else {
-      target = sublattices[k - 1];
-      originX = (k === 2) ? 0 : half;   // sub-lattices 1 and 3 are shifted across
-      originY = (k === 1) ? 0 : half;   // sub-lattices 2 and 3 are shifted down
+    var target = k === 0 ? accum[accumIndex] : sublattices[k - 1];
+    var origin = sublatticeOrigin(k, progressive.stride), originX = origin.x, originY = origin.y;
+    // The whole level, unless a pan is reusing the last picture's pixels -
+    // then only what it exposed, the rest being copied in as the pass starts.
+    var region = levelSimRegion(progressive.stride, originX, originY, false);
+    if (progressive.band === 0 && progressive.tileX === 0 && !progressive.tile) {
+      reuseFillCovered(target, progressive.stride, originX, originY, region);
+      if (region.rows === 0) return REUSE_FREE_COST;
     }
+    var at = locateBand(region, progressive.band);
+    if (!at) return 0;
     // Above float32: a slice of a tile rather than a band of whole
     // simulations - see "Sliced rendering".
     var slicedPrograms = slicedProgramsForGrid();
     if (slicedPrograms) {
       return drawSlicedTile(slicedPrograms, { target: target, w: w, h: h, stride: progressive.stride,
-        originX: originX, originY: originY, blend: 0 }, pixelsAvailable);
+        originX: originX, originY: originY, blend: 0, region: region }, pixelsAvailable);
     }
-    var rows = Math.min(Math.max(MIN_BAND_ROWS, Math.floor(pixelsAvailable / Math.max(w, 1))), h - progressive.band);
+    var rect = at.rect;
+    var rows = Math.min(Math.max(MIN_BAND_ROWS, Math.floor(pixelsAvailable / Math.max(rect.w, 1))), rect.h - at.row);
     gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
     gl.viewport(0, 0, w, h);
     gl.enable(gl.SCISSOR_TEST);
-    gl.scissor(0, progressive.band, w, rows);
+    gl.scissor(rect.x, rect.y + at.row, rect.w, rows);
     drawSublattice(progressive.stride, originX, originY);
     gl.disable(gl.SCISSOR_TEST);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     progressive.band += rows;
-    return rows * w;
+    return rows * rect.w;
   }
 
   // Gathers the accumulator plus `shown` of the current level's sub-lattices
@@ -4788,17 +5332,19 @@
       drawPresent(aaAccum.tex, canvas.width, canvas.height);
       return;
     }
+    var level = null;
     if (progressive.sublattice > 1) {
       // Mid-level: show a preview that includes the sub-lattices finished
       // so far, without disturbing the accumulator the next composite reads.
-      var preview = runComposite(progressive.sublattice - 1);
-      presentLevel(preview.target, preview.w, preview.h, preview.stride);
-      return;
+      level = runComposite(progressive.sublattice - 1);
+    } else if (progressive.accumStride > 0) {
+      level = { target: accum[accumIndex], w: levelWidth(progressive.accumStride),
+        h: levelHeight(progressive.accumStride), stride: progressive.accumStride };
     }
-    if (progressive.accumStride > 0) {
-      presentLevel(accum[accumIndex], levelWidth(progressive.accumStride),
-        levelHeight(progressive.accumStride), progressive.accumStride);
-    }
+    // Picture reuse: until the ladder has bettered it, the last picture
+    // stays up, with the ladder's output only where it has nothing.
+    if (!reuseLadderWins()) presentWithSource(level);
+    else if (level) presentLevel(level.target, level.w, level.h, level.stride);
   }
 
   // One frame's worth of refinement. Spends up to the current pixel budget
@@ -4831,8 +5377,21 @@
       ladderBudget.lastWorkAt = 0;
       ladderBudget.lastSpent = 0;
     }
+    // See f32SlicedPending: nothing safe to draw yet.
+    if (f32SlicedPending()) return;
+    gpuTimerPoll(now);
     adaptSliceSteps(noteFrameTiming(ladderBudget, now));
+    sliceFrameMs = 0;
     var pixelBudget = ladderBudget.budget;
+    gpuTimerBegin();
+    try {
+      stepProgressiveWork(pixelBudget);
+    } finally {
+      gpuTimerEnd(ladderBudget, ladderBudget.lastSpent);
+    }
+  }
+
+  function stepProgressiveWork(pixelBudget) {
     var spent = 0;
 
     // Antialiasing runs on the same budget, banding and present path as
@@ -4843,7 +5402,7 @@
         var aaCost = drawAaBand(pixelBudget - spent);
         if (aaCost === 0) break;
         spent += aaCost;
-        if (progressive.band < canvas.height) continue;
+        if (progressive.band < currentPassRows()) continue;
         progressive.aaSample += 1;
         progressive.band = 0;
         updateResolutionBoundsUI();
@@ -4865,7 +5424,7 @@
       var bandCost = drawSublatticeBand(pixelBudget - spent);
       if (bandCost === 0) break;
       spent += bandCost;
-      if (progressive.band < levelHeight(progressive.stride)) continue;
+      if (progressive.band < currentPassRows()) continue;
 
       if (progressive.sublattice === 0) {
         // The base level just landed; it IS the accumulator already.
@@ -5021,6 +5580,19 @@
   // same conversion from screen pixels to world units.
   function panByClientDelta(dxPix, dyPix) {
     var scaleFactor = canvas.width / canvas.getBoundingClientRect().width;
+    if (reuseEnabled) {
+      // Picture reuse: a pan by a WHOLE number of device pixels lands every
+      // pixel of the new view on a pixel of the old one, which is what lets
+      // the old one's be reused as they are. The fraction set aside is
+      // carried into the next move, so a slow drag still adds up.
+      var wantX = dxPix * scaleFactor + reuse.panCarryX, wantY = dyPix * scaleFactor + reuse.panCarryY;
+      var wholeX = Math.round(wantX), wholeY = Math.round(wantY);
+      reuse.panCarryX = wantX - wholeX;
+      reuse.panCarryY = wantY - wholeY;
+      var worldPerDevicePixel = view.scale / canvas.height;
+      shiftViewCenter(-wholeX * worldPerDevicePixel, wholeY * worldPerDevicePixel);
+      return;
+    }
     var worldPerPixel = (view.scale / canvas.height) * scaleFactor;
     shiftViewCenter(-dxPix * worldPerPixel, dyPix * worldPerPixel);
   }
@@ -7730,6 +8302,8 @@
       loop.declarations,
       ["  if (!u_init) {"],
       indentLines(PhysicsGridCodegen.generatePlaybackStateLoadGLSL(vars, "u_state", "ivec2(gl_FragCoord.xy)"), "    "),
+      // What the state deliberately leaves out - see loopStateVariables.
+      indentLines(pieces.loopStateRestoreLines, "    "),
       // The saved lifespan of a pixel still running is the step count as of
       // the save; it has lived through the steps this draw adds, too.
       carriesLifespan ? ["    if (!wrapStopped) lifespanValue = float(u_baseStep + u_steps);"] : [],
@@ -7996,9 +8570,112 @@
   // The calibration stops doubling once a slice takes this long: enough to
   // stand clear of the ~1ms a timed round trip costs by itself.
   var SLICE_CALIBRATION_STOP_MS = 3;
+  // A slice takes at least as long as its steps take ONE pixel, however few
+  // pixels it has - that is what the numbers above are about - so a draw of
+  // a few thousand pixels costs the GPU what a draw of tens of thousands
+  // does, and leaves most of it idle while it runs. Measured with GPU timer
+  // queries: a 64x64 tile of the df double pendulum took 0.9ms a step and a
+  // 192x192 one 1.5ms, nine times the pixels for 1.6 times the time; df
+  // pinball reached its benchmark throughput at 192x192 and a third of it
+  // at the ~100x100 tiles the budget alone used to ask for. So:
+  //
+  // Tiles are at least this big wherever the level has that much left to
+  // draw, with the STEPS per slice brought down (never up - the calibrated
+  // count is a ceiling, see drawSlicedTile) to keep a slice of it inside
+  // the frame's budget...
+  var SLICE_SATURATE_TEXELS = 32768;
+  // ...the ladder does not start coarser than a level with this many
+  // samples. Every level is at least one pass of slices, and a pass of the
+  // whole run costs the same few hundred ms whether it covers one sample or
+  // ten thousand - so the 1x1, 2x1, 3x2... levels each held the first real
+  // picture back by that much (eight levels of three passes each, for the
+  // double pendulum: 12s before anything finer than 32px blocks)...
+  var SLICE_FIRST_LEVEL_SAMPLES = 4096;
+  // ...and a frame stops issuing slices once their runs add up to this share
+  // of the display period, whatever the pixel budget has left. The budget
+  // counts pixels, by which a slice of a tiny tile is free; the GPU counts
+  // time, by which it is not. Frames of a coarse level used to issue
+  // thousands of them (3,586 in one, measured: a 5.4s stall).
+  var SLICE_FRAME_SHARE = 0.75;
+  var sliceFrameMs = 0;
   // Far below the ladder's own floor: a sliced frame's smallest unit of work
   // is one slice of a small tile, not a whole simulated row.
   var SLICE_MIN_PIXEL_BUDGET = 16;
+
+  // ---- Float32, when its whole run is too long for one draw ----
+  //
+  // The limit at the top of this section is not about precision. A scene
+  // with many body slots is dear at float32 too - a splitter's 20 cost
+  // ~0.4ms a step - and the grid program runs a pixel's WHOLE simulation in
+  // one draw, so a few hundred steps of such a scene is a fragment that runs
+  // for 100ms and more: the GPU is reset under it, the canvas goes blank,
+  // and after a few of those the OS ignores the page's GPU work until it is
+  // reloaded. (Measured, on this page as it was before slicing existed as
+  // well as after.)
+  //
+  // So float32 is timed too, once per scene and display mode: the grid
+  // program itself, on a handful of pixels, for 1, 2, 4... steps until a
+  // run is long enough to measure - each at most double one already seen to
+  // be short, as in calibrateSliceSteps, and for the same reason. If the
+  // full Simulation Duration at that rate fits comfortably in one draw,
+  // nothing changes: float32 keeps its single-draw program, which for an
+  // ordinary scene is the fast path by a wide margin. If it does not,
+  // float32 is drawn by the sliced renderer like everything above it.
+  var F32_SINGLE_DRAW_LIMIT_MS = 12;
+  var f32StepMs = {};   // by variant; emptied with the scene (releaseAllSliceStates)
+  function measureF32StepMs() {
+    var target = makeTarget(8, 8);
+    var stride = Math.max(1, Math.floor(Math.min(canvas.width, canvas.height) / 8));
+    var texel = new Uint8Array(4);
+    function timedRun(k) {
+      var startedAt = performance.now();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
+      gl.viewport(0, 0, 8, 8);
+      gl.disable(gl.SCISSOR_TEST);
+      gl.disable(gl.BLEND);
+      drawSublattice(stride, 0, 0, k);
+      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, texel);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      return performance.now() - startedAt;
+    }
+    function timed(k) { return Math.min(timedRun(k), timedRun(k)); }
+    timedRun(1);
+    timedRun(1);
+    var k = 1, took = timed(1), before = took, perStep = took;
+    while (took < SLICE_CALIBRATION_STOP_MS && k < simulationSteps) {
+      var next = Math.min(k * 2, simulationSteps);
+      before = took;
+      took = timed(next);
+      // The slope between the last two, as in calibrateSliceSteps - and never
+      // less than an eighth of the plain ratio, against a noisy pair.
+      perStep = Math.max((took - before) / (next - k), took / next / 8);
+      k = next;
+    }
+    freeTarget(target);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    return perStep;
+  }
+  function f32NeedsSlicing() {
+    // (Reachable while the page is still starting up - the first budget is
+    // made before the targets exist - when there is nothing to time with.)
+    if (!hasFloatColorBuffer || !accum || !accum[0]) return false;
+    var variant = wantedVariant();
+    if (f32StepMs[variant] === undefined) {
+      // The grid program has to exist to be timed; building it is what the
+      // first frame would have done anyway.
+      if (!requestPass("f32", variant, true)) return false;
+      f32StepMs[variant] = measureF32StepMs();
+    }
+    return f32StepMs[variant] * simulationSteps > F32_SINGLE_DRAW_LIMIT_MS;
+  }
+  // The sliced programs float32 is waiting for, when it needs them and they
+  // are still building. Until they arrive the grid draws NOTHING: the only
+  // other thing it could draw is the very draw that must not be issued.
+  function f32SlicedPending() {
+    if (effectivePrecision() !== "f32" || !f32NeedsSlicing()) return false;
+    var entry = playbackGpu.programs.f32;
+    return !entry || entry.status === "building";
+  }
 
   // Named state-texture pairs: "ladder" for the tile the refinement ladder is
   // working on (which lives across frames), "sampler" for measurements (which
@@ -8021,6 +8698,7 @@
     sliceSteps = {};
     sliceCalibrated = {};
     sliceTooHeavy = {};
+    f32StepMs = {};
   }
 
   // Grow-only: a tile's size follows the budget from frame to frame, and
@@ -8059,9 +8737,18 @@
   // One step draw: up to `steps` more of the run. The first also builds each
   // pixel's starting state (and is issued even for a zero-step run, which
   // still needs a state to paint from). Returns how many steps it ran.
-  function advanceSliceJob(job, steps) {
+  //
+  // `maxDraws` (default: no limit) lets a slice be spread over several calls.
+  // A state too big for one draw's attachments is written a group per draw,
+  // each re-running the slice's steps - seven draws for a 20-slot splitter
+  // scene - and the groups land in different layers of the same target, so
+  // nothing stops them being issued a few per frame. A slice left part-way
+  // returns 0 and picks up at its next group when called again; the state
+  // only changes hands once the last group is in.
+  function advanceSliceJob(job, steps, maxDraws) {
     var spec = job.spec, st = job.state, prog = job.programs.step, u = prog.uniforms;
-    var k = Math.max(0, Math.min(steps, spec.totalSteps - job.done));
+    var resuming = job.nextGroup > 0;
+    var k = resuming ? job.sliceSteps : Math.max(0, Math.min(steps, spec.totalSteps - job.done));
     if (k === 0 && job.started) return 0;
     var target = st.textures[1 - st.current];
     gl.useProgram(prog.program);
@@ -8086,7 +8773,9 @@
     gl.viewport(0, 0, spec.cols * spec.stencil, spec.rows);
     gl.disable(gl.SCISSOR_TEST);
     var layers = job.programs.layers;
-    for (var g = 0; g < job.programs.groups; g++) {
+    var firstGroup = resuming ? job.nextGroup : 0;
+    var lastGroup = Math.min(job.programs.groups, firstGroup + (maxDraws > 0 ? maxDraws : job.programs.groups));
+    for (var g = firstGroup; g < lastGroup; g++) {
       var buffers = [];
       for (var a = 0; a < MAX_STATE_ATTACHMENTS; a++) {
         var layer = g * MAX_STATE_ATTACHMENTS + a;
@@ -8099,6 +8788,13 @@
       gl.drawArrays(gl.TRIANGLES, 0, 6);
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    job.drawsIssued = lastGroup - firstGroup;
+    if (lastGroup < job.programs.groups) {
+      job.nextGroup = lastGroup;
+      job.sliceSteps = k;
+      return 0;
+    }
+    job.nextGroup = 0;
     st.current = 1 - st.current;
     job.done += k;
     job.started = true;
@@ -8168,19 +8864,44 @@
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       return performance.now() - startedAt;
     }
+    // Each timing is the better of two. One bad reading used to decide the
+    // whole scene: measured over three loads of the df double pendulum, the
+    // slices after the first took 2.1, 4.7 and 2.3ms for a single step whose
+    // true cost is 0.1ms - the driver still settling in - and the 4.7 was
+    // read as "one step is all a draw can afford", which left that session
+    // drawing one step per slice and rendering at a fraction of the speed.
+    //
+    // And it is per DRAW: a state too big for one draw's attachments is
+    // written in groups, one draw each (see advanceSliceJob), and it is a
+    // single draw's length the limit is about - a 20-slot splitter scene
+    // takes seven, and timing the seven together allowed it one step a
+    // slice where four are safe.
+    function timed(k) { return Math.min(timedSlice(k), timedSlice(k)) / programs.groups; }
     // Untimed: builds each pixel's starting state, and absorbs whatever the
-    // driver still had left to do for this program.
+    // driver still had left to do for this program - which takes more than
+    // one draw.
     timedSlice(1);
-    var k = 1, took = timedSlice(1);
+    timedSlice(1);
+    var k = 1, took = timed(1), before = took;
     if (took > SLICE_SINGLE_STEP_LIMIT_MS) {
       sliceTooHeavy[precision] = true;
+      sliceSteps[precision] = SLICE_STEPS_MIN;
     } else {
       while (took < SLICE_CALIBRATION_STOP_MS && k < SLICE_STEPS_MAX) {
         k *= 2;
-        took = timedSlice(k);
+        before = took;
+        took = timed(k);
       }
+      // A slice costs a fixed amount (the round trip that timed it, the
+      // state's load and store) plus so much a step, and only the second
+      // part grows with its length - so the step's cost is the SLOPE between
+      // the last two timings, not the last one divided by its steps, which
+      // charged the fixed part to the steps and came out several times too
+      // cautious for a scene whose steps are cheap.
+      var perStep = k > 1 ? Math.max((took - before) / (k / 2), took / k / 8) : took;
+      var fixed = Math.max(0, took - perStep * k);
+      sliceSteps[precision] = clamp(Math.floor((SLICE_TARGET_MS - Math.min(fixed, SLICE_TARGET_MS / 2)) / perStep), SLICE_STEPS_MIN, SLICE_STEPS_MAX);
     }
-    sliceSteps[precision] = clamp(Math.floor(SLICE_TARGET_MS * k / Math.max(took, 1e-3)), SLICE_STEPS_MIN, SLICE_STEPS_MAX);
     sliceCalibrated[precision] = sliceSteps[precision];
     releaseSliceState("calibrate");
   }
@@ -8190,7 +8911,19 @@
   // state in, or the programs are still building - see effectivePrecision).
   function slicedProgramsForGrid() {
     var precision = effectivePrecision();
-    if (precision === "f32" || !hasFloatColorBuffer) return null;
+    if (!hasFloatColorBuffer) return null;
+    if (precision === "f32") {
+      if (!f32NeedsSlicing()) return null;
+      // Built in the background like the precisions above - playback's own
+      // request for them (playbackProgramsFor) still waits, as it always has.
+      if (!playbackGpu.programs.f32) {
+        try {
+          playbackGpu.programs.f32 = startPlaybackBuild("f32");
+        } catch (err) {
+          playbackGpu.programs.f32 = { status: "failed", programs: null };
+        }
+      }
+    }
     var entry = playbackGpu.programs[precision];
     if (!entry || entry.status !== "ready") return null;
     if (!sliceSteps[precision]) {
@@ -8216,38 +8949,76 @@
   function drawSlicedTile(programs, lattice, pixelsAvailable) {
     var total = renderedSteps();
     var perDraw = sliceSteps[effectivePrecision()] || SLICE_STEPS_MIN;
+    // See SLICE_FRAME_SHARE. Never before the frame's first slice, so a
+    // frame always moves forward; 0 is what the callers read as "stop here".
+    if (sliceFrameMs >= displayPeriodMs * SLICE_FRAME_SHARE) return 0;
     var job = progressive.tile;
+    // A slice is sized to be about a whole frame's budget (see perDraw
+    // below), so unlike a band it cannot be trimmed to whatever the frame
+    // has left - and a frame that had spent 99% of its budget on one used to
+    // see 1% remaining and issue a second, for twice the budget every frame.
+    // After the frame's first, the next slice goes ahead only if most of it
+    // fits in what is left.
+    if (sliceFrameMs > 0) {
+      var nextCost = job ? job.spec.cols * job.spec.rows * Math.min(job.perDraw, total - job.done) / Math.max(total, 1)
+                         : ladderBudget.budget;
+      if (nextCost > pixelsAvailable * 2) return 0;
+    }
     if (!job) {
+      // Which rectangle of the level's region this tile is cut from (the
+      // whole level, unless a pan is reusing pixels - see levelSimRegion).
+      // The caller has checked there is one.
+      var at = locateBand(lattice.region, progressive.band), rect = at.rect;
       var stencil = displayMode.id !== 0 ? 5 : 1;
       var slices = Math.max(1, Math.ceil(total / perDraw));
       var maxPixels = Math.max(1, Math.floor(SLICE_MAX_TEXELS / stencil));
       var maxCols = Math.max(1, Math.floor(MAX_TEXTURE_SIZE / stencil));
-      var pixels = clamp(Math.floor(pixelsAvailable * slices), 64, maxPixels);
+      // See SLICE_SATURATE_TEXELS: what the budget affords at full-length
+      // slices, or enough to keep the GPU busy, whichever is more - but
+      // never so many that even a ONE-step slice of them overruns the
+      // frame's budget, which for a scene heavy enough is fewer than that.
+      var saturate = Math.min(Math.floor(SLICE_SATURATE_TEXELS / stencil), Math.floor(ladderBudget.budget * Math.max(total, 1)));
+      var pixels = clamp(Math.max(Math.floor(pixelsAvailable * slices), saturate), 64, maxPixels);
       var cols, rows;
-      if (progressive.tileX === 0 && pixels >= lattice.w && lattice.w <= maxCols) {
-        cols = lattice.w;
-        rows = Math.min(lattice.h - progressive.band, Math.floor(pixels / lattice.w));
+      if (progressive.tileX === 0 && pixels >= rect.w && rect.w <= maxCols) {
+        cols = rect.w;
+        rows = Math.min(rect.h - at.row, Math.floor(pixels / rect.w));
       } else {
         rows = 1;
-        cols = Math.min(lattice.w - progressive.tileX, pixels, maxCols);
+        cols = Math.min(rect.w - progressive.tileX, pixels, maxCols);
       }
       job = beginSliceJob("ladder", programs, {
-        cols: cols, rows: rows, stencil: stencil, tileX: progressive.tileX, tileY: progressive.band,
+        cols: cols, rows: rows, stencil: stencil, tileX: rect.x + progressive.tileX, tileY: rect.y + at.row,
         stride: lattice.stride, originX: lattice.originX, originY: lattice.originY,
         resW: canvas.width, resH: canvas.height, totalSteps: total,
       });
+      job.rectWidth = rect.w;
+      // Steps per slice for THIS tile: as many as a frame's budget covers
+      // for a tile this size, up to the calibrated ceiling.
+      job.perDraw = clamp(Math.floor(ladderBudget.budget * total / Math.max(cols * rows, 1)), SLICE_STEPS_MIN, perDraw);
       progressive.tile = job;
     }
-    var ran = advanceSliceJob(job, perDraw);
+    // The calibrated count takes about SLICE_TARGET_MS a draw; fewer steps,
+    // less. A state written in several groups is that many draws a slice,
+    // of which a frame issues only as many as its time cap has room for
+    // (always one) - see advanceSliceJob.
+    var sliceK = Math.min(job.perDraw || perDraw, perDraw);
+    var drawMs = SLICE_TARGET_MS * Math.max(job.nextGroup > 0 ? job.sliceSteps : sliceK, 1) / perDraw;
+    var room = Math.max(1, Math.floor((displayPeriodMs * SLICE_FRAME_SHARE - sliceFrameMs) / drawMs));
+    var ran = advanceSliceJob(job, sliceK, room);
+    sliceFrameMs += drawMs * job.drawsIssued;
+    // Part-way through a slice: nothing to charge or finish yet, and nothing
+    // more to issue this frame.
+    if (job.nextGroup > 0) { sliceFrameMs = Infinity; return REUSE_FREE_COST; }
     var area = job.spec.cols * job.spec.rows;
     var cost = total > 0 ? area * ran / total : area;
     if (job.done >= total) {
       resolveSliceJob(job, lattice.target.fbo, job.spec.tileX, job.spec.tileY, { blend: lattice.blend });
-      if (job.spec.cols === lattice.w) {
+      if (job.spec.cols === job.rectWidth) {
         progressive.band += job.spec.rows;
       } else {
         progressive.tileX += job.spec.cols;
-        if (progressive.tileX >= lattice.w) { progressive.tileX = 0; progressive.band += 1; }
+        if (progressive.tileX >= job.rectWidth) { progressive.tileX = 0; progressive.band += 1; }
       }
       progressive.tile = null;
     }
@@ -8289,10 +9060,18 @@
   // A quarter still leaves a real mis-measurement a further 4x of relief, on
   // top of the several-fold margin SLICE_TARGET_MS already keeps under the
   // limit.
+  var sliceOverrunsInARow = 0;
   function adaptSliceSteps(tookPeriods) {
     var precision = effectivePrecision();
-    if (!sliceSteps[precision] || tookPeriods <= HARD_OVERRUN_RATIO) return;
-    if (ladderBudget.budget > ladderBudget.min * 1.5) return;
+    // Three in a row: one long frame is a hiccup, and says nothing about
+    // the slices that happened to be in it.
+    if (!sliceSteps[precision] || tookPeriods <= HARD_OVERRUN_RATIO || ladderBudget.budget > ladderBudget.min * 1.5) {
+      if (tookPeriods > 0) sliceOverrunsInARow = 0;
+      return;
+    }
+    sliceOverrunsInARow += 1;
+    if (sliceOverrunsInARow < 3) return;
+    sliceOverrunsInARow = 0;
     var floor = Math.max(SLICE_STEPS_MIN, Math.ceil((sliceCalibrated[precision] || sliceSteps[precision]) / 4));
     sliceSteps[precision] = Math.max(floor, Math.floor(sliceSteps[precision] / 2));
   }
@@ -8507,6 +9286,8 @@
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     presentLevel(target, res.w, res.h, res.stride);
     timeline.presentedKey = playbackLookKey(res);
+    // Picture reuse: the accumulator is playback's now, not a ladder run's.
+    reuse.image = null;
   }
 
   // One frame of playback. Returns false when playback isn't drawing this
@@ -8664,6 +9445,9 @@
     if (!res || res.pending || timeline.stateKey !== res.key || timeline.stateStep !== timeline.step) return false;
     if (timeline.presentedKey !== playbackLookKey(res)) return false;
     dirty = false;
+    // Picture reuse: what playback painted is this view at this step, and
+    // from here on the ladder's to refine.
+    if (reuseEnabled) reuseNoteImage();
     progressive.stride = res.stride;
     progressive.accumStride = res.stride;
     progressive.sublattice = 1;
@@ -9085,6 +9869,10 @@
 
   global.FractalGrid.setScene = function (nextScene) {
     scene = nextScene;
+    // Picture reuse: nothing rendered so far is a picture of this scene.
+    sceneGeneration += 1;
+    reuse.image = null;
+    reuseDropSource();
     adoptSceneDuration();
     // The timeline was the old scene's: stop it, drop everything playback
     // compiled and simulated for that scene, and rest at the new one's end.
