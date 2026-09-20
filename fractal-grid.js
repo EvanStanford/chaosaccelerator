@@ -7513,10 +7513,19 @@
   // resolution ladder: each notch is roughly twice the work of the one
   // before it. 0 is the top notch and means "match the grid" - one sample
   // per rendered pixel, whatever that is on this screen.
-  var STATS_SAMPLE_STOPS = [96, 128, 192, 256, 384, 512, 768, 1024, 1536, 2048, 3072, 4096, 6144];
-  // 256, which is what this was fixed at before the slider existed: about
-  // 40k simulations at 16:9, a small fraction of one rendered frame.
-  var STATS_DEFAULT_SAMPLE_LONG_SIDE = 256;
+  var STATS_SAMPLE_STOPS = [96, 128, 192, 256, 384, 512, 800, 1024, 1536, 2048, 3072, 4096, 6144];
+  // 800 on the LONG side, the short one proportioned to the canvas by
+  // statsSampleBlock - so the default block is 800 x something at most, and
+  // the sampled rectangle is the one on screen rather than a stretched
+  // version of it. Enough samples for the connected-feature measurements
+  // (longest ridge and longest valley) to find real structure rather than
+  // a handful of specks, which a 256-wide block routinely did.
+  //
+  // On a screen whose own long side is under 800 this stop is trimmed out
+  // of the ladder entirely (see statsSampleLadder) and the slider lands on
+  // "one sample per rendered pixel" instead, which is the finest the view
+  // can honestly be measured at anyway.
+  var STATS_DEFAULT_SAMPLE_LONG_SIDE = 800;
   var statsSampleLongSide = STATS_DEFAULT_SAMPLE_LONG_SIDE;
 
   // The stops the slider actually offers on THIS screen: everything below
@@ -7813,6 +7822,11 @@
   // stays cheap and does nothing at all while the card is closed.
   function statsOnViewChanged() {
     if (!statsPanel) return;
+    // The overlay is drawn in the coordinates of the block that was
+    // measured, so the moment the view moves it is pointing at the wrong
+    // place - and a stale annotation on the map is worse than none. Off it
+    // goes, switch and all, before anything else here can return early.
+    statsPanel.featureOverlayOff();
     statsGeneration++;
     statsResultIsCurrent = false;
     abandonStatsRun();
@@ -8036,6 +8050,81 @@
     return n;
   }
 
+  // ---- The longest ridge / longest valley overlay ----
+  //
+  // Feature Census can draw the two paths it measured straight onto the
+  // map, which is the only way to tell "the longest valley is 0.8 screen
+  // diagonals" from a number that happens to be 0.8. Its own canvas over
+  // the grid rather than anything in the WebGL pipeline: this is an
+  // annotation that comes and goes with a switch on a card, and rebuilding
+  // the render for it would tie a piece of UI to the thing the whole page
+  // is otherwise built to keep fast.
+  //
+  // Row 0 is the BOTTOM row of the sample block (see fractal-stats.js's own
+  // header), so the y mapping below flips - and the block is proportioned
+  // to this same canvas area, which is what lets a sample index map to a
+  // CSS pixel by simple ratio without going through world coordinates.
+  var featureOverlay = null;      // { width, height, ridge, valley } or null
+  var featureOverlayCanvas = null;
+
+  function ensureFeatureOverlayCanvas() {
+    if (featureOverlayCanvas) return featureOverlayCanvas;
+    featureOverlayCanvas = document.createElement("canvas");
+    featureOverlayCanvas.id = "grid-feature-overlay";
+    canvasArea.appendChild(featureOverlayCanvas);
+    return featureOverlayCanvas;
+  }
+
+  function drawFeatureOverlay() {
+    if (!featureOverlayCanvas) return;
+    var cw = canvasArea.clientWidth, ch = canvasArea.clientHeight;
+    var dpr = window.devicePixelRatio || 1;
+    featureOverlayCanvas.width = Math.max(1, Math.round(cw * dpr));
+    featureOverlayCanvas.height = Math.max(1, Math.round(ch * dpr));
+    var ctx = featureOverlayCanvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cw, ch);
+    if (!featureOverlay) return;
+    var W = featureOverlay.width, H = featureOverlay.height;
+    if (!(W > 0 && H > 0)) return;
+
+    function stroke(path, color) {
+      if (!path || path.length < 4) return;
+      ctx.beginPath();
+      for (var i = 0; i < path.length; i += 2) {
+        var x = (path[i] + 0.5) / W * cw;
+        var y = (1 - (path[i + 1] + 0.5) / H) * ch;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      // Dark casing first: the fractal underneath is every color there is,
+      // and a single-colored line disappears into whichever part of it
+      // happens to match.
+      ctx.strokeStyle = "rgba(0, 0, 0, 0.75)";
+      ctx.lineWidth = 5;
+      ctx.stroke();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+    }
+    stroke(featureOverlay.ridge, "#ffd479");   // crests, warm
+    stroke(featureOverlay.valley, "#7fd4ff");  // troughs, cool
+  }
+
+  function setFeatureOverlay(data) {
+    featureOverlay = data || null;
+    if (!featureOverlay) {
+      if (featureOverlayCanvas) {
+        featureOverlayCanvas.parentNode.removeChild(featureOverlayCanvas);
+        featureOverlayCanvas = null;
+      }
+      return;
+    }
+    ensureFeatureOverlayCanvas();
+    drawFeatureOverlay();
+  }
+
   if (statsPanelBodyEl && global.FractalStatsPanel && global.FractalStats) {
     statsPanel = FractalStatsPanel.create({
       body: statsPanelBodyEl,
@@ -8056,6 +8145,7 @@
         sampleLadder: statsSampleLadder,
         sampleLongSide: function () { return statsSampleLongSide; },
         describeSample: statsDescribeSample,
+        setFeatureOverlay: setFeatureOverlay,
       },
       onSampleResolutionChange: function (longSide) {
         statsSampleLongSide = longSide | 0;

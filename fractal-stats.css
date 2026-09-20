@@ -94,12 +94,6 @@
   display: flex;
   gap: 8px;
 }
-/* Smaller than a full .secondary button - these two sit in a header row,
-   not in the body's own stack of controls. */
-.stat-mini-btn {
-  font-size: 11.5px;
-  padding: 4px 8px !important;
-}
 
 /* ---- One section ----
    The switch IS the section: off means collapsed AND not measured (each
@@ -166,31 +160,8 @@
   color: var(--text-dim);
 }
 
-/* ---- The min/max blocks ----
-   Each gets its own outlined group with the sample's real color on it,
-   so "the maximum is this color" is shown rather than described. */
-.stat-extreme {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px 10px;
-  margin-bottom: 8px;
-  background: var(--bg-input);
-}
-.stat-extreme-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 4px;
-}
-.stat-extreme-title {
-  font-size: 12px;
-  font-weight: 600;
-}
-.stat-extreme-value {
-  margin-left: auto;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
+/* A color chip in front of a label - the pie chart's legend lines use it
+   to tie each share to its slice. */
 .stat-swatch {
   width: 14px;
   height: 14px;
@@ -213,14 +184,159 @@
 .stat-chart canvas {
   display: block;
 }
-.stat-chart-actions {
-  display: flex;
-  justify-content: flex-end;
-}
 
 /* The view moved and these numbers describe somewhere else now. Dimmed
    rather than cleared: a visibly stale panel is far more use mid-pan than
    an empty one, and the status line says so in words at the same time. */
 .stats-stale .stats-section {
   opacity: 0.45;
+}
+
+/* ---- Number lines ----
+   A number line: both ends named, reference points along it, and an
+   arrow showing where this view falls - for every stat whose range is fixed by the maths rather than by the
+   scene (see numberLine in fractal-stats-panel.js). Four stacked strips:
+   reference names above, the track, the arrows under it, and what the two
+   ends mean at the bottom.
+
+   All of it is positioned in percentages so it reflows with the card and
+   needs no measuring - which is the whole reason these are DOM rather than
+   another canvas. Nothing here clips: an arrow at the very end of a track
+   lets its triangle bleed a couple of pixels into the card's own padding,
+   which is invisible, where overflow: hidden would shave it in half. */
+.stat-numline {
+  width: 100%;
+  /* The parent is sometimes .stat-row (row direction, wrapping) and
+     sometimes the section body (column direction). `auto` keeps the basis
+     out of the height in the column case; the rule below forces the wrap
+     in the row one. */
+  flex: 0 0 auto;
+  margin: 5px 0 9px 0;
+}
+.stat-row > .stat-numline {
+  flex-basis: 100%;
+}
+
+.stat-numline-marks {
+  position: relative;
+  height: 13px;
+  font-size: 9.5px;
+  line-height: 13px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.stat-numline-mark {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+}
+/* Reference ticks and arrow labels both anchor rather than straddle when
+   they sit at an end - see anchorClass in fractal-stats-panel.js. */
+.stat-numline-mark.stat-numline-at-lo,
+.stat-numline-arrow-label.stat-numline-at-lo {
+  transform: translateX(0);
+}
+.stat-numline-mark.stat-numline-at-hi,
+.stat-numline-arrow-label.stat-numline-at-hi {
+  transform: translateX(-100%);
+}
+
+.stat-numline-track {
+  position: relative;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+}
+/* A reference tick is a hairline THROUGH the track, so it reads as a place
+   on the axis rather than as another value being plotted on it. */
+.stat-numline-tick {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 1px;
+  background: var(--border);
+}
+
+.stat-numline-arrows {
+  position: relative;
+  height: 20px;
+  font-size: 9.5px;
+  line-height: 12px;
+  white-space: nowrap;
+}
+.stat-numline-arrow {
+  position: absolute;
+  top: 0;
+  width: 0;
+}
+/* The arrowhead itself: a CSS triangle pointing up at the track. */
+.stat-numline-point {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-bottom: 5px solid var(--accent);
+}
+.stat-numline-arrow-label {
+  position: absolute;
+  top: 6px;
+  left: 0;
+  transform: translateX(-50%);
+  color: var(--accent);
+}
+/* The second arrow on a shared track (the steepest step next to the
+   average one). Dimmed and outlined so the two are told apart at a glance
+   and the primary reading stays the primary one. */
+.stat-numline-arrow-weak .stat-numline-point {
+  border-bottom-color: var(--text-dim);
+}
+.stat-numline-arrow-weak .stat-numline-arrow-label {
+  color: var(--text-dim);
+}
+.stat-numline-empty {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+/* What the two ends MEAN - the part that makes the arrow's position
+   readable at all. Allowed to wrap onto two lines: "all horizontal change
+   (vertical bands)" will not fit on one at the card's width, and shortening
+   it to fit would lose the half that says what it looks like. */
+.stat-numline-ends {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 1px;
+  font-size: 9.5px;
+  line-height: 1.25;
+  color: var(--text-dim);
+}
+.stat-numline-end {
+  max-width: 46%;
+}
+.stat-numline-end-hi {
+  text-align: right;
+}
+
+/* The switch under Feature Census that draws the longest ridge and valley
+   onto the map itself. A plain checkbox rather than the section switches'
+   sliding toggle: those mean "measure this or don't", which costs a pass
+   over the view, and this one only decides whether something already
+   measured is also drawn. */
+.stat-overlay-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text);
+}
+.stat-overlay-toggle input {
+  accent-color: var(--accent);
+  margin: 0;
 }

@@ -1024,6 +1024,15 @@
       });
 
       var peaks = 0, pits = 0, ridges = 0, valleys = 0, saddles = 0, flats = 0, inspected = 0;
+      // Which way each sample curves, kept rather than only counted:
+      // the longest-ridge and longest-valley measurements below need
+      // to know WHICH samples were which, not just how many.
+      var RIDGE = 1, VALLEY = 2;
+      var shape = null;   // Uint8Array: 0 unclassified, RIDGE, or VALLEY
+      steps.push(function allocateShape() {
+        if (out.empty) return;
+        shape = new Uint8Array(W * H);
+      });
       addRowPass(1, Math.max(1, H - 1), function census(r0, r1) {
         if (out.empty) return;
         for (var r = r0; r < r1; r++) {
@@ -1067,8 +1076,8 @@
             var rad = Math.sqrt((txx - tyy) * (txx - tyy) + 4 * txy * txy);
             var e1 = (trH + rad) / 2, e2 = (trH - rad) / 2;
             if (Math.abs(e1) < flatCutoff && Math.abs(e2) < flatCutoff) flats++;
-            else if (e1 < 0 && e2 < 0) ridges++;
-            else if (e1 > 0 && e2 > 0) valleys++;
+            else if (e1 < 0 && e2 < 0) { ridges++; if (shape) shape[i] = RIDGE; }
+            else if (e1 > 0 && e2 > 0) { valleys++; if (shape) shape[i] = VALLEY; }
             else saddles++;
           }
         }
@@ -1085,6 +1094,211 @@
           flatFraction: inspected > 0 ? flats / inspected : 0,
         };
       });
+
+      // ---- The longest ridge, and the longest valley ----
+      //
+      // The fractions above say how MUCH of the view curves each way; they
+      // say nothing about whether that curvature is organised. A picture
+      // can be a third valley by area either as ten thousand unconnected
+      // specks or as one canyon running corner to corner, and those are
+      // completely different pictures. So: take the ridge samples as one
+      // set and the valley samples as another, find their connected pieces,
+      // and measure the longest piece of each end to end.
+      //
+      // "Length" here is the GEODESIC diameter - the distance from one end
+      // of the piece to the other along the piece itself, not the straight
+      // line between them - which is the honest answer for a feature that
+      // curves. It is found by the standard double sweep: breadth-first
+      // from any member reaches one true end, and breadth-first from THAT
+      // end reaches the other. Exact on a piece with no loops, and within a
+      // sample or two on one that has them.
+      //
+      // Cost. Labelling is one union-find pass over the block, near linear.
+      // The double sweep is quadratic in nothing - it is two passes over
+      // ONE piece - but it is only run on a handful of candidate pieces
+      // rather than all of them: the longest is always among the largest by
+      // area or the largest by bounding box, and taking several of each
+      // covers the case where a long thin piece loses on area to a fat
+      // round one. Everything else is left unmeasured, which is what keeps
+      // this affordable on a multi-megasample block.
+      var parent = null;      // union-find, indexed by sample; only shaped samples take part
+      var comps = null;       // root -> { size, minC, maxC, minR, maxR, cls }
+      var candidates = null;  // the few roots worth a double sweep
+      var members = null;     // root -> array of sample indices
+      // How many pieces of each class, by each measure, get measured
+      // properly. Four and four is well past the point where the longest
+      // has ever not been among them, and each one is cheap.
+      var LONGEST_CANDIDATES = 4;
+
+      steps.push(function allocateLabels() {
+        if (out.empty || !shape) return;
+        parent = new Int32Array(W * H);
+      });
+
+      // Union with the four neighbours already walked (left, and the three
+      // above) - which is all it takes for 8-connectivity when the walk
+      // goes in row order, and means a neighbour's own label is always set
+      // by the time it is read.
+      addRowPass(1, Math.max(1, H - 1), function labelPieces(r0, r1) {
+        if (out.empty || !shape || !parent) return;
+        for (var r = r0; r < r1; r++) {
+          for (var c = 1; c < W - 1; c++) {
+            var i = r * W + c, s = shape[i];
+            if (!s) continue;
+            parent[i] = i;
+            if (c > 1 && shape[i - 1] === s) unite(i, i - 1);
+            if (r > 1) {
+              if (shape[i - W] === s) unite(i, i - W);
+              if (c > 1 && shape[i - W - 1] === s) unite(i, i - W - 1);
+              if (c < W - 2 && shape[i - W + 1] === s) unite(i, i - W + 1);
+            }
+          }
+        }
+      });
+
+      addRowPass(1, Math.max(1, H - 1), function measurePieces(r0, r1) {
+        if (out.empty || !shape || !parent) return;
+        if (!comps) comps = new Map();
+        for (var r = r0; r < r1; r++) {
+          for (var c = 1; c < W - 1; c++) {
+            var i = r * W + c, s = shape[i];
+            if (!s) continue;
+            var root = findRoot(i);
+            var e = comps.get(root);
+            if (!e) {
+              comps.set(root, { size: 1, minC: c, maxC: c, minR: r, maxR: r, cls: s });
+            } else {
+              e.size++;
+              if (c < e.minC) e.minC = c; else if (c > e.maxC) e.maxC = c;
+              if (r < e.minR) e.minR = r; else if (r > e.maxR) e.maxR = r;
+            }
+          }
+        }
+      }, function choosePieces() {
+        if (out.empty || !comps) return;
+        // The longest piece is among the biggest by area or the biggest by
+        // bounding box - a long thin one can lose the first contest badly
+        // and win the second outright, which is exactly the shape this
+        // whole measurement is looking for.
+        var byClass = {};
+        byClass[RIDGE] = [];
+        byClass[VALLEY] = [];
+        comps.forEach(function (e, root) {
+          e.root = root;
+          e.span = Math.sqrt((e.maxC - e.minC) * (e.maxC - e.minC) + (e.maxR - e.minR) * (e.maxR - e.minR));
+          byClass[e.cls].push(e);
+        });
+        candidates = [];
+        [RIDGE, VALLEY].forEach(function (cls) {
+          var list = byClass[cls], picked = {};
+          function take(key) {
+            list.sort(function (a, b) { return b[key] - a[key]; });
+            for (var i = 0; i < Math.min(LONGEST_CANDIDATES, list.length); i++) {
+              if (!picked[list[i].root]) { picked[list[i].root] = true; candidates.push(list[i]); }
+            }
+          }
+          take("size");
+          take("span");
+        });
+        members = new Map();
+        for (var i = 0; i < candidates.length; i++) members.set(candidates[i].root, []);
+      });
+
+      addRowPass(1, Math.max(1, H - 1), function collectMembers(r0, r1) {
+        if (out.empty || !members || members.size === 0) return;
+        for (var r = r0; r < r1; r++) {
+          for (var c = 1; c < W - 1; c++) {
+            var i = r * W + c;
+            if (!shape[i]) continue;
+            var list = members.get(findRoot(i));
+            if (list) list.push(i);
+          }
+        }
+      }, function sweepPieces() {
+        if (out.empty || !out.groups.features) return;
+        var best = {};
+        best[RIDGE] = null;
+        best[VALLEY] = null;
+        for (var k = 0; candidates && k < candidates.length; k++) {
+          var comp = candidates[k];
+          var found = geodesicDiameter(members.get(comp.root));
+          if (found && (!best[comp.cls] || found.length > best[comp.cls].length)) best[comp.cls] = found;
+        }
+        var diagonal = Math.sqrt(W * W + H * H);
+        var f = out.groups.features;
+        f.diagonalSamples = diagonal;
+        f.longestRidge = best[RIDGE];
+        f.longestValley = best[VALLEY];
+        // What the panel actually shows: a length that means the same thing
+        // whatever the sampling resolution is, since both it and the
+        // diagonal are counted in the same samples.
+        f.longestRidgeDiagonals = best[RIDGE] ? best[RIDGE].length / diagonal : 0;
+        f.longestValleyDiagonals = best[VALLEY] ? best[VALLEY].length / diagonal : 0;
+        // Nothing below needs the labels any more, and they are the largest
+        // thing this group allocates.
+        parent = null; comps = null; members = null; candidates = null;
+      });
+
+      function unite(a, b) {
+        a = findRoot(a); b = findRoot(b);
+        if (a !== b) parent[b] = a;
+      }
+      // Path halving: every lookup flattens the branch it walked, which is
+      // what keeps the pass near linear without a rank array.
+      function findRoot(a) {
+        while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; }
+        return a;
+      }
+
+      // Both ends of one connected piece, and the path between them.
+      // `list` is every sample index in the piece.
+      function geodesicDiameter(list) {
+        if (!list || list.length === 0) return null;
+        var n = list.length;
+        var local = new Map();
+        for (var i = 0; i < n; i++) local.set(list[i], i);
+        var dist = new Int32Array(n), prev = new Int32Array(n), queue = new Int32Array(n);
+        // Breadth-first over the piece from `start`, leaving dist/prev
+        // filled and returning the last sample reached - which, from any
+        // start, is one end of the piece.
+        function sweep(start) {
+          dist.fill(-1); prev.fill(-1);
+          var head = 0, tail = 0;
+          dist[start] = 0; queue[tail++] = start;
+          var last = start;
+          while (head < tail) {
+            var cur = queue[head++];
+            last = cur;
+            var gi = list[cur], gc = gi % W, gr = (gi - gc) / W;
+            for (var dr = -1; dr <= 1; dr++) {
+              for (var dc = -1; dc <= 1; dc++) {
+                if (dr === 0 && dc === 0) continue;
+                if (gc + dc < 1 || gc + dc > W - 2 || gr + dr < 1 || gr + dr > H - 2) continue;
+                var nb = local.get(gi + dr * W + dc);
+                if (nb === undefined || dist[nb] >= 0) continue;
+                dist[nb] = dist[cur] + 1;
+                prev[nb] = cur;
+                queue[tail++] = nb;
+              }
+            }
+          }
+          return last;
+        }
+        var far = sweep(0);
+        var other = sweep(far);
+        // Walk the path back and measure it properly: a diagonal step is
+        // root two samples long, not one, and a feature that runs at 45
+        // degrees is made almost entirely of them.
+        var path = [], length = 0, at = other, prevC = -1, prevR = -1;
+        while (at >= 0) {
+          var g = list[at], c = g % W, r = (g - c) / W;
+          if (prevC >= 0) length += (c !== prevC && r !== prevR) ? Math.SQRT2 : 1;
+          path.push(c, r);
+          prevC = c; prevR = r;
+          at = prev[at];
+        }
+        return { length: length, path: path };
+      }
     }
 
     // Each group returns its raw per-bin arrays (the histogram, the
