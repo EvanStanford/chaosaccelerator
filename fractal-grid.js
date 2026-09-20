@@ -7380,6 +7380,55 @@
   // frame) - meaningful and stable the instant it appears, since t=0 of
   // this offset scene is exactly what the eventual replay's first frame
   // will show too.
+  // Where an Input is a body's starting VELOCITY, moving across the map
+  // changes nothing the instant preview could otherwise show: every pixel's
+  // scene starts in the same place, and only how hard the body is thrown
+  // differs. So the instant preview - and only it - draws that throw, as the
+  // editor's own velocity arrow (same color, same one-pixel-per-unit length,
+  // same head), on each body an Input's vx or vy lands on. It follows the
+  // hover because the instant preview is redrawn for every hovered pixel; and
+  // it is gone the moment the real replay takes over, where the motion itself
+  // says the same thing and an arrow frozen at t=0 would contradict it.
+  var HOVER_VELOCITY_ARROW_COLOR = "#e06bff"; // physics-ui.js's VELOCITY_ARROW_COLOR
+  function drawHoverInputVelocityArrows(offsetScene) {
+    var targets = {};
+    [scene.xInput, scene.yInput].forEach(function (input) {
+      if (input && (input.property === "vx" || input.property === "vy")) targets[input.body] = true;
+    });
+    var px = 1 / hoverFit.scale; // one preview-canvas pixel, in scene units
+    Object.keys(targets).forEach(function (index) {
+      var body = offsetScene.bodies[index];
+      if (!body) return;
+      var vx = body.vx || 0, vy = body.vy || 0;
+      var speed = Math.sqrt(vx * vx + vy * vy);
+      if (!(speed >= 1) || !isFinite(speed)) return;
+      // What the engine will actually start it at: it clamps on the first step.
+      var cap = PhysicsEngine.speedCapFor(offsetScene);
+      var len = cap > 0 ? Math.min(speed, cap) : speed;
+      var ux = vx / speed, uy = vy / speed;
+      var tipX = body.x + ux * len, tipY = body.y + uy * len;
+      // Sized in preview pixels, not scene units: the preview is the scene
+      // shrunk several times over, and a 2.5-unit shaft would vanish.
+      var head = Math.min(9 * px, Math.max(5 * px, len * 0.25));
+      hoverCtx.save();
+      hoverCtx.strokeStyle = HOVER_VELOCITY_ARROW_COLOR;
+      hoverCtx.fillStyle = HOVER_VELOCITY_ARROW_COLOR;
+      hoverCtx.lineWidth = 2 * px;
+      hoverCtx.lineCap = "round";
+      hoverCtx.beginPath();
+      hoverCtx.moveTo(body.x, body.y);
+      hoverCtx.lineTo(tipX - ux * head * 0.6, tipY - uy * head * 0.6);
+      hoverCtx.stroke();
+      hoverCtx.beginPath();
+      hoverCtx.moveTo(tipX, tipY);
+      hoverCtx.lineTo(tipX - ux * head - uy * head * 0.45, tipY - uy * head + ux * head * 0.45);
+      hoverCtx.lineTo(tipX - ux * head + uy * head * 0.45, tipY - uy * head - ux * head * 0.45);
+      hoverCtx.closePath();
+      hoverCtx.fill();
+      hoverCtx.restore();
+    });
+  }
+
   function showHoverInstant(worldPoint) {
     var offsetScene;
     try {
@@ -7424,6 +7473,7 @@
         half: PhysicsGPU.shapeHalf([body], 0),
       });
     });
+    drawHoverInputVelocityArrows(offsetScene);
     // The inspected point's own t=0 state - "both play on top of each other"
     // starts here, before either has even upgraded to a real replay.
     drawInspectedAtStep(0);
