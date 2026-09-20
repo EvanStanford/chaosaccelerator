@@ -117,6 +117,12 @@ html.layout-mobile body {
   image-rendering: auto;
 }
 
+/* The back link's phone face (see #back-link in index.html) - not shown
+   anywhere else. */
+.menu-back-chevron {
+  display: none;
+}
+
 /* Touch only - see its comment in index.html. */
 #btn-inspect-point {
   display: none;
@@ -257,9 +263,6 @@ html.layout-mobile #inspect-arm-row > button {
      stay too - reading as a second lit tab next to the one that is. */
   #grid-dock-tabs > .menu-toggle:hover {
     background: transparent;
-  }
-  #grid-dock-sheet > .menu-card > .menu-card-header:hover {
-    background: var(--bg-panel);
   }
 }
 
@@ -524,10 +527,21 @@ html.layout-mobile #grid-menu-column {
   width: auto;
   max-width: calc(100% - var(--panel-inset) * 2 - var(--safe-left) - var(--safe-right));
 }
+/* Just the chevron: a square button the size of the desktop's menu buttons,
+   no words. */
 html.layout-mobile .menu-back {
-  height: 36px;
-  padding: 0 12px;
-  font-size: 12.5px;
+  width: var(--settings-btn-size);
+  height: var(--settings-btn-size);
+  padding: 0;
+  justify-content: center;
+}
+html.layout-mobile .menu-back-label {
+  display: none;
+}
+html.layout-mobile .menu-back-chevron {
+  display: block;
+  /* The chevron's own point sits left of its box's middle. */
+  margin-right: 2px;
 }
 html.layout-mobile #menu-render-progress {
   left: calc(var(--panel-inset) + var(--safe-left));
@@ -606,9 +620,12 @@ html.layout-mobile-landscape #grid-dock-sheet {
 
 /* A card in the sheet is a section of it, not a floating panel: full width,
    no chrome of its own, as tall as its content - the SHEET is what scrolls,
-   so a card's body must not also. Its header sticks to the top of the sheet
-   while the card is in view, which keeps "which card is this, and how do I
-   put it away" on screen however far down the card has been scrolled. */
+   so a card's body must not also.
+
+   And no title line. On a desktop that line is how a card is named and put
+   away; here the lit tab directly underneath does both - same icon, same
+   name, press it to shut the card - so the line was a fifth of the sheet
+   spent saying it twice. */
 #grid-dock-sheet > .menu-card {
   width: 100%;
   max-width: none;
@@ -622,27 +639,8 @@ html.layout-mobile-landscape #grid-dock-sheet {
   backdrop-filter: none;
   animation: none;
 }
-#grid-dock-sheet > .menu-card + .menu-card {
-  border-top: 1px solid var(--border);
-}
 #grid-dock-sheet > .menu-card > .menu-card-header {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  padding: 4px 8px 4px 14px;
-  background: var(--bg-panel);
-}
-/* The whole header line puts the card away (see makeMenu), so the caret at
-   its end is a label for that, not the target - it can stay its desktop size
-   rather than growing to a finger's and making every header a third taller. */
-#grid-dock-sheet > .menu-card > .menu-card-header .menu-collapse {
-  width: 32px;
-  height: 32px;
-  min-height: 32px;
-  border-color: transparent;
-}
-#grid-dock-sheet > .menu-card > .menu-card-header {
-  min-height: 42px;
+  display: none;
 }
 #grid-dock-sheet > .menu-card > .menu-card-body {
   overflow: visible;

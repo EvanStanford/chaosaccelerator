@@ -495,6 +495,13 @@
   }
 
   function transitionTo(which, scene) {
+    // Going to the other page by the app's own buttons is a NAVIGATION, and
+    // gets a history entry of its own (see "The address bar"). First the
+    // page being left writes itself down one last time, so that Back returns
+    // to it as it was left rather than as it was half a second before - and
+    // before anything below resets its view for the animation.
+    syncAddress();
+    pushPending = true;
     var instant = prefersReducedMotion();
     var direction = which === "grid" ? "forward" : "reverse";
     var full = !introSeen(direction);
@@ -586,6 +593,8 @@
       // path applies for itself - see the matching call and its own comment
       // in transitionTo.
       global.FractalGrid.pausePlayback();
+      syncAddress();
+      pushPending = true; // a navigation, like transitionTo's
       showOnly("editor");
     });
   }
@@ -603,6 +612,16 @@
   // scene, and on the map the view of it (share-url.js is the format). So
   // sharing anything is sharing the address, and opening an address rebuilds
   // what it describes.
+  //
+  // Two kinds of write. Moving BETWEEN the two pages with the app's own
+  // buttons (Fractal-ize, Back to scene editor) is a navigation: it pushes a
+  // new history entry, so the browser's Back and Forward buttons walk between
+  // the builder and the map the way they would between two real pages. Coming
+  // back that way has no animation - the explainer is about sending a scene
+  // to the map, and Back is not that - it simply opens what the entry
+  // describes, through the same path a pasted link takes (the hashchange
+  // listener below). Everything that changes WITHIN a page only ever replaces
+  // the current entry:
   //
   // WRITTEN on a timer rather than from every place state can change. There
   // are dozens of those across two large modules, a missed one would be a
@@ -623,6 +642,10 @@
   // What the address last said on this page's own account (written, or
   // loaded from), so a change can be told from no change.
   var lastFragment = null;
+  // Set by a navigation between the pages (see transitionTo): the next
+  // address written is a NEW history entry rather than a rewrite of this one.
+  // It waits for that write - which, mid-transition, is a few seconds off.
+  var pushPending = false;
 
   function currentFragment() {
     // Mid-transition neither page's state is settled: the grid's zoom is
@@ -646,9 +669,13 @@
 
   function syncAddress() {
     var fragment = currentFragment();
-    if (fragment === null || fragment === lastFragment) return;
+    if (fragment === null) return;
+    // (A navigation that ended up where it started has nothing to push.)
+    if (fragment === lastFragment) { pushPending = false; return; }
     try {
-      global.history.replaceState(null, "", "#" + fragment);
+      if (pushPending) global.history.pushState(null, "", "#" + fragment);
+      else global.history.replaceState(null, "", "#" + fragment);
+      pushPending = false;
       lastFragment = fragment;
     } catch (err) {
       // Refused (rate limit, or a sandboxed frame): the address is stale
@@ -660,7 +687,22 @@
   // between the two times this runs: on load the editor has already taken
   // the scene for itself (it has to, before its first render - see
   // loadSceneFromLink in physics-ui.js), so here it is only checked.
+  // Whether two scenes are the same scene, by the only definition that
+  // matters here: they would be written into an address identically.
+  function sameScene(a, b) {
+    try {
+      var P = global.ShareUrl.PAGE_BUILDER;
+      return !!a && !!b && global.ShareUrl.encode({ page: P, scene: a }) === global.ShareUrl.encode({ page: P, scene: b });
+    } catch (err) {
+      return false;
+    }
+  }
+
   function openAddress(onLoad) {
+    // Whatever this opens is being opened by the ADDRESS - typed, pasted, or
+    // reached with Back or Forward - so the entry for it already exists, and
+    // a push still waiting from an interrupted transition must not add one.
+    pushPending = false;
     var link;
     try {
       link = global.ShareUrl.decode(global.location.hash);
@@ -677,13 +719,29 @@
     }
     // The editor takes the scene whichever page the link is for - it is
     // where the map's own Back leads.
-    var problem = onLoad ? global.PhysicsUI.sharedSceneProblem(link.scene) : global.PhysicsUI.loadSharedScene(link.scene);
+    // Back and Forward mostly arrive at a scene the editor is already
+    // holding - it is the one that was sent to the map in the first place -
+    // and loading it again would cost the editor its selection, and flag a
+    // scene the user built as one that arrived by link.
+    var editorHasIt = !onLoad && sameScene(global.PhysicsUI.shareScene(), link.scene);
+    var problem = onLoad ? global.PhysicsUI.sharedSceneProblem(link.scene)
+      : editorHasIt ? null : global.PhysicsUI.loadSharedScene(link.scene);
     if (problem) {
       global.PhysicsUI.reportLinkProblem("This link's scene couldn't be loaded: " + problem);
       return;
     }
     stopActive(true);
     if (link.page === global.ShareUrl.PAGE_MAP) {
+      // Likewise the map: Forward to the map that Back just left finds its
+      // scene still compiled, and starting it again would mean rebuilding
+      // every shader - seconds, on a phone - to arrive at what is already
+      // there. Only the view has to be put back.
+      var gridState = !onLoad && global.FractalGrid.isStarted() ? global.FractalGrid.shareState() : null;
+      if (gridState && sameScene(global.PhysicsCoords.toAuthoredJSON(gridState.scene), link.scene)) {
+        global.FractalGrid.applyShareView(link.view);
+        showOnly("grid");
+        return;
+      }
       var gridScene = null;
       try {
         gridScene = global.PhysicsUI.gridSceneFromShared(link.scene);

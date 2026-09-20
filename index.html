@@ -20,19 +20,19 @@
      show them at once (see transition.js). physics.css styles the editor
      view and fractal-grid.css the grid view; the handful of rules that
      would otherwise collide are scoped to #grid-view inside the latter. -->
-<link rel="stylesheet" href="physics.css?v=m5">
-<link rel="stylesheet" href="fractal-grid.css?v=m5">
-<link rel="stylesheet" href="app-shell.css?v=m5">
-<link rel="stylesheet" href="fractal-stats.css?v=m5">
-<link rel="stylesheet" href="responsive-layout.css?v=m5">
+<link rel="stylesheet" href="physics.css?v=m6">
+<link rel="stylesheet" href="fractal-grid.css?v=m6">
+<link rel="stylesheet" href="app-shell.css?v=m6">
+<link rel="stylesheet" href="fractal-stats.css?v=m6">
+<link rel="stylesheet" href="responsive-layout.css?v=m6">
 <!-- The small-window (phone) layout and the touch-input adjustments. Last, so
      it wins the cascade over everything above without needing !important;
      every rule in it is scoped to a class layout-mode.js puts on <html>. -->
-<link rel="stylesheet" href="mobile.css?v=m5">
+<link rel="stylesheet" href="mobile.css?v=m6">
 <!-- In <head>, ahead of any layout: decides which layout/input/performance
      classes <html> carries, and both views measure their canvas area as they
      start - so the answer has to be in place before they do. -->
-<script src="layout-mode.js?v=m5"></script>
+<script src="layout-mode.js?v=m6"></script>
 <!-- A link to the map (see share-url.js) should open ON the map. The editor
      is the view the markup starts with, and everything that would swap them
      is a script at the end of the body - by which time the editor has been
@@ -316,7 +316,14 @@
                the whole reason these are two elements rather than one. -->
           <div id="grid-menu-stack">
 
-            <a id="back-link" class="menu-back" href="#bldr/">&larr; Back to scene editor</a>
+            <!-- Two faces, one of which shows (see .menu-back-chevron in
+                 mobile.css): the words on a desktop, and in the small-window
+                 layout the bare back chevron every phone app uses, which
+                 there needs no words and has no room for them. -->
+            <a id="back-link" class="menu-back" href="#bldr/" title="Back to scene editor" aria-label="Back to scene editor">
+              <svg class="menu-back-chevron" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 5 8 12 15 19"></polyline></svg>
+              <span class="menu-back-label">&larr; Back to scene editor</span>
+            </a>
             <!-- Errors only. "Ready" and "Loading" told nobody anything they
                  couldn't see; an unreadable scene or a compile failure very
                  much does, so this stays and only shows for those. Outside
@@ -879,20 +886,20 @@
 
 </div>
 
-<script src="physics-engine.js?v=m5"></script>
-<script src="physics-coords.js?v=m5"></script>
-<script src="share-url.js?v=m5"></script>
-<script src="movie-path.js?v=m5"></script>
-<script src="physics-sound.js?v=m5"></script>
-<script src="physics-hinge-geometry.js?v=m5"></script>
-<script src="physics-df.js?v=m5"></script>
-<script src="physics-gpu.js?v=m5"></script>
-<script src="physics-gpu-df.js?v=m5"></script>
-<script src="physics-grid-codegen.js?v=m5"></script>
-<script src="physics-ui.js?v=m5"></script>
-<script src="fractal-stats.js?v=m5"></script>
-<script src="fractal-stats-panel.js?v=m5"></script>
-<script src="fractal-grid.js?v=m5"></script>
-<script src="transition.js?v=m5"></script>
+<script src="physics-engine.js?v=m6"></script>
+<script src="physics-coords.js?v=m6"></script>
+<script src="share-url.js?v=m6"></script>
+<script src="movie-path.js?v=m6"></script>
+<script src="physics-sound.js?v=m6"></script>
+<script src="physics-hinge-geometry.js?v=m6"></script>
+<script src="physics-df.js?v=m6"></script>
+<script src="physics-gpu.js?v=m6"></script>
+<script src="physics-gpu-df.js?v=m6"></script>
+<script src="physics-grid-codegen.js?v=m6"></script>
+<script src="physics-ui.js?v=m6"></script>
+<script src="fractal-stats.js?v=m6"></script>
+<script src="fractal-stats-panel.js?v=m6"></script>
+<script src="fractal-grid.js?v=m6"></script>
+<script src="transition.js?v=m6"></script>
 </body>
 </html>
