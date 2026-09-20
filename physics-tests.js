@@ -4388,6 +4388,212 @@
     }
   );
 
+  // The two tests below pin the numbers the Analysis panel DRAWS AS AXES.
+  //
+  // Every scale bar in Gradient & Roughness (see scaleRow and
+  // roughnessBounds in fractal-stats-panel.js) has a hard-coded maximum -
+  // the value a one-sample checkerboard reaches - and a hard-coded "noise"
+  // tick. An axis is a claim about what is possible, so a wrong one is a
+  // worse bug than a wrong number: the number would at least look odd,
+  // where a mis-scaled arrow looks perfectly reasonable in the wrong place
+  // forever. Nothing else in the codebase would catch it, because the panel
+  // is the only thing that knows these bounds exist.
+  //
+  // s below is the largest step between two neighbouring samples: 1 for a
+  // linear Output, and 0.5 for a circular one, where delta() folds a
+  // difference into [-0.5, 0.5].
+
+  addTest(
+    "A one-sample checkerboard sits exactly on every roughness maximum the panel draws",
+    "The Analysis panel's scale bars hard-code these as the ends of their axes",
+    function () {
+      // 64x64 keeps every figure EXACT rather than merely close. The
+      // gradient passes skip the last row and column and the Laplacian pass
+      // skips the whole border, so the measured region is 63x63 and 62x62
+      // respectively - both even, so each carries equally many light and
+      // dark centres and the Laplacian's mean is exactly 0 rather than off
+      // by one sample's worth.
+      var W = 64, H = 64, problems = [], detail = [];
+      [false, true].forEach(function (circular) {
+        var s = circular ? 0.5 : 1;
+        var tag = circular ? "circular" : "linear";
+        var check = function (name, got, want) {
+          // Every value here is a sum of exact float32 differences of 0,
+          // 0.5 and 1, so this tolerance is for the arithmetic, not for the
+          // shape of the picture.
+          if (Math.abs(got - want) > 1e-6) {
+            problems.push(tag + " " + name + "=" + got.toFixed(8) + " (expected " + want.toFixed(8) + ")");
+          }
+        };
+
+        var board = statsField(W, H, function (c, r) { return ((c + r) % 2) ? s : 0; });
+        var g = runStatsJob({ width: W, height: H, t: board.t, circular: circular, groups: { roughness: true } }).groups.roughness;
+        check("checkerboard meanGradient", g.meanGradient, Math.SQRT2 * s);
+        check("checkerboard maxGradient", g.maxGradient, Math.SQRT2 * s);
+        check("checkerboard gradientEnergy", g.gradientEnergy, 2 * s * s);
+        check("checkerboard totalVariation", g.totalVariation, 2 * s);
+        check("checkerboard meanAbsDx", g.meanAbsDx, s);
+        check("checkerboard meanAbsDy", g.meanAbsDy, s);
+        // The analytic ceiling (Popoviciu on a Laplacian confined to
+        // [-4s, 4s]) AND the true attainable maximum - the checkerboard
+        // sends all four of its terms the same way at once. Confirmed by
+        // exhaustive search over every periodic 4x4 binary grid and by
+        // hill-climbing continuous 6x6 ones; nothing beats it.
+        check("checkerboard laplacianVariance", g.laplacianVariance, 16 * s * s);
+        detail.push(tag + " checkerboard ok");
+
+        // One-sample vertical stripes: the pattern that maxes out ONE of
+        // the two variation halves and leaves the other at zero, which is
+        // what makes the panel's horizontal/vertical balance bar reach its
+        // ends at all.
+        var stripes = statsField(W, H, function (c) { return (c % 2) ? s : 0; });
+        var v = runStatsJob({ width: W, height: H, t: stripes.t, circular: circular, groups: { roughness: true } }).groups.roughness;
+        check("stripes meanAbsDx", v.meanAbsDx, s);
+        check("stripes meanAbsDy", v.meanAbsDy, 0);
+        check("stripes totalVariation", v.totalVariation, s);
+        check("stripes maxGradient", v.maxGradient, s);
+        check("stripes gradientEnergy", v.gradientEnergy, s * s);
+
+        // ...and the other end of every one of those axes.
+        var flat = statsField(W, H, function () { return 0.37; });
+        var f = runStatsJob({ width: W, height: H, t: flat.t, circular: circular, groups: { roughness: true } }).groups.roughness;
+        check("flat meanGradient", f.meanGradient, 0);
+        check("flat maxGradient", f.maxGradient, 0);
+        check("flat gradientEnergy", f.gradientEnergy, 0);
+        check("flat totalVariation", f.totalVariation, 0);
+        check("flat meanAbsDx", f.meanAbsDx, 0);
+        check("flat meanAbsDy", f.meanAbsDy, 0);
+        check("flat laplacianVariance", f.laplacianVariance, 0);
+        if (f.comparedPairs === 0) problems.push(tag + " flat field compared no pairs at all");
+      });
+      return {
+        pass: problems.length === 0,
+        detail: problems.length ? problems.join("; ") : detail.join(", ") + ", stripes and flat exact in both modes",
+      };
+    }
+  );
+
+  addTest(
+    "Uniform noise lands where the roughness scales say noise lands",
+    "The 'noise' tick on each Analysis scale bar is a hard-coded constant",
+    function () {
+      // The reference the panel actually draws. For a circular Output each
+      // wrapped difference is exactly uniform on [-0.5, 0.5] and
+      // independent of its neighbours, so all five constants are closed
+      // form. For a linear one dx and dy share their centre sample and are
+      // therefore correlated, which is why the mean gradient there is a
+      // numerical integral (Simpson over the unit cube) rather than a tidy
+      // expression - and why it is worth a test at all.
+      var W = 256, H = 256, problems = [], detail = [];
+      [false, true].forEach(function (circular) {
+        var s = circular ? 0.5 : 1;
+        var tag = circular ? "circular" : "linear";
+        var rnd = mulberry32(circular ? 11 : 7);
+        var f = statsField(W, H, function () { return rnd(); });
+        var g = runStatsJob({ width: W, height: H, t: f.t, circular: circular, groups: { roughness: true } }).groups.roughness;
+        var want = {
+          meanGradient: circular ? s * (Math.SQRT2 + Math.log(1 + Math.SQRT2)) / 3 : 0.51786660 * s,
+          gradientEnergy: circular ? 2 * s * s / 3 : s * s / 3,
+          totalVariation: circular ? s : 2 * s / 3,
+          meanAbsDx: circular ? s / 2 : s / 3,
+          laplacianVariance: circular ? 4 * s * s / 3 : 5 * s * s / 3,
+        };
+        // 65,536 samples, so the sampling error on each of these is a few
+        // parts in ten thousand; the tolerances are set well above that and
+        // still far tighter than the distance to any neighbouring landmark
+        // on the same axis.
+        var tol = { meanGradient: 0.006, gradientEnergy: 0.006, totalVariation: 0.008, meanAbsDx: 0.004, laplacianVariance: 0.03 };
+        Object.keys(want).forEach(function (k) {
+          if (Math.abs(g[k] - want[k]) > tol[k]) {
+            problems.push(tag + " " + k + "=" + g[k].toFixed(6) + " (expected " + want[k].toFixed(6) + " +/- " + tol[k] + ")");
+          }
+        });
+        detail.push(tag + " |grad|=" + g.meanGradient.toFixed(5) + " (expected " + want.meanGradient.toFixed(5) + ")");
+      });
+      return { pass: problems.length === 0, detail: problems.length ? problems.join("; ") : detail.join(", ") };
+    }
+  );
+
+  addTest(
+    "The longest ridge and the longest valley are found, and measured along themselves",
+    "Feature Census reports these as screen diagonals, and the map overlay draws the very paths measured",
+    function () {
+      // A separable field whose ridge and valley sets can be written down
+      // exactly, so this tests the connected-piece labelling and the
+      // geodesic sweep rather than agreeing with whatever they happen to
+      // return:
+      //
+      //   t = 0.5 + 0.3 cos(pi c / 2) + 0.2 cos(pi r / H)
+      //
+      // A SUM of a function of c and a function of r, so the mixed second
+      // difference is exactly zero and the Hessian is diagonal - its
+      // eigenvalues are the two axis second differences themselves.
+      //
+      //   d2/dc2 > 0 exactly where cos(pi c / 2) < 0, i.e. c = 2 (mod 4)
+      //   d2/dr2 > 0 exactly where cos(pi r / H) < 0, i.e. r > H/2
+      //
+      // Valley is both positive: single columns at c = 2 (mod 4), rows 33
+      // to 62 - thirty samples, twenty-nine unit steps. Ridge is both
+      // negative: columns c = 0 (mod 4), rows 1 to 31 - thirty-one samples,
+      // thirty steps. The columns either side (c odd) have zero curvature
+      // in x and read as flat, which is what keeps each column its own
+      // piece rather than one connected slab.
+      var W = 64, H = 64;
+      var f = statsField(W, H, function (c, r) {
+        return 0.5 + 0.3 * Math.cos(Math.PI * c / 2) + 0.2 * Math.cos(Math.PI * r / H);
+      });
+      var g = runStatsJob({ width: W, height: H, t: f.t, circular: false, groups: { features: true } }).groups.features;
+      var diag = Math.sqrt(W * W + H * H);
+      var problems = [];
+      function check(name, got, want) {
+        if (Math.abs(got - want) > 1e-9) problems.push(name + "=" + got + " (expected " + want + ")");
+      }
+      if (!g.longestRidge) problems.push("no ridge found at all");
+      if (!g.longestValley) problems.push("no valley found at all");
+      if (g.longestRidge && g.longestValley) {
+        // Every step is one row, so the length is a plain count - no
+        // diagonal steps to weigh at root two.
+        check("ridge length", g.longestRidge.length, 30);
+        check("valley length", g.longestValley.length, 29);
+        check("ridge in diagonals", g.longestRidgeDiagonals, 30 / diag);
+        check("valley in diagonals", g.longestValleyDiagonals, 29 / diag);
+        check("diagonal", g.diagonalSamples, diag);
+        // The path is what the map overlay draws, so its SHAPE matters as
+        // much as its length: one column, every row in it, no repeats.
+        // The residue the path's column must have mod 4: ridge columns are
+        // 0 (mod 4), valley columns 2 (mod 4).
+        [["ridge", g.longestRidge, 0, 1, 31], ["valley", g.longestValley, 2, 33, 62]].forEach(function (one) {
+          var name = one[0], path = one[1].path, rows = {};
+          var col = path[0], minR = 1e9, maxR = -1e9, straight = true;
+          for (var i = 0; i < path.length; i += 2) {
+            if (path[i] !== col) straight = false;
+            rows[path[i + 1]] = (rows[path[i + 1]] || 0) + 1;
+            minR = Math.min(minR, path[i + 1]);
+            maxR = Math.max(maxR, path[i + 1]);
+          }
+          if (!straight) problems.push(name + " path wanders across columns");
+          if ((col % 4) !== one[2]) problems.push(name + " path column " + col + " is not " + one[2] + " (mod 4)");
+          if (minR !== one[3] || maxR !== one[4]) problems.push(name + " path spans rows " + minR + ".." + maxR + " (expected " + one[3] + ".." + one[4] + ")");
+          for (var k in rows) if (rows[k] !== 1) problems.push(name + " path visits row " + k + " " + rows[k] + " times");
+        });
+      }
+
+      // A flat view has neither, and says so rather than reporting a
+      // zero-length one.
+      var flat = statsField(W, H, function () { return 0.42; });
+      var fg = runStatsJob({ width: W, height: H, t: flat.t, circular: false, groups: { features: true } }).groups.features;
+      if (fg.longestRidge !== null || fg.longestValley !== null) problems.push("a flat field reported a longest feature");
+      if (fg.longestRidgeDiagonals !== 0 || fg.longestValleyDiagonals !== 0) problems.push("a flat field reported a non-zero length");
+
+      return {
+        pass: problems.length === 0,
+        detail: problems.length ? problems.join("; ")
+          : "ridge " + g.longestRidge.length + " samples (" + g.longestRidgeDiagonals.toFixed(4) +
+            " diagonals), valley " + g.longestValley.length + " samples (" + g.longestValleyDiagonals.toFixed(4) + ")",
+      };
+    }
+  );
+
   // ---- Grid playback: a pixel's simulation survives a trip through its
   // state textures ----
   //
