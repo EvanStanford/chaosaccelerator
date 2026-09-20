@@ -138,6 +138,9 @@
       editorPanel.style.opacity = "";
     }
     current = which;
+    // The one Settings body there is, into the page now on screen (see "One
+    // settings body" in fractal-grid.js).
+    if (global.FractalGrid.placeSettings) global.FractalGrid.placeSettings(which);
     nudgeLayout();
     // Straight away rather than on the next tick of the sync timer: which
     // page this is happens to be the first thing the address says.

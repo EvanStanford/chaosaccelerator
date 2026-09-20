@@ -43,10 +43,7 @@
   var btnSettings = document.getElementById("btn-settings");
   var btnSettingsClose = document.getElementById("btn-settings-close");
   var settingsPanel = document.getElementById("settings-panel");
-  var btnResetTips = document.getElementById("btn-reset-tips");
   var btnMute = document.getElementById("btn-mute");
-  var soundVolumeSlider = document.getElementById("sound-volume-slider");
-  var soundVolumeIcon = document.getElementById("sound-volume-icon");
   var statusEl = document.getElementById("status");
   var stepReadout = document.getElementById("step-readout");
   var toolButtons = Array.prototype.slice.call(document.querySelectorAll(".tool-btn"));
@@ -1481,16 +1478,6 @@
     window.LayoutMode.onChange(function (mode) { setTopbarActive(mode.isMobile()); });
     setTopbarActive(window.LayoutMode.isMobile());
   }
-  btnResetTips.addEventListener("click", function () {
-    try {
-      localStorage.removeItem(TIP_DISMISSED_KEY);
-    } catch (err) {
-      // Nothing to clean up if storage was never reachable to begin with.
-    }
-    var original = btnResetTips.textContent;
-    btnResetTips.textContent = "Tips reset";
-    setTimeout(function () { btnResetTips.textContent = original; }, 1500);
-  });
   // ---- Sound volume (mute button + settings slider) ----
   //
   // PhysicsSound's volume is shared, module-level state - the fractal
@@ -1512,16 +1499,11 @@
   }
   function updateVolumeUI(volume) {
     setVolumeIconState(btnMute, volume);
-    setVolumeIconState(soundVolumeIcon, volume);
-    soundVolumeSlider.value = String(Math.round(volume * 100));
     var label = volume <= 0 ? "Unmute" : "Mute";
     btnMute.title = label;
     btnMute.setAttribute("aria-label", label);
   }
   btnMute.addEventListener("click", function () { PhysicsSound.toggleMute(); });
-  soundVolumeSlider.addEventListener("input", function () {
-    PhysicsSound.setVolume(Number(soundVolumeSlider.value) / 100);
-  });
   PhysicsSound.onVolumeChange(updateVolumeUI);
   updateVolumeUI(PhysicsSound.getVolume());
 

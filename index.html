@@ -20,19 +20,19 @@
      show them at once (see transition.js). physics.css styles the editor
      view and fractal-grid.css the grid view; the handful of rules that
      would otherwise collide are scoped to #grid-view inside the latter. -->
-<link rel="stylesheet" href="physics.css?v=m14">
-<link rel="stylesheet" href="fractal-grid.css?v=m14">
-<link rel="stylesheet" href="app-shell.css?v=m14">
-<link rel="stylesheet" href="fractal-stats.css?v=m14">
-<link rel="stylesheet" href="responsive-layout.css?v=m14">
+<link rel="stylesheet" href="physics.css?v=m15">
+<link rel="stylesheet" href="fractal-grid.css?v=m15">
+<link rel="stylesheet" href="app-shell.css?v=m15">
+<link rel="stylesheet" href="fractal-stats.css?v=m15">
+<link rel="stylesheet" href="responsive-layout.css?v=m15">
 <!-- The small-window (phone) layout and the touch-input adjustments. Last, so
      it wins the cascade over everything above without needing !important;
      every rule in it is scoped to a class layout-mode.js puts on <html>. -->
-<link rel="stylesheet" href="mobile.css?v=m14">
+<link rel="stylesheet" href="mobile.css?v=m15">
 <!-- In <head>, ahead of any layout: decides which layout/input/performance
      classes <html> carries, and both views measure their canvas area as they
      start - so the answer has to be in place before they do. -->
-<script src="layout-mode.js?v=m14"></script>
+<script src="layout-mode.js?v=m15"></script>
 <!-- A link to the map (see share-url.js) should open ON the map. The editor
      is the view the markup starts with, and everything that would swap them
      is a script at the end of the body - by which time the editor has been
@@ -253,17 +253,13 @@
           <h2>Settings</h2>
           <button id="btn-settings-close" class="icon-button" title="Close" aria-label="Close">&times;</button>
         </div>
-        <div class="settings-panel-body">
-          <label class="volume-field">
-            <span>Sound</span>
-            <span class="volume-icon" id="sound-volume-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5z"></path><path class="vol-arc-1" d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path class="vol-arc-2" d="M19.07 4.93a10 10 0 0 1 0 14.14"></path><g class="vol-mute-x"><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></g></svg>
-            </span>
-            <input type="range" id="sound-volume-slider" min="0" max="100" step="1" value="100" aria-label="Sound volume">
-          </label>
-          <button id="btn-reset-tips" class="secondary">Reset Tool Tips</button>
-        <button id="btn-replay-intro" class="secondary">Replay Intro Animation</button>
-        </div>
+        <!-- Empty in the markup. There is ONE settings body in this document
+             (#shared-settings-body, written out inside the map's Settings
+             card below) and it is physically moved to whichever page is on
+             screen - here while the builder is - so the two pages' settings
+             cannot drift apart: they are the same elements. See "One
+             settings body" in fractal-grid.js. -->
+        <div class="settings-panel-body" id="editor-settings-mount"></div>
       </aside>
 
       <!-- Reusable modal shell - one instance, its title/body swapped per use
@@ -514,7 +510,7 @@
                   <h2>Settings</h2>
                   <button id="grid-btn-settings-close" class="icon-button menu-collapse" type="button" title="Collapse Settings" aria-label="Collapse Settings">&#9660;</button>
                 </div>
-                <div class="menu-card-body">
+                <div class="menu-card-body" id="shared-settings-body">
                   <label class="volume-field">
                     <span>Sound</span>
                     <span class="volume-icon" id="grid-sound-volume-icon" aria-hidden="true">
@@ -886,20 +882,20 @@
 
 </div>
 
-<script src="physics-engine.js?v=m14"></script>
-<script src="physics-coords.js?v=m14"></script>
-<script src="share-url.js?v=m14"></script>
-<script src="movie-path.js?v=m14"></script>
-<script src="physics-sound.js?v=m14"></script>
-<script src="physics-hinge-geometry.js?v=m14"></script>
-<script src="physics-df.js?v=m14"></script>
-<script src="physics-gpu.js?v=m14"></script>
-<script src="physics-gpu-df.js?v=m14"></script>
-<script src="physics-grid-codegen.js?v=m14"></script>
-<script src="physics-ui.js?v=m14"></script>
-<script src="fractal-stats.js?v=m14"></script>
-<script src="fractal-stats-panel.js?v=m14"></script>
-<script src="fractal-grid.js?v=m14"></script>
-<script src="transition.js?v=m14"></script>
+<script src="physics-engine.js?v=m15"></script>
+<script src="physics-coords.js?v=m15"></script>
+<script src="share-url.js?v=m15"></script>
+<script src="movie-path.js?v=m15"></script>
+<script src="physics-sound.js?v=m15"></script>
+<script src="physics-hinge-geometry.js?v=m15"></script>
+<script src="physics-df.js?v=m15"></script>
+<script src="physics-gpu.js?v=m15"></script>
+<script src="physics-gpu-df.js?v=m15"></script>
+<script src="physics-grid-codegen.js?v=m15"></script>
+<script src="physics-ui.js?v=m15"></script>
+<script src="fractal-stats.js?v=m15"></script>
+<script src="fractal-stats-panel.js?v=m15"></script>
+<script src="fractal-grid.js?v=m15"></script>
+<script src="transition.js?v=m15"></script>
 </body>
 </html>

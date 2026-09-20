@@ -761,3 +761,9 @@ html.layout-mobile-landscape #grid-dock-tabs > .menu-toggle[aria-expanded="true"
   bottom: 18%;
   width: 2px;
 }
+
+/* The shared settings body in the builder's full-screen panel: clear of the
+   home indicator, which the mount's own padding (now zero) used to see to. */
+html.layout-mobile #editor-settings-mount > .menu-card-body {
+  padding: 16px calc(16px + var(--safe-right)) calc(16px + var(--safe-bottom)) calc(16px + var(--safe-left));
+}

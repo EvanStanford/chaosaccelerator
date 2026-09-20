@@ -47,6 +47,189 @@
     renderStill: function () {},
   };
 
+  // ---- One settings body ----
+  //
+  // Both pages have a Settings panel, and they are the same panel: there is
+  // exactly one set of controls in the document (#shared-settings-body) and
+  // it is MOVED into whichever page is on screen - the builder's panel or the
+  // map's card - by placeSettings, which the app shell calls as it switches
+  // pages (see showOnly in transition.js). Nothing is copied, so nothing can
+  // fall out of step.
+  //
+  // Most of those controls steer the map's renderer, which does not exist
+  // until the first Fractal-ize (see "Started on demand", above). Until then
+  // the controls themselves are the record of what was chosen: the little
+  // below keeps them coherent with each other - the preset slider sets the
+  // others and follows them, the two resolution handles don't cross, the
+  // readouts read - and boot() takes its starting values from them
+  // (readPerf, readPrecision) instead of from constants. Once the map has
+  // started, its own wiring of these same elements takes over and everything
+  // here stands down (`started`).
+  var PERF_PRESETS = {
+    low: { endStride: 2, antialias: false, reuse: true, maxDpr: 2, frameMs: 50, drawMs: 20, playbackMB: 96, gestureFirst: true },
+    high: { endStride: 1, antialias: true, reuse: true, maxDpr: 0, frameMs: 0, drawMs: 5, playbackMB: 256, gestureFirst: false },
+  };
+  // A phone or tablet starts at Low, everything else at High (see
+  // LayoutMode.isConstrained). Page state: every visit starts from the
+  // device's own preset again.
+  var perfDefaultPreset = global.LayoutMode && global.LayoutMode.isConstrained() ? "low" : "high";
+
+  var sharedSettings = (function () {
+    function $(id) { return document.getElementById(id); }
+    var body = $("shared-settings-body");
+    var el = {
+      preset: $("perf-preset-slider"), precision: $("precision-select"),
+      resMin: $("resolution-min-slider"), resMax: $("resolution-max-slider"),
+      resFill: $("resolution-range-fill"), resReadout: $("resolution-bounds-readout"),
+      antialias: $("antialias-checkbox"), reuse: $("reuse-picture-checkbox"), gesture: $("perf-gesture-checkbox"),
+      dpr: $("perf-dpr-select"), frame: $("perf-frame-select"), draw: $("perf-draw-select"), memory: $("perf-playback-memory-select"),
+      lineCount: $("inspect-line-sample-count-slider"), lineCountReadout: $("inspect-line-sample-count-readout"),
+      gridSize: $("inspect-grid-size-slider"), gridSizeReadout: $("inspect-grid-size-readout"),
+      volume: $("grid-sound-volume-slider"), volumeIcon: $("grid-sound-volume-icon"),
+      resetTips: $("grid-btn-reset-tips"), resetAll: $("grid-btn-reset-all"),
+    };
+    var labels = Array.prototype.slice.call(document.querySelectorAll(".perf-preset-labels [data-preset]"));
+    var STOPS = { low: 0, custom: 1, high: 2 };
+    var NAMES = { low: "Low Performance Devices", custom: "Custom", high: "High Performance Devices" };
+    // Where the right-hand resolution handle sits for each preset's endStride
+    // (boot's RESOLUTION_SLIDER_FOR_STRIDE says why 90).
+    var RES_MAX = { 1: "100", 2: "90" };
+
+    function readPerf() {
+      return {
+        antialias: el.antialias.checked, maxDpr: Number(el.dpr.value), frameMs: Number(el.frame.value),
+        drawMs: Number(el.draw.value), playbackMB: Number(el.memory.value), gestureFirst: el.gesture.checked,
+      };
+    }
+    function readPrecision(ladder) {
+      var v = el.precision.value;
+      return v === "auto" || ladder.indexOf(v) !== -1 ? v : "f32";
+    }
+    function writePreset(name) {
+      var p = PERF_PRESETS[name];
+      el.resMin.value = "0";
+      el.resMax.value = RES_MAX[p.endStride];
+      el.antialias.checked = p.antialias;
+      el.reuse.checked = p.reuse;
+      el.gesture.checked = p.gestureFirst;
+      el.dpr.value = String(p.maxDpr);
+      el.frame.value = String(p.frameMs);
+      if (!el.draw.disabled) el.draw.value = String(p.drawMs);
+      el.memory.value = String(p.playbackMB);
+    }
+    function presetNow() {
+      var names = ["low", "high"];
+      for (var i = 0; i < names.length; i++) {
+        var p = PERF_PRESETS[names[i]];
+        if (el.resMin.value === "0" && el.resMax.value === RES_MAX[p.endStride] && el.antialias.checked === p.antialias &&
+            el.reuse.checked === p.reuse && el.gesture.checked === p.gestureFirst && Number(el.dpr.value) === p.maxDpr &&
+            Number(el.frame.value) === p.frameMs && Number(el.memory.value) === p.playbackMB &&
+            (el.draw.disabled || Number(el.draw.value) === p.drawMs)) return names[i];
+      }
+      return "custom";
+    }
+    function syncPreset() {
+      var preset = presetNow();
+      el.preset.value = String(STOPS[preset]);
+      el.preset.setAttribute("aria-valuetext", NAMES[preset]);
+      labels.forEach(function (l) { l.classList.toggle("is-current", l.getAttribute("data-preset") === preset); });
+    }
+    function syncReadouts() {
+      el.lineCountReadout.textContent = el.lineCount.value;
+      el.gridSizeReadout.textContent = el.gridSize.value + "\u00d7" + el.gridSize.value;
+      el.resFill.style.left = el.resMin.value + "%";
+      el.resFill.style.width = Math.max(0, Number(el.resMax.value) - Number(el.resMin.value)) + "%";
+      // In pixels it depends on the map's canvas, which isn't there yet.
+      el.resReadout.textContent = el.resMax.value === "100" ? "down to 1 sim/px" : el.resMax.value === "90" ? "down to 2px" : "set";
+    }
+
+    // Everything below is the pre-map half, and stands down once it starts.
+    function early(fn) { return function (e) { if (!started) fn(e); }; }
+    el.preset.addEventListener("input", early(function () {
+      var stop = Number(el.preset.value);
+      if (stop === STOPS.low) writePreset("low"); else if (stop === STOPS.high) writePreset("high");
+      syncReadouts();
+    }));
+    el.preset.addEventListener("change", early(syncPreset));
+    el.preset.addEventListener("keydown", early(function (e) {
+      var toward = { ArrowLeft: "low", ArrowDown: "low", Home: "low", ArrowRight: "high", ArrowUp: "high", End: "high" }[e.key];
+      if (!toward) return;
+      e.preventDefault();
+      writePreset(toward); syncReadouts(); syncPreset();
+    }));
+    labels.forEach(function (l) {
+      var name = l.getAttribute("data-preset");
+      if (name !== "custom") l.addEventListener("click", early(function () { writePreset(name); syncReadouts(); syncPreset(); }));
+    });
+    body.addEventListener("input", early(function (e) {
+      if (e.target === el.preset) return;
+      if (Number(el.resMin.value) > Number(el.resMax.value)) {
+        if (e.target === el.resMin) el.resMin.value = el.resMax.value; else el.resMax.value = el.resMin.value;
+      }
+      syncReadouts(); syncPreset();
+    }));
+    body.addEventListener("change", early(function (e) { if (e.target !== el.preset) syncPreset(); }));
+
+    // These three need nothing of the map's, so they are wired here once
+    // and for all rather than inside boot.
+    function volumeIcon(volume) {
+      var muted = volume <= 0;
+      el.volumeIcon.querySelector(".vol-arc-1").style.display = muted ? "none" : "inline";
+      el.volumeIcon.querySelector(".vol-arc-2").style.display = (muted || volume <= 0.5) ? "none" : "inline";
+      el.volumeIcon.querySelector(".vol-mute-x").style.display = muted ? "inline" : "none";
+      el.volume.value = String(Math.round(volume * 100));
+    }
+    el.volume.addEventListener("input", function () { PhysicsSound.setVolume(Number(el.volume.value) / 100); });
+    PhysicsSound.onVolumeChange(volumeIcon);
+    volumeIcon(PhysicsSound.getVolume());
+    el.resetTips.addEventListener("click", function () {
+      try { localStorage.removeItem("physicsAppDismissedTips"); } catch (err) { /* never reachable: nothing to clear */ }
+      var original = el.resetTips.textContent;
+      el.resetTips.textContent = "Tips reset";
+      setTimeout(function () { el.resetTips.textContent = original; }, 1500);
+    });
+    // "Deletes all cookies for the page" per the user's ask - this app keeps
+    // its state in localStorage, not cookies, so that (plus any cookies this
+    // origin might still pick up some day) is what actually needs clearing.
+    // A hard reload after wiping is the simplest way to put every module back
+    // in its true first-run state, rather than hand-resetting each one here.
+    el.resetAll.addEventListener("click", function () {
+      if (!global.confirm("Reset all saved data for this page? This clears your saved scene, dismissed tips, and intro animation state, then reloads.")) return;
+      try { localStorage.clear(); } catch (err) { /* nothing to clear */ }
+      try {
+        document.cookie.split(";").forEach(function (pair) {
+          var name = pair.split("=")[0].trim();
+          if (name) document.cookie = name + "=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/";
+        });
+      } catch (err) { /* same */ }
+      // The scene is in the address bar too (see share-url.js), and a plain
+      // reload would load it straight back in - so the address is cleared
+      // first, which is what makes this the reset it says it is.
+      try { global.history.replaceState(null, "", global.location.pathname + global.location.search); } catch (err) { /* reloads where it is */ }
+      global.location.reload();
+    });
+
+    // The page as it loads: the device's preset, float32 (explicitly -
+    // browsers restore form controls across a reload), and the builder's
+    // panel as the body's home, since the builder is the page that is up.
+    // An Apple GPU holds the draw length at its first stop (boot's
+    // drawLengthLocked, which also knows the GPU's name, says why); by
+    // platform alone is as much as can be known before there is a context.
+    if (/Mac|iPhone|iPad|iPod/.test((global.navigator && (global.navigator.platform || global.navigator.userAgent)) || "")) el.draw.disabled = true;
+    el.precision.value = "f32";
+    writePreset(perfDefaultPreset);
+    syncReadouts();
+    syncPreset();
+
+    function place(view) {
+      var home = view === "grid" ? $("grid-settings-panel") : $("editor-settings-mount");
+      if (home && body.parentNode !== home) home.appendChild(body);
+    }
+    place("editor");
+    return { readPerf: readPerf, readPrecision: readPrecision, place: place };
+  })();
+  global.FractalGrid.placeSettings = sharedSettings.place;
+
   function boot(bootScene) {
 
   var DEFAULT_CENTER = { x: 0, y: 0 };
@@ -137,8 +320,6 @@
   var tipPopoverText = document.getElementById("tip-popover-text");
   var tipPopoverOk = document.getElementById("tip-popover-ok");
   var tipPopoverDismiss = document.getElementById("tip-popover-dismiss");
-  var btnResetTips = document.getElementById("grid-btn-reset-tips");
-  var btnResetAll = document.getElementById("grid-btn-reset-all");
   var statsPanelBodyEl = document.getElementById("grid-stats-panel-body");
   var stepsSlider = document.getElementById("steps-slider");
   var stepsReadout = document.getElementById("steps-readout");
@@ -226,26 +407,17 @@
   //                 map under the finger, which looks better than moving an
   //                 old picture does; on where it is not, because there the
   //                 redraw is what makes the finger feel ignored.
-  var PERF_PRESETS = {
-    low: { endStride: 2, antialias: false, reuse: true, maxDpr: 2, frameMs: 50, drawMs: 20, playbackMB: 96, gestureFirst: true },
-    high: { endStride: 1, antialias: true, reuse: true, maxDpr: 0, frameMs: 0, drawMs: 5, playbackMB: 256, gestureFirst: false },
-  };
-  // A phone or tablet starts at Low, everything else at High (see
-  // LayoutMode.isConstrained). Page state, like the precision it now sits
-  // beside: every visit starts from the device's own preset again.
-  var perfDefaultPreset = global.LayoutMode && global.LayoutMode.isConstrained() ? "low" : "high";
+  // (PERF_PRESETS itself, and which one a device starts at, are declared
+  // outside boot - see "One settings body" - because the Settings controls
+  // exist, and can be worked, before the map has ever been started.)
+  //
   // The settings that are nothing BUT a number live here; reuse and the
   // resolution handles keep the variables and controls they always had
-  // (reuseEnabled, the two sliders), which the rest of the file already reads. applyPerfValues and perfValuesNow are the two places
-  // that know the whole list.
-  var perf = {
-    antialias: PERF_PRESETS[perfDefaultPreset].antialias,
-    maxDpr: PERF_PRESETS[perfDefaultPreset].maxDpr,
-    frameMs: PERF_PRESETS[perfDefaultPreset].frameMs,
-    drawMs: PERF_PRESETS[perfDefaultPreset].drawMs,
-    playbackMB: PERF_PRESETS[perfDefaultPreset].playbackMB,
-    gestureFirst: PERF_PRESETS[perfDefaultPreset].gestureFirst,
-  };
+  // (reuseEnabled, the two sliders), which the rest of the file already
+  // reads. They start as whatever the CONTROLS say: the controls were put at
+  // the device's preset when the page loaded, and the builder page shows
+  // them too, so by now they may have been changed.
+  var perf = sharedSettings.readPerf();
 
   // What the performance readout reports (see "The performance readout",
   // near the end of boot). Kept whether or not the readout is showing - each
@@ -684,50 +856,6 @@
   // sits in, even though it isn't part of #grid-menu-stack. Nothing to
   // start or stop on open/close, same as displayMenu.
   var renderProgressMenu = makeMenu("menu-render-progress", "grid-btn-render-progress", "left");
-  btnResetTips.addEventListener("click", function () {
-    try {
-      localStorage.removeItem(TIP_DISMISSED_KEY);
-    } catch (err) {
-      // Nothing to clean up if storage was never reachable to begin with.
-    }
-    var original = btnResetTips.textContent;
-    btnResetTips.textContent = "Tips reset";
-    setTimeout(function () { btnResetTips.textContent = original; }, 1500);
-  });
-  // "Deletes all cookies for the page" per the user's ask - this app keeps
-  // its state in localStorage, not cookies, so that (plus any cookies this
-  // origin might still pick up some day) is what actually needs clearing.
-  // A hard reload after wiping is the simplest way to put every module back
-  // in its true first-run state, rather than hand-resetting each one here.
-  if (btnResetAll) {
-    btnResetAll.addEventListener("click", function () {
-      if (!global.confirm("Reset all saved data for this page? This clears your saved scene, dismissed tips, and intro animation state, then reloads.")) return;
-      try {
-        localStorage.clear();
-      } catch (err) {
-        // Nothing to clean up if storage was never reachable to begin with.
-      }
-      try {
-        document.cookie.split(";").forEach(function (pair) {
-          var name = pair.split("=")[0].trim();
-          if (!name) return;
-          document.cookie = name + "=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/";
-        });
-      } catch (err) {
-        // Same - nothing to clean up if cookies aren't reachable.
-      }
-      // The scene is in the address bar too (see share-url.js), and a plain
-      // reload would load it straight back in - so the address is cleared
-      // first, which is what makes this the reset it says it is.
-      try {
-        global.history.replaceState(null, "", global.location.pathname + global.location.search);
-      } catch (err) {
-        // Reloads where it is, then - still with everything stored wiped.
-      }
-      global.location.reload();
-    });
-  }
-
   // The Output property's own exact range, used to color the whole [0, max]
   // span across the full rainbow rather than guessing at one: a non-anchored
   // body's x/y is already wrapped into exactly [0, frameWidth)/[0,
@@ -2576,7 +2704,10 @@
   // session that doesn't need it shouldn't quietly inherit it from an
   // earlier one; the deep-zoom tip below is what offers Auto at the point
   // where it actually starts to buy something.
-  var precisionMode = "f32";
+  // ...unless it was changed on the builder page first - it is the same
+  // dropdown there (see "One settings body"), which was put at Force float32
+  // when the page loaded.
+  var precisionMode = sharedSettings.readPrecision(PRECISION_LADDER);
 
   function float32UlpAt(magnitude) {
     return Math.pow(2, Math.ceil(Math.log2(Math.max(magnitude, 1e-30))) - 24);
@@ -2675,7 +2806,9 @@
     markDirty();
   }
   if (reusePictureCheckbox) {
-    reusePictureCheckbox.checked = reuseEnabled;
+    // (The checkbox is NOT put at reuseEnabled here: it may have been set
+    // from the builder page before the map existed, and the end of boot
+    // takes reuseEnabled from IT - see "Performance settings: the controls".)
     reusePictureCheckbox.addEventListener("change", function () {
       setReuseEnabled(reusePictureCheckbox.checked);
       syncPerfPresetUI();
@@ -3513,8 +3646,8 @@
   // kink at. Read fresh by lockGridOfPoints on every drag (see
   // computeGridLayout); their own change listeners live down by the rest of
   // the Settings wiring, next to stepsSlider/colorZoomCheckbox.
-  var inspectGridSize = 3;
-  var inspectGridTwoPart = true;
+  var inspectGridSize = Number(document.getElementById("inspect-grid-size-slider").value) || 3;
+  var inspectGridTwoPart = document.getElementById("inspect-grid-two-part-checkbox").checked;
   var inspectedGroups = []; // each: { type, points: [...], startWorld, endWorld (line/grid), cols, rows, segments, meshLineEls, outputBodyIndex (grid only) }
   function totalInspectedPointCount() {
     var total = 0;
@@ -3576,7 +3709,7 @@
   // own ceiling, so changing this never has to grow or shrink that pool -
   // only how many of it are shown.
   var INSPECT_LINE_SAMPLE_MAX = 60;
-  var inspectLineSampleCount = 30;
+  var inspectLineSampleCount = Number(document.getElementById("inspect-line-sample-count-slider").value) || 30;
   // Stops short of 360 (== 0 on the hue wheel) so the last point never ends
   // up looking near-identical to the first - the interval is [0, 324], not
   // [0, 360), regardless of inspectLineSampleCount.
@@ -11201,10 +11334,13 @@
   // is shown for what it is rather than offered as a choice.
   if (drawLengthLocked) perfDrawSelect.disabled = true;
 
-  // The device's own preset, for the things `perf` could not hold at the top
-  // of boot: the resolution handle, and picture reuse (whose machinery did
-  // not exist yet). Before the first frame, so nothing is drawn twice.
-  applyPerfValues(PERF_PRESETS[perfDefaultPreset]);
+  // The one setting `perf` could not take from its control at the top of
+  // boot: picture reuse, whose machinery did not exist yet. (The resolution
+  // handles are read where they stand.) Before the first frame, so nothing
+  // is drawn twice.
+  setReuseEnabled(reusePictureCheckbox.checked);
+  updateResolutionBoundsUI();
+  syncPerfPresetUI();
 
   // ---- The performance readout ----
   //
@@ -11220,7 +11356,7 @@
   // Not a performance setting, and not part of either preset. Everything it
   // shows is gathered whether or not it is showing (see perfStats).
   var PERF_READOUT_INTERVAL_MS = 250;
-  var perfReadoutShown = false;
+  var perfReadoutShown = perfReadoutCheckbox.checked; // off, unless switched on from the builder page
   var perfReadoutAt = 0;
   var perfFrame = { lastAt: 0, ms: 0 };
 

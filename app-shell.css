@@ -358,3 +358,28 @@
 .vol-mute-x {
   display: none;
 }
+
+/* ---- The shared settings body, while it is in the builder's panel ----
+   There is one settings body (#shared-settings-body) and it lives in
+   whichever page is showing (see "One settings body" in fractal-grid.js).
+   Here it is a guest: it brings its own padding and its own scrolling, so
+   the mount it sits in gives up both, and the panel is a little wider than
+   the three controls it used to hold needed. */
+#editor-settings-mount {
+  padding: 0;
+  min-height: 0;
+  display: flex;
+}
+#editor-settings-mount > .menu-card-body {
+  flex: 1;
+  min-width: 0;
+}
+.settings-panel {
+  width: 320px;
+}
+/* What fractal-grid.css gives these inside #grid-view, which the body has
+   just left. */
+#editor-settings-mount .field span { display: block; }
+#editor-settings-mount .field select { width: 100%; }
+#editor-settings-mount button.secondary { padding: 6px 10px; }
+#editor-settings-mount .readout { white-space: nowrap; }
