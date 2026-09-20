@@ -3,10 +3,10 @@
 // root, or https://chaosaccelerator.com/license for a hosted copy.
 
 // Renders every pixel's offset scene run forward a fixed number of steps,
-// colored by the Output property's value at the END of that run. Scene is
-// read once from localStorage (written by #editor-view's "Send to Fractal
-// Grid" button) and compiled into one fixed WebGL2 shader for this page's
-// lifetime - there's no live editing here, unlike the physics simulator.
+// colored by the Output property's value at the END of that run. The scene
+// is handed over by the app shell (from #editor-view's "Send to Fractal
+// Grid" button, or from a shared link - see transition.js) and compiled into
+// WebGL2 shaders - there's no live editing here, unlike the physics simulator.
 // Each render (on load, pan, zoom, or resize) redoes the full offset +
 // simulation for every pixel from scratch, for however many steps the
 // timeline currently shows - which is the Settings panel's Simulation
@@ -39,14 +39,15 @@
       boot(scene);
     },
     isStarted: function () { return started; },
-    // Replaced by boot() with the real implementation once it has run; this
-    // stub only exists so a caller can't hit `undefined` before then.
+    // Replaced by boot() with the real implementations once it has run;
+    // these stubs only exist so a caller can't hit `undefined` before then.
     setScene: function () {},
+    shareState: function () { return null; },
+    applyShareView: function () {},
   };
 
   function boot(bootScene) {
 
-  var GRID_HANDOFF_KEY = "physicsFractalScene";
   var DEFAULT_CENTER = { x: 0, y: 0 };
   // How much world the view spans across its reference height on load -
   // and, because the readout reports DEFAULT_SCALE / view.scale, also
@@ -552,6 +553,14 @@
       } catch (err) {
         // Same - nothing to clean up if cookies aren't reachable.
       }
+      // The scene is in the address bar too (see share-url.js), and a plain
+      // reload would load it straight back in - so the address is cleared
+      // first, which is what makes this the reset it says it is.
+      try {
+        global.history.replaceState(null, "", global.location.pathname + global.location.search);
+      } catch (err) {
+        // Reloads where it is, then - still with everything stored wiped.
+      }
       global.location.reload();
     });
   }
@@ -592,10 +601,10 @@
     if (message) emptyState.querySelector("p").textContent = message;
   }
 
-  // bootScene is what the app shell handed over; the localStorage read is
-  // the fallback for a cold load (opening index.html with a scene already
-  // saved from a previous session).
-  var raw = bootScene ? JSON.stringify(bootScene) : localStorage.getItem(GRID_HANDOFF_KEY);
+  // bootScene is what the app shell handed over - through JSON, so this
+  // page holds a copy of its own rather than an object the editor might
+  // still be holding too.
+  var raw = bootScene ? JSON.stringify(bootScene) : null;
   var scene = null;
   if (raw) {
     try {
@@ -610,8 +619,8 @@
       var outputProblem = PhysicsEngine.outputMappingError(scene.output, scene.bodies.length);
       if (outputProblem) throw new Error(outputProblem);
     } catch (err) {
-      setStatus(false, "Invalid saved scene");
-      showEmptyState("The saved scene couldn't be read (" + (err.message || err) + "). Go back and send it again.");
+      setStatus(false, "Invalid scene");
+      showEmptyState("The scene couldn't be read (" + (err.message || err) + "). Go back and send it again.");
       scene = null;
     }
   }
@@ -2138,6 +2147,16 @@
     var py = ddAddNumber(view.center.y, view.center.yLo, uvy * view.scale);
     return { x: px[0], y: py[0], xLo: px[1], yLo: py[1] };
   }
+  // The inverse: how many view-heights from the centre a world point is,
+  // as [u, v]. The high and low differences are taken separately and only
+  // then added - subtracting two nearly equal 1e3-sized numbers first would
+  // leave nothing of a difference that lives entirely in the low halves.
+  function worldPointToUV(point) {
+    return [
+      ((point.x - view.center.x) + ((point.xLo || 0) - view.center.xLo)) / view.scale,
+      ((point.y - view.center.y) + ((point.yLo || 0) - view.center.yLo)) / view.scale,
+    ];
+  }
   // The CENTRE of the rendered cell a view-relative point falls in, by the
   // shader's own mapping (pixel index, plus a half, over the canvas height)
   // - so a snapped point is exactly a point some pixel simulates. `cell`
@@ -3364,8 +3383,12 @@
   // up looking near-identical to the first - the interval is [0, 324], not
   // [0, 360), regardless of inspectLineSampleCount.
   var INSPECT_LINE_MAX_HUE = 324;
-  function inspectLinePointColor(i) {
-    var hue = inspectLineSampleCount > 1 ? i * (INSPECT_LINE_MAX_HUE / (inspectLineSampleCount - 1)) : 0;
+  // `count` is the line's own sample count - the panel's current setting
+  // for one being dragged out now, but a line restored from a link brings
+  // the count it was made with (see restoreInspectGroups).
+  function inspectLinePointColor(i, count) {
+    count = count || inspectLineSampleCount;
+    var hue = count > 1 ? i * (INSPECT_LINE_MAX_HUE / (count - 1)) : 0;
     return { fill: "hsl(" + hue + ", 100%, 50%)", stroke: "#000000" };
   }
   function evenlySpacedPoints(start, end, count) {
@@ -3509,15 +3532,11 @@
   // a bottom-left origin (Y increases upward); CSS/DOM coordinates have a
   // top-left origin, hence the height-flip on fy below.
   // worldXLo/worldYLo are the low halves of a double-double point (see
-  // worldPointAtUV) - optional, zero for a plain float64 one. The high and
-  // low differences are taken separately and only then added: subtracting
-  // two nearly equal 1e3-sized numbers first would leave nothing of a
-  // difference that lives entirely in the low halves.
+  // worldPointAtUV) - optional, zero for a plain float64 one.
   function worldToCanvasAreaPixel(worldX, worldY, worldXLo, worldYLo) {
-    var uvx = ((worldX - view.center.x) + ((worldXLo || 0) - view.center.xLo)) / view.scale;
-    var uvy = ((worldY - view.center.y) + ((worldYLo || 0) - view.center.yLo)) / view.scale;
-    var fx = uvx * canvas.height + 0.5 * canvas.width;
-    var fy = 0.5 * canvas.height - uvy * canvas.height;
+    var uv = worldPointToUV({ x: worldX, y: worldY, xLo: worldXLo, yLo: worldYLo });
+    var fx = uv[0] * canvas.height + 0.5 * canvas.width;
+    var fy = 0.5 * canvas.height - uv[1] * canvas.height;
     var canvasRect = canvas.getBoundingClientRect();
     var areaRect = canvasArea.getBoundingClientRect();
     var cssX = fx * (canvasRect.width / canvas.width) + (canvasRect.left - areaRect.left);
@@ -3863,20 +3882,21 @@
   // MAX_INSPECT_POINTS, only the first `available` (start-ward) get added
   // rather than re-spacing/re-coloring a smaller set - simpler, and the cap
   // is high enough (300) that this only bites right at the edge.
-  function lockLineOfPoints(startWorld, endWorld) {
+  function lockLineOfPoints(startWorld, endWorld, sampleCount) {
+    sampleCount = sampleCount || inspectLineSampleCount;
     var available = MAX_INSPECT_POINTS - totalInspectedPointCount();
     if (available <= 0) return; // stays armed - Clear All (or removing a point) might free up room to retry
-    var worldPoints = evenlySpacedPoints(startWorld, endWorld, inspectLineSampleCount);
+    var worldPoints = evenlySpacedPoints(startWorld, endWorld, sampleCount);
     var count = Math.min(worldPoints.length, available);
     var points = [];
     for (var i = 0; i < count; i++) {
       var entry = computeTrajectoryEntry(worldPoints[i]);
       if (!entry) continue; // don't let one bad point abort the rest of the line
-      entry.color = inspectLinePointColor(i);
+      entry.color = inspectLinePointColor(i, sampleCount);
       points.push(entry);
     }
     disarmInspect();
-    if (points.length > 0) inspectedGroups.push({ type: "line", points: points, startWorld: startWorld, endWorld: endWorld });
+    if (points.length > 0) inspectedGroups.push({ type: "line", points: points, startWorld: startWorld, endWorld: endWorld, sampleCount: sampleCount });
     updateInspectUI();
   }
 
@@ -3904,8 +3924,11 @@
   // except as the already-resolved layout - so changing them only ever
   // changes what the NEXT drag makes; an existing grid's own points/mesh
   // were already committed and don't move or recolor retroactively.
-  function lockGridOfPoints(startWorld, endWorld) {
-    var layout = computeGridLayout(inspectGridSize, inspectGridTwoPart);
+  function lockGridOfPoints(startWorld, endWorld, gridSize, twoPart) {
+    // The panel's current Grid Settings, unless the caller is rebuilding a
+    // grid that was made under others (see restoreInspectGroups).
+    if (gridSize === undefined) { gridSize = inspectGridSize; twoPart = inspectGridTwoPart; }
+    var layout = computeGridLayout(gridSize, twoPart);
     var worldPoints = evenlySpacedGrid(startWorld, endWorld, layout.size, layout.size)
       .filter(function (p) { return isAxisIn(layout.axes, p.row) || isAxisIn(layout.axes, p.col); });
     if (MAX_INSPECT_POINTS - totalInspectedPointCount() < worldPoints.length) return;
@@ -3934,6 +3957,11 @@
       outputBodyIndex: inspectGridOutputBodyIndex(),
       startWorld: startWorld,
       endWorld: endWorld,
+      // What it was made with, which the resolved layout above can't be
+      // read back into (5 dots a side is 5 plain lines or 3 two-part ones) -
+      // kept for the one thing that has to say it again, a shared link.
+      gridSize: gridSize,
+      twoPart: !!twoPart,
     });
     disarmInspect();
     updateInspectUI();
@@ -3955,6 +3983,7 @@
       if (group.type === "grid") group.meshLineEls.forEach(function (el) { el.remove(); });
     });
     inspectedGroups = [];
+    pendingInspect = null;
     nextColorIndex = 0;
     disarmInspect();
     updateInspectUI();
@@ -9890,6 +9919,7 @@
     prewarmPasses();
     pollBounceMax();
     refreshBuildStatus();
+    pumpPendingInspect();
     if (dirty) { resetProgressive(); dirty = false; }
     releasePlaybackIfViewMoved();
     if (!stepPlayback(now)) stepProgressive(now);
@@ -10015,6 +10045,116 @@
     // rather than dimmed, unlike an ordinary view change (see markStale).
     if (statsPanel) { statsHasResult = false; statsResultIsCurrent = false; statsPanel.clearResult(); }
     resizeCanvas();
+    markDirty();
+  };
+
+  // ---- The address bar ----
+  //
+  // A link to the map carries this page's view of it as well as the scene
+  // (see share-url.js for the format; transition.js decides when the address
+  // is read and written, and asks here for what it should say).
+
+  // Inspections a link asked for that haven't been rebuilt yet, as
+  // { type, a, b, count | size + twoPart } with a/b WORLD points - turned
+  // into those the moment the link's view was applied, so panning away
+  // before they are built doesn't move them.
+  var pendingInspect = null;
+  var pendingInspectFrames = 0;
+
+  function describeInspectGroup(group) {
+    if (group.type === "point") return { type: "point", a: group.points[0].worldPoint };
+    if (group.type === "line") return { type: "line", a: group.startWorld, b: group.endWorld, count: group.sampleCount };
+    return { type: "grid", a: group.startWorld, b: group.endWorld, size: group.gridSize, twoPart: group.twoPart };
+  }
+
+  // One group a frame, and none until the map has had a couple of frames to
+  // put something on screen: every inspected point is a shader compiled and
+  // run on the spot, so a link with a full grid in it is seconds of work -
+  // which should come after the picture, the way it did for whoever made it.
+  //
+  // And not until the precision this view calls for is built. A trajectory
+  // is computed at whatever the grid is drawing with (see
+  // computeTrajectoryEntry), which on arrival is the float32 stand-in: a
+  // deep-zoom link's points would all be traced at a precision that cannot
+  // tell them apart. A rung that failed or is too slow here isn't coming, so
+  // that is not waited for.
+  function pumpPendingInspect() {
+    if (!pendingInspect) return;
+    if (++pendingInspectFrames < 3) return;
+    var wanted = pickPrecision();
+    if (effectivePrecision() !== wanted && precisionPending(wanted)) return;
+    var next = pendingInspect.shift();
+    if (!pendingInspect.length) pendingInspect = null;
+    if (next.type === "point") lockPointAt(next.a);
+    else if (next.type === "line") lockLineOfPoints(next.a, next.b, next.count);
+    else lockGridOfPoints(next.a, next.b, next.size, next.twoPart);
+  }
+
+  // Everything a link to this map has to say: the scene as this page runs
+  // it (its own Simulation Duration, which is the one on screen), and the
+  // view. Inspection points go out as view-heights from the centre - see
+  // share-url.js on why - including any still waiting to be rebuilt, so a
+  // link copied in those first seconds doesn't quietly lose them.
+  global.FractalGrid.shareState = function () {
+    var shared = {};
+    Object.keys(scene).forEach(function (k) { shared[k] = scene[k]; });
+    shared.simulationSteps = simulationSteps;
+    var inspect = inspectedGroups.map(describeInspectGroup).concat(pendingInspect || []).map(function (group) {
+      var out = { type: group.type, a: worldPointToUV(group.a), count: group.count, size: group.size, twoPart: group.twoPart };
+      if (group.b) out.b = worldPointToUV(group.b);
+      return out;
+    });
+    return {
+      scene: shared,
+      view: {
+        center: { x: view.center.x, xLo: view.center.xLo, y: view.center.y, yLo: view.center.yLo },
+        scale: view.scale,
+        zoom: DEFAULT_SCALE / view.scale,
+        display: colorZoomEnabled ? "colorzoom" : displayMode.value,
+        precision: precisionMode,
+        speed: playbackSpeed,
+        volume: PhysicsSound.getVolume(),
+        inspect: inspect,
+      },
+    };
+  };
+
+  // The way back in, for a view ShareUrl.decode produced - so every field is
+  // present and already a number or a known word. Called right after the
+  // link's scene has been started (or set), which is what put everything
+  // here back to its defaults first.
+  global.FractalGrid.applyShareView = function (shared) {
+    view.center.x = shared.center.x; view.center.xLo = shared.center.xLo;
+    view.center.y = shared.center.y; view.center.yLo = shared.center.yLo;
+    view.scale = clamp(DEFAULT_SCALE / shared.zoom, MIN_SCALE, MAX_SCALE);
+
+    colorZoomEnabled = shared.display === "colorzoom";
+    colorZoomCheckbox.checked = colorZoomEnabled;
+    setDisplayMode(colorZoomEnabled ? DISPLAY_MODES[0] : displayModeByValue(shared.display));
+
+    // A rung this browser can't build (see PRECISION_LADDER) becomes Auto:
+    // the best it does have, where the view needs it.
+    precisionMode = (shared.precision === "auto" || PRECISION_LADDER.indexOf(shared.precision) !== -1) ? shared.precision : "auto";
+    if (precisionSelect) precisionSelect.value = precisionMode;
+
+    setPlaybackSpeed(shared.speed);
+    PhysicsSound.setVolume(shared.volume);
+
+    clearInspected();
+    var groups = shared.inspect.map(function (group) {
+      return {
+        type: group.type,
+        a: worldPointAtUV(group.a[0], group.a[1]),
+        b: group.b ? worldPointAtUV(group.b[0], group.b[1]) : null,
+        count: clamp(group.count || 0, 2, INSPECT_LINE_SAMPLE_MAX),
+        size: clamp(group.size || 0, Number(inspectGridSizeSlider.min) || 1, Number(inspectGridSizeSlider.max) || 8),
+        twoPart: !!group.twoPart,
+      };
+    });
+    pendingInspect = groups.length ? groups : null;
+    pendingInspectFrames = 0;
+
+    updateZoomReadout();
     markDirty();
   };
 

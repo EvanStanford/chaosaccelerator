@@ -33,6 +33,14 @@
   display: none;
 }
 
+/* A visit that arrived by a link to the map: the editor stays laid out (it
+   measures its own canvas as it starts up) but is not shown, so it doesn't
+   flash up ahead of the map the link is for. Set by index.html's inline
+   script and cleared by transition.js once it has routed the visit. */
+.opening-map #editor-view {
+  visibility: hidden;
+}
+
 /* Set by transition.js while a transition is running. Nothing in either
    view should react to a click aimed at the animation on top of it. */
 .view.is-transitioning {

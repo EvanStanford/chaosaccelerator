@@ -5197,6 +5197,193 @@
     }
   );
 
+  // ---- Shared links (share-url.js) ----
+  //
+  // The address bar carries the whole scene, and on the map the view of it.
+  // Everything a link gets wrong is wrong silently - it opens, on something
+  // else - so what is pinned here is that a link says exactly what it was
+  // written from, and that the ways one arrives damaged are survived.
+
+  // Key order is the writer's business, not part of what a scene says.
+  function canonicalJSON(value) {
+    return JSON.stringify(value, function (key, v) {
+      if (!v || typeof v !== "object" || Array.isArray(v)) return v;
+      var sorted = {};
+      Object.keys(v).sort().forEach(function (k) { sorted[k] = v[k]; });
+      return sorted;
+    });
+  }
+
+  // One of everything a scene can hold: all four shapes, an anchored body, a
+  // starting velocity on some and none on others, a hinge to the world and
+  // one between bodies, a pair Output, and every setting off its default.
+  function everythingScene() {
+    return {
+      mutualGravity: true, collisionsEnabled: false, simulationSteps: 2300,
+      bodies: [
+        { type: "circle", x: -132.1042, y: 321.4385, angle: 0.0021, isAnchored: false, radius: 30, vx: 0, vy: 0, w: 0 },
+        { type: "line", x: -334, y: -173.5, angle: -0.7679, isAnchored: true, length: 479, vx: 0, vy: 0, w: 0 },
+        { type: "funnel", x: 260.5, y: -160.5, angle: 0.6632, isAnchored: true, size: 120, vx: 0, vy: 0, w: 0 },
+        { type: "splitter", x: 0, y: 0, angle: 3.1416, isAnchored: false, size: 95.5, vx: 12.5, vy: 0, w: 0 },
+        { type: "circle", x: 410.0625, y: 288.125, angle: 0, isAnchored: false, radius: 18.5, vx: 0, vy: 44, w: -0.12 },
+      ],
+      hinges: [
+        { bodyA: null, bodyB: 0, localAnchorA: { x: -188, y: 51.5 }, localAnchorB: { x: -70, y: 1 } },
+        { bodyA: 0, bodyB: 4, localAnchorA: { x: 70, y: 0 }, localAnchorB: { x: -71.25, y: 1 } },
+      ],
+      xInput: { body: 0, property: "vx" }, yInput: { body: 4, property: "radius" },
+      output: { body: 0, bodyB: 4, property: "distance" },
+      frameWidth: 1192, frameHeight: 809, edgeMode: "infinite", maxSimulationBodies: 7,
+    };
+  }
+
+  addTest(
+    "A shared link says exactly the scene it was written from, and says it again unchanged",
+    "share-url.js - the scene is the address bar now, so anything the link drops or rounds differently from serializeScene is a scene that silently changes when it is shared. Re-encoding what was decoded must give the same text, or the address would rewrite itself under a page that had only just loaded it",
+    function () {
+      var scene = everythingScene();
+      var fragment = ShareUrl.encode({ page: "bldr", scene: scene });
+      var back = ShareUrl.decode("#" + fragment);
+      var same = canonicalJSON(back.scene) === canonicalJSON(scene);
+      var stable = ShareUrl.encode({ page: "bldr", scene: back.scene }) === fragment;
+      // Scene Lifespan belongs to no body, which is the one mapping with a
+      // shape of its own.
+      var lifespan = everythingScene();
+      lifespan.output = { body: null, bodyB: null, property: "lifespan" };
+      var lifespanBack = ShareUrl.decode(ShareUrl.encode({ page: "bldr", scene: lifespan })).scene.output;
+      return {
+        pass: same && stable && back.page === "bldr" && back.view === null && canonicalJSON(lifespanBack) === canonicalJSON(lifespan.output),
+        detail: (same ? "round trip exact" : "ROUND TRIP DIFFERS: " + canonicalJSON(back.scene)) + "; re-encodes identically=" + stable +
+          "; " + (fragment.length + 1) + " characters: #" + fragment,
+      };
+    }
+  );
+
+  addTest(
+    "An absent field means the FORMAT's default, not whatever the editor starts a scene with today",
+    "share-url.js's wire defaults - a field at its default is left out of a link, so what 'left out' means is fixed by every link already shared. decode() fills each one in explicitly so that nothing downstream can substitute a newer default of its own",
+    function () {
+      var decoded = ShareUrl.decode("#bldr/body:ci:0:0:0:30,frmw:900,frmh:600").scene;
+      var want = { mutualGravity: false, collisionsEnabled: true, simulationSteps: 1000, edgeMode: "sticky", maxSimulationBodies: 20 };
+      var wrong = Object.keys(want).filter(function (k) { return decoded[k] !== want[k]; });
+      var body = decoded.bodies[0];
+      var restOk = body.vx === 0 && body.vy === 0 && body.w === 0 && body.isAnchored === false &&
+        decoded.hinges.length === 0 && decoded.xInput === null && decoded.yInput === null && decoded.output === null;
+      return {
+        pass: wrong.length === 0 && restOk,
+        detail: wrong.length ? "wrong defaults for: " + wrong.join(", ") : "all five settings, the three velocities, anchoring and the mappings come back explicit",
+      };
+    }
+  );
+
+  addTest(
+    "A link's view center keeps every digit the zoom can use, from 1x to 1e26x",
+    "share-url.js's formatDD/parseDD - the map holds its center as a double-double because one float64 cannot tell neighbouring pixels apart past ~1e13x, and a link that carried only the float64 would reopen a deep view somewhere else entirely. The center travels as one decimal with zoom-dependent places; this checks it lands within a millionth of a pixel at every depth, by exact integer arithmetic rather than by the floating point under test",
+    function () {
+      if (typeof BigInt !== "function") return { pass: true, detail: "no BigInt in this browser - centers keep float64 precision, which is as deep as it can render" };
+      function exact(x) { // x === m * 2^e
+        var view = new DataView(new ArrayBuffer(8));
+        view.setFloat64(0, x);
+        var top = view.getUint32(0), low = view.getUint32(4), ex = (top >>> 20) & 0x7FF;
+        var m = BigInt(top & 0xFFFFF) * BigInt(4294967296) + BigInt(low);
+        if (ex) m += BigInt(4503599627370496);
+        return { m: (top >>> 31) ? -m : m, e: ex ? ex - 1075 : -1074 };
+      }
+      function ddDistance(a, b) { // |(a0 + a1) - (b0 + b1)|, exactly, then as a float
+        var parts = [exact(a[0]), exact(a[1]), exact(-b[0]), exact(-b[1])];
+        var e = Math.min.apply(null, parts.map(function (p) { return p.e; }));
+        var sum = BigInt(0);
+        parts.forEach(function (p) { sum += p.m << BigInt(p.e - e); });
+        if (sum < BigInt(0)) sum = -sum;
+        return Number(sum) * Math.pow(2, e);
+      }
+      var seed = 20260920;
+      function random() { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; }
+      var worst = 0, worstAt = "", unstable = 0;
+      for (var i = 0; i < 1500; i++) {
+        var hi = (random() - 0.5) * Math.pow(10, Math.floor(random() * 5));
+        var sum = PhysicsDF.twoSum64(hi, (random() - 0.5) * Math.abs(hi) * Math.pow(2, -52));
+        var scale = (200 / 0.17) / Math.pow(10, random() * 26);
+        var places = ShareUrl.centerDecimals(scale);
+        var text = ShareUrl.formatDD(sum[0], sum[1], places);
+        var back = ShareUrl.parseDD(text, "center");
+        var viewHeights = ddDistance(sum, back) / scale;
+        if (viewHeights > worst) { worst = viewHeights; worstAt = text + " at " + ((200 / 0.17) / scale).toExponential(1) + "x"; }
+        if (ShareUrl.formatDD(back[0], back[1], places) !== text) unstable++;
+      }
+      // A millionth of a pixel on a thousand-pixel-high view.
+      return {
+        pass: worst <= 1e-9 && unstable === 0 && ShareUrl.centerDecimals((200 / 0.17) / 1e26) === 32,
+        detail: "worst of 1500 random centers and zooms: " + worst.toExponential(2) + " view heights (" + worstAt +
+          "); " + unstable + " re-encoded differently; " + ShareUrl.centerDecimals((200 / 0.17) / 1e26) + " decimal places at the deepest zoom",
+      };
+    }
+  );
+
+  addTest(
+    "A map link carries its view, and nothing at all for a view left at its defaults",
+    "share-url.js's view fields - zoom, display mode (Color Zoom counted as one), precision, speed, volume and the three kinds of inspection, each written only when it differs from its default so an untouched map's link is just its scene",
+    function () {
+      var scene = everythingScene();
+      var center = PhysicsDF.twoSum64(213.41826094537, 3.1e-15);
+      var view = {
+        center: { x: center[0], xLo: center[1], y: -88.0421795513, yLo: 0 }, scale: 1e-5, zoom: (200 / 0.17) / 1e-5,
+        display: "colorzoom", precision: "tf", speed: 4, volume: 0.35,
+        inspect: [
+          { type: "point", a: [0.0115, -0.0075] },
+          { type: "line", a: [-0.2875, -0.1018], b: [0.2973, 0.143], count: 45 },
+          { type: "grid", a: [-0.3691, -0.1426], b: [0.3925, 0.2246], size: 5, twoPart: true },
+          { type: "grid", a: [0.1, 0.1], b: [0.2, 0.2], size: 2, twoPart: false },
+        ],
+      };
+      var fragment = ShareUrl.encode({ page: "map", scene: scene, view: view });
+      var back = ShareUrl.decode(fragment).view;
+      var viewOk = back.display === "colorzoom" && back.precision === "tf" && back.speed === 4 && back.volume === 0.35 &&
+        Math.abs(back.zoom / view.zoom - 1) < 1e-9 && back.center.y === view.center.y &&
+        Math.abs((back.center.x - view.center.x) + (back.center.xLo - view.center.xLo)) < 1e-14 &&
+        canonicalJSON(back.inspect) === canonicalJSON(view.inspect);
+      var untouched = ShareUrl.encode({
+        page: "map", scene: scene,
+        view: { center: { x: 0, xLo: 0, y: 0, yLo: 0 }, scale: 200 / 0.17, zoom: 1, display: "standard", precision: "f32", speed: 1, volume: 1, inspect: [] },
+      });
+      var bare = untouched === "map/" + ShareUrl.encodeScene(scene).join(",");
+      return {
+        pass: viewOk && bare,
+        detail: "view round trip " + (viewOk ? "exact" : "DIFFERS: " + canonicalJSON(back)) + "; untouched view adds nothing=" + bare +
+          "; view fields: " + fragment.slice(fragment.indexOf("frmh:") + 9),
+      };
+    }
+  );
+
+  addTest(
+    "Links survive how they actually arrive, and the ones that can't be read say why",
+    "share-url.js's decode - chat apps drop a trailing '!' or ',' from the link they detect (so no link may end in one: the frame size follows the bodies for exactly this reason), some software percent-encodes the punctuation, and a link lifted out of a sentence brings the sentence's own full stop. A scene that can't be read must throw something showable rather than load as something else; a view field that can't be read is dropped, since the right map framed slightly wrong beats no map",
+    function () {
+      var scene = everythingScene();
+      scene.bodies = [scene.bodies[1]]; // one anchored line: its "!" is the last character of the body list
+      scene.hinges = []; scene.xInput = scene.yInput = scene.output = null;
+      var fragment = ShareUrl.encode({ page: "bldr", scene: scene });
+      var want = canonicalJSON(ShareUrl.decode(fragment));
+      var endsClean = /[A-Za-z0-9]$/.test(fragment);
+      var survives = [encodeURIComponent(fragment).replace(/%2F/g, "/"), fragment + ".", fragment + ").", fragment + ",futr:1:2:3"]
+        .filter(function (mangled) { return canonicalJSON(ShareUrl.decode("#" + mangled)) !== want; });
+      var ignored = ["", "#", "#editor", "#grid-view", "#maps/body:ci:0:0:0:30"].filter(function (other) { return ShareUrl.decode(other) !== null; });
+      var unreadable = ["#bldr/body:zz:1:2:3:4", "#bldr/body:ci:1:2:3", "#bldr/body:ci:1:2:3:0", "#bldr/body:ci:1:0x10:3:4",
+        "#bldr/body:ci:1:2:3:4,hnge:0:1:2", "#bldr/body:ci:1:2:3:4,outp:0.nope", "#bldr/body:ci:1:2:3:4,edge:nope", "#bldr/body:ci:1:2:3:4,coll:yes"];
+      var accepted = unreadable.filter(function (bad) {
+        try { ShareUrl.decode(bad); return true; } catch (err) { return !err.message; }
+      });
+      var lenient = ShareUrl.decode("#map/body:ci:1:2:3:4,zoom:banana,ctrx:12.5,disp:nope,insp:q:1:2").view;
+      var lenientOk = lenient.zoom === 1 && lenient.center.x === 12.5 && lenient.display === "standard" && lenient.inspect.length === 0;
+      return {
+        pass: endsClean && survives.length === 0 && ignored.length === 0 && accepted.length === 0 && lenientOk,
+        detail: "ends in a letter or digit=" + endsClean + "; mangled forms misread: " + (survives.length || "none") +
+          "; other sites' anchors mistaken for links: " + (ignored.length || "none") + "; unreadable scenes accepted: " +
+          (accepted.length ? accepted.join(" ") : "none of " + unreadable.length) + "; bad view fields dropped without losing the rest=" + lenientOk,
+      };
+    }
+  );
+
   // ---- Runner / report rendering ----
 
   function renderRow(tbody, name, bugRef, outcome) {

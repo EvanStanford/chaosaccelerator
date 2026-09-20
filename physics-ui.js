@@ -17,14 +17,15 @@
   // the same thing on both pages' identical sliders.
   var SIMULATION_STEPS_PER_NOTCH = 100;
   var SIMULATION_STEPS_MAX_NOTCHES = 50;
-  // Handoff to #grid-view - localStorage (not a URL param) since the
-  // scene can be arbitrarily large and this is same-origin, same-browser
-  // navigation, not a link meant to be shared.
-  var GRID_HANDOFF_KEY = "physicsFractalScene";
   // Auto-saved on every edit so navigating away and back (e.g. via the
   // above, or the topbar's back-link) restores exactly what was there
   // before, instead of resetting to the hardcoded seed scene.
   var EDITOR_STORAGE_KEY = "physicsEditorScene";
+  // Set while the scene on screen is one that arrived by link and has not
+  // been edited since - see saveEditorAutosave. `true` until the first save
+  // after loading, which is when the scene has settled (restored, framed,
+  // normalized) into what "unedited" actually looks like.
+  var sharedSceneIdentity = null;
   // Shared with fractal-grid.js's tip-popover system (not page-specific) -
   // this page has no tips of its own yet, but the Settings panel's Reset
   // Tool Tips button clears the same key either way, so it's ready to work
@@ -1170,8 +1171,20 @@
   // Pulled out of render() so it can also be called from the pagehide/
   // visibilitychange safety net below - see there for why that net exists.
   function saveEditorAutosave() {
+    var authored = PhysicsCoords.toAuthoredJSON(serializeScene());
+    // A scene that arrived by link is not saved until it is EDITED: opening
+    // a friend's link must not overwrite the scene this browser was in the
+    // middle of, which is otherwise exactly what the first render() after
+    // loading it would do. Compared without the frame, which follows the
+    // window rather than anything the user did.
+    if (sharedSceneIdentity !== null) {
+      var identity = sceneIdentity(authored);
+      if (sharedSceneIdentity === true) sharedSceneIdentity = identity;
+      if (identity === sharedSceneIdentity) return;
+      sharedSceneIdentity = null;
+    }
     try {
-      localStorage.setItem(EDITOR_STORAGE_KEY, JSON.stringify(PhysicsCoords.toAuthoredJSON(serializeScene())));
+      localStorage.setItem(EDITOR_STORAGE_KEY, JSON.stringify(authored));
     } catch (err) {
       // Full/unavailable storage shouldn't break editing - auto-save is a
       // convenience, not a requirement.
@@ -1408,7 +1421,7 @@
   updateVolumeUI(PhysicsSound.getVolume());
 
   var flashTimer = null;
-  function flashStatus(message) {
+  function flashStatus(message, holdMs) {
     if (flashTimer) clearTimeout(flashTimer);
     var prevText = statusEl.textContent, prevClass = statusEl.className;
     statusEl.textContent = message;
@@ -1417,7 +1430,7 @@
       statusEl.textContent = prevText;
       statusEl.className = prevClass;
       flashTimer = null;
-    }, 1600);
+    }, holdMs || 1600);
   }
 
   function canAddBody() {
@@ -2089,24 +2102,10 @@
     }
     sendToGridErrorEl.textContent = "";
     sendToGridErrorEl.className = "readout";
-    var handoff = serializeScene();
-    try {
-      localStorage.setItem(GRID_HANDOFF_KEY, JSON.stringify(handoff));
-    } catch (err) {
-      showSendToGridError("Couldn't save scene: " + (err.message || err));
-      return;
-    }
-    // Both views live in one document now, so this is a view switch (and
-    // the transition that plays over it), not a navigation. The handoff is
-    // still written above: it is what a cold load of index.html reads, and
-    // what the grid falls back to if it is started without one.
-    window.AppShell.goToGrid(handoff);
+    // Both views live in one document, so this is a view switch (and the
+    // transition that plays over it), not a navigation.
+    window.AppShell.goToGrid(serializeScene());
   });
-
-  function showSendToGridError(message) {
-    sendToGridErrorEl.textContent = message;
-    sendToGridErrorEl.className = "readout error";
-  }
 
   // ---- Scene JSON: a live, editable description of the starting scene ----
 
@@ -2144,6 +2143,12 @@
   }
 
   function serializeScene() {
+    return serializeSceneOf(scene);
+  }
+  // The same, of any scene-shaped object - which is how a shared link's scene
+  // reaches the grid without first becoming the editor's (see
+  // gridSceneFromShared). The parameter deliberately shadows the live scene.
+  function serializeSceneOf(scene) {
     return {
       mutualGravity: !!scene.mutualGravity,
       collisionsEnabled: PhysicsEngine.collisionsEnabled(scene),
@@ -2397,6 +2402,39 @@
     if (!raw) return false;
     try {
       applySceneData(parseSceneData(PhysicsCoords.toEngineJSON(JSON.parse(raw), liveFrame())));
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  // ---- Scenes that arrive by link ----
+  //
+  // The address bar carries the whole scene (see share-url.js for the format
+  // and transition.js for when it is read and written). A link's scene is the
+  // same authored JSON Export writes, so it comes in through the same door a
+  // pasted one does - validated by parseSceneData, and placed from the center
+  // of whatever frame this window has.
+
+  function sceneIdentity(authored) {
+    var copy = {};
+    Object.keys(authored).forEach(function (k) {
+      if (k !== "frameWidth" && k !== "frameHeight") copy[k] = authored[k];
+    });
+    return JSON.stringify(copy);
+  }
+
+  // On load, ahead of the auto-saved scene: a link says what to show, and
+  // this browser's own last scene is still there for the next plain visit
+  // (see sharedSceneIdentity). False - leaving the caller to fall back - when
+  // there is no scene in the address bar or it can't be used; transition.js
+  // reads the same link a moment later and is what tells the user why.
+  function loadSceneFromLink() {
+    try {
+      var shared = ShareUrl.decode(location.hash);
+      if (!shared || !shared.scene) return false;
+      applySceneData(parseSceneData(PhysicsCoords.toEngineJSON(shared.scene, liveFrame())));
+      sharedSceneIdentity = true;
       return true;
     } catch (err) {
       return false;
@@ -3069,7 +3107,7 @@
     scene.frameWidth = canvasArea.clientWidth;
     scene.frameHeight = canvasArea.clientHeight;
   }
-  if (!loadPersistedScene()) seedDefaultScene();
+  if (!loadSceneFromLink() && !loadPersistedScene()) seedDefaultScene();
   // Redundant when loadPersistedScene ran applySceneData above, but harmless
   // and cheap - and it's what keeps a fresh (seeded) scene's slider in sync
   // with scene.simulationSteps without relying on the HTML's own default
@@ -3109,6 +3147,63 @@
     // draw. A copy, so the animation stepping it forward can't disturb what
     // the editor is holding.
     currentScene: function () { return PhysicsEngine.cloneScene(scene); },
+    // ---- What the address bar needs from the editor (see transition.js) ----
+    //
+    // The scene as a link describes it: the authored JSON, exactly what
+    // Export shows. Null during a run, when scene.bodies is a frame of the
+    // animation rather than anything that was authored - the address just
+    // keeps saying what it said when Play was pressed.
+    shareScene: function () {
+      return isPlaying ? null : PhysicsCoords.toAuthoredJSON(serializeScene());
+    },
+    // Why a link's scene can't be used, or null if it can. On load the
+    // scene is already in by the time anyone could be told otherwise (see
+    // loadSceneFromLink), so this is how transition.js finds out - and says -
+    // that it was refused instead.
+    sharedSceneProblem: function (authored) {
+      try {
+        parseSceneData(PhysicsCoords.toEngineJSON(authored, liveFrame()));
+        return null;
+      } catch (err) {
+        return err.message;
+      }
+    },
+    // A link opened while the page is already up (pasted over the address,
+    // or reached with Back). Returns why it was refused, or null once the
+    // scene is in.
+    loadSharedScene: function (authored) {
+      var data;
+      try {
+        data = parseSceneData(PhysicsCoords.toEngineJSON(authored, liveFrame()));
+      } catch (err) {
+        return err.message;
+      }
+      resetToInitialScene(); // a run in progress belongs to the scene being replaced
+      applySceneData(data);
+      sharedSceneIdentity = true;
+      finishSceneReplace();
+      return null;
+    },
+    // The scene a map link opens ON: validated like any other, but placed in
+    // the link's OWN frame rather than this window's. The frame is physics -
+    // it is where the edges are, and the range an x/y Output is colored over
+    // - so the map in a link is only the same map if it is computed in the
+    // frame it was shared from. (The editor can't do the same: there the
+    // frame IS the canvas. It shows the scene centered in its own window,
+    // as it would a pasted one.) Throws, with a message fit to show, if the
+    // scene is one the editor itself would refuse to send.
+    gridSceneFromShared: function (authored) {
+      var frame = { frameWidth: Number(authored.frameWidth), frameHeight: Number(authored.frameHeight) };
+      if (!(frame.frameWidth > 0 && frame.frameHeight > 0)) throw new Error("it doesn't say how big the scene's frame is");
+      var data = parseSceneData(PhysicsCoords.toEngineJSON(authored, frame));
+      if (data.bodies.length <= 1 || !data.xInput || !data.yInput || !data.output) {
+        throw new Error("its scene has no X / Y Input and Output mapped yet");
+      }
+      data.frameWidth = frame.frameWidth;
+      data.frameHeight = frame.frameHeight;
+      return serializeSceneOf(data);
+    },
+    reportLinkProblem: function (message) { flashStatus(message, 6000); },
     // ---- The one setting that exists on both pages ----
     //
     // Simulation Duration is scene.simulationSteps, and the fractal grid

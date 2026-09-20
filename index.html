@@ -17,6 +17,15 @@
 <link rel="stylesheet" href="app-shell.css">
 <link rel="stylesheet" href="fractal-stats.css">
 <link rel="stylesheet" href="responsive-layout.css">
+<!-- A link to the map (see share-url.js) should open ON the map. The editor
+     is the view the markup starts with, and everything that would swap them
+     is a script at the end of the body - by which time the editor has been
+     on screen for as long as those scripts took to arrive. This keeps it out
+     of sight (not out of layout: it still has to measure itself) until
+     transition.js has decided which view this visit is for. -->
+<script>
+  if (/^#map\//.test(location.hash)) document.documentElement.classList.add("opening-map");
+</script>
 </head>
 <body class="page-grid">
 <div id="app">
@@ -277,7 +286,7 @@
                the whole reason these are two elements rather than one. -->
           <div id="grid-menu-stack">
 
-            <a id="back-link" class="menu-back" href="#editor">&larr; Back to scene editor</a>
+            <a id="back-link" class="menu-back" href="#bldr/">&larr; Back to scene editor</a>
             <!-- Errors only. "Ready" and "Loading" told nobody anything they
                  couldn't see; an unreadable scene or a compile failure very
                  much does, so this stays and only shows for those. Outside
@@ -594,7 +603,7 @@
           </section>
           <div id="empty-state" hidden>
             <p>No scene has been sent from the Physics Simulator yet.</p>
-            <a id="empty-state-link" href="#editor">Go map X / Y / Output and send one &rarr;</a>
+            <a id="empty-state-link" href="#bldr/">Go map X / Y / Output and send one &rarr;</a>
           </div>
         </main>
 
@@ -663,6 +672,7 @@
 
 <script src="physics-engine.js"></script>
 <script src="physics-coords.js"></script>
+<script src="share-url.js"></script>
 <script src="physics-sound.js"></script>
 <script src="physics-hinge-geometry.js"></script>
 <script src="physics-df.js"></script>

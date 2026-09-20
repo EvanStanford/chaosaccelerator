@@ -2,8 +2,9 @@
 // Attribution License, Version 1.0 (CPAL-1.0) - see LICENSE in the project
 // root, or https://chaosaccelerator.com/license for a hosted copy.
 
-// The app shell: which of index.html's two views is on screen, and the
-// animated explainer that runs between them.
+// The app shell: which of index.html's two views is on screen, the
+// animated explainer that runs between them, and the address bar that says
+// which one (and what is in it) - see "The address bar" at the end.
 //
 // Both views exist in one document (see index.html and app-shell.css) so
 // this can show them AT ONCE, which is the whole point: the transition has
@@ -135,6 +136,9 @@
     }
     current = which;
     nudgeLayout();
+    // Straight away rather than on the next tick of the sync timer: which
+    // page this is happens to be the first thing the address says.
+    syncAddress();
   }
 
   // ---- The tiled editor scene ----
@@ -492,7 +496,14 @@
       // user can no longer see. Same stop the grid's own Pause button does.
       global.FractalGrid.pausePlayback();
     }
-    if (instant) { showOnly(which); return; }
+    if (instant) {
+      // No animation to land the zoom back on the default framing (see
+      // finish), so it is put there directly - without this the grid opened
+      // on whatever scale the setScale above left it at.
+      if (which === "grid") global.FractalGrid.resetView();
+      showOnly(which);
+      return;
+    }
     runTransition({
       forward: which === "grid",
       durationMs: full ? FULL_MS : QUICK_MS,
@@ -517,8 +528,12 @@
       var done = active.renderAt(elapsedMs);
       // Lands exactly as the real loop would, so stepping to the end is a
       // faithful rehearsal of it rather than only of its middle. Read
-      // durationMs first - finishing clears `active`.
-      if (done) { var a = active; active = null; a.finish(); }
+      // durationMs first - finishing clears `active`. The real loop's own
+      // pending frame is cancelled with it: left scheduled, it found `active`
+      // gone, threw on every frame until the run's time was up, and then
+      // finished the transition a SECOND time - switching views again under
+      // whatever had happened since.
+      if (done) { var a = active; active = null; if (a.raf) cancelAnimationFrame(a.raf); a.finish(); }
       return {
         elapsedMs: elapsedMs, durationMs: durationMs, done: done,
         cellPx: lastFrameInfo && Math.round(lastFrameInfo.cellPx * 100) / 100,
@@ -552,6 +567,127 @@
   });
   global.addEventListener("resize", function () {
     if (active) sizeTransitionCanvas();
+  });
+
+  // ---- The address bar ----
+  //
+  // The whole state of the app is in the URL fragment: which page, the
+  // scene, and on the map the view of it (share-url.js is the format). So
+  // sharing anything is sharing the address, and opening an address rebuilds
+  // what it describes.
+  //
+  // WRITTEN on a timer rather than from every place state can change. There
+  // are dozens of those across two large modules, a missed one would be a
+  // link that silently lies, and the whole state serializes in microseconds
+  // - so twice a second this asks both pages what is true and rewrites the
+  // address if that has changed. replaceState, never pushState or
+  // location.hash: a session of editing must not become four hundred Back
+  // presses, and replaceState alone does not fire hashchange - which leaves
+  // that event meaning exactly one thing, below. Twice a second is also well
+  // inside the rate at which browsers start refusing history writes (Safari:
+  // a hundred per thirty seconds).
+  //
+  // READ on load, and again whenever the fragment changes under a page that
+  // is already up: a link pasted over the address, or Back to one. That is
+  // a navigation within the same document, so nothing reloads and this is
+  // the only thing that will act on it.
+  var ADDRESS_SYNC_MS = 500;
+  // What the address last said on this page's own account (written, or
+  // loaded from), so a change can be told from no change.
+  var lastFragment = null;
+
+  function currentFragment() {
+    // Mid-transition neither page's state is settled: the grid's zoom is
+    // being driven by the animation, and `current` still names the page
+    // being left.
+    if (active) return null;
+    if (current === "grid") {
+      var state = global.FractalGrid.shareState();
+      if (!state) return null;
+      return global.ShareUrl.encode({
+        page: global.ShareUrl.PAGE_MAP,
+        // The grid runs the scene in engine space, in the frame it was sent
+        // in; a link describes it from the center of that same frame.
+        scene: global.PhysicsCoords.toAuthoredJSON(state.scene),
+        view: state.view,
+      });
+    }
+    var scene = global.PhysicsUI.shareScene();
+    return scene ? global.ShareUrl.encode({ page: global.ShareUrl.PAGE_BUILDER, scene: scene }) : null;
+  }
+
+  function syncAddress() {
+    var fragment = currentFragment();
+    if (fragment === null || fragment === lastFragment) return;
+    try {
+      global.history.replaceState(null, "", "#" + fragment);
+      lastFragment = fragment;
+    } catch (err) {
+      // Refused (rate limit, or a sandboxed frame): the address is stale
+      // until the next tick gets through, and nothing else is affected.
+    }
+  }
+
+  // Opens whatever the address describes. `onLoad` is the one difference
+  // between the two times this runs: on load the editor has already taken
+  // the scene for itself (it has to, before its first render - see
+  // loadSceneFromLink in physics-ui.js), so here it is only checked.
+  function openAddress(onLoad) {
+    var link;
+    try {
+      link = global.ShareUrl.decode(global.location.hash);
+    } catch (err) {
+      global.PhysicsUI.reportLinkProblem("This link's scene couldn't be read: " + err.message);
+      return;
+    }
+    // Not a link to a scene: the page opens the way it always has.
+    if (!link || !link.scene) return;
+    // The editor takes the scene whichever page the link is for - it is
+    // where the map's own Back leads.
+    var problem = onLoad ? global.PhysicsUI.sharedSceneProblem(link.scene) : global.PhysicsUI.loadSharedScene(link.scene);
+    if (problem) {
+      global.PhysicsUI.reportLinkProblem("This link's scene couldn't be loaded: " + problem);
+      return;
+    }
+    stopActive(true);
+    if (link.page === global.ShareUrl.PAGE_MAP) {
+      var gridScene = null;
+      try {
+        gridScene = global.PhysicsUI.gridSceneFromShared(link.scene);
+      } catch (err) {
+        // The scene itself is fine, so it stays open in the builder.
+        global.PhysicsUI.reportLinkProblem("This link's map couldn't be opened: " + err.message);
+      }
+      if (gridScene) {
+        // Straight there, no explainer: the animation is about a scene
+        // collapsing into one pixel of its map, and someone arriving by
+        // link never saw the scene.
+        global.FractalGrid.start(gridScene);
+        global.FractalGrid.applyShareView(link.view);
+        showOnly("grid");
+        return;
+      }
+    }
+    if (current !== "editor") {
+      global.FractalGrid.pausePlayback();
+      showOnly("editor");
+    }
+  }
+
+  openAddress(true);
+  // Set by index.html's own inline script for a map link, to keep the editor
+  // from flashing up before this script has had its turn.
+  document.documentElement.classList.remove("opening-map");
+  syncAddress();
+  setInterval(syncAddress, ADDRESS_SYNC_MS);
+  global.addEventListener("hashchange", function () {
+    if (global.ShareUrl.cleanFragment(global.location.hash) === lastFragment) return;
+    openAddress(false);
+    // Whatever came of that, the address goes back to describing what is
+    // actually on screen - the link as this page would write it, or, for one
+    // that couldn't be opened, the state it was refused in favor of.
+    lastFragment = null;
+    syncAddress();
   });
 
   // Both Settings panels carry the same reset, since either view can be the
