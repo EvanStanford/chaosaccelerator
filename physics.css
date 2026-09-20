@@ -592,3 +592,77 @@ select:disabled { opacity: 0.5; }
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+
+/* ---- The Output's color key, on the scrubber ----
+   With Scene Lifespan as the Output, the playback scrubber's track IS the
+   key: the color a run gets is the one under the point where it stops (see
+   "The Output's color key" in physics-ui.js, which sets the class and the
+   --output-key gradient). A native range input's track can't be painted
+   from outside, so with the class on the input gives up its native look
+   for one that can: the gradient as the input's own background, a
+   transparent track over it, and a plain white thumb that reads against
+   every hue. Without the class nothing here applies. */
+#playback-progress-slider.output-key {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--output-key);
+  outline-offset: 4px;
+}
+#playback-progress-slider.output-key::-webkit-slider-runnable-track {
+  -webkit-appearance: none;
+  height: 10px;
+  background: transparent;
+}
+#playback-progress-slider.output-key::-moz-range-track {
+  height: 10px;
+  background: transparent;
+}
+#playback-progress-slider.output-key::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #14161c;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+#playback-progress-slider.output-key::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #14161c;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+/* Before Play the scrubber is disabled, which would dim it to half - but
+   the key is most use exactly then, before there is a run to watch. So the
+   track keeps its full color and only the thumb says "not yet". */
+#playback-progress-slider.output-key:disabled {
+  opacity: 1;
+}
+#playback-progress-slider.output-key:disabled::-webkit-slider-thumb {
+  background: #9399ad;
+}
+#playback-progress-slider.output-key:disabled::-moz-range-thumb {
+  background: #9399ad;
+}
+
+/* ...and on the Set Output button, which once an Output is set IS a swatch
+   of its whole range, low to high from left to right. background-IMAGE, so
+   the button's own idle/hover/active background COLORS underneath are left
+   to their rules; what says "armed" over a swatch is a white ring instead
+   of the blue fill it would otherwise hide. */
+button.tool-btn.output-key {
+  background-image: var(--output-key);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
+}
+button.tool-btn.output-key.active {
+  border-color: #fff;
+  box-shadow: 0 0 0 2px #fff;
+}

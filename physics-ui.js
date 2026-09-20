@@ -1213,8 +1213,14 @@
     ctx.setTransform(renderScale, 0, 0, renderScale, 0, 0);
     ctx.clearRect(0, 0, w, h);
     drawGrid(w, h);
+    // Under the scene rather than over it: a key is for reading against, and
+    // a body that reaches the frame's edge should still be seen to.
+    drawOutputKeyBorder(w, h);
+    drawOutputKeyRing();
+    updateOutputKeyControls();
     for (var i = 0; i < scene.bodies.length; i++) drawBody(scene.bodies[i], i === selectedIndex);
     for (var j = 0; j < scene.hinges.length; j++) drawHinge(scene.hinges[j]);
+    drawOutputKeyBodyDot(w, h);
     drawVelocityArrows();
     drawMappingBadges();
     if (!isPlaying && selectedIndex >= 0) {
@@ -2773,9 +2779,34 @@
   // static image, but headache-inducing for something animating in place.
   // Fixed lightness/chroma keeps every hue the same apparent brightness;
   // only the hue itself carries the value, same as the HSL version did.
-  function outputColorForNormalized(t) {
-    var hue = 360 * (1 - t);
+  //
+  // hueRange (default 360) is how much of the wheel the property's range is
+  // spread over - see outputHueRange.
+  function outputColorForNormalized(t, hueRange) {
+    var hue = (hueRange || 360) * (1 - t);
     return "oklch(60% 0.136 " + hue.toFixed(2) + ")";
+  }
+
+  // The map's own rule for the outputs that now have a color KEY on this page
+  // (see "The Output's color key"): a range that does not wrap - Scene
+  // Lifespan always, x/y wherever the edges don't wrap them - stops at 300
+  // degrees, so that its two ends are two colors rather than the same red
+  // (fractal-grid.js: isCircularOutput / HUE_RANGE_MAX). Before there was a
+  // key nobody could see that this page spread them over the full 360 and the
+  // map did not; with a key it would be a legend whose two ends read as the
+  // same value. The other outputs are left exactly as they were.
+  function outputHueRange(prop) {
+    if (prop === "lifespan") return 300;
+    if (prop === "x" || prop === "y") return scene.edgeMode === "wrap" ? 360 : 300;
+    return 360;
+  }
+  // Where in its color range a POSITION (an x or a y, in engine space) lands:
+  // wrapped into the frame, or - with the edges off - squashed into it.
+  // Shared by the playback background and the border that is its key.
+  function positionOutputT(prop, value) {
+    var rangeMax = outputRangeMax(prop);
+    if (scene.edgeMode === "infinite") return PhysicsEngine.frameSigmoid(value / rangeMax);
+    return PhysicsHingeGeometry.wrapIntoRange(value, rangeMax) / rangeMax;
   }
 
   function updateOutputBackground(currentStepCount) {
@@ -2805,17 +2836,275 @@
         ? wrapStopOverride[scene.output.property]
         : outputValueAtFrame(trajectory[currentStepCount - 1], scene.output);
       var prop = scene.output.property;
-      if (scene.edgeMode === "infinite" && (prop === "x" || prop === "y")) {
-        // Nothing wraps this coordinate back into the frame any more, so
-        // there is no range to divide it into - the sigmoid squashes the
-        // whole infinite line into the color range instead. Angle is left
-        // alone: it is genuinely circular whatever the edges do.
-        t = PhysicsEngine.frameSigmoid(value / rangeMax);
+      if (prop === "x" || prop === "y") {
+        // With the edges off nothing wraps this coordinate back into the
+        // frame, so there is no range to divide it into - a sigmoid squashes
+        // the whole infinite line into the color range instead (see
+        // positionOutputT). Angle is left alone: it is genuinely circular
+        // whatever the edges do.
+        t = positionOutputT(prop, value);
       } else {
         t = PhysicsHingeGeometry.wrapIntoRange(value, rangeMax) / rangeMax;
       }
     }
-    canvasArea.style.backgroundColor = outputColorForNormalized(t);
+    canvasArea.style.backgroundColor = outputColorForNormalized(t, outputHueRange(scene.output.property));
+  }
+
+  // ---- The Output's color key ----
+  //
+  // What the map does with a scene is color every pixel by its Output, and
+  // nothing on this page said which color meant what. For the two kinds of
+  // Output whose value IS something already on screen, the screen itself can
+  // say so:
+  //
+  //   a body's X or Y (or a pair's average) - a border around the scene,
+  //       shaded along that axis: the color a run gets is the border's color
+  //       at the height (or the distance across) where the body ends up,
+  //       with a pointer from the body to that spot on the border.
+  //   Scene Lifespan - the playback scrubber's own track, shaded along its
+  //       length: the color is the one under the point where the run stops.
+  //   a body's Rotation - a ring around that body, shaded around its
+  //       circumference: the color is the one the body POINTS at - the end
+  //       of a line, the radius mark on a circle - with a pointer drawn out
+  //       to the ring from that end, since a line's two ends look alike.
+  //
+  // All use exactly the colors Play already paints the background with
+  // (outputColorForNormalized), so during a run the background can be seen
+  // to match the key beside the body. The other Outputs - a bounce count, a
+  // distance apart, a pair's average rotation - are numbers with no place on
+  // the screen to stand for them, and get no key in the scene.
+  //
+  // And whatever the Output is, once there is one the Set Output button is
+  // itself a swatch of its whole range, low to high from left to right (see
+  // updateOutputKeyControls) - the one key every Output can have.
+  var OUTPUT_KEY_BORDER_PX = 10;   // the border's thickness, in screen pixels
+  var OUTPUT_KEY_STOPS = 24;       // gradients interpolate in sRGB; the hue sweep is given to them in slices
+  function outputKeyAxis() {
+    var prop = scene.output && scene.output.property;
+    return prop === "x" || prop === "y" ? prop : null;
+  }
+  // Drawn by render(), in frame space like everything else there - so it
+  // hugs the FRAME, which while playing is letterboxed inside the canvas
+  // area rather than filling it.
+  function drawOutputKeyBorder(w, h) {
+    var axis = outputKeyAxis();
+    if (!axis || !(w > 0 && h > 0)) return;
+    var gradient;
+    try {
+      gradient = axis === "y" ? ctx.createLinearGradient(0, 0, 0, h) : ctx.createLinearGradient(0, 0, w, 0);
+      var hueRange = outputHueRange(axis), length = axis === "y" ? h : w;
+      for (var i = 0; i <= OUTPUT_KEY_STOPS; i++) {
+        var f = i / OUTPUT_KEY_STOPS;
+        // The last stop is a hair inside the frame: AT the far edge a wrapped
+        // coordinate is the near edge again, and the key would end on the
+        // color it started with.
+        gradient.addColorStop(f, outputColorForNormalized(positionOutputT(axis, Math.min(f * length, length - 1e-6)), hueRange));
+      }
+    } catch (err) {
+      return; // a browser whose canvas can't parse oklch(): no key, rather than a wrong one
+    }
+    var b = OUTPUT_KEY_BORDER_PX / (displayScale || 1);
+    ctx.save();
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, w, b);
+    ctx.fillRect(0, h - b, w, b);
+    ctx.fillRect(0, b, b, h - 2 * b);
+    ctx.fillRect(w - b, b, b, h - 2 * b);
+    // Ruler ticks. The two sides that are the scale - the ones the color
+    // changes ALONG - are ticked across their thickness, to match the fine
+    // divisions the ring has round its circumference (there a by-product of
+    // how it is drawn, in slices; here drawn on purpose). The other two sides
+    // are one flat color each, with nothing to measure, so each gets exactly
+    // one: a line down the middle of its thickness, running its whole length.
+    //
+    // That line is also what sets the spacing. It sits half a border's
+    // thickness in from the edge, and the side ticks carry on from it at that
+    // same interval - so going round a corner the ruling simply continues,
+    // the flat side's one line being the first (and, at the far end, the
+    // last) tick of the run. The interval is stretched by whatever fraction
+    // of a pixel makes a whole number of them fit between the two lines.
+    var px = 1 / (displayScale || 1);
+    var length = axis === "y" ? h : w, span = axis === "y" ? w : h;
+    var first = b / 2, last = length - b / 2;
+    var intervals = Math.max(1, Math.round((last - first) / (b / 2)));
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
+    ctx.lineWidth = 1 * px;
+    ctx.beginPath();
+    for (var k = 0; k <= intervals; k++) {
+      var at = first + k * (last - first) / intervals;
+      var whole = k === 0 || k === intervals; // a flat side's own line: the full length of it
+      if (axis === "y") {
+        if (whole) { ctx.moveTo(0, at); ctx.lineTo(span, at); }
+        else { ctx.moveTo(0, at); ctx.lineTo(b, at); ctx.moveTo(span - b, at); ctx.lineTo(span, at); }
+      } else {
+        if (whole) { ctx.moveTo(at, 0); ctx.lineTo(at, span); }
+        else { ctx.moveTo(at, 0); ctx.lineTo(at, b); ctx.moveTo(at, span - b); ctx.lineTo(at, span); }
+      }
+    }
+    ctx.stroke();
+    ctx.restore();
+    drawOutputKeyBorderPointer(axis, w, h, b);
+  }
+  // The ring's pointer, for the border: a dashed line through the Output body
+  // straight across the whole scene (for Y; straight up and down, for X),
+  // from one side of the border to the other, ending in a dot ON each - so
+  // the color being pointed at is the color the scene would get if it stopped
+  // right now, and can be read off whichever side is nearer the eye. Under
+  // the bodies, like the rest of the key, so it appears to pass behind one.
+  function drawOutputKeyBorderPointer(axis, w, h, b) {
+    var output = scene.output, body = scene.bodies[output.body];
+    if (!body) return;
+    // The value is the Output's own (a pair's average, a split ball's whole
+    // lineage) - the same figure Play colors the background by.
+    var value = outputValueAtFrame(scene.bodies, output);
+    var length = axis === "y" ? h : w, span = axis === "y" ? w : h;
+    if (!isFinite(value)) return;
+    if (scene.edgeMode === "wrap") value = PhysicsHingeGeometry.wrapIntoRange(value, length);
+    // Off the frame (the edges are off, and it has left): nothing on the
+    // border is level with it.
+    if (value < 0 || value > length) return;
+    var px = 1 / (displayScale || 1);
+    ctx.save();
+    ctx.globalAlpha = 0.8;
+    ctx.strokeStyle = "#ffffff";
+    ctx.fillStyle = "#ffffff";
+    ctx.lineWidth = 1.5 * px;
+    ctx.setLineDash([4 * px, 4 * px]);
+    ctx.beginPath();
+    // Between the border's two inner edges...
+    if (axis === "y") { ctx.moveTo(b, value); ctx.lineTo(span - b, value); }
+    else { ctx.moveTo(value, b); ctx.lineTo(value, span - b); }
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // ...with a dot in the middle of the border's thickness at each end.
+    [b / 2, span - b / 2].forEach(function (dot) {
+      ctx.beginPath();
+      if (axis === "y") ctx.arc(dot, value, 3 * px, 0, TAU);
+      else ctx.arc(value, dot, 3 * px, 0, TAU);
+      ctx.fill();
+    });
+    ctx.restore();
+  }
+  // The third dot of the border's pointer: on the tracked body's own center
+  // (midway between the two, for a pair), where the dashed line passes
+  // through it. Drawn separately from the rest of the key, AFTER the bodies -
+  // everything else sits under them, and this one would be hidden there.
+  function drawOutputKeyBodyDot(w, h) {
+    var axis = outputKeyAxis();
+    if (!axis) return;
+    var output = scene.output, body = scene.bodies[output.body];
+    if (!body) return;
+    var partner = PhysicsEngine.isPairOutput(output) ? scene.bodies[output.bodyB] : null;
+    var other = axis === "y" ? "x" : "y";
+    var along = outputValueAtFrame(scene.bodies, output);
+    var across = partner ? (body[other] + partner[other]) / 2 : body[other];
+    var length = axis === "y" ? h : w;
+    if (!isFinite(along) || !isFinite(across)) return;
+    if (scene.edgeMode === "wrap") along = PhysicsHingeGeometry.wrapIntoRange(along, length);
+    if (along < 0 || along > length) return; // no line to sit on - see drawOutputKeyBorderPointer
+    var px = 1 / (displayScale || 1);
+    ctx.save();
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    if (axis === "y") ctx.arc(across, along, 3 * px, 0, TAU);
+    else ctx.arc(along, across, 3 * px, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // The ring, for a single body's Rotation. (A pair's average rotation is an
+  // angle neither body is pointing at, so there is nothing to draw it round.)
+  var OUTPUT_KEY_RING_GAP_PX = 22;    // from the body's farthest reach to the ring
+  var OUTPUT_KEY_RING_WIDTH_PX = 10;
+  var OUTPUT_KEY_RING_SEGMENTS = 90;  // arcs of 4 degrees: a conic gradient, without needing createConicGradient
+  function drawOutputKeyRing() {
+    var output = scene.output;
+    if (!output || output.property !== "angle" || PhysicsEngine.isPairOutput(output)) return;
+    var body = scene.bodies[output.body];
+    if (!body) return;
+    var px = 1 / (displayScale || 1); // one screen pixel, in frame units
+    // How far the body reaches from its center, and where along its own
+    // direction the mark that does the pointing ends.
+    var reach;
+    if (body.type === "circle") reach = playbackDisplayRadius(body.radius);
+    else if (isTrapezoidType(body.type)) {
+      reach = 0;
+      funnelPathVertices(body.x, body.y, body.angle, body.size).forEach(function (v) {
+        reach = Math.max(reach, Math.hypot(v.x - body.x, v.y - body.y));
+      });
+    } else reach = body.length / 2;
+    var radius = reach + OUTPUT_KEY_RING_GAP_PX * px;
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.lineWidth = OUTPUT_KEY_RING_WIDTH_PX * px;
+    ctx.lineCap = "butt";
+    var step = TAU / OUTPUT_KEY_RING_SEGMENTS;
+    for (var i = 0; i < OUTPUT_KEY_RING_SEGMENTS; i++) {
+      // The color of the segment's MIDDLE, and a hair of overlap so no seam
+      // shows between neighbours. Canvas angles run the way body.angle does
+      // (see drawBody), so the ring needs no conversion: the point of it at
+      // angle a is the color of a rotation of a.
+      ctx.strokeStyle = outputColorForNormalized((i + 0.5) / OUTPUT_KEY_RING_SEGMENTS, outputHueRange("angle"));
+      ctx.beginPath();
+      ctx.arc(body.x, body.y, radius, i * step - 0.003, (i + 1) * step + 0.003);
+      ctx.stroke();
+    }
+    // The pointer: from the end that points, out to the ring.
+    var dx = Math.cos(body.angle), dy = Math.sin(body.angle);
+    ctx.globalAlpha = 0.8;
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 1.5 * px;
+    ctx.setLineDash([4 * px, 4 * px]);
+    ctx.beginPath();
+    ctx.moveTo(body.x + dx * reach, body.y + dy * reach);
+    ctx.lineTo(body.x + dx * (radius - OUTPUT_KEY_RING_WIDTH_PX * px / 2), body.y + dy * (radius - OUTPUT_KEY_RING_WIDTH_PX * px / 2));
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(body.x + dx * radius, body.y + dy * radius, 3 * px, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // The keys that are CONTROLS rather than drawing: the scrubber's track (for
+  // Scene Lifespan) and the Set Output button (for any Output at all). A
+  // class and a custom property on each rather than inline styles, because a
+  // range input's track can only be reached through pseudo-elements, and the
+  // button still has hover and active looks of its own to keep (see
+  // .output-key in physics.css). Called from render(), so they follow every
+  // change that can matter - the mapping, the edge mode, a loaded scene -
+  // without each of them having to remember it; the state string is what
+  // stops that being a style write per frame.
+  var outputKeyControlsState = null;
+  var btnOutputTool = document.querySelector('.tool-btn[data-tool="output"]');
+  function outputKeyGradient(prop) {
+    var stops = [];
+    for (var i = 0; i <= OUTPUT_KEY_STOPS; i++) {
+      var f = i / OUTPUT_KEY_STOPS;
+      stops.push(outputColorForNormalized(f, outputHueRange(prop)) + " " + (f * 100).toFixed(1) + "%");
+    }
+    return "linear-gradient(to right, " + stops.join(", ") + ")";
+  }
+  function updateOutputKeyControls() {
+    var prop = scene.output ? scene.output.property : "";
+    var state = prop + "|" + (prop === "x" || prop === "y" ? scene.edgeMode : "");
+    if (state === outputKeyControlsState) return;
+    outputKeyControlsState = state;
+    var gradient = prop ? outputKeyGradient(prop) : "";
+    // The button says which state it is in as well as showing it: "Set
+    // Output" is an instruction, and once there is an Output it has been
+    // followed. It is still the same tool either way - pressing it arms
+    // picking a (different) Output exactly as before.
+    if (btnOutputTool) btnOutputTool.textContent = prop ? "Output Set" : "Set Output";
+    [[playbackProgressSlider, prop === "lifespan"], [btnOutputTool, !!prop]].forEach(function (pair) {
+      var el = pair[0], on = pair[1];
+      if (!el) return;
+      el.classList.toggle("output-key", on);
+      if (on) el.style.setProperty("--output-key", gradient);
+      else el.style.removeProperty("--output-key");
+    });
   }
 
   function sceneHasSplitter(s) {
