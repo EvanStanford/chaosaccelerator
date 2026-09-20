@@ -121,6 +121,7 @@
   var colorZoomCheckbox = document.getElementById("color-zoom-checkbox");
   var colorZoomField = document.getElementById("color-zoom-field");
   var displayModePanelBody = document.getElementById("grid-display-mode-list");
+  var btnInspectPoint = document.getElementById("btn-inspect-point");
   var btnInspectLine = document.getElementById("btn-inspect-line");
   var btnInspectGrid = document.getElementById("btn-inspect-grid");
   var btnInspectClearAll = document.getElementById("btn-inspect-clear-all");
@@ -168,6 +169,112 @@
 
   function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
 
+  // Play and pause as small drawings rather than the characters they used
+  // to be. U+23F8 has an emoji form, and a phone with no plain-text glyph
+  // for it draws that: an orange tile in a row of white icons. A path looks
+  // the same everywhere. (Same two in physics-ui.js, for the editor's
+  // transport.) Skipped when the button already shows the right one - the
+  // timeline's is refreshed every frame of playback.
+  var PLAY_ICON_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72a.6.6 0 0 0 .92.5l10.55-6.86a.6.6 0 0 0 0-1L8.92 4.64a.6.6 0 0 0-.92.5z"></path></svg>';
+  var PAUSE_ICON_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg>';
+  function setPlayPauseIcon(button, playing) {
+    var want = playing ? "pause" : "play";
+    if (button.getAttribute("data-icon") === want) return;
+    button.setAttribute("data-icon", want);
+    button.innerHTML = playing ? PAUSE_ICON_SVG : PLAY_ICON_SVG;
+  }
+
+  // ---- Performance settings: the values ----
+  //
+  // Every knob that trades the picture's quality, or the page's smoothness,
+  // against how soon the picture is finished - gathered under Settings >
+  // Performance Settings, where a three-stop slider sets them all at once.
+  // (The controls and the slider are wired near the end of boot, under
+  // "Performance settings: the controls"; this is only the state, up here
+  // because the first things to read it run long before that.)
+  //
+  // Two presets. HIGH is this page as it was tuned on a desktop, every value
+  // what it used to be as a constant. LOW is everything known to help a GPU
+  // that cannot keep up - a phone first of all, but just as much an old
+  // laptop, which is why none of this asks what kind of device it is on: the
+  // device only decides which preset the page STARTS at.
+  //
+  // (Numeric precision is NOT one of them, though it costs more than all of
+  // them put together: it is about how deep a zoom stays sharp rather than
+  // about the device, the deep-zoom tip offers it at the zoom where it starts
+  // to matter, and it sits just above this section in the card.)
+  //
+  //   endStride   - where refinement stops: 1 is a simulation per canvas
+  //                 pixel, 2 is one per 2x2 block - a quarter of the work,
+  //                 and on a phone's pixel pitch still a sharp picture.
+  //   antialias   - three more full-resolution passes after the picture is
+  //                 complete. Four times the work of not doing it.
+  //   reuse       - Reuse Last Picture (see "Picture reuse"): a pan keeps the
+  //                 pixels it already has instead of starting over. On in
+  //                 both, like precision: it is here to sit with the others
+  //                 and to be switched off, not because the presets differ.
+  //   maxDpr      - the most canvas pixels per CSS pixel (0: no cap). A phone
+  //                 reports 3, which is 2.25 times the simulations of 2, and
+  //                 every full-size float target is sized by it too.
+  //   frameMs     - how long a frame of rendering may take (0: one display
+  //                 refresh). See frameBaseMs.
+  //   drawMs      - how long ONE draw may run. See sliceTargetMs.
+  //   playbackMB  - Map Evolution's state budget. See playbackStateMaxBytes.
+  //   gestureFirst - while the map is being dragged or pinched, render
+  //                 NOTHING: only move the picture already on screen. See
+  //                 "Gestures first". Off on a GPU quick enough to redraw the
+  //                 map under the finger, which looks better than moving an
+  //                 old picture does; on where it is not, because there the
+  //                 redraw is what makes the finger feel ignored.
+  var PERF_PRESETS = {
+    low: { endStride: 2, antialias: false, reuse: true, maxDpr: 2, frameMs: 50, drawMs: 20, playbackMB: 96, gestureFirst: true },
+    high: { endStride: 1, antialias: true, reuse: true, maxDpr: 0, frameMs: 0, drawMs: 5, playbackMB: 256, gestureFirst: false },
+  };
+  // A phone or tablet starts at Low, everything else at High (see
+  // LayoutMode.isConstrained). Page state, like the precision it now sits
+  // beside: every visit starts from the device's own preset again.
+  var perfDefaultPreset = global.LayoutMode && global.LayoutMode.isConstrained() ? "low" : "high";
+  // The settings that are nothing BUT a number live here; reuse and the
+  // resolution handles keep the variables and controls they always had
+  // (reuseEnabled, the two sliders), which the rest of the file already reads. applyPerfValues and perfValuesNow are the two places
+  // that know the whole list.
+  var perf = {
+    antialias: PERF_PRESETS[perfDefaultPreset].antialias,
+    maxDpr: PERF_PRESETS[perfDefaultPreset].maxDpr,
+    frameMs: PERF_PRESETS[perfDefaultPreset].frameMs,
+    drawMs: PERF_PRESETS[perfDefaultPreset].drawMs,
+    playbackMB: PERF_PRESETS[perfDefaultPreset].playbackMB,
+    gestureFirst: PERF_PRESETS[perfDefaultPreset].gestureFirst,
+  };
+
+  // What the performance readout reports (see "The performance readout",
+  // near the end of boot). Kept whether or not the readout is showing - each
+  // of these is an assignment or an addition on a path that was already
+  // running - so switching it on shows the run in progress, not a blank.
+  var perfStats = {
+    gpuMs: 0,              // last GPU-timed frame, where there are timer queries
+    workFrameMs: 0,        // smoothed interval between frames that did work
+    workFrameMaxMs: 0,     // ...and the longest, since the run began
+    drawsThisFrame: 0, drawsLastFrame: 0,
+    sliceStepMs: 0,        // what calibrateSliceSteps measured a step at
+    calibrationMs: 0,      // page time spent in calibrations, this scene
+    builds: 0, buildMs: 0, lastBuildMs: 0,
+    run: null,             // the refinement run in progress or last finished
+    presentOnlyAt: -1e9,   // when a frame last only moved the picture (see "Gestures first")
+    busyWaits: 0,          // frames that sat out because the GPU had not finished the last one
+  };
+
+  // How many of the canvas's own pixels there are to a CSS pixel: the
+  // display's ratio, up to the Canvas pixel density setting (perf.maxDpr).
+  // Everything that sizes the backing store, or reasons about how fine "one
+  // pixel" is, asks this rather than window.devicePixelRatio - capped, the
+  // two differ, and the backing store is the one the simulations are counted
+  // in.
+  function gridDpr() {
+    var dpr = window.devicePixelRatio || 1;
+    return perf.maxDpr > 0 ? Math.min(dpr, perf.maxDpr) : dpr;
+  }
+
   // ---- Reusable tip popover ----
   //
   // One shared instance, repointed and reworded per call - not specific to
@@ -205,6 +312,7 @@
   }
 
   var activeTipAnchor = null;
+  var activeTipNoArrowAbove = false;
   // What OK does for the tip currently showing, when "just close it" isn't
   // the whole story - see showTip's own comment.
   var activeTipOnOk = null;
@@ -243,11 +351,21 @@
     var width = tipPopover.offsetWidth;
     var height = tipPopover.offsetHeight;
     var left = clamp(rect.left, 12, window.innerWidth - width - 12);
+    // Below the anchor, unless that would run off the bottom of the window
+    // and there is room above it instead - which is every anchor in the
+    // small-window layout's dock, since the dock IS the bottom of the window.
+    // Clamped to the window only tucks the popover over the very control it
+    // is about, with its arrow pointing away from it. (.tip-above moves the
+    // arrow to the popover's bottom edge - see mobile.css.)
+    var above = rect.bottom + 10 + height > window.innerHeight - 12 && rect.top - 10 - height >= 12;
+    tipPopover.classList.toggle("tip-above", above);
+    // See showTip's opts.noArrowAbove.
+    tipPopover.classList.toggle("tip-no-arrow", above && activeTipNoArrowAbove);
     // Vertically clamped for the same reason the horizontal clamp exists,
     // and newly necessary: an anchor part-way out of the scrolling menu
     // column would otherwise put the whole popover above the top of the
     // window.
-    tipPopover.style.top = clamp(rect.bottom + 10, 12, Math.max(12, window.innerHeight - height - 12)) + "px";
+    tipPopover.style.top = clamp(above ? rect.top - 10 - height : rect.bottom + 10, 12, Math.max(12, window.innerHeight - height - 12)) + "px";
     tipPopover.style.left = left + "px";
     // Aim the arrow at the middle of the anchor rather than leaving it at a
     // fixed spot on the popover: the clamp above can push the body far from
@@ -278,6 +396,12 @@
     activeTipId = id;
     activeTipAnchor = anchorEl;
     activeTipOnOk = (opts && opts.onOk) || null;
+    // opts.noArrowAbove: drop the arrow when the popover has had to go ABOVE
+    // its anchor - which is the dock, where the anchor is a tab at the very
+    // bottom of the screen. For a tip about a control that arrow is the
+    // point; for one that explains the PICTURE it points down, away from the
+    // picture, at a tab the tip is not about.
+    activeTipNoArrowAbove = !!(opts && opts.noArrowAbove);
     // "OK" is right for a tip that suggests doing something; a tip that only
     // explains what the user is already looking at has nothing to agree to,
     // so it can ask for "Dismiss" instead. Assigned every time rather than
@@ -318,6 +442,7 @@
     // card that was shut a moment ago.
     bringTipAnchorIntoView(anchorEl);
     activeTipAnchor = anchorEl;
+    activeTipNoArrowAbove = !!(opts && opts.noArrowAbove);
     activeTipOnOk = (opts && opts.onOk) || null;
     // "OK" is right for a tip that suggests doing something; a tip that only
     // explains what the user is already looking at has nothing to agree to,
@@ -375,6 +500,11 @@
   // Evolution, whose frame its keyframes are taken at - and which puts the
   // map back to its last frame the moment it is closed (see playbackMenu).
   var menuGroups = { left: [], right: [], movie: [] };
+  // Set by the dock (see "The dock", at the end of boot) once it exists:
+  // called after any menu opens or shuts, with that menu, so the small-window
+  // layout can re-fit its sheet around whatever is open now. Null until then,
+  // and a no-op in the desktop layout.
+  var onDockedMenuChange = null;
   function makeMenu(itemId, toggleId, side, onChange) {
     var item = document.getElementById(itemId);
     var toggle = document.getElementById(toggleId);
@@ -388,8 +518,25 @@
       open = next;
       if (open) {
         group.forEach(function (other) {
-          if (other !== api && other.isOpen()) other.set(false);
+          if (other === api || !other.isOpen()) return;
+          // While the dock holds the menus, the rendering-progress gauge is
+          // the one menu still floating over the map, and no longer shares a
+          // corner with anything: opening it must not shut the card in the
+          // dock (which would resize the map to show a one-line label), nor
+          // the other way round.
+          if (other.docked !== api.docked) return;
+          other.set(false);
         });
+        // And in the dock the sides mean nothing: it is a tab bar, and a tab
+        // bar shows one card. Half a phone's screen holds one card, and two
+        // open at once put the second below a fold nobody scrolls to.
+        if (api.docked) {
+          Object.keys(menuGroups).forEach(function (side) {
+            menuGroups[side].forEach(function (other) {
+              if (other !== api && other.docked && other.isOpen()) other.set(false);
+            });
+          });
+        }
       }
       item.classList.toggle("is-open", open);
       card.hidden = !open;
@@ -397,12 +544,17 @@
       // Nothing to drag when every menu is shut - see #panel-resizer.
       menuColumn.classList.toggle("has-open-menu",
         !!document.querySelector("#grid-menu-stack .menu-item.is-open"));
+      if (onDockedMenuChange) onDockedMenuChange(api);
       // A tip anchored to something inside a card that has just appeared or
       // vanished is pointing at a rect that no longer describes anything.
       repositionActiveTip();
       if (onChange) onChange(open);
     }
-    toggle.addEventListener("click", function () { set(true); });
+    // A toggle, not only "open": in the desktop layout the button leaves the
+    // layout the moment its card opens, so it can only ever be clicked shut
+    // and the two are the same thing - but in the dock the button stays put
+    // as a tab, and pressing the tab of an open card is how it is put away.
+    toggle.addEventListener("click", function () { set(!open); });
     // The whole header line collapses the card, not just the caret button -
     // the button (.menu-collapse) is still its own focusable element inside
     // the header, so Tab/Enter/Space keep working, and the click it
@@ -415,6 +567,13 @@
       // tip to point at - the other one has display: none and a rect of
       // zeros, which would park the popover in the corner.
       anchor: function () { return open ? card : toggle; },
+      // The three elements themselves, for the dock: it moves the button and
+      // the card out of `item` and back (see "The dock").
+      item: item,
+      toggle: toggle,
+      card: card,
+      // True while the dock is holding this menu's button and card.
+      docked: false,
     };
     group.push(api);
     return api;
@@ -1751,7 +1910,7 @@
     gl.attachShader(program, vs);
     gl.attachShader(program, shader);
     gl.linkProgram(program);
-    return { status: "linking", program: program, shader: shader, sync: null, error: null };
+    return { status: "linking", program: program, shader: shader, sync: null, error: null, startedAt: performance.now() };
   }
 
   function discardProgramBuild(build) {
@@ -1837,7 +1996,7 @@
       // otherwise stay alive for the life of the context, one per build.
       gl.deleteShader(build.shader);
       build.shader = null;
-      if (wait) { build.status = "ready"; return build.status; }
+      if (wait) { build.status = "ready"; noteBuildDone(build); return build.status; }
       warmUpProgram(build.program, warmFormats);
       build.sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
       gl.flush();
@@ -1849,9 +2008,20 @@
         gl.deleteSync(build.sync);
         build.sync = null;
         build.status = "ready";
+        noteBuildDone(build);
       }
     }
     return build.status;
+  }
+  // For the performance readout: how long programs take to build here, from
+  // the compile being issued to the program being usable.
+  function noteBuildDone(build) {
+    if (!build.startedAt) return;
+    var ms = performance.now() - build.startedAt;
+    build.startedAt = 0;
+    perfStats.builds += 1;
+    perfStats.buildMs += ms;
+    perfStats.lastBuildMs = ms;
   }
 
   // ---- The grid's programs ----
@@ -2218,7 +2388,8 @@
     tileX: 0,
   };
 
-  // ---- Picture reuse (Settings > Reuse Last Picture; off by default) ----
+  // ---- Picture reuse (Settings > Performance Settings > Reuse Last Picture;
+  // on by default) ----
   //
   // Every view change used to throw the picture away and start the ladder
   // again from its coarsest level, which above float32 means seconds to a
@@ -2419,7 +2590,7 @@
   // refinement run, or the coarse and fine levels of one picture would be
   // computed by two different shaders and disagree with each other.
   function referenceHeightPx() {
-    return Math.max(canvasArea.clientHeight * (window.devicePixelRatio || 1), canvas.height, 1);
+    return Math.max(canvasArea.clientHeight * gridDpr(), canvas.height, 1);
   }
   // The distance in world units between two adjacent simulated points.
   function worldPixelSpacing() { return view.scale / referenceHeightPx(); }
@@ -2477,25 +2648,37 @@
     });
   }
 
-  // Picture reuse (see `reuse`). Page state like the precision above, and
-  // off on every arrival for the same reason: it changes what the screen
-  // shows while a render is under way, which should be asked for.
+  // Picture reuse (see `reuse`). Page state like the precision above - and,
+  // since it became part of both performance presets, ON on every arrival
+  // (it used to start off, as something that changes what the screen shows
+  // while a render is under way and so ought to be asked for; in use it
+  // turned out to be what anyone would ask for). It is switched on at the end
+  // of boot rather than here, by the preset the page starts at - see
+  // applyPerfValues - because the machinery it switches on is further down.
+  // Shared by the checkbox and the performance presets (see applyPerfValues).
+  function setReuseEnabled(on) {
+    on = !!on;
+    if (reusePictureCheckbox) reusePictureCheckbox.checked = on;
+    if (on === reuseEnabled) return;
+    reuseEnabled = on;
+    reuse.panCarryX = reuse.panCarryY = 0;
+    if (reuseEnabled) {
+      // The picture on screen is of this view, if a run has got anywhere
+      // with it - so the very next pan or zoom has something to reuse.
+      if (!dirty && progressive.stride > 0) reuseNoteImage();
+      return;
+    }
+    // Off mid-run: a run that was reusing pixels has only drawn part of
+    // each level, so it cannot simply carry on without them.
+    reuse.image = null;
+    reuseDropSource();
+    markDirty();
+  }
   if (reusePictureCheckbox) {
     reusePictureCheckbox.checked = reuseEnabled;
     reusePictureCheckbox.addEventListener("change", function () {
-      reuseEnabled = reusePictureCheckbox.checked;
-      reuse.panCarryX = reuse.panCarryY = 0;
-      if (reuseEnabled) {
-        // The picture on screen is of this view, if a run has got anywhere
-        // with it - so the very next pan or zoom has something to reuse.
-        if (!dirty && progressive.stride > 0) reuseNoteImage();
-        return;
-      }
-      // Off mid-run: a run that was reusing pixels has only drawn part of
-      // each level, so it cannot simply carry on without them.
-      reuse.image = null;
-      reuseDropSource();
-      markDirty();
+      setReuseEnabled(reusePictureCheckbox.checked);
+      syncPerfPresetUI();
     });
   }
 
@@ -2574,7 +2757,7 @@
     var anchor = tipAnchorVisible(zoomReadout) ? zoomReadout : displayMenu.anchor();
     return showTip(VELOCITY_CAP_TIP_ID, anchor,
       "Radial lines are an artifact of the maximum speed cap.",
-      { okLabel: "Dismiss" });
+      { okLabel: "Dismiss", noArrowAbove: true });
   }
 
   // Returns true if this tip is showing (or just appeared), so the caller can
@@ -3346,9 +3529,20 @@
   // single point (see endDrag), and WITH one armed it's not a drag at all -
   // just a reminder (see showInspectToast) to drag instead, since only a
   // real drag can mean something other than panning.
-  var inspectArmMode = null; // null | "line" | "grid"
+  //
+  // "point" is the touch-only third (see #btn-inspect-point in index.html):
+  // a finger's tap locks a point only once it has been armed, because a
+  // finger has no hover to preview with and its taps share the map with
+  // one-finger pans and pinches. Unlike the other two it never takes the
+  // drag away from panning - a tap and a drag are already different
+  // gestures, so an armed Point leaves the map as movable as it was.
+  var inspectArmMode = null; // null | "point" | "line" | "grid"
+  function inspectArmTakesDrag() {
+    return inspectArmMode === "line" || inspectArmMode === "grid";
+  }
   function disarmInspect() {
     inspectArmMode = null;
+    btnInspectPoint.classList.remove("inspect-armed");
     btnInspectLine.classList.remove("inspect-armed");
     btnInspectGrid.classList.remove("inspect-armed");
   }
@@ -3815,6 +4009,7 @@
     updateInspectMarkers();
     updateInspectList();
     var full = totalInspectedPointCount() >= MAX_INSPECT_POINTS;
+    btnInspectPoint.disabled = full;
     btnInspectLine.disabled = full;
     btnInspectGrid.disabled = full;
     btnInspectClearAll.hidden = inspectedGroups.length === 0;
@@ -4004,9 +4199,14 @@
   function armInspect(mode) {
     if (inspectArmMode === mode) { disarmInspect(); return; }
     inspectArmMode = mode;
+    btnInspectPoint.classList.toggle("inspect-armed", mode === "point");
     btnInspectLine.classList.toggle("inspect-armed", mode === "line");
     btnInspectGrid.classList.toggle("inspect-armed", mode === "grid");
   }
+  btnInspectPoint.addEventListener("click", function () {
+    if (totalInspectedPointCount() >= MAX_INSPECT_POINTS) return;
+    armInspect("point");
+  });
   btnInspectLine.addEventListener("click", function () {
     if (totalInspectedPointCount() >= MAX_INSPECT_POINTS) return;
     armInspect("line");
@@ -4166,6 +4366,37 @@
     lastFrameAt = now;
   }
   var lastFrameAt = 0;
+
+  // How long a frame of rendering is meant to take - the period everything
+  // below measures a frame against. One display refresh, unless Settings >
+  // Performance Settings > Work per frame asks for longer (perf.frameMs).
+  //
+  // One refresh is what keeps the page perfectly smooth while it renders, and
+  // on a GPU with time to spare it costs nothing. On one without, it costs
+  // most of the GPU. Every frame carries a fixed charge that has nothing to
+  // do with how much it simulates - the browser compositing the page, this
+  // page's own present pass, the state a sliced draw loads and stores - and
+  // at 120Hz a frame is 8ms, of which a phone can spend the better part on
+  // that charge alone. Worse, the feedback loop below can only tell whether a
+  // frame FIT its period: where even a nearly empty work frame takes two
+  // refreshes to come back (a busy mobile compositor, a browser that halves
+  // its frame rate under GPU load), every frame reads as an overrun, the
+  // budget is cut on every one of them, and it ends up pinned at its floor -
+  // a tile advanced a step or two per frame, a picture that takes minutes.
+  // Against a 50ms frame the same charge is a few percent, and a frame that
+  // took two refreshes simply fit.
+  //
+  // The cost is the page's frame rate while a render is under way, which is
+  // why this is a setting and not a fact. While the user is doing something
+  // the longer frame is halved, the same give-way the GPU-timed path already
+  // makes (see GPU_SHARE_INTERACTING).
+  function frameBaseMs() { return Math.max(displayPeriodMs, perf.frameMs || 0); }
+  function userIsInteracting(now) { return now - lastInteractionAt < INTERACTION_HOLD_MS; }
+  function frameTargetMs(now) {
+    var base = frameBaseMs();
+    return base > displayPeriodMs && userIsInteracting(now) ? Math.max(displayPeriodMs, base / 2) : base;
+  }
+
   // Correcting down is a measurement; probing up is a guess. That asymmetry
   // is forced by vsync, and it is worth being explicit about because it
   // shapes the whole loop.
@@ -4258,8 +4489,9 @@
     }
   }
   function noteGpuTime(b, spent, budgetThen, ms, now) {
-    var share = now - lastInteractionAt < INTERACTION_HOLD_MS ? GPU_SHARE_INTERACTING : GPU_SHARE_IDLE;
-    var targetMs = displayPeriodMs * share;
+    var share = userIsInteracting(now) ? GPU_SHARE_INTERACTING : GPU_SHARE_IDLE;
+    var targetMs = frameBaseMs() * share;
+    perfStats.gpuMs = ms;
     // Only a frame that spent most of its budget says what a budget's worth
     // costs. One cut short - the last band of a level, or a sliced frame
     // that stopped at its slice-time cap with pixels to spare - is mostly
@@ -4272,7 +4504,7 @@
     b.gpuPerMs = b.gpuPerMs > 0 && perMs > b.gpuPerMs ? b.gpuPerMs * (1 - BUDGET_SMOOTHING) + perMs * BUDGET_SMOOTHING : perMs;
     b.budget = clamp(b.gpuPerMs * targetMs, b.min, b.max);
     // What one period holds - the figure other budgets are seeded from.
-    b.throughput = b.gpuPerMs * displayPeriodMs;
+    b.throughput = b.gpuPerMs * frameBaseMs();
   }
 
   // One work budget and the measurements that steer it. There are two: the
@@ -4376,8 +4608,12 @@
       // comfortably, and the budget grows on the strength of a frame that
       // actually overran. Left continuous, the same interval is a straight
       // measurement of how much work fits in one period.
-      var periods = Math.max(1, dt / displayPeriodMs);
+      // "Period" is the frame's target length (see frameBaseMs), which is one
+      // display refresh unless the Work per frame setting says otherwise.
+      var periods = Math.max(1, dt / frameTargetMs(now));
       tookPeriods = periods;
+      perfStats.workFrameMs = perfStats.workFrameMs > 0 ? perfStats.workFrameMs * 0.8 + dt * 0.2 : dt;
+      perfStats.workFrameMaxMs = Math.max(perfStats.workFrameMaxMs, dt);
       // Steered by measured GPU time instead (noteGpuTime): a long interval
       // then is the page's own doing - a compile, a garbage collection -
       // and no reason to touch the budget.
@@ -4458,8 +4694,15 @@
     return Math.max(sliderValueToStride(Number(resolutionMinSlider.value)), endStride());
   }
   function endStride() {
+    // A movie's frames are finished pictures at the movie's own quality (see
+    // renderStill), whatever this page's Resolution Limits - which in the
+    // player's frame are simply the device's default preset - happen to say.
+    if (stillJob) return 1;
     return sliderValueToStride(Number(resolutionMaxSlider.value));
   }
+  // Settings > Performance Settings > Antialiasing - except for a movie's
+  // frame, which says for itself whether it is antialiased.
+  function antialiasWanted() { return stillJob ? stillJob.antialias : perf.antialias; }
 
   // ---- GPU resources ----
   //
@@ -4780,6 +5023,7 @@
     gl.blendFunc(gl.CONSTANT_ALPHA, gl.ONE_MINUS_CONSTANT_ALPHA);
     gl.blendColor(0, 0, 0, 1 / n);
     drawSublattice(1, off.x, off.y);
+    perfStats.drawsThisFrame += 1;
     gl.disable(gl.BLEND);
     gl.disable(gl.SCISSOR_TEST);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -4948,6 +5192,7 @@
     // with the start of a run, not with every level inside it.
     updateInspectMarkers();
     updatePrecisionReadout();
+    beginPerfRun();
   }
 
   // Puts a level-sized image on the canvas, magnified by its own stride.
@@ -5030,9 +5275,20 @@
     // The same view at a different precision is the user asking what the
     // OTHER arithmetic makes of it; the old answer is no preview of that.
     if (a === 1 && bx === 0 && by === 0 && !samePrecision) return;
-    var exact = a === 1 && reuse.stride === 1 && samePrecision &&
-      Math.abs(bx - Math.round(bx)) < 1e-4 && Math.abs(by - Math.round(by)) < 1e-4;
-    if (exact) { bx = Math.round(bx); by = Math.round(by); }
+    // Exact when every sample this run will want is one the source HAS: the
+    // source holds a true sample at every reuse.stride-th pixel (its blocks
+    // are that sample, magnified - see reuseCapture), this run samples pixels
+    // that are multiples of its own last stride, and the pan between them is
+    // a whole number of source samples. At one simulation per pixel that is
+    // "a pan by whole pixels", which is all this used to allow; stopping the
+    // ladder at 2px (the Low preset) it is a pan by whole 2x2 blocks - and
+    // without it that preset, the one that can least afford to, re-simulated
+    // the entire screen after every pan.
+    var sourceStride = reuse.stride;
+    var snappedX = Math.round(bx / sourceStride) * sourceStride, snappedY = Math.round(by / sourceStride) * sourceStride;
+    var exact = a === 1 && sourceStride >= 1 && sourceStride <= endStride() && samePrecision &&
+      Math.abs(bx - snappedX) < 1e-4 && Math.abs(by - snappedY) < 1e-4;
+    if (exact) { bx = snappedX; by = snappedY; }
     // The pixels of this view the source has something for.
     var x0 = clamp(Math.ceil(-bx / a - 0.5), 0, W), x1 = clamp(Math.ceil((W - bx) / a - 0.5), 0, W);
     var y0 = clamp(Math.ceil(-by / a - 0.5), 0, H), y1 = clamp(Math.ceil((H - by) / a - 0.5), 0, H);
@@ -5198,7 +5454,8 @@
   ].join("\n");
   // The screen while the source is still the better picture: the source
   // wherever it has a texel for the pixel, the ladder's latest level where
-  // it has not, and black where neither has anything yet.
+  // it has not, and a dim smear of the source's edge where neither has
+  // anything yet.
   var REUSE_PRESENT_FRAGMENT_SOURCE = [
     "#version 300 es",
     "precision highp float;",
@@ -5216,7 +5473,12 @@
     "  } else if (u_ladderStride > 0) {",
     "    fragColor = vec4(texelFetch(u_ladder, ivec2(gl_FragCoord.xy) / u_ladderStride, 0).rgb, 1.0);",
     "  } else {",
-    "    fragColor = vec4(0.0, 0.0, 0.0, 1.0);",
+    // Neither picture has this pixel yet - the strip a drag has just pulled
+    // into view, before anything has been rendered for it. The source's
+    // nearest edge, well dimmed: plainly a placeholder, but one that belongs
+    // to the picture beside it, where solid black read as the map tearing.
+    "    ivec2 edge = clamp(q, ivec2(0), u_sourceSize - 1);",
+    "    fragColor = vec4(texelFetch(u_source, edge, 0).rgb * 0.3, 1.0);",
     "  }",
     "}",
   ].join("\n");
@@ -5320,6 +5582,7 @@
     gl.enable(gl.SCISSOR_TEST);
     gl.scissor(rect.x, rect.y + at.row, rect.w, rows);
     drawSublattice(progressive.stride, originX, originY);
+    perfStats.drawsThisFrame += 1;
     gl.disable(gl.SCISSOR_TEST);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     progressive.band += rows;
@@ -5416,15 +5679,23 @@
     }
     // See f32SlicedPending: nothing safe to draw yet.
     if (f32SlicedPending()) return;
+    // See "...and never more than a frame behind". Before the timing below,
+    // deliberately: the interval it measures should run from one frame of
+    // work being issued to the GPU being free for the next.
+    if (lastFrameStillRunning(now)) { perfStats.busyWaits += 1; return; }
     gpuTimerPoll(now);
     adaptSliceSteps(noteFrameTiming(ladderBudget, now));
     sliceFrameMs = 0;
+    perfStats.drawsThisFrame = 0;
     var pixelBudget = ladderBudget.budget;
     gpuTimerBegin();
     try {
       stepProgressiveWork(pixelBudget);
     } finally {
       gpuTimerEnd(ladderBudget, ladderBudget.lastSpent);
+      noteFrameIssued(now);
+      perfStats.drawsLastFrame = perfStats.drawsThisFrame;
+      notePerfRunProgress(now);
     }
   }
 
@@ -5508,7 +5779,7 @@
     // work, just the end of the first sample - and only when the ladder
     // actually reached one simulation per pixel, since averaging offset
     // samples of a deliberately coarse render would just blur the blocks.
-    if (progressive.aaSample === 0 && endStride() <= 1 && !(stillJob && !stillJob.antialias) &&
+    if (progressive.aaSample === 0 && endStride() <= 1 && antialiasWanted() &&
         progressive.accumStride === 1 && beginAntialias()) {
       progressive.band = 0;
       presentFrame();
@@ -5538,12 +5809,43 @@
   // would floor to a 1x1 canvas and throw away the real image for nothing,
   // so skip entirely and let the ResizeObserver below call back once it has
   // a size again.
+  //
+  // What the VIEW does about a resize depends on what resized it. view.scale
+  // is the world the canvas spans top to bottom, so left alone it keeps the
+  // same world in a canvas of any height: drag a window taller and the
+  // picture grows with it, centre held. Right for a window - and wrong for
+  // the small-window layout's dock, which opens a sheet over the bottom half
+  // of the screen: the half of the map still showing would shrink to half
+  // size and slide up. For that one case (pinViewCornerOnResize, set by the
+  // dock and spent on the very next resize) the picture stays exactly where
+  // it is instead: same world per pixel, same world point in the top-left
+  // corner, the sheet simply covering or uncovering what is beneath it.
+  var pinViewCornerOnResize = false;
+  function pinViewTopLeft(oldW, oldH, newW, newH) {
+    if (!(oldW > 1 && oldH > 1)) return; // never sized before: nothing on screen to hold still
+    var oldScale = view.scale;
+    var newScale = clamp(oldScale * newH / oldH, MIN_SCALE, MAX_SCALE);
+    // The corner is centre + (-W/2H, +1/2) view-heights; holding it still
+    // while W, H and the scale change gives these two shifts. As exact
+    // products, for zoomAtClientPoint's reason: at a deep zoom a rounded one
+    // is a permanent error in where the centre is.
+    shiftViewCenterByProducts(0.5 * (newW - oldW) / oldH, oldScale, 0.5, oldScale - newScale);
+    view.scale = newScale;
+    updateZoomReadout();
+  }
   function resizeCanvas() {
     if (canvasArea.clientWidth <= 0 || canvasArea.clientHeight <= 0) return;
-    var dpr = window.devicePixelRatio || 1;
+    var dpr = gridDpr();
+    // A capped backing store is stretched to the display by a ratio that is
+    // not a whole number (2 -> 3 is 1.5), and nearest-neighbour at such a
+    // ratio makes every other pixel twice the width of its neighbours. The
+    // stylesheet's pixelated rendering is right for the uncapped canvas it
+    // was written for; this hands the stretched one back to smooth scaling.
+    canvas.classList.toggle("is-upscaled", dpr < (window.devicePixelRatio || 1));
     var w = Math.max(1, Math.round(canvasArea.clientWidth * dpr));
     var h = Math.max(1, Math.round(canvasArea.clientHeight * dpr));
     if (canvas.width !== w || canvas.height !== h) {
+      if (pinViewCornerOnResize) pinViewTopLeft(canvas.width, canvas.height, w, h);
       canvas.width = w;
       canvas.height = h;
       gl.viewport(0, 0, w, h);
@@ -5558,6 +5860,8 @@
         else statsPanel.refreshSampleReadout();
       }
     }
+    // Spent whether or not the size changed: it was about THIS resize.
+    pinViewCornerOnResize = false;
   }
 
   function formatZoom(z) {
@@ -5604,8 +5908,115 @@
     shiftViewCenterByProducts(uv.uvx, oldScale - view.scale, uv.uvy, oldScale - view.scale);
   }
 
+  // ---- Gestures first ----
+  //
+  // There is no such thing as priority on a GPU a page can reach. WebGL has
+  // one queue: draws run in the order they were issued, each to completion,
+  // and nothing - not a newer draw, not the browser's own compositor - gets
+  // in ahead of one that is already there. "Prioritise the pan over the
+  // render" can therefore only mean one thing: while a pan is happening,
+  // don't ISSUE the render. Whatever is in the queue when a finger moves is
+  // what the finger waits behind.
+  //
+  // That wait is what a drag felt like on a phone. Every frame of a drag
+  // restarted the ladder and spent a frame's budget on it - 25ms of
+  // simulation by design, several times that when the budget had been set by
+  // settled rendering - and the browser lets a page run two or three frames
+  // ahead of the screen. The picture followed the finger by the sum.
+  //
+  // So, with Settings > Performance Settings > Prioritize panning and zooming
+  // on, a frame in the middle of a gesture simulates nothing. It draws the
+  // last picture moved and scaled to where the view is NOW
+  // (presentWithSource - one textured quad, a fraction of a millisecond), and
+  // that is the whole frame. The ladder starts again the moment the gesture
+  // stops: the finger lifting, or holding still for GESTURE_SETTLE_MS. What a
+  // drag pulls into view shows the source's dimmed edge until then (see
+  // REUSE_PRESENT_FRAGMENT_SOURCE), and what it leaves alone is never redrawn
+  // at all, settled or not (see reusePlanRun on exact reuse).
+  //
+  // It needs a picture to move, so it needs Reuse Last Picture; without one
+  // (the setting off, nothing finished yet, a derived display mode mid-zoom,
+  // the timeline playing) presentGestureFrame declines and the frame is an
+  // ordinary one.
+  //
+  // A finger that has only just LANDED counts as a gesture too, before it has
+  // moved at all: a touch precedes its first movement by a few frames, and
+  // those are exactly the frames in which the queue can drain, so that the
+  // first movement has nothing to wait behind.
+  var GESTURE_SETTLE_MS = 140;
+  var gesture = { down: false, downAt: -1e9, movedAt: -1e9, wheelAt: -1e9 };
+  function noteGestureDown() { gesture.down = true; gesture.downAt = performance.now(); }
+  function noteGestureUp() { gesture.down = false; }
+  function noteGestureMoved() { gesture.movedAt = performance.now(); }
+  function gestureInProgress(now) {
+    if (!perf.gestureFirst) return false;
+    // A wheel has no "down": it is a gesture for as long as notches keep coming.
+    if (now - gesture.wheelAt < GESTURE_SETTLE_MS) return true;
+    return gesture.down && now - Math.max(gesture.downAt, gesture.movedAt) < GESTURE_SETTLE_MS;
+  }
+  // The whole of a gesture's frame, when it can be: returns false when this
+  // frame should be an ordinary one instead.
+  function presentGestureFrame(now) {
+    if (!reuseEnabled || stillJob || !gestureInProgress(now)) return false;
+    // Either way the ladder is sitting this frame out, and an interval with
+    // no work in it must not be read as a slow frame (see stepProgressive's
+    // own note on why idle frames are forgotten).
+    function sitOut() {
+      ladderBudget.lastWorkAt = 0;
+      ladderBudget.lastSpent = 0;
+      perfStats.presentOnlyAt = now;
+      return true;
+    }
+    // A run is in progress or finished, so the view has not moved since it
+    // began (moving it resets the run): the right picture is already up.
+    if (progressive.stride !== 0 || progressive.complete) return sitOut();
+    if (!ensureTargets()) return false;
+    reusePlanRun();
+    if (!reuse.run) return false;
+    presentWithSource(null);
+    // What beginProgressive would have done for a run that began this frame:
+    // the markers are positioned against the view, which has just moved.
+    updateInspectMarkers();
+    return sitOut();
+  }
+
+  // ---- ...and never more than a frame behind ----
+  //
+  // The other half of the same problem. With Work per frame set long, a frame
+  // of rendering is 50ms of GPU time by design, and a browser that lets the
+  // page get two or three of those ahead has put a sixth of a second between
+  // anything the user does and the screen - before the first frame of a
+  // gesture can even be presented. So in that mode a frame of work is only
+  // issued once the GPU has FINISHED the last one: a fence goes in behind
+  // each frame's draws, and until it signals, animation frames simply pass.
+  // The GPU idles for the fraction of a refresh between finishing and the
+  // next animation frame, which is the price; the intervals noteFrameTiming
+  // measures become true measurements of a frame's GPU time, which is a
+  // bonus. With Work per frame at one display refresh nothing here runs.
+  var frameInFlight = { sync: null, at: 0 };
+  var FRAME_IN_FLIGHT_TIMEOUT_MS = 1500; // a fence that never signals must not end rendering
+  function lastFrameStillRunning(now) {
+    if (!frameInFlight.sync) return false;
+    var done = perf.frameMs <= 0 || now - frameInFlight.at > FRAME_IN_FLIGHT_TIMEOUT_MS || gl.isContextLost() ||
+      gl.getSyncParameter(frameInFlight.sync, gl.SYNC_STATUS) === gl.SIGNALED;
+    if (!done) return true;
+    gl.deleteSync(frameInFlight.sync);
+    frameInFlight.sync = null;
+    return false;
+  }
+  function noteFrameIssued(now) {
+    if (perf.frameMs <= 0 || gl.isContextLost()) return;
+    if (frameInFlight.sync) gl.deleteSync(frameInFlight.sync);
+    frameInFlight.sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    frameInFlight.at = now;
+    // A fence is only ever seen to signal once the commands ahead of it have
+    // actually been sent.
+    gl.flush();
+  }
+
   canvas.addEventListener("wheel", function (e) {
     e.preventDefault();
+    gesture.wheelAt = performance.now();
     zoomAtClientPoint(e.clientX, e.clientY, Math.pow(1.0016, e.deltaY));
     updateZoomReadout();
     markDirty();
@@ -5623,8 +6034,17 @@
       // pixel of the new view on a pixel of the old one, which is what lets
       // the old one's be reused as they are. The fraction set aside is
       // carried into the next move, so a slow drag still adds up.
+      //
+      // "Pixel" meaning one of the picture's own samples: with Resolution
+      // Limits stopping the ladder at one simulation per 2x2 block, it is a
+      // pan by whole BLOCKS that lands samples on samples (see reusePlanRun).
+      // Only while a block is too small to see the snapping, though: with the
+      // right-hand resolution handle dragged down to 64px, a map that moved
+      // in 64-pixel jumps would be a high price for reusing so few samples.
+      var REUSE_SNAP_MAX_STRIDE = 4;
+      var snap = endStride() <= REUSE_SNAP_MAX_STRIDE ? endStride() : 1;
       var wantX = dxPix * scaleFactor + reuse.panCarryX, wantY = dyPix * scaleFactor + reuse.panCarryY;
-      var wholeX = Math.round(wantX), wholeY = Math.round(wantY);
+      var wholeX = Math.round(wantX / snap) * snap, wholeY = Math.round(wantY / snap) * snap;
       reuse.panCarryX = wantX - wholeX;
       reuse.panCarryY = wantY - wholeY;
       var worldPerDevicePixel = view.scale / canvas.height;
@@ -5642,8 +6062,20 @@
   // Inspect drag - a real drag easily exceeds it within the first couple of
   // mousemoves.
   var CLICK_DRAG_THRESHOLD = 4;
+  // A finger is not a mouse: it rolls a few pixels on the glass during a tap
+  // that was never meant to move anything, and here every one of those
+  // pixels is a pan - which throws away the picture and starts the
+  // refinement ladder again. So a touch moves nothing at all until it has
+  // travelled this far from where it landed, and one that never does is a
+  // tap. Measured as distance from the press point, not as the path length
+  // dragDistance adds up: a finger held still still jitters, and a jitter's
+  // path length grows for as long as the finger rests there.
+  var TOUCH_SLOP_PX = 10;
+  var dragIsTouch = false, dragStartClientX = 0, dragStartClientY = 0;
+  // False only for a touch that has not yet left its slop radius.
+  var dragPastSlop = true;
   // The world point an Inspect-armed drag started at - see beginDrag below.
-  // Only meaningful while inspectArmMode && dragging.
+  // Only meaningful while inspectArmTakesDrag() && dragging.
   var inspectDragStartWorld = null;
 
   // Snapped to the same grid-cell resolution the hover preview itself
@@ -5662,12 +6094,14 @@
   // not an event, so both the mouse listeners below and the touch listeners
   // further down can call the same three functions instead of keeping two
   // hand-synced copies of "pan, or preview/commit an Inspect line or grid."
-  function beginDrag(clientX, clientY) {
+  function beginDrag(clientX, clientY, isTouch) {
     dragging = true;
-    lastClientX = clientX;
-    lastClientY = clientY;
+    dragIsTouch = !!isTouch;
+    dragStartClientX = lastClientX = clientX;
+    dragStartClientY = lastClientY = clientY;
     dragDistance = 0;
-    if (inspectArmMode) {
+    dragPastSlop = !dragIsTouch;
+    if (inspectArmTakesDrag()) {
       // Don't pan while armed - see handleDragMove below. Recorded now (not
       // just at the end of the drag) so the line/rectangle preview starts
       // from the actual press point.
@@ -5677,12 +6111,22 @@
     }
   }
   function handleDragMove(clientX, clientY) {
+    if (!dragPastSlop) {
+      if (Math.hypot(clientX - dragStartClientX, clientY - dragStartClientY) < TOUCH_SLOP_PX) return;
+      dragPastSlop = true;
+      // Picked up from HERE, not from the press point: the slop is discarded
+      // rather than delivered all at once as a jump. And whatever else comes
+      // of this gesture, it is no longer a tap.
+      lastClientX = clientX;
+      lastClientY = clientY;
+      dragDistance = CLICK_DRAG_THRESHOLD;
+    }
     var dxPix = clientX - lastClientX;
     var dyPix = clientY - lastClientY;
     dragDistance += Math.abs(dxPix) + Math.abs(dyPix);
     lastClientX = clientX;
     lastClientY = clientY;
-    if (inspectArmMode) {
+    if (inspectArmTakesDrag()) {
       // A click/tap doesn't start a line or grid at all (see endDrag) -
       // only once the drag is unambiguous does it commit to previewing one,
       // so a slightly-shaky press doesn't flash the preview for a moment.
@@ -5694,6 +6138,7 @@
       return;
     }
     panByClientDelta(dxPix, dyPix);
+    noteGestureMoved();
     markDirty();
   }
   function endDrag(clientX, clientY) {
@@ -5707,14 +6152,15 @@
       // working." Releasing the drag should always retire the preview
       // immediately; the real mesh/line then appears whenever it's ready.
       hideInspectPreview();
-      if (dragDistance < CLICK_DRAG_THRESHOLD) {
-        // A plain click/tap with NEITHER armed always locks a single
-        // Inspect point - no button needed for this. With Line or Grid
-        // armed, a plain click isn't enough to mean "make one of those" (a
-        // real drag still has to default to panning, so that meaning needs
-        // an unambiguous drag, not just a click), so it just reminds
-        // instead of silently doing nothing, and leaves the mode armed for
-        // the drag it's actually waiting for.
+      var wasTap = dragIsTouch ? !dragPastSlop : dragDistance < CLICK_DRAG_THRESHOLD;
+      if (wasTap) {
+        // A plain CLICK with nothing armed always locks a single Inspect
+        // point - no button needed for this. With Line or Grid armed, a
+        // plain click isn't enough to mean "make one of those" (a real drag
+        // still has to default to panning, so that meaning needs an
+        // unambiguous drag, not just a click), so it just reminds instead of
+        // silently doing nothing, and leaves the mode armed for the drag
+        // it's actually waiting for.
         if (inspectArmMode === "line") showInspectToast("Drag to inspect a line");
         else if (inspectArmMode === "grid") showInspectToast("Drag to inspect a grid");
         // Neither arms without the Inspect card open (their buttons live
@@ -5724,7 +6170,15 @@
         // comment), so this is the one thing that has to check for it
         // explicitly rather than relying on disarmInspect leaving nothing
         // else to do.
-        else if (inspectMenu.isOpen()) lockPointAt(current);
+        else if (inspectMenu.isOpen()) {
+          // A finger's TAP is the exception to "no button needed": it only
+          // locks a point once Inspect (Point) has been armed (see
+          // inspectArmMode's own comment). Unarmed it does nothing, and says
+          // nothing - the card's own empty preview already says how, and a
+          // toast for every stray touch of a map that is touched all the
+          // time was more noise than help.
+          if (inspectArmMode === "point" || !dragIsTouch) lockPointAt(current);
+        }
       } else if (inspectArmMode === "line") {
         lockLineOfPoints(inspectDragStartWorld, current);
       } else if (inspectArmMode === "grid") {
@@ -5736,9 +6190,9 @@
     canvas.classList.remove("dragging");
   }
 
-  canvas.addEventListener("mousedown", function (e) { beginDrag(e.clientX, e.clientY); });
+  canvas.addEventListener("mousedown", function (e) { noteGestureDown(); beginDrag(e.clientX, e.clientY, false); });
   window.addEventListener("mousemove", function (e) { if (dragging) handleDragMove(e.clientX, e.clientY); });
-  window.addEventListener("mouseup", function (e) { endDrag(e.clientX, e.clientY); });
+  window.addEventListener("mouseup", function (e) { noteGestureUp(); endDrag(e.clientX, e.clientY); });
 
   // ---- Touch: one finger pans (same beginDrag/handleDragMove/endDrag as
   // the mouse), two fingers pinch-zoom-and-pan at once ----
@@ -5774,8 +6228,9 @@
 
   canvas.addEventListener("touchstart", function (e) {
     e.preventDefault();
+    noteGestureDown();
     if (e.touches.length === 1) {
-      beginDrag(e.touches[0].clientX, e.touches[0].clientY);
+      beginDrag(e.touches[0].clientX, e.touches[0].clientY, true);
     } else if (e.touches.length === 2) {
       // A second finger landing mid-drag supersedes whatever the first one
       // was doing (a pan, or an Inspect line/grid preview) - a pinch is never
@@ -5799,10 +6254,13 @@
       // Inverted (old/new, not new/old): view.scale is world units per
       // screen pixel, so spreading fingers apart (dist increases) needs
       // view.scale to DECREASE - zooming in, the same direction as the
-      // wheel handler's factor<1 branch - not increase.
-      zoomAtClientPoint(mid.x, mid.y, pinchDistance / dist);
+      // wheel handler's factor<1 branch - not increase. Two fingers reported
+      // at one spot (it happens, as one of them lifts) have no ratio to
+      // offer, and dividing by their zero would send the view to its limit.
+      if (pinchDistance > 0 && dist > 0) zoomAtClientPoint(mid.x, mid.y, pinchDistance / dist);
       pinchMidX = mid.x; pinchMidY = mid.y; pinchDistance = dist;
       updateZoomReadout();
+      noteGestureMoved();
       markDirty();
     } else if (e.touches.length === 1 && dragging) {
       e.preventDefault();
@@ -5812,6 +6270,17 @@
 
   function onTouchEnd(e) {
     if (e.touches.length === 0) {
+      noteGestureUp();
+      if (e.type === "touchcancel") {
+        // The browser took the gesture away (an incoming call, a system
+        // swipe): nothing the finger was part-way through gets committed.
+        dragging = false;
+        canvas.classList.remove("dragging");
+        hideInspectPreview();
+        inspectDragStartWorld = null;
+        pinchDistance = 0;
+        return;
+      }
       // changedTouches, not the now-empty e.touches, has the lifted
       // finger's last known position - needed either to commit a one-finger
       // drag's Inspect tap/line/grid (endDrag) or, if this touch just ended a
@@ -5820,6 +6289,13 @@
       var last = e.changedTouches[0];
       endDrag(last.clientX, last.clientY);
       pinchDistance = 0;
+    } else if (e.touches.length === 2) {
+      // Three fingers down to two: whichever two are left are not
+      // necessarily the two the pinch was measured between, so it is
+      // measured again from them rather than jumping by the difference.
+      pinchDistance = touchDistance(e.touches[0], e.touches[1]);
+      var mid = touchMidpoint(e.touches[0], e.touches[1]);
+      pinchMidX = mid.x; pinchMidY = mid.y;
     } else if (e.touches.length === 1) {
       // Two fingers down to one: let the remaining finger keep panning
       // without needing to lift and re-touch, matching how a real map app
@@ -5831,16 +6307,17 @@
       // handleDragMove runs. Lifting the rest of the way and tapping again
       // starts a clean Inspect gesture instead.
       pinchDistance = 0;
-      if (!inspectArmMode) {
+      if (!inspectArmTakesDrag()) {
         dragging = true;
+        dragIsTouch = true;
         lastClientX = e.touches[0].clientX;
         lastClientY = e.touches[0].clientY;
-        // Starts this finger's own count fresh, same as a real beginDrag -
-        // otherwise whatever a plain click now does (see endDrag) could
-        // fire off however little the FIRST finger happened to move before
-        // the second one landed, plus however little this one moves before
-        // it's lifted, even though the gesture in between was a pinch.
-        dragDistance = 0;
+        // Already a drag, and never a tap: the two fingers of a pinch never
+        // lift in the same instant, so EVERY pinch ends as one finger resting
+        // on the glass for a moment - and read as a tap, that moment locked
+        // an Inspect point under it at the end of every zoom.
+        dragPastSlop = true;
+        dragDistance = CLICK_DRAG_THRESHOLD;
         canvas.classList.add("dragging");
       }
     }
@@ -5906,6 +6383,7 @@
     }
     updateResolutionBoundsUI();
     markDirty();
+    syncPerfPresetUI();
   }
   resolutionMinSlider.addEventListener("input", onResolutionBoundInput);
   resolutionMaxSlider.addEventListener("input", onResolutionBoundInput);
@@ -6294,7 +6772,7 @@
   var PLAY_PAUSE_GRACE_MS = 300;
 
   function updatePlayPauseButtonUI() {
-    hoverPlayPauseBtn.textContent = playbackPlaying ? "⏸" : "▶";
+    setPlayPauseIcon(hoverPlayPauseBtn, playbackPlaying);
     hoverPlayPauseBtn.title = playbackPlaying ? "Pause" : "Play";
     hoverPlayPauseBtn.setAttribute("aria-label", playbackPlaying ? "Pause" : "Play");
   }
@@ -6559,7 +7037,11 @@
     updatePlayPauseButtonUI();
     updateProgressSliderPosition();
     hoverEmptyState.hidden = false;
-    hoverEmptyState.textContent = message || "Hover the grid to preview a pixel";
+    // Asked fresh each time rather than decided once: a tablet can gain or
+    // lose a mouse while the page is open.
+    hoverEmptyState.textContent = message || (global.LayoutMode && !global.LayoutMode.canHover()
+      ? "Press Inspect (Point), then tap the map to see that spot\u2019s simulation"
+      : "Hover the grid to preview a pixel");
     // A placeholder, not blank - leaving this empty let the whole line
     // collapse and reflow everything below it every time hovering starts
     // or stops.
@@ -7505,7 +7987,9 @@
     // points, its buttons, etc.) isn't "done looking at this" either - if a
     // locked-group session is already playing, leave it running right where
     // it is instead of restarting it from step 0.
-    if (e.relatedTarget && inspectMenuEl.contains(e.relatedTarget) && inspectedGroups.length > 0 && playbackHasSession) return;
+    // (The card is asked as well as the menu it belongs to: while the dock
+    // holds it, the card is not inside #menu-inspect - see "The dock".)
+    if (e.relatedTarget && (inspectMenuEl.contains(e.relatedTarget) || inspectMenu.card.contains(e.relatedTarget)) && inspectedGroups.length > 0 && playbackHasSession) return;
     if (inspectedGroups.length > 0) { beginInspectOnlySession(); } else { showHoverEmpty(); }
   });
 
@@ -8116,7 +8600,7 @@
   function drawFeatureOverlay() {
     if (!featureOverlayCanvas) return;
     var cw = canvasArea.clientWidth, ch = canvasArea.clientHeight;
-    var dpr = window.devicePixelRatio || 1;
+    var dpr = gridDpr();
     featureOverlayCanvas.width = Math.max(1, Math.round(cw * dpr));
     featureOverlayCanvas.height = Math.max(1, Math.round(ch * dpr));
     var ctx = featureOverlayCanvas.getContext("2d");
@@ -8352,7 +8836,15 @@
   // takes the browser down with it - it was 640MB at first, and Chrome
   // crashed. A typical scene on a Retina laptop needs about half of this at
   // one sample per CSS pixel; bigger states just run coarser.
-  var PLAYBACK_STATE_MAX_BYTES = 256 * 1024 * 1024;
+  //
+  //
+  // That is the High preset's 256MB. Low gets well under half of it (see
+  // PERF_PRESETS): a phone's GPU has no memory of its own - this comes out of
+  // the same few gigabytes as everything else on the device - and the penalty
+  // for overreaching is not a slow frame but the browser discarding the page
+  // (see "Losing the WebGL context"). Playback only runs coarser for it,
+  // which on that GPU it would be doing anyway.
+  function playbackStateMaxBytes() { return perf.playbackMB * 1024 * 1024; }
   var BYTES_PER_STATE_TEXEL = 16; // RGBA32F, one layer
   // The most wall-clock time the clock will owe steps for. A hitch - a
   // shader compile, a GC pause, a backgrounded tab - should cost that much
@@ -8688,13 +9180,41 @@
   // steered towards is several times under the limit above, because the
   // measurement is of a handful of pixels at the start of their runs and a
   // tile shades as slowly as its slowest pixel at its dearest step.
-  var SLICE_TARGET_MS = 5;
+  //
+  // 5ms is that, and is what Settings > Performance Settings > Longest single
+  // GPU draw offers as its safest stop. The limit it keeps clear of is
+  // Apple's. Other GPUs' watchdogs are measured in seconds, and there a
+  // longer draw is simply a cheaper way to do the same work: every slice pays
+  // to load and store the whole tile's state, in float textures, through a
+  // phone's memory bus - and a whole run that fits in ONE draw pays none of
+  // it (see sliceLimits().f32SingleDrawMs, which moves with this). So the
+  // setting is honoured everywhere except on an Apple GPU, where it is held
+  // at 5 whatever it says.
+  var SLICE_TARGET_BASE_MS = 5;
+  var gpuRendererName = (function () {
+    try {
+      var info = gl.getExtension("WEBGL_debug_renderer_info");
+      return String((info && gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) || gl.getParameter(gl.RENDERER) || "");
+    } catch (err) {
+      return "";
+    }
+  })();
+  // By the renderer's name where there is one, and by the platform where the
+  // browser masks it (Safari says only "Apple GPU"; an iPad says it is a Mac).
+  var drawLengthLocked = /apple|metal/i.test(gpuRendererName) ||
+    /Mac|iPhone|iPad|iPod/.test((global.navigator && (global.navigator.platform || global.navigator.userAgent)) || "");
+  function sliceTargetMs() {
+    return drawLengthLocked ? SLICE_TARGET_BASE_MS : Math.max(SLICE_TARGET_BASE_MS, perf.drawMs || SLICE_TARGET_BASE_MS);
+  }
   var SLICE_STEPS_MIN = 1;
-  var SLICE_STEPS_MAX = 256;
+  // At the base draw length; a longer draw may run proportionally more.
+  var SLICE_STEPS_BASE_MAX = 256;
+  function sliceStepsMax() { return Math.round(SLICE_STEPS_BASE_MAX * sliceTargetMs() / SLICE_TARGET_BASE_MS); }
   // A precision whose SINGLE step measures longer than this cannot be drawn
   // at all - there is no smaller slice than one step - so the ladder treats
   // it as unavailable for the scene rather than hang the GPU finding out.
-  var SLICE_SINGLE_STEP_LIMIT_MS = 15;
+  // (Three draws' worth, like everything here in proportion to sliceTargetMs.)
+  function sliceSingleStepLimitMs() { return 3 * sliceTargetMs(); }
   // The calibration stops doubling once a slice takes this long: enough to
   // stand clear of the ~1ms a timed round trip costs by itself.
   var SLICE_CALIBRATION_STOP_MS = 3;
@@ -8724,8 +9244,11 @@
   // counts pixels, by which a slice of a tiny tile is free; the GPU counts
   // time, by which it is not. Frames of a coarse level used to issue
   // thousands of them (3,586 in one, measured: a 5.4s stall).
+  // ("The display period" being the frame's target length - see frameBaseMs -
+  // so a longer frame has room for proportionally more of them.)
   var SLICE_FRAME_SHARE = 0.75;
   var sliceFrameMs = 0;
+  function sliceFrameCapMs() { return frameTargetMs(performance.now()) * SLICE_FRAME_SHARE; }
   // Far below the ladder's own floor: a sliced frame's smallest unit of work
   // is one slice of a small tile, not a whole simulated row.
   var SLICE_MIN_PIXEL_BUDGET = 16;
@@ -8749,7 +9272,11 @@
   // nothing changes: float32 keeps its single-draw program, which for an
   // ordinary scene is the fast path by a wide margin. If it does not,
   // float32 is drawn by the sliced renderer like everything above it.
-  var F32_SINGLE_DRAW_LIMIT_MS = 12;
+  //
+  // "Comfortably" is 2.4 draws' worth: 12ms at the base draw length, and more
+  // where Longest single GPU draw allows more - which on a slow GPU is what
+  // decides whether an ordinary scene gets the single-draw fast path at all.
+  function f32SingleDrawLimitMs() { return 2.4 * sliceTargetMs(); }
   var f32StepMs = {};   // by variant; emptied with the scene (releaseAllSliceStates)
   function measureF32StepMs() {
     var target = makeTarget(8, 8);
@@ -8792,9 +9319,11 @@
       // The grid program has to exist to be timed; building it is what the
       // first frame would have done anyway.
       if (!requestPass("f32", variant, true)) return false;
+      var measureStartedAt = performance.now();
       f32StepMs[variant] = measureF32StepMs();
+      perfStats.calibrationMs += performance.now() - measureStartedAt;
     }
-    return f32StepMs[variant] * simulationSteps > F32_SINGLE_DRAW_LIMIT_MS;
+    return f32StepMs[variant] * simulationSteps > f32SingleDrawLimitMs();
   }
   // The sliced programs float32 is waiting for, when it needs them and they
   // are still building. Until they arrive the grid draws NOTHING: the only
@@ -8917,6 +9446,7 @@
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     job.drawsIssued = lastGroup - firstGroup;
+    perfStats.drawsThisFrame += job.drawsIssued;
     if (lastGroup < job.programs.groups) {
       job.nextGroup = lastGroup;
       job.sliceSteps = k;
@@ -9011,11 +9541,13 @@
     timedSlice(1);
     timedSlice(1);
     var k = 1, took = timed(1), before = took;
-    if (took > SLICE_SINGLE_STEP_LIMIT_MS) {
+    var calibrationStartedAt = performance.now();
+    if (took > sliceSingleStepLimitMs()) {
       sliceTooHeavy[precision] = true;
       sliceSteps[precision] = SLICE_STEPS_MIN;
     } else {
-      while (took < SLICE_CALIBRATION_STOP_MS && k < SLICE_STEPS_MAX) {
+      var stepsMax = sliceStepsMax(), targetMs = sliceTargetMs();
+      while (took < SLICE_CALIBRATION_STOP_MS && k < stepsMax) {
         k *= 2;
         before = took;
         took = timed(k);
@@ -9028,8 +9560,10 @@
       // cautious for a scene whose steps are cheap.
       var perStep = k > 1 ? Math.max((took - before) / (k / 2), took / k / 8) : took;
       var fixed = Math.max(0, took - perStep * k);
-      sliceSteps[precision] = clamp(Math.floor((SLICE_TARGET_MS - Math.min(fixed, SLICE_TARGET_MS / 2)) / perStep), SLICE_STEPS_MIN, SLICE_STEPS_MAX);
+      sliceSteps[precision] = clamp(Math.floor((targetMs - Math.min(fixed, targetMs / 2)) / perStep), SLICE_STEPS_MIN, stepsMax);
+      perfStats.sliceStepMs = perStep;
     }
+    perfStats.calibrationMs += performance.now() - calibrationStartedAt;
     sliceCalibrated[precision] = sliceSteps[precision];
     releaseSliceState("calibrate");
   }
@@ -9079,7 +9613,7 @@
     var perDraw = sliceSteps[effectivePrecision()] || SLICE_STEPS_MIN;
     // See SLICE_FRAME_SHARE. Never before the frame's first slice, so a
     // frame always moves forward; 0 is what the callers read as "stop here".
-    if (sliceFrameMs >= displayPeriodMs * SLICE_FRAME_SHARE) return 0;
+    if (sliceFrameMs >= sliceFrameCapMs()) return 0;
     var job = progressive.tile;
     // A slice is sized to be about a whole frame's budget (see perDraw
     // below), so unlike a band it cannot be trimmed to whatever the frame
@@ -9126,13 +9660,13 @@
       job.perDraw = clamp(Math.floor(ladderBudget.budget * total / Math.max(cols * rows, 1)), SLICE_STEPS_MIN, perDraw);
       progressive.tile = job;
     }
-    // The calibrated count takes about SLICE_TARGET_MS a draw; fewer steps,
+    // The calibrated count takes about sliceTargetMs() a draw; fewer steps,
     // less. A state written in several groups is that many draws a slice,
     // of which a frame issues only as many as its time cap has room for
     // (always one) - see advanceSliceJob.
     var sliceK = Math.min(job.perDraw || perDraw, perDraw);
-    var drawMs = SLICE_TARGET_MS * Math.max(job.nextGroup > 0 ? job.sliceSteps : sliceK, 1) / perDraw;
-    var room = Math.max(1, Math.floor((displayPeriodMs * SLICE_FRAME_SHARE - sliceFrameMs) / drawMs));
+    var drawMs = sliceTargetMs() * Math.max(job.nextGroup > 0 ? job.sliceSteps : sliceK, 1) / perDraw;
+    var room = Math.max(1, Math.floor((sliceFrameCapMs() - sliceFrameMs) / drawMs));
     var ran = advanceSliceJob(job, sliceK, room);
     sliceFrameMs += drawMs * job.drawsIssued;
     // Part-way through a slice: nothing to charge or finish yet, and nothing
@@ -9186,7 +9720,7 @@
   // such hiccup used to count. Unbounded, a few of them ratcheted triple-
   // float down to one step per draw for good (seen: a 10s picture took 50s).
   // A quarter still leaves a real mis-measurement a further 4x of relief, on
-  // top of the several-fold margin SLICE_TARGET_MS already keeps under the
+  // top of the several-fold margin sliceTargetMs() already keeps under the
   // limit.
   var sliceOverrunsInARow = 0;
   function adaptSliceSteps(tookPeriods) {
@@ -9296,13 +9830,13 @@
   // Which sub-lattice of the full-res grid playback simulates: never finer
   // than one sample per CSS pixel (a Retina canvas has four device pixels to
   // each), never finer than the Resolution Limits setting allows the ladder,
-  // and coarser still until both state copies fit PLAYBACK_STATE_MAX_BYTES.
+  // and coarser still until both state copies fit playbackStateMaxBytes().
   // A power of two, so it is always one of the ladder's own levels.
   function playbackStride(layers) {
-    var dpr = window.devicePixelRatio || 1;
+    var dpr = gridDpr();
     var stride = Math.max(endStride(), Math.pow(2, Math.floor(Math.log2(Math.max(1, dpr)))));
     while (stride < COARSEST_STRIDE &&
-      2 * layers * BYTES_PER_STATE_TEXEL * levelWidth(stride) * levelHeight(stride) > PLAYBACK_STATE_MAX_BYTES) {
+      2 * layers * BYTES_PER_STATE_TEXEL * levelWidth(stride) * levelHeight(stride) > playbackStateMaxBytes()) {
       stride *= 2;
     }
     return stride;
@@ -9797,7 +10331,7 @@
     // being locked out of it.
     var linked = previewOwnsTimeline();
     var playing = linked ? playbackPlaying : timeline.playing;
-    gridPlayPauseBtn.textContent = playing ? "⏸" : "▶";
+    setPlayPauseIcon(gridPlayPauseBtn, playing);
     gridPlayPauseBtn.title = !linked && !hasFloatColorBuffer
       ? "Playback needs floating-point render targets, which this browser doesn't provide"
       : playing ? "Pause" : "Play";
@@ -9920,6 +10454,11 @@
   // the view is moving, when it hands the frame back so the ladder can show
   // the current step (see stepPlayback).
   requestAnimationFrame(function frame(now) {
+    // Every GL call on a lost context is a silent no-op that hands back
+    // null, which the code below was never written to be handed - and there
+    // is nothing to draw to in any case. See "Losing the WebGL context".
+    if (contextLost) { requestAnimationFrame(frame); return; }
+    updatePerfReadout(now);
     // Every frame, working or idle - see noteFrameCadence on why the idle
     // ones are the important ones.
     noteFrameCadence(now);
@@ -9931,7 +10470,10 @@
     pumpPendingInspect();
     if (dirty) { resetProgressive(); dirty = false; }
     releasePlaybackIfViewMoved();
-    if (!stepPlayback(now)) stepProgressive(now);
+    // A gesture's frame moves the picture and does nothing else - see
+    // "Gestures first". (It declines while the timeline is playing, which
+    // has its own way of giving a moving view the frame - see stepPlayback.)
+    if (!presentGestureFrame(now) && !stepPlayback(now)) stepProgressive(now);
     requestAnimationFrame(frame);
   });
 
@@ -9997,6 +10539,15 @@
   };
 
   global.FractalGrid.setScene = function (nextScene) {
+    // The context went while the editor was on screen (see "Losing the
+    // WebGL context"), so there is nothing here to compile the scene with.
+    // A reload gets a new one, and an address that says "this scene, on the
+    // map" is what makes the reload land where this call was headed.
+    if (contextLost) { reloadIntoMap(nextScene); return; }
+    // The view is about to be put back to its default framing, which is
+    // framed for whatever size the canvas ends up - not pinned to a corner
+    // of the size it happens to be before Inspect reopens (see the dock).
+    dockSuppressPin = true;
     scene = nextScene;
     // Picture reuse: nothing rendered so far is a picture of this scene.
     sceneGeneration += 1;
@@ -10060,6 +10611,9 @@
     if (statsPanel) { statsHasResult = false; statsResultIsCurrent = false; statsPanel.clearResult(); }
     resizeCanvas();
     markDirty();
+    // Clears dockSuppressPin once the dock has settled, whether or not the
+    // setInspectOpen above changed anything it had to react to.
+    scheduleDockLayout(false);
   };
 
   // ---- Movies ----
@@ -10357,6 +10911,10 @@
   // link's scene has been started (or set), which is what put everything
   // here back to its defaults first.
   global.FractalGrid.applyShareView = function (shared) {
+    // A link's view is its centre and its zoom, and has to arrive as both -
+    // see setScene on why that means no corner pinning.
+    dockSuppressPin = true;
+    scheduleDockLayout(false);
     view.center.x = shared.center.x; view.center.xLo = shared.center.xLo;
     view.center.y = shared.center.y; view.center.yLo = shared.center.yLo;
     view.scale = clamp(DEFAULT_SCALE / shared.zoom, MIN_SCALE, MAX_SCALE);
@@ -10368,6 +10926,10 @@
     // A rung this browser can't build (see PRECISION_LADDER) becomes Auto:
     // the best it does have, where the view needs it.
     precisionMode = (shared.precision === "auto" || PRECISION_LADDER.indexOf(shared.precision) !== -1) ? shared.precision : "auto";
+    // Unless the last visit ended in repeated context losses, which the
+    // multi-float programs - many times the size and the memory of the
+    // float32 one - are the likeliest cause of. See "Losing the WebGL context".
+    if (contextLossForcesFloat32()) precisionMode = "f32";
     if (precisionSelect) precisionSelect.value = precisionMode;
 
     setPlaybackSpeed(shared.speed);
@@ -10402,6 +10964,603 @@
     updateZoomReadout();
     markDirty();
   };
+
+  // ---- Performance settings: the controls ----
+  //
+  // The values and what the two presets are live at the top of boot (see
+  // "Performance settings: the values"). This is the Settings card's side of
+  // it: one control per value, and the three-stop slider above them.
+  //
+  // The slider is an OUTPUT as much as an input. Low and High each set every
+  // control beneath them; Custom cannot be chosen, and is simply where the
+  // slider goes whenever those controls match neither preset. Which means it
+  // is never stored: it is worked
+  // out from the controls every time one of them changes (perfPresetNow), so
+  // there is no second copy of the truth to fall out of step, and setting
+  // everything back by hand to what Low means IS Low.
+  var perfPresetSlider = document.getElementById("perf-preset-slider");
+  var perfPresetLabels = Array.prototype.slice.call(document.querySelectorAll(".perf-preset-labels [data-preset]"));
+  var antialiasCheckbox = document.getElementById("antialias-checkbox");
+  var perfDprSelect = document.getElementById("perf-dpr-select");
+  var perfDprReadout = document.getElementById("perf-dpr-readout");
+  var perfFrameSelect = document.getElementById("perf-frame-select");
+  var perfDrawSelect = document.getElementById("perf-draw-select");
+  var perfPlaybackMemorySelect = document.getElementById("perf-playback-memory-select");
+  var perfGestureCheckbox = document.getElementById("perf-gesture-checkbox");
+  var perfReadoutCheckbox = document.getElementById("perf-readout-checkbox");
+  var perfReadoutEl = document.getElementById("perf-readout");
+  var PERF_PRESET_STOPS = { low: 0, custom: 1, high: 2 };
+  var PERF_PRESET_NAMES = { low: "Low Performance Devices", custom: "Custom", high: "High Performance Devices" };
+  // Where the right-hand resolution handle sits for an endStride of 2. Not
+  // 100 * (levels - 1) / levels worked out on the spot: the ladder's length
+  // changes with the canvas (the dock opening is enough), and 90 rounds to
+  // "one level short of the end" for every ladder from 6 levels to 14.
+  var RESOLUTION_SLIDER_FOR_STRIDE = { 1: "100", 2: "90" };
+
+  // Everything a preset decides, as it stands right now.
+  function perfValuesNow() {
+    return {
+      startAtCoarsest: Number(resolutionMinSlider.value) === 0,
+      endStride: sliderValueToStride(Number(resolutionMaxSlider.value)),
+      antialias: perf.antialias,
+      reuse: reuseEnabled,
+      maxDpr: perf.maxDpr,
+      frameMs: perf.frameMs,
+      drawMs: perf.drawMs,
+      playbackMB: perf.playbackMB,
+      gestureFirst: perf.gestureFirst,
+    };
+  }
+  function perfPresetNow() {
+    var now = perfValuesNow();
+    var names = ["low", "high"];
+    for (var i = 0; i < names.length; i++) {
+      var p = PERF_PRESETS[names[i]];
+      if (now.startAtCoarsest && now.endStride === p.endStride &&
+          now.antialias === p.antialias && now.reuse === p.reuse && now.maxDpr === p.maxDpr &&
+          now.frameMs === p.frameMs && now.playbackMB === p.playbackMB && now.gestureFirst === p.gestureFirst &&
+          // A control this GPU doesn't get to use (see drawLengthLocked) can't
+          // be what keeps the slider off a preset.
+          (drawLengthLocked || now.drawMs === p.drawMs)) return names[i];
+    }
+    return "custom";
+  }
+
+  // Puts every control where the values are, and the slider where they add
+  // up to. Safe to call from anywhere, any number of times.
+  function syncPerfPresetUI() {
+    if (!perfPresetSlider) return; // called from a run that began before the card was wired
+    antialiasCheckbox.checked = perf.antialias;
+    perfDprSelect.value = String(perf.maxDpr);
+    perfFrameSelect.value = String(perf.frameMs);
+    perfDrawSelect.value = String(drawLengthLocked ? SLICE_TARGET_BASE_MS : perf.drawMs);
+    perfPlaybackMemorySelect.value = String(perf.playbackMB);
+    perfGestureCheckbox.checked = perf.gestureFirst;
+    var devDpr = window.devicePixelRatio || 1, dpr = gridDpr();
+    perfDprReadout.textContent = (Math.round(dpr * 100) / 100) + "×" + (dpr < devDpr ? " of " + (Math.round(devDpr * 100) / 100) + "×" : "");
+    var preset = perfPresetNow();
+    perfPresetSlider.value = String(PERF_PRESET_STOPS[preset]);
+    perfPresetSlider.setAttribute("aria-valuetext", PERF_PRESET_NAMES[preset]);
+    perfPresetLabels.forEach(function (el) { el.classList.toggle("is-current", el.getAttribute("data-preset") === preset); });
+  }
+
+  // What changing each value has to set in motion. Every one of them changes
+  // what the next frame should draw, so all end in markDirty; the rest is
+  // whatever was measured or allocated under the old value.
+  function setPerfMaxDpr(v) {
+    if (v === perf.maxDpr) return;
+    perf.maxDpr = v;
+    resizeCanvas(); // a different backing store, if this display is past the cap
+    markDirty();
+  }
+  function setPerfFrameMs(v) {
+    if (v === perf.frameMs) return;
+    perf.frameMs = v;
+    // Budgets are in work per frame, and a frame has just changed length.
+    // They would find their way (an overrun is believed at once, and fitting
+    // grows 10% a frame) but there is no reason to make them.
+    ladderBudgets = {};
+    ladderBudget = budgetFor(effectivePrecision(), wantedVariant());
+    markDirty();
+  }
+  function setPerfDrawMs(v) {
+    if (v === perf.drawMs) return;
+    perf.drawMs = v;
+    // Steps per draw were calibrated against the old length, and whether
+    // float32 needs slicing at all is decided against it too (per-step
+    // timings, f32StepMs, are the GPU's and stay).
+    sliceSteps = {};
+    sliceCalibrated = {};
+    sliceTooHeavy = {};
+    progressive.tile = null;
+    progressive.tileX = 0;
+    ladderBudgets = {};
+    ladderBudget = budgetFor(effectivePrecision(), wantedVariant());
+    updatePrecisionReadout();
+    markDirty();
+  }
+  function setPerfPlaybackMB(v) {
+    if (v === perf.playbackMB) return;
+    perf.playbackMB = v;
+    // The lattice is chosen to fit the budget when the state is built (see
+    // playbackStride); dropping the state is what makes the next Play choose
+    // again.
+    releasePlaybackTextures();
+    markDirty();
+  }
+  function setPerfAntialias(on) {
+    on = !!on;
+    if (on === perf.antialias) return;
+    perf.antialias = on;
+    markDirty();
+  }
+
+  function applyPerfValues(p) {
+    resolutionMinSlider.value = "0";
+    resolutionMaxSlider.value = RESOLUTION_SLIDER_FOR_STRIDE[p.endStride] || "100";
+    setPerfAntialias(p.antialias);
+    setReuseEnabled(p.reuse);
+    setPerfMaxDpr(p.maxDpr);
+    setPerfFrameMs(p.frameMs);
+    setPerfDrawMs(p.drawMs);
+    setPerfPlaybackMB(p.playbackMB);
+    perf.gestureFirst = !!p.gestureFirst; // read fresh every frame; nothing to set in motion
+    markDirty();
+    // After the restart, so its "at ..." half describes the run that is
+    // starting rather than the one just abandoned.
+    updateResolutionBoundsUI();
+    syncPerfPresetUI();
+  }
+  function applyPerfPreset(name) {
+    if (!PERF_PRESETS[name] || perfPresetNow() === name) { syncPerfPresetUI(); return; }
+    applyPerfValues(PERF_PRESETS[name]);
+  }
+
+  // The slider. Dragging THROUGH the middle is fine - it is between the two
+  // ends - but it is not somewhere to stop: released there, the slider goes
+  // back to wherever the controls below actually put it.
+  perfPresetSlider.addEventListener("input", function () {
+    var stop = Number(perfPresetSlider.value);
+    if (stop === PERF_PRESET_STOPS.low) applyPerfPreset("low");
+    else if (stop === PERF_PRESET_STOPS.high) applyPerfPreset("high");
+  });
+  perfPresetSlider.addEventListener("change", syncPerfPresetUI);
+  // From the keyboard the middle would be a wall: one arrow press from an
+  // end lands on it, and it bounces back. So the arrows step over it.
+  perfPresetSlider.addEventListener("keydown", function (e) {
+    var toward = { ArrowLeft: "low", ArrowDown: "low", Home: "low", ArrowRight: "high", ArrowUp: "high", End: "high" }[e.key];
+    if (!toward) return;
+    e.preventDefault();
+    applyPerfPreset(toward);
+  });
+  // The labels are the stops' names, and the two that can be chosen can be
+  // chosen by pressing them - an easier target than the end of a slider.
+  perfPresetLabels.forEach(function (el) {
+    var name = el.getAttribute("data-preset");
+    if (name === "custom") return;
+    el.addEventListener("click", function () { applyPerfPreset(name); });
+  });
+
+  antialiasCheckbox.addEventListener("change", function () { setPerfAntialias(antialiasCheckbox.checked); syncPerfPresetUI(); });
+  perfDprSelect.addEventListener("change", function () { setPerfMaxDpr(Number(perfDprSelect.value)); syncPerfPresetUI(); });
+  perfFrameSelect.addEventListener("change", function () { setPerfFrameMs(Number(perfFrameSelect.value)); syncPerfPresetUI(); });
+  perfDrawSelect.addEventListener("change", function () { setPerfDrawMs(Number(perfDrawSelect.value)); syncPerfPresetUI(); });
+  perfPlaybackMemorySelect.addEventListener("change", function () { setPerfPlaybackMB(Number(perfPlaybackMemorySelect.value)); syncPerfPresetUI(); });
+  perfGestureCheckbox.addEventListener("change", function () { perf.gestureFirst = perfGestureCheckbox.checked; syncPerfPresetUI(); });
+  // Held at its first stop on an Apple GPU (see sliceTargetMs), so there it
+  // is shown for what it is rather than offered as a choice.
+  if (drawLengthLocked) perfDrawSelect.disabled = true;
+
+  // The device's own preset, for the things `perf` could not hold at the top
+  // of boot: the resolution handle, and picture reuse (whose machinery did
+  // not exist yet). Before the first frame, so nothing is drawn twice.
+  applyPerfValues(PERF_PRESETS[perfDefaultPreset]);
+
+  // ---- The performance readout ----
+  //
+  // Settings > Performance Settings > Nerd Performance Stats: what the
+  // renderer is doing, as a few lines of text over the map. It exists to be
+  // screenshotted from a device nobody can attach a debugger to - so it
+  // favours the numbers that say WHY a render is slow over the ones that say
+  // that it is: which path is drawing (one draw per band, or slices), how
+  // much a frame is allowed and how long frames actually take, whether the
+  // budget is sitting on its floor, and what building and calibrating cost
+  // before the first pixel.
+  //
+  // Not a performance setting, and not part of either preset. Everything it
+  // shows is gathered whether or not it is showing (see perfStats).
+  var PERF_READOUT_INTERVAL_MS = 250;
+  var perfReadoutShown = false;
+  var perfReadoutAt = 0;
+  var perfFrame = { lastAt: 0, ms: 0 };
+
+  function beginPerfRun() {
+    perfStats.run = {
+      startedAt: performance.now(), steps: renderedSteps(), spent: 0,
+      firstPictureAt: 0, levels: [], lastStride: 0, aa: [], aaSeen: 0, doneAt: 0,
+    };
+    perfStats.workFrameMaxMs = 0;
+    perfStats.busyWaits = 0;
+  }
+  // Once per work frame, after the work: how far the run has got.
+  function notePerfRunProgress() {
+    var run = perfStats.run;
+    if (!run || run.doneAt) return;
+    var t = performance.now() - run.startedAt;
+    run.spent += ladderBudget.lastSpent || 0;
+    if (progressive.accumStride > 0) {
+      if (!run.firstPictureAt) run.firstPictureAt = t;
+      if (progressive.accumStride !== run.lastStride) {
+        run.lastStride = progressive.accumStride;
+        run.levels.push({ stride: progressive.accumStride, t: t });
+      }
+    }
+    if (progressive.aaSample > run.aaSeen) {
+      run.aaSeen = progressive.aaSample;
+      // aaSample n means sample n is being averaged in, i.e. n - 1 are done
+      // (the ladder's own picture counting as the first).
+      if (progressive.aaSample > 1) run.aa.push({ n: progressive.aaSample - 1, t: t });
+    }
+    if (progressive.complete) run.doneAt = t;
+  }
+
+  function perfSeconds(ms) { return ms >= 9950 ? Math.round(ms / 1000) + "s" : (ms / 1000).toFixed(ms < 995 ? 2 : 1) + "s"; }
+  function perfCount(n) {
+    if (n >= 1e9) return (n / 1e9).toFixed(2) + "G";
+    if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + "M";
+    if (n >= 1e4) return Math.round(n / 1e3) + "k";
+    return String(Math.round(n));
+  }
+  function perfReadoutText(now) {
+    var precision = effectivePrecision();
+    // Read off what has already been measured - NOT f32NeedsSlicing(), which
+    // measures (a blocking build and a GPU round trip) when it hasn't been.
+    // A readout that changes what it reads out is not one.
+    var stepMs = f32StepMs[wantedVariant()];
+    var sliced = precision !== "f32" || (stepMs !== undefined && stepMs * simulationSteps > f32SingleDrawLimitMs());
+    var lines = [];
+    var gpu = gpuRendererName.replace(/^ANGLE \((.*)\)$/, "$1");
+    if (gpu.length > 44) gpu = gpu.slice(0, 43) + "…";
+    lines.push("gpu    " + (gpu || "?"));
+    lines.push("       timer " + (gpuTimer.ext ? "yes" : "no") + " · attach " + MAX_STATE_ATTACHMENTS +
+      " · parallel-compile " + (parallelCompileExt ? "yes" : "no"));
+    var devDpr = window.devicePixelRatio || 1;
+    lines.push("view   " + canvas.width + "×" + canvas.height + " @" + (Math.round(gridDpr() * 100) / 100) +
+      " (display " + (Math.round(devDpr * 100) / 100) + ") · " + renderedSteps() + " steps · " + precision);
+
+    var path = sliced ? "sliced" : "single draw";
+    if (sliced) {
+      var perDraw = sliceSteps[precision], tile = progressive.tile;
+      path += perDraw ? " · " + (tile ? tile.perDraw + "/" : "") + perDraw + " steps/draw" +
+        (sliceCalibrated[precision] && sliceCalibrated[precision] !== perDraw ? " (was " + sliceCalibrated[precision] + ")" : "") : " · calibrating";
+      if (tile) path += " · tile " + tile.spec.cols + "×" + tile.spec.rows;
+      var slicedEntry = playbackGpu.programs[precision];
+      if (!slicedEntry || slicedEntry.status === "building") path += " · programs building";
+      else if (slicedEntry.status !== "ready") path += " · programs " + slicedEntry.status;
+    }
+    lines.push("path   " + path);
+    lines.push("       draw ≤" + sliceTargetMs() + "ms" + (drawLengthLocked ? " (fixed)" : "") +
+      (stepMs !== undefined ? " · f32 step " + stepMs.toFixed(4) + "ms → run " + (stepMs * simulationSteps).toFixed(1) + "ms" : "") +
+      (perfStats.sliceStepMs > 0 && sliced ? " · slice step " + perfStats.sliceStepMs.toFixed(4) + "ms" : ""));
+
+    lines.push("frame  " + (perfStats.workFrameMs > 0 ? perfStats.workFrameMs.toFixed(1) + "ms work (max " + Math.round(perfStats.workFrameMaxMs) + ")" : "idle") +
+      " · page " + perfFrame.ms.toFixed(1) + "ms · display " + displayPeriodMs.toFixed(1) + "ms" +
+      (perfStats.gpuMs > 0 ? " · gpu " + perfStats.gpuMs.toFixed(1) + "ms" : ""));
+    var b = ladderBudget;
+    lines.push("budget " + perfCount(b.budget) + " px/frame" + (b.budget <= b.min * 1.5 ? " (AT FLOOR " + b.min + ")" : "") +
+      " · target " + Math.round(frameTargetMs(now)) + "ms · " + perfStats.drawsLastFrame + " draws/frame");
+    lines.push("input  " + (now - perfStats.presentOnlyAt < 400 ? "GESTURE - moving the picture, rendering nothing" :
+      perf.gestureFirst ? (reuseEnabled ? "gestures first" : "gestures first (needs Reuse Last Picture)") : "renders through gestures") +
+      (perf.frameMs > 0 ? " · gpu waits " + perfStats.busyWaits : "") +
+      (reuse.run ? (reuse.run.exact ? " · reusing " + Math.round(reuse.run.coverage * 100) + "%" : " · preview only") : ""));
+
+    var run = perfStats.run;
+    if (run) {
+      var elapsed = run.doneAt || (performance.now() - run.startedAt);
+      var parts = [];
+      if (run.firstPictureAt) parts.push("first " + perfSeconds(run.firstPictureAt));
+      run.levels.slice(-4).forEach(function (l) { parts.push(describeStride(l.stride).replace(" sim/px", "/px") + " " + perfSeconds(l.t)); });
+      run.aa.forEach(function (a) { parts.push("aa" + a.n + " " + perfSeconds(a.t)); });
+      lines.push("run    " + (parts.join(" · ") || "starting") + (run.doneAt ? " · DONE " + perfSeconds(run.doneAt) : " · " + perfSeconds(elapsed) + "…"));
+      lines.push("rate   " + (elapsed > 50 ? perfCount(run.spent * Math.max(run.steps, 1) / (elapsed / 1000)) + " px·steps/s" : "…") +
+        " · stop at " + describeStride(endStride()) + (antialiasWanted() && endStride() <= 1 ? " + aa" : "") + (reuseEnabled ? " · reuse" : ""));
+    }
+    lines.push("build  " + perfStats.builds + " programs " + Math.round(perfStats.buildMs) + "ms (last " + Math.round(perfStats.lastBuildMs) + ")" +
+      " · calibrate " + Math.round(perfStats.calibrationMs) + "ms");
+    return lines.join("\n");
+  }
+  // Called every animation frame; does nothing at all unless it is showing,
+  // and then rebuilds its text four times a second.
+  function updatePerfReadout(now) {
+    if (perfFrame.lastAt > 0) {
+      var dt = now - perfFrame.lastAt;
+      if (dt > 0 && dt < 1000) perfFrame.ms = perfFrame.ms > 0 ? perfFrame.ms * 0.9 + dt * 0.1 : dt;
+    }
+    perfFrame.lastAt = now;
+    if (!perfReadoutShown || now - perfReadoutAt < PERF_READOUT_INTERVAL_MS) return;
+    perfReadoutAt = now;
+    try {
+      perfReadoutEl.textContent = perfReadoutText(now);
+    } catch (err) {
+      // A readout must never be what stops the render loop it is reporting on.
+      perfReadoutEl.textContent = "readout: " + (err && err.message || err);
+    }
+  }
+  function setPerfReadoutShown(on) {
+    perfReadoutShown = !!on;
+    perfReadoutCheckbox.checked = perfReadoutShown;
+    perfReadoutEl.hidden = !perfReadoutShown;
+    perfReadoutAt = 0;
+  }
+  perfReadoutCheckbox.addEventListener("change", function () { setPerfReadoutShown(perfReadoutCheckbox.checked); });
+  setPerfReadoutShown(perfReadoutShown);
+
+  // ---- The dock: where the menus live in the small-window layout ----
+  //
+  // On a phone there is no room for cards floating over the map - one open
+  // card IS the screen. So in the small-window layout (LayoutMode.isMobile -
+  // decided by the window's size alone, which makes this just as reachable
+  // in a narrow desktop window) the map gets an area of its own, and the
+  // menus move into a dock along the bottom edge: every menu's button into a
+  // tab bar, every open card into a sheet above it. On its side, the dock
+  // runs down the right edge instead.
+  //
+  // MOVED, not rebuilt: the button and the card are lifted out of their
+  // .menu-item and put back again when the layout is left. makeMenu holds
+  // all three by reference and every listener is on the elements themselves,
+  // so nothing about a menu knows or cares which layout it is in.
+  //
+  // One card at a time, whichever side of the desktop layout it came from
+  // (see makeMenu): a lit tab is the card that is open, pressing it again
+  // puts the card away, and with none open the sheet is gone and the map has
+  // everything but the tab bar. That does cost the phone the one pairing the
+  // desktop's two columns exist for - Inspect beside Map Evolution, the map
+  // playing in step with the preview - which was tried here as a sheet
+  // showing every open card, and lost: the second card sat below a fold
+  // nobody scrolled to, and a tab bar with two tabs lit read as broken.
+  //
+  // Every menu but one. There is no Movie tab: a movie is hundreds of
+  // finished pictures rendered back to back, which is not something to start
+  // on a phone, and five tabs is what a phone's width holds comfortably. Its
+  // button and card stay where index.html put them, in the right-hand column
+  // - which this layout hides (see #grid-right-menu-column in mobile.css) -
+  // so the card is simply not reachable here, and is shut on the way in if
+  // it was open. Nothing about a movie is lost by that: the keyframes are
+  // state, not markup, and are all still there when the window is wide again
+  // (and in the link, either way).
+  var gridViewEl = document.getElementById("grid-view");
+  var dockSheetEl = document.getElementById("grid-dock-sheet");
+  var dockTabsEl = document.getElementById("grid-dock-tabs");
+  // Tab order, left to right (top to bottom, on its side).
+  var dockMenus = [inspectMenu, statsMenu, displayMenu, playbackMenu, settingsMenu];
+  var dockActive = false;
+  // Upright, the dock as a whole gets at most this share of the view: "the
+  // bottom half of the screen", tab bar included.
+  var DOCK_MAX_SHARE = 0.5;
+  // True from a programmatic reset of the view (a new scene, a link) until
+  // the dock next settles: the resize that follows is then an ordinary one,
+  // which re-frames about the centre instead of pinning a corner.
+  var dockSuppressPin = false;
+  var dockLayoutQueued = false, dockLayoutWantsPin = false;
+
+  // The sheet's height is set ONCE per change of which cards are open - to
+  // what they need, up to the cap - and then left alone, scrolling whatever
+  // outgrows it. Every change of its height is a change of the map's, and
+  // every one of those restarts the render from its coarsest level: worth it
+  // for a menu opened on purpose, not for a list that grew by one row.
+  function layoutDock(pin) {
+    if (!dockActive) return;
+    var anyOpen = dockMenus.some(function (menu) { return menu.isOpen(); });
+    gridViewEl.classList.toggle("dock-sheet-open", anyOpen);
+    if (!anyOpen || global.LayoutMode.orientation() !== "portrait") {
+      // On its side the sheet is a fixed-width column (see mobile.css).
+      dockSheetEl.style.height = "";
+    } else {
+      dockSheetEl.style.height = "auto";
+      var cap = Math.max(140, Math.round(gridViewEl.clientHeight * DOCK_MAX_SHARE) - dockTabsEl.offsetHeight);
+      dockSheetEl.style.height = Math.min(dockSheetEl.scrollHeight, cap) + "px";
+    }
+    // Now, rather than whenever the ResizeObserver gets to it: the frame in
+    // between would show the old picture stretched to the new shape.
+    pinViewCornerOnResize = !!pin;
+    resizeCanvas();
+    pinViewCornerOnResize = false;
+    // Analysis lays its charts out to the card's width, which has just
+    // changed if the card has just changed homes.
+    if (statsPanel && statsOpen) statsPanel.relayout();
+    repositionActiveTip();
+  }
+  // Coalesced to the end of the current task. Opening one menu can shut
+  // another in the same call (they are accordions), and a new scene opens
+  // Inspect half-way through resetting the view: measured in the middle of
+  // either, the sheet is a size it will not be by the time anything paints.
+  function scheduleDockLayout(pin) {
+    dockLayoutWantsPin = dockLayoutWantsPin || !!pin;
+    if (dockLayoutQueued) return;
+    dockLayoutQueued = true;
+    Promise.resolve().then(function () {
+      var wantsPin = dockLayoutWantsPin && !dockSuppressPin;
+      dockLayoutQueued = false;
+      dockLayoutWantsPin = false;
+      dockSuppressPin = false;
+      layoutDock(wantsPin);
+    });
+  }
+
+  function setDockActive(active) {
+    if (active === dockActive) { scheduleDockLayout(false); return; }
+    dockActive = active;
+    gridViewEl.classList.toggle("dock-active", active);
+    // Not coming along (see above) - and an open card left behind in a hidden
+    // column would be open with no way to shut it.
+    if (active && movieMenu.isOpen()) movieMenu.set(false);
+    // One card at a time in here (see makeMenu): coming in with one open on
+    // each side, the left-hand one - Inspect, usually - is the one kept.
+    if (active) {
+      var keep = null;
+      dockMenus.forEach(function (menu) {
+        if (!menu.isOpen()) return;
+        if (keep) menu.set(false); else keep = menu;
+      });
+    }
+    dockMenus.forEach(function (menu) {
+      menu.docked = active;
+      if (active) {
+        dockTabsEl.appendChild(menu.toggle);
+        dockSheetEl.appendChild(menu.card);
+      } else {
+        // Back where index.html put them: the button first, then its card.
+        menu.item.insertBefore(menu.toggle, menu.item.firstChild);
+        menu.item.appendChild(menu.card);
+      }
+    });
+    if (!active) {
+      gridViewEl.classList.remove("dock-sheet-open");
+      dockSheetEl.style.height = "";
+      // The floating gauge goes back to sharing a corner, and an accordion,
+      // with the left column - which may have a card open that it must not
+      // be open beside.
+      if (renderProgressMenu.isOpen() && (inspectMenu.isOpen() || statsMenu.isOpen() || displayMenu.isOpen())) {
+        renderProgressMenu.set(false);
+      }
+    }
+    // An ordinary resize, not a pinned one: the whole window changed shape.
+    scheduleDockLayout(false);
+  }
+
+  onDockedMenuChange = function (menu) {
+    if (!dockActive || !menu.docked) return;
+    if (menu.isOpen()) {
+      // From its top, however far down the last card had been scrolled.
+      dockSheetEl.insertBefore(menu.card, dockSheetEl.firstChild);
+      dockSheetEl.scrollTop = 0;
+    }
+    scheduleDockLayout(true);
+  };
+
+  // The cap is a share of the view, so it moves when the view does: the
+  // phone turned, the window dragged, the address bar sliding away. Also what
+  // sizes the sheet for the first time when the grid is started while still
+  // hidden behind the transition (a hidden view measures as zero).
+  new ResizeObserver(function () { if (dockActive) scheduleDockLayout(false); }).observe(gridViewEl);
+
+  if (global.LayoutMode) {
+    global.LayoutMode.onChange(function (mode) { setDockActive(mode.isMobile()); });
+    dockSuppressPin = true; // the default framing - see setScene
+    setDockActive(global.LayoutMode.isMobile());
+  }
+
+  // ---- Losing the WebGL context ----
+  //
+  // A browser may take a page's WebGL context away at any moment, and on a
+  // phone it routinely does: the tab sent to the background, the GPU's
+  // memory wanted elsewhere, the graphics driver restarting. Every texture,
+  // buffer and program made on that context is gone. Rebuilding them in
+  // place would mean auditing every GL object this file ever keeps - across
+  // the ladder, reuse, antialiasing, playback, the slice states and the
+  // sampler - for whether it re-makes itself on demand, and then trusting
+  // that audit on devices nobody here can test. The address bar already
+  // holds the whole state of the page instead (see "The address bar"): so
+  // recovery is to make sure it is current and load it again.
+  //
+  // Not instantly, though, and not blindly:
+  //  - A hidden page waits until it is looked at again. There is nothing to
+  //    recover FOR until then, and a reload in the background can simply lose
+  //    its new context the same way.
+  //  - A visible one gives the browser a moment to hand the context back
+  //    first ("webglcontextrestored"). Straight after a driver reset, asking
+  //    for a new one can fail.
+  //  - While the EDITOR is what is on screen nothing reloads at all - the
+  //    user is part-way through something that has nothing to do with this
+  //    page. The next scene sent over finds the context gone and reloads into
+  //    the map then (see setScene, and reloadIntoMap).
+  //  - And a page that keeps losing its context stops reloading itself and
+  //    says so, rather than looping. Whatever it comes back as comes back at
+  //    float32: see contextLossForcesFloat32.
+  var contextLost = false;
+  var contextLostEl = document.getElementById("grid-context-lost");
+  var contextLostText = document.getElementById("grid-context-lost-text");
+  var contextLostReloadBtn = document.getElementById("grid-context-lost-reload");
+  var CONTEXT_LOSS_KEY = "fractalGridContextLoss";
+  // Losses closer together than this are the same trouble, not a new one.
+  var CONTEXT_LOSS_WINDOW_MS = 90 * 1000;
+  var CONTEXT_LOSS_MAX_AUTO_RELOADS = 2;
+  var CONTEXT_RESTORE_GRACE_MS = 2000;
+
+  function readContextLossRecord() {
+    try {
+      var rec = JSON.parse(global.sessionStorage.getItem(CONTEXT_LOSS_KEY));
+      if (rec && typeof rec.t === "number" && typeof rec.n === "number") return rec;
+    } catch (err) {
+      // Unreadable or unreachable storage: no history, which is the safe read.
+    }
+    return { t: 0, n: 0 };
+  }
+  function noteContextLoss() {
+    var rec = readContextLossRecord();
+    var now = Date.now();
+    rec = { t: now, n: now - rec.t < CONTEXT_LOSS_WINDOW_MS ? rec.n + 1 : 1 };
+    try { global.sessionStorage.setItem(CONTEXT_LOSS_KEY, JSON.stringify(rec)); } catch (err) { /* see above */ }
+    return rec;
+  }
+  // True on a visit that follows back-to-back context losses. One loss is
+  // weather - a backgrounded tab - and the view comes back exactly as it was,
+  // precision included. Two in a row says something this page is doing is
+  // what the device cannot hold, and the multi-float programs are the
+  // likeliest something by a wide margin.
+  function contextLossForcesFloat32() {
+    var rec = readContextLossRecord();
+    return rec.n >= 2 && Date.now() - rec.t < CONTEXT_LOSS_WINDOW_MS;
+  }
+
+  function reloadToCurrentAddress() {
+    if (global.AppShell && global.AppShell.syncAddress) global.AppShell.syncAddress();
+    global.location.reload();
+  }
+  function reloadIntoMap(sceneForMap) {
+    try {
+      var fragment = global.ShareUrl.encode({
+        page: global.ShareUrl.PAGE_MAP,
+        scene: global.PhysicsCoords.toAuthoredJSON(sceneForMap),
+      });
+      global.history.replaceState(null, "", "#" + fragment);
+    } catch (err) {
+      // Reloads where it is, then: the editor, with the scene it auto-saved.
+    }
+    global.location.reload();
+  }
+
+  var contextRecoveryTimer = null;
+  function scheduleContextRecovery() {
+    if (!contextLost || contextRecoveryTimer) return;
+    if (document.hidden) return; // visibilitychange calls back in
+    if (global.AppShell && global.AppShell.currentView() !== "grid") return; // see above: the editor is left alone
+    contextRecoveryTimer = setTimeout(reloadToCurrentAddress, CONTEXT_RESTORE_GRACE_MS);
+  }
+
+  canvas.addEventListener("webglcontextlost", function (e) {
+    // Without this the browser never offers the context back at all.
+    e.preventDefault();
+    contextLost = true;
+    var rec = noteContextLoss();
+    contextLostEl.hidden = false;
+    if (rec.n > CONTEXT_LOSS_MAX_AUTO_RELOADS) {
+      contextLostText.textContent = "The browser keeps resetting this page\u2019s graphics, which usually means the device is out of graphics memory. Closing other tabs or apps may help.";
+      return; // the button is the only way on from here
+    }
+    scheduleContextRecovery();
+  });
+  canvas.addEventListener("webglcontextrestored", function () {
+    if (!contextLost) return;
+    if (readContextLossRecord().n > CONTEXT_LOSS_MAX_AUTO_RELOADS) return;
+    if (document.hidden || (global.AppShell && global.AppShell.currentView() !== "grid")) return;
+    if (contextRecoveryTimer) clearTimeout(contextRecoveryTimer);
+    reloadToCurrentAddress();
+  });
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden && readContextLossRecord().n <= CONTEXT_LOSS_MAX_AUTO_RELOADS) scheduleContextRecovery();
+  });
+  contextLostReloadBtn.addEventListener("click", reloadToCurrentAddress);
 
   }
 })(window);

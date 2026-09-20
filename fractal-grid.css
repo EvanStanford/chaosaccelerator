@@ -1365,3 +1365,113 @@ input[type="range"] {
 #movie-summary {
   margin: 10px 0;
 }
+
+/* ---- Settings > Performance Settings (see "Performance settings" in
+   fractal-grid.js) ---- */
+
+/* A titled group inside a card's body - the first the Settings card has
+   needed. Set off from the controls above it by a rule rather than a box:
+   the card is already a box. */
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  margin-top: 4px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.settings-section h3 {
+  margin: 0 0 12px 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+/* The readout's switch belongs to the section but not to the presets, and
+   sits apart from the controls they set. */
+#grid-view #perf-readout-field {
+  margin: 4px 0 0 0;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border);
+}
+
+/* The three-stop preset slider, with each stop's name under it. The names
+   are a three-column grid rather than flexed text, so "Custom" sits under
+   the middle stop whatever the two longer names on either side wrap to. */
+.perf-preset {
+  margin-bottom: 10px;
+}
+.perf-preset-labels {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.25;
+  color: var(--text-dim);
+}
+.perf-preset-labels span {
+  padding: 2px 0;
+}
+.perf-preset-labels [data-preset="low"] { text-align: left; }
+.perf-preset-labels [data-preset="custom"] { text-align: center; }
+.perf-preset-labels [data-preset="high"] { text-align: right; }
+/* Low and High can be pressed; Custom only ever happens. */
+.perf-preset-labels [data-preset="low"],
+.perf-preset-labels [data-preset="high"] {
+  cursor: pointer;
+}
+.perf-preset-labels .is-current {
+  color: var(--text);
+  font-weight: 600;
+}
+/* "Custom" names a place the slider can only end up, never be put - so its
+   name is only there while the slider is. (Hidden, not removed: it is the
+   middle column of the grid above.) */
+.perf-preset-labels [data-preset="custom"]:not(.is-current) {
+  visibility: hidden;
+}
+/* The controls the slider sets, folded away under it (see #perf-details in
+   index.html) - the editor's own "Advanced" disclosure, whose legend has to
+   sit on this card's fill rather than the editor panel's. */
+#perf-details {
+  margin-top: 0;
+}
+#perf-details[open] > summary {
+  background: #1e212b;
+}
+#perf-details[open] {
+  padding-top: 16px;
+}
+#grid-view .field select:disabled {
+  opacity: 0.55;
+}
+
+/* The performance readout: bottom centre of the map - the one stretch of its
+   edge no menu opens over (the columns hang from the two upper corners, and
+   an open card reaches the bottom of its side) - and above the watermark's
+   line. pointer-events: none - the map under it still pans and zooms. Wraps
+   rather than clips, since a phone is narrower than some of its lines. */
+#perf-readout {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 32px;
+  z-index: 2;
+  margin: 0;
+  width: max-content;
+  max-width: min(440px, calc(100% - 16px));
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(8, 9, 12, 0.78);
+  color: #c9f5d0;
+  font: 10.5px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+#perf-readout[hidden] {
+  display: none;
+}

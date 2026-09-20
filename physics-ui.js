@@ -760,8 +760,8 @@
     var dx = px - geo.x, dy = py - geo.y;
     var localX = dx * geo.dirX + dy * geo.dirY;
     var localY = -dx * geo.dirY + dy * geo.dirX;
-    var halfLen = RESIZE_HANDLE_LENGTH / 2 + RESIZE_HANDLE_HIT_PAD;
-    var halfWid = RESIZE_HANDLE_WIDTH / 2 + RESIZE_HANDLE_HIT_PAD;
+    var halfLen = RESIZE_HANDLE_LENGTH / 2 + RESIZE_HANDLE_HIT_PAD + pointerSlop;
+    var halfWid = RESIZE_HANDLE_WIDTH / 2 + RESIZE_HANDLE_HIT_PAD + pointerSlop;
     return Math.abs(localX) <= halfLen && Math.abs(localY) <= halfWid;
   }
 
@@ -908,8 +908,8 @@
     var dx = px - geo.x, dy = py - geo.y;
     var localX = dx * geo.tanX + dy * geo.tanY;
     var localY = -dx * geo.tanY + dy * geo.tanX;
-    var halfLen = RESIZE_HANDLE_LENGTH / 2 + RESIZE_HANDLE_HIT_PAD;
-    var halfWid = RESIZE_HANDLE_WIDTH / 2 + RESIZE_HANDLE_HIT_PAD;
+    var halfLen = RESIZE_HANDLE_LENGTH / 2 + RESIZE_HANDLE_HIT_PAD + pointerSlop;
+    var halfWid = RESIZE_HANDLE_WIDTH / 2 + RESIZE_HANDLE_HIT_PAD + pointerSlop;
     return Math.abs(localX) <= halfLen && Math.abs(localY) <= halfWid;
   }
 
@@ -991,7 +991,7 @@
     var geo = anchorIconGeometry(bodyIndex);
     if (!geo) return false;
     var dx = px - geo.x, dy = py - geo.y;
-    var r = ANCHOR_ICON_RADIUS + ANCHOR_ICON_HIT_PAD;
+    var r = ANCHOR_ICON_RADIUS + ANCHOR_ICON_HIT_PAD + pointerSlop;
     return dx * dx + dy * dy <= r * r;
   }
 
@@ -1317,9 +1317,38 @@
 
   // ---- Hit testing (topmost first = end of array first, matching paint order) ----
 
-  function hitTestTopmost(px, py) {
+  // How far outside a shape's drawn edge the pointer now pressing the canvas
+  // may land and still pick it up. Zero for a mouse, which is as exact as it
+  // looks; a fingertip covers a disc of glass and reports some point inside
+  // it, which for a LINE - a few pixels thick - is a miss more often than
+  // not. Set per press from the pointer's own type (see the pointerdown
+  // handler), so a touch laptop gets each where it applies. The on-canvas
+  // handles widen their own hit boxes by the same amount.
+  var TOUCH_HIT_SLOP = 14;
+  var pointerSlop = 0;
+  var HIT_RING = [[1, 0], [0.7071, 0.7071], [0, 1], [-0.7071, 0.7071], [-1, 0], [-0.7071, -0.7071], [0, -1], [0.7071, -0.7071]];
+
+  function hitTestExact(px, py) {
     for (var i = scene.bodies.length - 1; i >= 0; i--) {
       if (PhysicsEngine.pointInBody(scene.bodies[i], px, py)) return i;
+    }
+    return -1;
+  }
+
+  function hitTestTopmost(px, py) {
+    var hit = hitTestExact(px, py);
+    if (hit >= 0 || pointerSlop <= 0) return hit;
+    // Nothing exactly under the point: whatever is nearest within the slop,
+    // found by trying a ring of points at half of it and then at all of it.
+    // Coarse next to a true distance-to-shape, but that is a function the
+    // engine doesn't have for every shape, and eight probes of the one it
+    // does are plenty to tell "meant that line" from "meant empty space".
+    for (var ring = 1; ring <= 2; ring++) {
+      var r = pointerSlop * ring / 2;
+      for (var k = 0; k < HIT_RING.length; k++) {
+        hit = hitTestExact(px + HIT_RING[k][0] * r, py + HIT_RING[k][1] * r);
+        if (hit >= 0) return hit;
+      }
     }
     return -1;
   }
@@ -1338,10 +1367,42 @@
     activeTool = tool;
     toolButtons.forEach(function (b) { b.classList.toggle("active", b.getAttribute("data-tool") === tool); });
     canvas.className = "tool-" + tool;
+    // Back to Select means the tool was used or abandoned; either way what
+    // it wanted done no longer needs saying.
+    if (tool === "select") hideToolHint();
+  }
+
+  // Every tool button says what it wants done in its title - which a mouse
+  // reads by hovering, and a finger never sees. So a tool picked BY TOUCH
+  // says the same thing in a toast over the canvas instead (#editor-hint-
+  // toast - see index.html), from the same title attribute so there is
+  // still one copy of each instruction, with its "click" read as "tap".
+  // Which kind of pointer pressed last is noted at the window, in the
+  // capture phase, so it is already known by the time the click it produces
+  // reaches a button.
+  var toolHintEl = document.getElementById("editor-hint-toast");
+  var toolHintTimer = null;
+  var TOOL_HINT_VISIBLE_MS = 6000;
+  var lastPointerType = "mouse";
+  window.addEventListener("pointerdown", function (e) { lastPointerType = e.pointerType || "mouse"; }, true);
+
+  function hideToolHint() {
+    if (toolHintTimer) { clearTimeout(toolHintTimer); toolHintTimer = null; }
+    if (toolHintEl) toolHintEl.classList.remove("visible");
+  }
+  function showToolHint(text) {
+    if (!toolHintEl || !text) return;
+    hideToolHint();
+    toolHintEl.textContent = text.replace(/\bClick\b/g, "Tap").replace(/\bclick\b/g, "tap");
+    toolHintEl.classList.add("visible");
+    toolHintTimer = setTimeout(hideToolHint, TOOL_HINT_VISIBLE_MS);
   }
 
   toolButtons.forEach(function (btn) {
-    btn.addEventListener("click", function () { setActiveTool(btn.getAttribute("data-tool")); });
+    btn.addEventListener("click", function () {
+      setActiveTool(btn.getAttribute("data-tool"));
+      if (lastPointerType === "touch") showToolHint(btn.getAttribute("title"));
+    });
   });
 
   // No dedicated "Select" button - it's the default, and any click in the
@@ -1376,6 +1437,44 @@
   btnSettingsClose.addEventListener("click", function () {
     settingsPanel.classList.remove("open");
   });
+
+  // ---- The top bar (small-window layout only) ----
+  //
+  // On a desktop the Play transport floats over the top of the scene and the
+  // settings button over its corner, and the scene has room to spare under
+  // both. A phone's scene has none, so there (LayoutMode.isMobile - the
+  // window's size, not the device) the two are MOVED into #editor-topbar, a
+  // bar locked to the top of the screen with the canvas starting below it,
+  // and moved back when the window is wide again. Moved rather than copied,
+  // for the reason the grid's dock gives: every listener and every id stays
+  // on the one element it was bound to. (The settings PANEL the button opens
+  // takes the whole screen in that layout - that part is only CSS, see
+  // .settings-panel in mobile.css.)
+  //
+  // Nothing else has to know. The canvas area shrinks by the bar's height,
+  // which its ResizeObserver turns into a resize like any other, and
+  // deleteZoneTop already measures the transport wherever it happens to be.
+  var editorTopbar = document.getElementById("editor-topbar");
+  var topbarHomes = null; // where each element lives in the desktop layout
+  function setTopbarActive(active) {
+    if (!editorTopbar || !playbackToolbar) return;
+    if (active === !!topbarHomes) return;
+    if (active) {
+      topbarHomes = [playbackToolbar, btnSettings].map(function (el) {
+        return { el: el, parent: el.parentNode, next: el.nextSibling };
+      });
+      editorTopbar.appendChild(playbackToolbar);
+      editorTopbar.appendChild(btnSettings);
+    } else {
+      topbarHomes.forEach(function (home) { home.parent.insertBefore(home.el, home.next); });
+      topbarHomes = null;
+    }
+    closeSpeedPopup(); // it was placed against a button that has just moved
+  }
+  if (window.LayoutMode) {
+    window.LayoutMode.onChange(function (mode) { setTopbarActive(mode.isMobile()); });
+    setTopbarActive(window.LayoutMode.isMobile());
+  }
   btnResetTips.addEventListener("click", function () {
     try {
       localStorage.removeItem(TIP_DISMISSED_KEY);
@@ -1514,9 +1613,30 @@
   });
 
   // ---- Canvas interaction ----
+  //
+  // Pointer events, not mouse events: one set of listeners for a mouse, a
+  // finger and a pen. (Mouse events alone left every DRAG in the editor dead
+  // on a touchscreen - a browser only synthesizes them for a tap, never for
+  // a moving finger - so shapes could not be drawn, moved, resized, rotated
+  // or aimed.) The canvas has touch-action: none (see mobile.css), so a
+  // finger on it is never the browser's to scroll with.
+  //
+  // One pointer at a time. A second finger landing mid-drag is not primary
+  // and is ignored rather than fought over, and the pointer that started a
+  // gesture is the only one that can move or finish it. (isPrimary is the
+  // whole test: a primary pointer can only go down while no other of its
+  // kind is, so an id left behind by a pointerup that never arrived is
+  // simply overwritten instead of locking the canvas.) Captured, so the drag
+  // keeps arriving while the pointer is outside the canvas - which a finger,
+  // unlike a mouse over a window, otherwise stops doing at the canvas's edge.
+  var activePointerId = null;
 
-  canvas.addEventListener("mousedown", function (e) {
+  canvas.addEventListener("pointerdown", function (e) {
     if (isPlaying) return;
+    if (!e.isPrimary) return;
+    activePointerId = e.pointerId;
+    pointerSlop = e.pointerType === "touch" ? TOUCH_HIT_SLOP : 0;
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* already gone: the window listeners still see it */ }
     var p = canvasPoint(e);
 
     if (activeTool === "select") {
@@ -1642,7 +1762,8 @@
     }
   });
 
-  window.addEventListener("mousemove", function (e) {
+  window.addEventListener("pointermove", function (e) {
+    if (activePointerId !== null && e.pointerId !== activePointerId) return;
     if (rotationHandleDrag) {
       updateRotationHandleDrag(canvasPoint(e));
       return;
@@ -1671,7 +1792,26 @@
     render();
   });
 
-  window.addEventListener("mouseup", function (e) {
+  // The browser took the pointer away mid-gesture (a system swipe, an
+  // incoming call, a palm): whatever was in progress is dropped, not
+  // committed - a half-drawn shape placed wherever the finger happened to be
+  // is worse than no shape.
+  window.addEventListener("pointercancel", function (e) {
+    if (e.pointerId !== activePointerId) return;
+    activePointerId = null;
+    rotationHandleDrag = null;
+    resizeHandleDrag = null;
+    velocityDrag = null;
+    drawingShape = null;
+    dragging = false;
+    deleteZoneArmed = false;
+    canvas.classList.remove("dragging");
+    render();
+  });
+
+  window.addEventListener("pointerup", function (e) {
+    if (e.pointerId !== activePointerId) return;
+    activePointerId = null;
     if (rotationHandleDrag) {
       rotationHandleDrag = null;
       return;
@@ -2770,8 +2910,17 @@
     playbackProgressSlider.value = String(Math.max(1, stepCount));
   }
 
+  // Drawings rather than the characters they used to be: U+23F8 has an emoji
+  // form, and a phone with no plain-text glyph for it draws that - an orange
+  // tile in a row of white icons. (Same two in fractal-grid.js.)
+  var PLAY_ICON_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72a.6.6 0 0 0 .92.5l10.55-6.86a.6.6 0 0 0 0-1L8.92 4.64a.6.6 0 0 0-.92.5z"></path></svg>';
+  var PAUSE_ICON_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg>';
   function updatePlayPauseButtonUI() {
-    btnPlayPause.textContent = isAdvancing ? "⏸" : "▶";
+    var icon = isAdvancing ? "pause" : "play";
+    if (btnPlayPause.getAttribute("data-icon") !== icon) {
+      btnPlayPause.setAttribute("data-icon", icon);
+      btnPlayPause.innerHTML = isAdvancing ? PAUSE_ICON_SVG : PLAY_ICON_SVG;
+    }
     btnPlayPause.title = isAdvancing ? "Pause" : "Play";
     btnPlayPause.setAttribute("aria-label", isAdvancing ? "Pause" : "Play");
   }

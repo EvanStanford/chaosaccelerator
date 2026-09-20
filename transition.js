@@ -29,6 +29,9 @@
   // just grabbed for hiding. See "Where the zoom starts" below.
   var editorPanel = document.getElementById("panel");
   var editorCanvasArea = document.getElementById("canvas-area");
+  // And the box the MAP is drawn in, read for its rect the same way - see
+  // gridCenter below.
+  var gridCanvasArea = document.getElementById("grid-canvas-area");
 
   var current = "editor";
 
@@ -293,6 +296,27 @@
     };
   }
 
+  // Where the zoom ENDS: the map's own on-screen centre, which is where the
+  // grid has world (0, 0) for the whole run. In the desktop layout that is
+  // simply the middle of the window - the grid's menus float over a canvas
+  // that fills it - but in the small-window layout the map shares the window
+  // with the dock (see "The dock" in fractal-grid.js), so its centre is not
+  // the window's, and tiles converging on the window's would slide off the
+  // picture they are supposed to be dissolving into.
+  //
+  // Read every frame rather than once per run: a forward run starts in the
+  // same task that opens the grid's Inspect card, and the dock only settles
+  // its size (and with it the map's) at the end of that task.
+  function gridCenter(dims) {
+    var rect = gridCanvasArea ? gridCanvasArea.getBoundingClientRect() : null;
+    if (!rect || rect.width <= 0 || rect.height <= 0) return { x: dims.w / 2, y: dims.h / 2 };
+    var layerRect = layer.getBoundingClientRect();
+    return {
+      x: (rect.left - layerRect.left + rect.width / 2) * dims.dpr,
+      y: (rect.top - layerRect.top + rect.height / 2) * dims.dpr,
+    };
+  }
+
   // ---- Running one ----
   var active = null;
   // What the most recent rendered frame was, for debugRenderAt to report.
@@ -419,8 +443,9 @@
       // such kink: velocity is constant throughout, so any residual turning
       // point is a gentle apex, not a visible snap.
       var centerT = u;
-      var centerX = origin.centerX + (dims.w / 2 - origin.centerX) * centerT;
-      var centerY = origin.centerY + (dims.h / 2 - origin.centerY) * centerT;
+      var end = gridCenter(dims);
+      var centerX = origin.centerX + (end.x - origin.centerX) * centerT;
+      var centerY = origin.centerY + (end.y - origin.centerY) * centerT;
 
       if (opts.tiled) {
         // cellPx is ALREADY in device pixels (it descends from startPx =

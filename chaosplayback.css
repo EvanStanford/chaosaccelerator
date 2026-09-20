@@ -225,3 +225,77 @@ button.bar-link:disabled {
   color: var(--accent);
   border-color: var(--accent);
 }
+
+/* ---- Phones, and fingers ----
+   The same adjustments mobile.css makes for the app itself, in miniature:
+   this page is one bar, one picture and one row of buttons, and needs no
+   layout of its own for a small window - only to keep clear of the notch and
+   the home indicator (viewport-fit=cover, see chaosplayback.html), not to
+   bounce or zoom, and to give a finger targets it can hit. */
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  touch-action: manipulation;
+}
+html, body {
+  overscroll-behavior: none;
+}
+body {
+  -webkit-tap-highlight-color: transparent;
+}
+
+#player-bar {
+  padding-top: calc(8px + env(safe-area-inset-top, 0px));
+  padding-left: calc(12px + env(safe-area-inset-left, 0px));
+  padding-right: calc(12px + env(safe-area-inset-right, 0px));
+}
+#transport {
+  padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  padding-left: calc(12px + env(safe-area-inset-left, 0px));
+  padding-right: calc(12px + env(safe-area-inset-right, 0px));
+}
+
+@media (max-width: 560px) {
+  /* Two links, the facts and Download do not fit one line of a phone; the
+     facts are the part that can go to a line of their own. */
+  #player-bar {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+  #movie-facts {
+    order: 5;
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+  #transport {
+    gap: 6px;
+  }
+  #time-readout {
+    min-width: 0;
+    font-size: 11px;
+  }
+}
+
+@media (pointer: coarse) {
+  body {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  .bar-link {
+    padding: 10px 14px;
+  }
+  .transport-button {
+    width: 42px;
+    height: 42px;
+    font-size: 16px;
+  }
+  .transport-button.wide {
+    width: 52px;
+    font-size: 13px;
+  }
+  #scrubber {
+    min-height: 36px;
+  }
+}

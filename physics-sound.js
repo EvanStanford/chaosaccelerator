@@ -94,9 +94,36 @@
 
   function resumedContext() {
     var c = ensureContext();
-    if (c && c.state === "suspended") c.resume();
+    // Anything but "running": iOS has a third state, "interrupted" (a call,
+    // the tab sent to the background), that wants the same resume.
+    if (c && c.state !== "running" && c.state !== "closed") {
+      var resumed = c.resume();
+      // Refused outside a gesture (see below) - which is reported as a
+      // rejected promise, and an unhandled one is an error in the console for
+      // every sound that didn't play.
+      if (resumed && resumed.catch) resumed.catch(function () {});
+    }
     return c;
   }
+
+  // ---- Unlocking, where "after a gesture" isn't enough ----
+  //
+  // The comment at the top of this file holds on a desktop: every sound is
+  // downstream of something the user did, and Chrome and Firefox let a
+  // context start any time after the page's first interaction. But no sound
+  // is ever played FROM the gesture - they come out of an animation frame,
+  // moments later - and iOS Safari only lets a context start (or restart,
+  // after an interruption) from inside the gesture's own event handler. Left
+  // to the lazy path alone, a phone never makes a sound at all.
+  //
+  // So every gesture anywhere on the page also pokes the context. Capture
+  // phase and passive: it must run even where a handler further down stops
+  // the event (the grid's own touch handlers call preventDefault), and it
+  // never needs to stop anything itself. The release half of the gesture
+  // (touchend/pointerup/click), since that is the half iOS counts.
+  ["touchend", "pointerup", "click", "keydown"].forEach(function (type) {
+    global.addEventListener(type, function () { resumedContext(); }, { capture: true, passive: true });
+  });
 
   // ---- Chords, centered on middle C (MIDI 60) ----
   //
