@@ -44,6 +44,7 @@
     setScene: function () {},
     shareState: function () { return null; },
     applyShareView: function () {},
+    renderStill: function () {},
   };
 
   function boot(bootScene) {
@@ -370,7 +371,10 @@
   // to know them by name at its own construction time (settingsMenu/
   // inspectMenu/statsMenu are still being built when the first of them runs
   // this).
-  var menuGroups = { left: [], right: [] };
+  // "movie" is a group of one: the Movie card stays open alongside Map
+  // Evolution, whose frame its keyframes are taken at - and which puts the
+  // map back to its last frame the moment it is closed (see playbackMenu).
+  var menuGroups = { left: [], right: [], movie: [] };
   function makeMenu(itemId, toggleId, side, onChange) {
     var item = document.getElementById(itemId);
     var toggle = document.getElementById(toggleId);
@@ -4447,6 +4451,10 @@
     return Math.pow(2, levels - step);
   }
   function startStride() {
+    // A still being rendered for a movie (see renderStill) has no use for
+    // the coarse levels - they exist to put SOMETHING on screen quickly, and
+    // each costs a whole run's latency - so its ladder is its last rung.
+    if (stillJob) return endStride();
     return Math.max(sliderValueToStride(Number(resolutionMinSlider.value)), endStride());
   }
   function endStride() {
@@ -5500,7 +5508,7 @@
     // work, just the end of the first sample - and only when the ladder
     // actually reached one simulation per pixel, since averaging offset
     // samples of a deliberately coarse render would just blur the blocks.
-    if (progressive.aaSample === 0 && endStride() <= 1 &&
+    if (progressive.aaSample === 0 && endStride() <= 1 && !(stillJob && !stillJob.antialias) &&
         progressive.accumStride === 1 && beginAntialias()) {
       progressive.band = 0;
       presentFrame();
@@ -5516,6 +5524,7 @@
     // sample averaged in. Global Stats waits for exactly this and then a
     // further beat on top, being the lowest-priority work on the page.
     statsOnRenderSettled();
+    deliverStill();
   }
 
   // The canvas backing store is now always the full device-pixel
@@ -10021,6 +10030,11 @@
     bounceMaxProbe.measuredKey = null;
     bounceMaxProbe.key = null;
     clearInspected();
+    // Keyframes are views of the old scene's map, and a still half-rendered
+    // for someone is a picture of it.
+    movie.keyframes = [];
+    stillJob = null;
+    updateMovieUI();
     setViewCenter(DEFAULT_CENTER.x, DEFAULT_CENTER.y);
     view.scale = DEFAULT_SCALE;
     // Display mode and Color Zoom are this page's own view of the field,
@@ -10045,6 +10059,218 @@
     // rather than dimmed, unlike an ordinary view change (see markStale).
     if (statsPanel) { statsHasResult = false; statsResultIsCurrent = false; statsPanel.clearResult(); }
     resizeCanvas();
+    markDirty();
+  };
+
+  // ---- Movies ----
+  //
+  // A movie is a list of KEYFRAMES - a view of the map, and the Map
+  // Evolution frame it was showing - that a camera then travels between
+  // (movie-path.js is the travelling). The Movie card only collects them;
+  // Done hands the list, in a link, to chaosplayback.html, which renders
+  // every frame and plays the result. That page has no renderer of its own:
+  // it loads this app in a frame and asks it for one finished picture after
+  // another through renderStill, below - so a movie is drawn by exactly the
+  // code that draws the map, at whatever precision each of its views needs.
+
+  var MOVIE_QUALITIES = MoviePath.QUALITIES;
+  // keyframes: [{ center: { x, xLo, y, yLo }, scale, step, seconds }] -
+  // movie-path.js's own shape, seconds null until the user types one.
+  var movie = { keyframes: [], quality: MOVIE_QUALITIES.length - 1, loop: true };
+
+  var movieMenu = makeMenu("menu-movie", "grid-btn-movie", "movie");
+  var movieHint = document.getElementById("movie-hint");
+  var btnMovieAddKeyframe = document.getElementById("movie-add-keyframe");
+  var movieKeyframeList = document.getElementById("movie-keyframe-list");
+  var movieQualitySlider = document.getElementById("movie-quality-slider");
+  var movieQualityReadout = document.getElementById("movie-quality-readout");
+  var movieLoopCheckbox = document.getElementById("movie-loop-checkbox");
+  var movieSummary = document.getElementById("movie-summary");
+  var btnMovieDone = document.getElementById("movie-done");
+
+  function currentKeyframe(seconds) {
+    return {
+      center: { x: view.center.x, xLo: view.center.xLo, y: view.center.y, yLo: view.center.yLo },
+      scale: view.scale,
+      step: timeline.step,
+      seconds: seconds === undefined ? null : seconds,
+    };
+  }
+
+  function goToKeyframe(k) {
+    // A frame short of the last is only ever on screen with Map Evolution
+    // open (closing it is what puts the map back to the end), so showing one
+    // opens it - and takes the map off the Inspect preview's clock, which
+    // would otherwise carry it straight off again.
+    if (k.step < simulationSteps) playbackMenu.set(true);
+    unlinkMapWhereItIs();
+    view.center.x = k.center.x; view.center.xLo = k.center.xLo;
+    view.center.y = k.center.y; view.center.yLo = k.center.yLo;
+    view.scale = k.scale;
+    seekTimeline(Math.min(k.step, simulationSteps));
+    updateZoomReadout();
+    markDirty();
+  }
+
+  function movieButton(glyph, title, onClick) {
+    var button = document.createElement("button");
+    button.type = "button";
+    button.className = "icon-button";
+    button.textContent = glyph;
+    button.title = title;
+    button.setAttribute("aria-label", title);
+    button.addEventListener("click", onClick);
+    return button;
+  }
+
+  // Rebuilt whole on every change: a movie has a handful of keyframes, and
+  // each row's text depends on its neighbours (the time a move takes is a
+  // property of BOTH its ends).
+  function updateMovieUI() {
+    movieKeyframeList.textContent = "";
+    var moves = MoviePath.moves(movie.keyframes, movie.loop);
+    movie.keyframes.forEach(function (k, i) {
+      var row = document.createElement("li");
+      row.className = "movie-keyframe";
+
+      var what = document.createElement("div");
+      what.className = "movie-keyframe-what";
+      var index = document.createElement("b");
+      index.textContent = String(i + 1);
+      var text = document.createElement("span");
+      text.textContent = formatZoom(DEFAULT_SCALE / k.scale) + "  \u00b7  frame " + Math.min(k.step, simulationSteps).toLocaleString();
+      what.appendChild(index);
+      what.appendChild(text);
+
+      // The move that ARRIVES here. The first keyframe has one only in a
+      // movie that returns to it.
+      var arriving = i > 0 ? moves[i - 1] : (movie.loop && movie.keyframes.length > 1 ? moves[moves.length - 1] : null);
+      if (arriving) {
+        var secondsField = document.createElement("label");
+        secondsField.className = "movie-keyframe-seconds";
+        secondsField.title = "How long the move arriving at this keyframe takes. Left empty, it is worked out from how far the camera and the simulation have to go.";
+        var secondsInput = document.createElement("input");
+        secondsInput.type = "number";
+        secondsInput.min = "0.1"; secondsInput.max = "60"; secondsInput.step = "0.1";
+        secondsInput.placeholder = String(arriving.seconds);
+        if (k.seconds) secondsInput.value = String(k.seconds);
+        secondsInput.setAttribute("aria-label", "Seconds to reach keyframe " + (i + 1));
+        secondsInput.addEventListener("change", function () {
+          var v = Number(secondsInput.value);
+          k.seconds = v > 0 ? clamp(Math.round(v * 10) / 10, 0.1, 60) : null;
+          updateMovieUI();
+        });
+        secondsField.appendChild(secondsInput);
+        secondsField.appendChild(document.createTextNode(" s"));
+        what.appendChild(secondsField);
+      }
+      row.appendChild(what);
+
+      var actions = document.createElement("div");
+      actions.className = "movie-keyframe-actions";
+      actions.appendChild(movieButton("⌖", "Go to this keyframe", function () { goToKeyframe(k); }));
+      actions.appendChild(movieButton("⟳", "Replace with the current view and frame", function () {
+        movie.keyframes[i] = currentKeyframe(k.seconds);
+        updateMovieUI();
+      }));
+      var earlier = movieButton("▲", "Move earlier", function () {
+        movie.keyframes.splice(i - 1, 0, movie.keyframes.splice(i, 1)[0]);
+        updateMovieUI();
+      });
+      earlier.disabled = i === 0;
+      var later = movieButton("▼", "Move later", function () {
+        movie.keyframes.splice(i + 1, 0, movie.keyframes.splice(i, 1)[0]);
+        updateMovieUI();
+      });
+      later.disabled = i === movie.keyframes.length - 1;
+      actions.appendChild(earlier);
+      actions.appendChild(later);
+      actions.appendChild(movieButton("✕", "Delete this keyframe", function () {
+        movie.keyframes.splice(i, 1);
+        updateMovieUI();
+      }));
+      row.appendChild(actions);
+      movieKeyframeList.appendChild(row);
+    });
+
+    movieHint.hidden = movie.keyframes.length > 0;
+    movieQualitySlider.value = String(movie.quality);
+    movieQualityReadout.textContent = MOVIE_QUALITIES[movie.quality].label;
+    movieLoopCheckbox.checked = movie.loop;
+    var seconds = MoviePath.totalSeconds(movie.keyframes, movie.loop);
+    movieSummary.textContent = movie.keyframes.length < 2
+      ? (movie.keyframes.length ? "Add at least one more keyframe." : "")
+      : movie.keyframes.length + " keyframes  \u00b7  " + seconds.toFixed(1) + " s  \u00b7  " +
+        Math.round(seconds * MoviePath.FPS).toLocaleString() + " frames to render";
+    btnMovieDone.disabled = movie.keyframes.length < 2;
+  }
+
+  btnMovieAddKeyframe.addEventListener("click", function () {
+    movie.keyframes.push(currentKeyframe());
+    updateMovieUI();
+  });
+  movieQualitySlider.addEventListener("input", function () {
+    movie.quality = clamp(Number(movieQualitySlider.value), 0, MOVIE_QUALITIES.length - 1);
+    movieQualityReadout.textContent = MOVIE_QUALITIES[movie.quality].label;
+  });
+  movieLoopCheckbox.addEventListener("change", function () {
+    movie.loop = movieLoopCheckbox.checked;
+    updateMovieUI();
+  });
+  btnMovieDone.addEventListener("click", function () {
+    if (movie.keyframes.length < 2) return;
+    var shared = global.FractalGrid.shareState();
+    var link = "chaosplayback.html#" + ShareUrl.encode({
+      page: ShareUrl.PAGE_MOVIE,
+      scene: PhysicsCoords.toAuthoredJSON(shared.scene),
+      // A movie has no view of its own - its keyframes are its views.
+      view: { display: shared.view.display, precision: shared.view.precision, movie: shared.view.movie },
+    });
+    // The address this page leaves behind has to say what is in the card,
+    // or Back from the player would return to a map with no keyframes.
+    if (global.AppShell && global.AppShell.syncAddress) global.AppShell.syncAddress();
+    global.location.href = link;
+  });
+  updateMovieUI();
+
+  // ---- One finished picture, on request ----
+  //
+  // What the movie player asks of this page, once per frame of the movie:
+  // show THIS view at THIS simulation frame, render it all the way, and say
+  // when it is on the canvas. `onDone` is called in the same task as the
+  // draw that finished it, which is the one moment the canvas can be copied
+  // from (it has no preserved drawing buffer - by the next task the browser
+  // may have cleared it).
+  //
+  // A picture is only ever handed over at the precision its view calls for.
+  // One that finishes while that is still being built was drawn by the
+  // float32 stand-in, and is kept back: the build landing restarts the
+  // render (see pumpPlaybackBuilds), and the run after that is the one
+  // delivered. A rung that failed or is too slow here is not coming, so that
+  // is not waited for.
+  var stillJob = null;
+  function deliverStill() {
+    if (!stillJob) return;
+    var wanted = pickPrecision();
+    if (effectivePrecision() !== wanted && precisionPending(wanted)) return;
+    var job = stillJob;
+    stillJob = null;
+    job.onDone(canvas);
+  }
+  // spec: { center: { x, xLo, y, yLo }, scale, step, antialias }
+  global.FractalGrid.renderStill = function (spec, onDone) {
+    stillJob = { antialias: spec.antialias !== false, onDone: onDone };
+    stopTimelineClock();
+    unlinkMapWhereItIs();
+    view.center.x = spec.center.x; view.center.xLo = spec.center.xLo || 0;
+    view.center.y = spec.center.y; view.center.yLo = spec.center.yLo || 0;
+    view.scale = clamp(spec.scale, MIN_SCALE, MAX_SCALE);
+    timeline.step = clamp(Math.round(spec.step), 0, simulationSteps);
+    // Playback state is only ever advanced, never rewound, and is for a
+    // view that has just been left in any case.
+    timeline.stateKey = null;
+    updateZoomReadout();
+    updateTimelineUI();
     markDirty();
   };
 
@@ -10115,6 +10341,13 @@
         speed: playbackSpeed,
         volume: PhysicsSound.getVolume(),
         inspect: inspect,
+        movie: {
+          keyframes: movie.keyframes.map(function (k) {
+            return { center: k.center, scale: k.scale, zoom: DEFAULT_SCALE / k.scale, step: k.step, seconds: k.seconds };
+          }),
+          quality: movie.quality,
+          loop: movie.loop,
+        },
       },
     };
   };
@@ -10153,6 +10386,18 @@
     });
     pendingInspect = groups.length ? groups : null;
     pendingInspectFrames = 0;
+
+    movie.keyframes = shared.movie.keyframes.map(function (k) {
+      return {
+        center: k.center,
+        scale: clamp(DEFAULT_SCALE / k.zoom, MIN_SCALE, MAX_SCALE),
+        step: clamp(k.step, 0, simulationSteps),
+        seconds: k.seconds,
+      };
+    });
+    movie.quality = clamp(shared.movie.quality, 0, MOVIE_QUALITIES.length - 1);
+    movie.loop = shared.movie.loop;
+    updateMovieUI();
 
     updateZoomReadout();
     markDirty();

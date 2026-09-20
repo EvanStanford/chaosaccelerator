@@ -558,6 +558,48 @@
                 </div>
               </div>
             </section>
+
+            <!-- A movie is a list of keyframes - a view of the map AND the
+                 Map Evolution frame it was showing - that the camera then
+                 travels between (see movie-path.js). This card only collects
+                 them; Done hands the list to chaosplayback.html, which
+                 renders every frame and plays the result. It is NOT part of
+                 the accordion the two cards above it share (see menuGroups
+                 in fractal-grid.js): a keyframe is taken at whatever frame
+                 Map Evolution is showing, and that card puts the map back to
+                 its last frame the moment it is closed. -->
+            <section class="menu-item" id="menu-movie">
+              <button class="menu-toggle" id="grid-btn-movie" type="button" title="Movie" aria-label="Movie" aria-expanded="false">
+                <svg class="clapperboard" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="10.5" width="18" height="10" rx="1.5"></rect><path d="M3.4 10.2 2.6 6.7 19.2 2.9l.8 3.5z"></path><path d="m7.4 5.6 2.2 3.2"></path><path d="m12.8 4.4 2.2 3.2"></path></svg>
+              </button>
+              <div class="menu-card" id="grid-movie-panel" hidden>
+                <div class="menu-card-header">
+                  <span class="menu-card-icon" aria-hidden="true">
+                    <svg class="clapperboard" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="10.5" width="18" height="10" rx="1.5"></rect><path d="M3.4 10.2 2.6 6.7 19.2 2.9l.8 3.5z"></path><path d="m7.4 5.6 2.2 3.2"></path><path d="m12.8 4.4 2.2 3.2"></path></svg>
+                  </span>
+                  <h2>Movie</h2>
+                  <button id="grid-btn-movie-close" class="icon-button menu-collapse" type="button" title="Collapse Movie" aria-label="Collapse Movie">&#9660;</button>
+                </div>
+                <div class="menu-card-body">
+                  <p class="readout hint" id="movie-hint">Pan and zoom to a view, pick a frame in Map Evolution if you like, then add it. The camera travels smoothly from each keyframe to the next.</p>
+                  <button id="movie-add-keyframe" type="button">Add Keyframe</button>
+                  <ol id="movie-keyframe-list"></ol>
+                  <label class="field">
+                    <span>Resolution: <b id="movie-quality-readout">Full + antialiasing</b></span>
+                    <input type="range" id="movie-quality-slider" min="0" max="4" step="1" value="4" aria-label="Movie resolution">
+                  </label>
+                  <label class="toggle-field" title="Adds one more move at the end, from the last keyframe back to the first, so the movie plays on a loop without a jump.">
+                    <span>Return to First Keyframe</span>
+                    <span class="toggle-switch">
+                      <input type="checkbox" id="movie-loop-checkbox" checked>
+                      <span class="toggle-slider"></span>
+                    </span>
+                  </label>
+                  <p class="readout" id="movie-summary"></p>
+                  <button id="movie-done" type="button" disabled>Done</button>
+                </div>
+              </div>
+            </section>
           </div>
           <!-- A car-gauge-style ring in the lower left, tracking the
                progressive render (see updateRenderProgressRing in
@@ -673,6 +715,7 @@
 <script src="physics-engine.js"></script>
 <script src="physics-coords.js"></script>
 <script src="share-url.js"></script>
+<script src="movie-path.js"></script>
 <script src="physics-sound.js"></script>
 <script src="physics-hinge-geometry.js"></script>
 <script src="physics-df.js"></script>

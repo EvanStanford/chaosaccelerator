@@ -5384,6 +5384,121 @@
     }
   );
 
+  // ---- Movies (movie-path.js, and their fields in share-url.js) ----
+
+  function movieKeyframe(x, y, scale, step, seconds) {
+    return { center: { x: x, xLo: 0, y: y, yLo: 0 }, scale: scale, step: step || 0, seconds: seconds === undefined ? null : seconds };
+  }
+  function viewDistance(p, q) {
+    return Math.hypot((p.x - q.x) + (p.xLo - q.xLo), (p.y - q.y) + (p.yLo - q.yLo));
+  }
+
+  addTest(
+    "A movie's camera lands exactly on every keyframe, however far it pans while it zooms",
+    "movie-path.js's path() - the textbook form of van Wijk & Nuij's zoom-and-pan path gives the position as a FRACTION of the whole pan, good to one part in 1e16, and subtracts two numbers that grow with the zoom ratio to get it. Both are harmless across a UI transition's 10x and ruinous across this map's 1e12x: on the move below the textbook form ends thousands of views from its keyframe. Each half of the path is measured from its own end instead, so both ends are exact and the halves have to meet in the middle",
+    function () {
+      var cases = [
+        ["gentle", movieKeyframe(0, 0, 1000), movieKeyframe(900, -400, 300)],
+        ["pure pan", movieKeyframe(0, 0, 500), movieKeyframe(800, 0, 500)],
+        ["pure zoom 1e20", movieKeyframe(12.5, -3, 1000), movieKeyframe(12.5, -3, 1e-17)],
+        ["pan 1000 views while zooming in 1e12", movieKeyframe(0, 0, 1), movieKeyframe(1000, 250, 1e-12)],
+        ["zoom out 1e15 and pan", movieKeyframe(3.3333, 1.25, 1e-15), movieKeyframe(-40, 9, 1)],
+      ];
+      var worstEnd = 0, worstSeam = 0, worstHop = 0, bad = [];
+      cases.forEach(function (c) {
+        var from = c[1], to = c[2], route = MoviePath.path(from, to);
+        var start = route.at(0), end = route.at(1);
+        var endError = Math.max(viewDistance(start.center, from.center) / from.scale, viewDistance(end.center, to.center) / to.scale,
+          Math.abs(start.scale / from.scale - 1), Math.abs(end.scale / to.scale - 1));
+        var before = route.at(0.5 - 1e-12), after = route.at(0.5);
+        var seam = Math.max(viewDistance(before.center, after.center) / after.scale, Math.abs(before.scale / after.scale - 1));
+        var previous = start, hop = 0, finite = true;
+        for (var k = 1; k <= 400; k++) {
+          var v = route.at(k / 400);
+          if (!(v.scale > 0) || !isFinite(v.center.x + v.center.y)) finite = false;
+          hop = Math.max(hop, viewDistance(v.center, previous.center) / Math.max(v.scale, previous.scale));
+          previous = v;
+        }
+        worstEnd = Math.max(worstEnd, endError); worstSeam = Math.max(worstSeam, seam); worstHop = Math.max(worstHop, hop);
+        if (endError > 1e-9 || seam > 1e-6 || hop > 0.1 || !finite || !(route.length > 0)) bad.push(c[0]);
+      });
+      // Far apart, the path pulls back until both ends are in view.
+      var far = MoviePath.path(movieKeyframe(0, 0, 10), movieKeyframe(5000, 0, 10)), peak = 0;
+      for (var j = 0; j <= 100; j++) peak = Math.max(peak, far.at(j / 100).scale);
+      return {
+        pass: bad.length === 0 && peak > 1000,
+        detail: (bad.length ? "FAILED: " + bad.join(", ") + "; " : "") + "across " + cases.length + " moves: worst miss at a keyframe " +
+          worstEnd.toExponential(1) + " views, worst gap where the halves meet " + worstSeam.toExponential(1) +
+          " views, biggest hop in 1/400 of a move " + worstHop.toFixed(3) + " views; a 500-view pan pulls back from scale 10 to " + peak.toFixed(0),
+      };
+    }
+  );
+
+  addTest(
+    "A movie's frames: counted from its seconds, eased, looped without a jump, and the simulation rewinds as well as advances",
+    "movie-path.js's frames() - a keyframe holds the Map Evolution frame as well as the view, so a move can run the physics backwards; every move is eased (flat at both ends) so the camera never starts or stops with a jerk; and 'Return to First Keyframe' closes the movie with one more move so that played on a loop its last frame leads into its first",
+    function () {
+      var keys = [movieKeyframe(0, 0, 1000, 0), movieKeyframe(100, 50, 100, 500, 2), movieKeyframe(100, 50, 100, 200, 1)];
+      var looped = MoviePath.frames(keys, true), open = MoviePath.frames(keys, false);
+      var closing = MoviePath.autoSeconds(keys[2], keys[0]);
+      var counts = looped.length === Math.round((2 + 1 + closing) * MoviePath.FPS) && open.length === (2 + 1) * MoviePath.FPS + 1;
+      var last = open[open.length - 1];
+      var endsOnKeyframe = last.center.x === 100 && last.scale === 100 && last.step === 200;
+      var wraps = viewDistance(looped[looped.length - 1].center, looped[0].center) / looped[0].scale < 0.01;
+      var rewinds = open[60].step === 500 && open[75].step < 500 && open[75].step > 200 &&
+        open.every(function (f) { return f.step === Math.round(f.step); });
+      var ease = MoviePath.ease, monotonic = true;
+      for (var m = 1; m <= 1000; m++) if (ease(m / 1000) < ease((m - 1) / 1000)) monotonic = false;
+      var eased = monotonic && ease(0) === 0 && ease(1) === 1 && ease(1e-3) < 1e-8 && 1 - ease(1 - 1e-3) < 1e-8;
+      var smooth = 0;
+      for (var n = 1; n < looped.length; n++) {
+        smooth = Math.max(smooth, viewDistance(looped[n].center, looped[n - 1].center) / Math.min(looped[n].scale, looped[n - 1].scale));
+      }
+      var degenerate = MoviePath.frames([keys[0]], true).length === 1 && MoviePath.frames([], true).length === 0;
+      return {
+        pass: counts && endsOnKeyframe && wraps && rewinds && eased && smooth < 0.25 && degenerate,
+        detail: looped.length + " frames looped (closing move worked out at " + closing + "s), " + open.length + " open; ends on its last keyframe=" +
+          endsOnKeyframe + "; last frame leads into the first=" + wraps + "; simulation frame at the 2nd keyframe " + open[60].step +
+          " then mid-rewind " + open[75].step + "; ease flat at both ends=" + eased + "; biggest frame-to-frame hop " + smooth.toFixed(3) + " views",
+      };
+    }
+  );
+
+  addTest(
+    "A movie's link carries its keyframes, each with the digits its own zoom can use",
+    "share-url.js's kfrm/qual/loop - the player renders from its address alone, so the keyframes are the movie. A keyframe's center is written to the precision of THAT keyframe's zoom, which is what keeps a movie that dives to 1e8x from costing thirty digits on its wide shots; and a movie link has no view of its own, so none of the map's view fields belong in it",
+    function () {
+      var deep = PhysicsDF.twoSum64(213.41826094537, 3.1e-15);
+      var movie = { quality: 2, loop: false, keyframes: [
+        { center: { x: 0, xLo: 0, y: 0, yLo: 0 }, scale: 200 / 0.17, zoom: 1, step: 1000, seconds: null },
+        { center: { x: deep[0], xLo: deep[1], y: -88.0421795513, yLo: 0 }, scale: 1e-5, zoom: (200 / 0.17) / 1e-5, step: 500, seconds: 4.26 },
+      ] };
+      var scene = everythingScene();
+      var fragment = ShareUrl.encode({ page: "movi", scene: scene, view: { display: "laplacian", precision: "auto", movie: movie } });
+      var back = ShareUrl.decode(fragment);
+      var k = back.view.movie.keyframes;
+      var keyframesOk = k.length === 2 && k[0].zoom === 1 && k[0].step === 1000 && k[0].seconds === null &&
+        k[1].step === 500 && k[1].seconds === 4.3 && Math.abs(k[1].zoom / movie.keyframes[1].zoom - 1) < 1e-9 &&
+        Math.abs((k[1].center.x - deep[0]) + (k[1].center.xLo - deep[1])) < 1e-14;
+      var settingsOk = back.page === "movi" && back.view.movie.quality === 2 && back.view.movie.loop === false &&
+        back.view.display === "laplacian" && back.view.precision === "auto" && canonicalJSON(back.scene) === canonicalJSON(scene);
+      var noViewFields = !/ctrx|ctry|zoom:|insp/.test(fragment);
+      // The map's own link keeps the keyframes (Back from the player returns
+      // to them), and says nothing about movies while there are none.
+      var mapView = { center: { x: 0, xLo: 0, y: 0, yLo: 0 }, scale: 200 / 0.17, zoom: 1, movie: movie };
+      var mapKeeps = ShareUrl.decode(ShareUrl.encode({ page: "map", scene: scene, view: mapView })).view.movie.keyframes.length === 2;
+      mapView.movie = { keyframes: [], quality: 1, loop: false };
+      var silent = !/kfrm|qual|loop/.test(ShareUrl.encode({ page: "map", scene: scene, view: mapView }));
+      var defaults = ShareUrl.decode("#map/body:ci:0:0:0:30").view.movie;
+      return {
+        pass: keyframesOk && settingsOk && noViewFields && mapKeeps && silent && defaults.quality === 4 && defaults.loop === true && defaults.keyframes.length === 0,
+        detail: "keyframes " + (keyframesOk ? "exact" : "DIFFER: " + JSON.stringify(k)) + "; settings and scene=" + settingsOk +
+          "; no map-view fields in a movie link=" + noViewFields + "; a map link keeps them=" + mapKeeps + " and is silent without any=" + silent +
+          "; " + fragment.slice(fragment.indexOf("kfrm")),
+      };
+    }
+  );
+
   // ---- Runner / report rendering ----
 
   function renderRow(tbody, name, bugRef, outcome) {

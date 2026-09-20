@@ -515,6 +515,9 @@
 
   global.AppShell = {
     currentView: function () { return current; },
+    // For a page about to navigate away (the Movie card's Done): the address
+    // it leaves behind is what Back returns to, so it should be current.
+    syncAddress: function () { syncAddress(); },
     goToGrid: function (scene) { transitionTo("grid", scene); },
     goToEditor: function () { transitionTo("editor", null); },
     replayIntro: forgetIntro,
@@ -642,6 +645,11 @@
     }
     // Not a link to a scene: the page opens the way it always has.
     if (!link || !link.scene) return;
+    // A movie's link, opened on the wrong page: it belongs to the player.
+    if (link.page === global.ShareUrl.PAGE_MOVIE) {
+      global.location.replace("chaosplayback.html" + global.location.hash);
+      return;
+    }
     // The editor takes the scene whichever page the link is for - it is
     // where the map's own Back leads.
     var problem = onLoad ? global.PhysicsUI.sharedSceneProblem(link.scene) : global.PhysicsUI.loadSharedScene(link.scene);

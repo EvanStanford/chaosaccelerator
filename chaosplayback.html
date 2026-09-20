@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<!-- This file is part of Chaos Accelerator, licensed under the Common
+     Public Attribution License, Version 1.0 (CPAL-1.0) - see LICENSE in
+     the project root, or https://chaosaccelerator.com/license for a
+     hosted copy. -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Physics Fractal - Movie</title>
+<link rel="stylesheet" href="chaosplayback.css">
+</head>
+<body>
+
+<!-- The movie player. Everything it shows comes out of its own address (see
+     share-url.js): the scene, how the map is to be drawn, and the keyframes
+     the Movie card collected. It renders every frame first - however long
+     that takes - and only then plays, so playback never waits on a render.
+
+     It has no renderer of its own. #engine is the app itself, in a frame,
+     opened on the map of this movie's scene; chaosplayback.js asks it for one
+     finished picture per frame of the movie (FractalGrid.renderStill) and
+     keeps them. The frame sits UNDER #screen rather than hidden: a frame that
+     isn't being painted gets no animation frames, and the map only renders
+     inside those. -->
+
+<header id="player-bar">
+  <a id="back-to-map" class="bar-link" href="index.html">&larr; Back to map</a>
+  <a id="back-to-scene" class="bar-link" href="index.html">Scene editor</a>
+  <span id="movie-facts"></span>
+</header>
+
+<main id="stage">
+  <iframe id="engine" title="Movie renderer" tabindex="-1" aria-hidden="true"></iframe>
+  <canvas id="screen"></canvas>
+
+  <div id="render-panel" hidden>
+    <p id="render-status">Getting ready&hellip;</p>
+    <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-labelledby="render-status">
+      <div id="render-bar"></div>
+    </div>
+    <p id="render-detail"></p>
+  </div>
+
+  <div id="player-message" hidden>
+    <p id="player-message-text"></p>
+    <a class="bar-link" href="index.html">Open the scene builder</a>
+  </div>
+</main>
+
+<footer id="transport">
+  <button id="play-pause" class="transport-button" type="button" title="Play" aria-label="Play" disabled>&#9654;</button>
+  <input type="range" id="scrubber" min="0" max="0" step="1" value="0" aria-label="Movie position" disabled>
+  <span id="time-readout">0:00 / 0:00</span>
+  <button id="speed" class="transport-button wide" type="button" title="Playback speed" aria-label="Playback speed" disabled>1x</button>
+  <button id="loop" class="transport-button" type="button" title="Loop" aria-label="Loop" aria-pressed="true" disabled>
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 2l4 4-4 4"></path><path d="M3 11V9a3 3 0 0 1 3-3h15"></path><path d="M7 22l-4-4 4-4"></path><path d="M21 13v2a3 3 0 0 1-3 3H3"></path></svg>
+  </button>
+  <button id="restart" class="transport-button" type="button" title="Back to the start" aria-label="Back to the start" disabled>
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="2.5" height="14" rx="1"></rect><path d="M19 6.1v11.8a.6.6 0 0 1-.94.5L9.6 12.5a.6.6 0 0 1 0-1l8.46-5.9a.6.6 0 0 1 .94.5z"></path></svg>
+  </button>
+</footer>
+
+<script src="share-url.js"></script>
+<script src="movie-path.js"></script>
+<script src="chaosplayback.js"></script>
+</body>
+</html>

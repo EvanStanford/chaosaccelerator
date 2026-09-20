@@ -12,12 +12,15 @@
 //         yinp:0.y,outp:0.y,edge:wrap,frmw:1192,frmh:809
 //   #map/<the same scene>,ctrx:-14.318359,ctry:57.44,zoom:3.2,disp:lapl,
 //         insp:p:.0115:.0075;l:-.2875:-.1018:.2973:.143:30
+//   chaosplayback.html#movi/<the same scene>,disp:lapl,
+//         kfrm:0:0:1:1000;-14.318359:57.44:3.2:500:4
 //
 // The page comes first ("bldr" is the scene builder, "map" the fractal
-// grid), then comma-separated key:value fields. Inside a value, ":" separates
-// the parts of one thing and ";" separates things in a list. Every one of
-// those characters is legal unescaped in a fragment (RFC 3986's pchar plus
-// "/" and "?"), so nothing is percent-encoded and the address stays legible.
+// grid, "movi" the movie player), then comma-separated key:value fields.
+// Inside a value, ":" separates the parts of one thing and ";" separates
+// things in a list. Every one of those characters is legal unescaped in a
+// fragment (RFC 3986's pchar plus "/" and "?"), so nothing is
+// percent-encoded and the address stays legible.
 //
 // Made to be read by a person, barely: four-letter keys, plain decimals. It
 // costs about twice the characters of a packed binary form, and a full scene
@@ -40,10 +43,15 @@
 
   var PAGE_BUILDER = "bldr";
   var PAGE_MAP = "map";
+  var PAGE_MOVIE = "movi";
+  var PAGES = [PAGE_BUILDER, PAGE_MAP, PAGE_MOVIE];
 
   var DEFAULT_STEPS = 1000;
   var DEFAULT_MAX_BODIES = 20;
   var DEFAULT_EDGE = "sticky";
+  // A movie's resolution setting (see MOVIE_QUALITIES in fractal-grid.js):
+  // 4 is full resolution with antialiasing, and each step down is cheaper.
+  var DEFAULT_MOVIE_QUALITY = 4;
 
   var TYPE_CODES = { circle: "ci", line: "ln", funnel: "fu", splitter: "sp" };
   // Which field holds a body's one size - the same split serializeScene
@@ -214,6 +222,14 @@
     if (!(scale > 0)) return 6;
     return Math.min(45, Math.max(0, Math.ceil(9 - Math.log10(scale))));
   }
+  // The same from a zoom alone, for a caller with no map of its own to ask
+  // what scale that is (the movie player, writing the link back to the map).
+  // Only ever decides how many digits to WRITE, so it needs the map's
+  // framing at 1x no more exactly than this.
+  var SCALE_AT_ZOOM_ONE = 200 / 0.17;
+  function decimalsFor(view) {
+    return centerDecimals(view.scale > 0 ? view.scale : SCALE_AT_ZOOM_ONE / view.zoom);
+  }
 
   // ---- The scene ----
   //
@@ -348,7 +364,12 @@
   //     precision, speed, volume,
   //     inspect: [ { type: "point", a: [u, v] },
   //                { type: "line", a: [u, v], b: [u, v], count: n },
-  //                { type: "grid", a: [u, v], b: [u, v], size: n, twoPart: bool } ] }
+  //                { type: "grid", a: [u, v], b: [u, v], size: n, twoPart: bool } ],
+  //     movie: { keyframes: [ { center: { x, xLo, y, yLo }, scale, zoom, step, seconds } ],
+  //              quality, loop } }
+  //
+  // A movie link ("movi") has no view of its own - its keyframes are its
+  // views - so there `center`, `zoom` and `inspect` are simply absent.
   //
   // `zoom` is the number the map's own readout shows, `scale` the world
   // units per view height behind it (only used here to decide how many
@@ -388,22 +409,67 @@
     return group;
   }
 
+  // Ten significant digits: a zoom off by more than that would shift the
+  // pixels at the edge of the screen by more than the center's own
+  // millionth.
+  function zoomNum(zoom) {
+    return num(Number(Number(zoom).toPrecision(10)));
+  }
+  function parseZoom(text, what) {
+    var zoom = parseNum(text, what);
+    if (!(zoom > 0)) throw new Error(what + " must be more than zero");
+    return zoom;
+  }
+
+  // A movie keyframe (see movie-path.js): "x:y:zoom:frame", and a fifth part
+  // when the move arriving at it has been given a length in seconds rather
+  // than left to work one out. Each center gets the digits ITS OWN zoom can
+  // use, so a movie that dives in costs long coordinates only where it is
+  // deep.
+  function encodeKeyframe(k) {
+    var decimals = decimalsFor(k);
+    var parts = [
+      formatDD(k.center.x, k.center.xLo, decimals), formatDD(k.center.y, k.center.yLo, decimals),
+      zoomNum(k.zoom), Math.round(k.step),
+    ];
+    if (Number(k.seconds) > 0) parts.push(num(Math.round(k.seconds * 10) / 10));
+    return parts.join(":");
+  }
+  function decodeKeyframe(text) {
+    var parts = text.split(":"), what = "kfrm";
+    if (parts.length < 4 || parts.length > 5) throw new Error("kfrm has a keyframe that is not x, y, zoom and frame");
+    var cx = parseDD(parts[0], what), cy = parseDD(parts[1], what);
+    var seconds = parts.length > 4 ? parseNum(parts[4], what) : null;
+    return {
+      center: { x: cx[0], xLo: cx[1], y: cy[0], yLo: cy[1] },
+      zoom: parseZoom(parts[2], what),
+      step: parseIndex(parts[3], "kfrm's frame"),
+      seconds: seconds > 0 ? seconds : null,
+    };
+  }
+
   function encodeView(view) {
     var fields = [];
-    var decimals = centerDecimals(view.scale);
-    var cx = formatDD(view.center.x, view.center.xLo, decimals), cy = formatDD(view.center.y, view.center.yLo, decimals);
-    if (cx !== "0") fields.push("ctrx:" + cx);
-    if (cy !== "0") fields.push("ctry:" + cy);
-    // Ten significant digits: a zoom off by more than that would shift the
-    // pixels at the edge of the screen by more than the center's own
-    // millionth.
-    var zoom = num(Number(Number(view.zoom).toPrecision(10)));
-    if (zoom !== "1") fields.push("zoom:" + zoom);
+    if (view.center) {
+      var decimals = decimalsFor(view);
+      var cx = formatDD(view.center.x, view.center.xLo, decimals), cy = formatDD(view.center.y, view.center.yLo, decimals);
+      if (cx !== "0") fields.push("ctrx:" + cx);
+      if (cy !== "0") fields.push("ctry:" + cy);
+      var zoom = zoomNum(view.zoom);
+      if (zoom !== "1") fields.push("zoom:" + zoom);
+    }
     if (view.display && view.display !== "standard") fields.push("disp:" + DISPLAY_CODES[view.display]);
     if (view.precision && view.precision !== "f32") fields.push("prec:" + view.precision);
     if (view.speed !== undefined && num(view.speed) !== "1") fields.push("sped:" + num(view.speed));
     if (view.volume !== undefined && num(view.volume) !== "1") fields.push("snd:" + num(view.volume));
     if (view.inspect && view.inspect.length) fields.push("insp:" + view.inspect.map(encodeInspect).join(";"));
+    // The settings ride along only with keyframes to apply them to.
+    var movie = view.movie;
+    if (movie && movie.keyframes && movie.keyframes.length) {
+      fields.push("kfrm:" + movie.keyframes.map(encodeKeyframe).join(";"));
+      if (movie.quality !== undefined && movie.quality !== DEFAULT_MOVIE_QUALITY) fields.push("qual:" + movie.quality);
+      if (movie.loop === false) fields.push("loop:f");
+    }
     return fields;
   }
 
@@ -419,27 +485,28 @@
     var cy = attempt("ctry", function (t) { return parseDD(t, "ctry"); }, [0, 0]);
     return {
       center: { x: cx[0], xLo: cx[1], y: cy[0], yLo: cy[1] },
-      zoom: attempt("zoom", function (t) {
-        var z = parseNum(t, "zoom");
-        if (!(z > 0)) throw new Error("zoom must be more than zero");
-        return z;
-      }, 1),
+      zoom: attempt("zoom", function (t) { return parseZoom(t, "zoom"); }, 1),
       display: attempt("disp", function (t) { return DISPLAYS_BY_CODE[t] || "standard"; }, "standard"),
       precision: attempt("prec", function (t) { return PRECISIONS.indexOf(t) === -1 ? "f32" : t; }, "f32"),
       speed: attempt("sped", function (t) { return parseNum(t, "sped"); }, 1),
       volume: attempt("snd", function (t) { return Math.min(1, Math.max(0, parseNum(t, "snd"))); }, 1),
       inspect: attempt("insp", function (t) { return splitList(t).map(decodeInspect); }, []),
+      movie: {
+        keyframes: attempt("kfrm", function (t) { return splitList(t).map(decodeKeyframe); }, []),
+        quality: attempt("qual", function (t) { return Math.min(DEFAULT_MOVIE_QUALITY, parseIndex(t, "qual")); }, DEFAULT_MOVIE_QUALITY),
+        loop: attempt("loop", function (t) { return parseBool(t, "loop"); }, true),
+      },
     };
   }
 
   // ---- The fragment ----
 
-  // { page: "bldr" | "map", scene, view } -> the fragment, without its "#".
-  // `view` is only written for the map; the builder's link is the scene and
-  // nothing else.
+  // { page: "bldr" | "map" | "movi", scene, view } -> the fragment, without
+  // its "#". The builder's link is the scene and nothing else; the other two
+  // add their view of it.
   function encode(state) {
     var fields = encodeScene(state.scene);
-    if (state.page === PAGE_MAP && state.view) fields = fields.concat(encodeView(state.view));
+    if (state.page !== PAGE_BUILDER && state.view) fields = fields.concat(encodeView(state.view));
     return state.page + "/" + fields.join(",");
   }
 
@@ -476,18 +543,19 @@
     var text = cleanFragment(fragment);
     var slash = text.indexOf("/");
     var page = slash === -1 ? text : text.slice(0, slash);
-    if (page !== PAGE_BUILDER && page !== PAGE_MAP) return null;
+    if (PAGES.indexOf(page) === -1) return null;
     var fields = readFields(slash === -1 ? "" : text.slice(slash + 1));
     return {
       page: page,
       scene: decodeScene(fields),
-      view: page === PAGE_MAP ? decodeView(fields) : null,
+      view: page === PAGE_BUILDER ? null : decodeView(fields),
     };
   }
 
   global.ShareUrl = {
     PAGE_BUILDER: PAGE_BUILDER,
     PAGE_MAP: PAGE_MAP,
+    PAGE_MOVIE: PAGE_MOVIE,
     encode: encode,
     decode: decode,
     // The pieces, for a page with fields of its own to add around them.
