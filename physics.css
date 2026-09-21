@@ -240,6 +240,12 @@ select:disabled { opacity: 0.5; }
 .dual-select[hidden] {
   display: none;
 }
+/* The Spring section is toggled the same way (see refreshSpringPanel), and
+   gets the same guarantee rather than relying on .panel-section never being
+   given a `display` of its own. */
+#spring-section[hidden] {
+  display: none;
+}
 
 .editor-actions {
   display: flex;

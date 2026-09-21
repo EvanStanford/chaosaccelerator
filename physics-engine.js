@@ -3,10 +3,10 @@
 // root, or https://chaosaccelerator.com/license for a hosted copy.
 
 // Pure, DOM-free 2D rigid body physics engine: circles and line segments,
-// capsule-style collision, revolute (pin) joints, static anchors.
+// capsule-style collision, revolute (pin) joints, springs, static anchors.
 //
-// The scene is plain, serializable data - { bodies: [...], hinges: [...] }
-// - and step(scene, dt) mutates it in place. That data-in/data-out shape is
+// The scene is plain, serializable data - { bodies: [...], hinges: [...],
+// springs: [...] } - and step(scene, dt) mutates it in place. That data-in/data-out shape is
 // deliberate: it's what a future per-pixel GPU port (Milestone 2) or a
 // deterministic replay-from-a-starting-state (Milestone 3) both need.
 (function (global) {
@@ -342,6 +342,245 @@
       acc[i] = { x: ax, y: ay };
     }
     return acc;
+  }
+
+  // ---- Springs ----
+  //
+  // A spring is a FORCE, like gravity - not a constraint like a hinge, and
+  // not a body. It is massless, collides with nothing, and the two things it
+  // joins still collide with each other as if it were not there (a hinged
+  // pair does not - see hingeConnects). It is the same shape a hinge is:
+  //
+  //   { bodyA: index | null, bodyB: index, localAnchorA, localAnchorB,
+  //     stiffness, restLength }
+  //
+  // with bodyA === null meaning the background, in which case localAnchorA is
+  // a fixed WORLD point (exactly the hinge convention - see hingeBodyA). Either
+  // end may sit anywhere on its body, so a spring pulls on a lever arm and
+  // TURNS what it is attached to: it is the only thing in the engine that
+  // produces an angular acceleration. Gravity acts through the center of
+  // mass and every other change to `w` is an impulse (see step()).
+  //
+  // The law is Hooke's, with the length softened so it can never be zero:
+  //
+  //   Ls = sqrt(|d|^2 + SPRING_SOFTENING^2),   F = k * (Ls - restLength) * d / Ls
+  //
+  // which is exactly the gradient of U = k/2 * (Ls - restLength)^2, so the
+  // softening costs nothing in energy conservation. Without it a spring with
+  // a rest length has no direction at the instant its two ends coincide (0/0)
+  // - and nothing stops them coinciding: collisions keep two BODIES apart,
+  // but an attachment point on the background is not a body, and a ball is
+  // free to pass straight through it. One pixel of softening shortens a 100px
+  // spring's natural length by 0.005px. With restLength 0 the factor is
+  // exactly 1 and the spring is perfectly linear, F = k * d.
+  //
+  // No damping, on purpose: the rest of the engine is lossless (no friction,
+  // fully elastic), and a spring that bled energy would be the one thing in a
+  // scene that ran down.
+  var SPRING_SOFTENING = 1;
+  // What the editor's Stiffness slider spans, and what a loaded scene is
+  // clamped into. In force per pixel of stretch, against masses that run from
+  // ~80 (the smallest circle) through 2,827 (the default one) to ~280,000:
+  // the default circle bobs at 0.13Hz on the softest and 4.2Hz on the
+  // stiffest, and hangs 1,130px and 1.1px below its anchor under ordinary
+  // gravity.
+  var SPRING_STIFFNESS_MIN = 2000;
+  var SPRING_STIFFNESS_MAX = 2000000;
+  var SPRING_REST_LENGTH_MAX = 1000;
+  // The step is fixed and there are no substeps, so a spring is only as stiff
+  // as the step can integrate: semi-implicit Euler is stable for an
+  // oscillator while (omega * dt)^2 < 4, and past that its energy grows
+  // without limit. Linear speed has a cap to run into (see MAX_SPEED);
+  // ANGULAR speed has none, so an unstable spring on a lever arm spins its
+  // body up until `w` overflows - and NaN does not stay contained (see
+  // gravitationalMass's own story). So the stiffness actually used is limited
+  // to what the two ends can take: k * dt^2 * (wA + wB) <= SPRING_STABILITY,
+  // where w is how readily an end gives way - 1/mass, plus 1/inertia times
+  // the lever arm squared (the worst case, a pull square to the arm). 0.5
+  // leaves room for several springs on one body before their sum nears 4.
+  //
+  // The limit depends only on shape and on where the spring is attached, never
+  // on the motion, so it is one constant per run and the force stays
+  // conservative. It matters when a body is small (or an X/Y Input has
+  // shrunk it): the default circle alone allows 5,000,000, above anything the
+  // slider reaches, while the smallest allows 141,000.
+  //
+  // That covers the spring's own stiffness. A spring on a lever arm has a
+  // SECOND way to oscillate that it does not: the body swinging about its
+  // center like a pendulum under the spring's tension, whose stiffness is not
+  // k at all but tension x arm - and tension grows with stretch, without
+  // limit. Measured before anything guarded it: the smallest circle, attached
+  // 3px off-center to the stiffest spring it was allowed, passed
+  // (omega*dt)^2 = 4 at about 30px of stretch and was spun up to 7,000 rad/s,
+  // its energy multiplied by 580. No constant stiffness can rule that out (an
+  // X/Y Input can start a body thousands of pixels from where its spring
+  // relaxes), so the SPIN is integrated implicitly past the same margin - see
+  // springSpin. Scaling the torque back instead was tried first and is worse:
+  // a torque that no longer matches its force pumps energy in (+160% over
+  // 3000 steps on that same circle), where this can only take it out.
+  var SPRING_STABILITY = 0.5;
+
+  function sceneSprings(scene) { return scene.springs || []; }
+
+  function springBodyA(spring, bodies) {
+    return spring.bodyA === null ? WORLD_BODY : bodies[spring.bodyA];
+  }
+
+  function springEndWeight(body, localAnchor) {
+    if (body.isAnchored) return 0;
+    return body.invMass + body.invInertia * (localAnchor.x * localAnchor.x + localAnchor.y * localAnchor.y);
+  }
+
+  // The stiffest this spring may be between these two bodies at this step
+  // size - Infinity when neither end can move (nothing to destabilize).
+  function springStableStiffness(spring, bodies, dt) {
+    var wSum = springEndWeight(springBodyA(spring, bodies), spring.localAnchorA) +
+      springEndWeight(bodies[spring.bodyB], spring.localAnchorB);
+    return wSum > 0 ? SPRING_STABILITY / (wSum * dt * dt) : Infinity;
+  }
+
+  function springEffectiveStiffness(spring, bodies, dt) {
+    return Math.min(spring.stiffness, springStableStiffness(spring, bodies, dt));
+  }
+
+  // Both ends in world space - what the editor draws a spring between.
+  function getSpringWorldPoints(spring, bodies) {
+    var bodyA = springBodyA(spring, bodies), bodyB = bodies[spring.bodyB];
+    var rA = rotateVec(spring.localAnchorA, bodyA.angle);
+    var rB = rotateVec(spring.localAnchorB, bodyB.angle);
+    return { a: { x: bodyA.x + rA.x, y: bodyA.y + rA.y }, b: { x: bodyB.x + rB.x, y: bodyB.y + rB.y } };
+  }
+
+  function springArmLength(localAnchor) {
+    return Math.sqrt(localAnchor.x * localAnchor.x + localAnchor.y * localAnchor.y);
+  }
+
+  // A body's spin after `t` seconds of this step's torque: w + alpha*t, the
+  // explicit update every other quantity in the engine gets - until the swing
+  // it is feeding is too fast for the step. `swing` is that swing's frequency
+  // squared, (tension x arm) / inertia summed over the springs on this body
+  // (see SPRING_STABILITY): while swing * t^2 stays under SPRING_STABILITY the
+  // divisor is exactly 1 and this IS the explicit update, which is every
+  // ordinary scene. Past it, the excess goes into the divisor - the
+  // backward-Euler treatment of just that excess - which is stable however
+  // large the tension gets (the update's two eigenvalues stay inside the unit
+  // circle for any margin up to 2), and dissipative rather than conservative:
+  // a swing too fast for the step to follow is damped toward the direction
+  // the spring is pulling, instead of being sampled into noise or pumped.
+  // Continuous across the threshold, and in t (the identity at t = 0), so it
+  // splits across the two legs of a contact step like everything else.
+  function springSpin(w, alpha, swing, t) {
+    return (w + alpha * t) / (1 + Math.max(0, swing * t * t - SPRING_STABILITY));
+  }
+
+  // Adds every spring's pull to `acc` (each body's linear acceleration, as
+  // computeAccelerations returns it) and to `alpha` (its angular one, which
+  // nothing else contributes to), and tallies `swing` for springSpin.
+  // Evaluated once, from the positions the step starts at, for the same
+  // reason gravity is - see step().
+  function addSpringAccelerations(scene, acc, alpha, swing, dt) {
+    var bodies = scene.bodies, springs = sceneSprings(scene);
+    for (var s = 0; s < springs.length; s++) {
+      var spring = springs[s];
+      var bodyA = springBodyA(spring, bodies), bodyB = bodies[spring.bodyB];
+      if (bodyA.isAnchored && bodyB.isAnchored) continue; // nothing here can move
+      var rA = rotateVec(spring.localAnchorA, bodyA.angle);
+      var rB = rotateVec(spring.localAnchorB, bodyB.angle);
+      var dx = (bodyB.x + rB.x) - (bodyA.x + rA.x);
+      var dy = (bodyB.y + rB.y) - (bodyA.y + rA.y);
+      var k = springEffectiveStiffness(spring, bodies, dt);
+      var softLength = Math.sqrt(dx * dx + dy * dy + SPRING_SOFTENING * SPRING_SOFTENING);
+      var f = k * (1 - spring.restLength / softLength);
+      // The force on end A, toward B while stretched; end B gets its opposite.
+      var fx = f * dx, fy = f * dy;
+      // |F|, near enough (the softened length stands in for |d|, erring large).
+      var tension = Math.abs(f) * softLength;
+      if (!bodyA.isAnchored) {
+        acc[spring.bodyA].x += fx * bodyA.invMass;
+        acc[spring.bodyA].y += fy * bodyA.invMass;
+        alpha[spring.bodyA] += (rA.x * fy - rA.y * fx) * bodyA.invInertia;
+        swing[spring.bodyA] += tension * springArmLength(spring.localAnchorA) * bodyA.invInertia;
+      }
+      if (!bodyB.isAnchored) {
+        acc[spring.bodyB].x -= fx * bodyB.invMass;
+        acc[spring.bodyB].y -= fy * bodyB.invMass;
+        alpha[spring.bodyB] -= (rB.x * fy - rB.y * fx) * bodyB.invInertia;
+        swing[spring.bodyB] += tension * springArmLength(spring.localAnchorB) * bodyB.invInertia;
+      }
+    }
+  }
+
+  // What the springs hold, for an energy audit (the regression suite's, and
+  // anyone else's): the potential the force above is the gradient of.
+  function springPotentialEnergy(scene, dt) {
+    var total = 0, bodies = scene.bodies;
+    sceneSprings(scene).forEach(function (spring) {
+      var p = getSpringWorldPoints(spring, bodies);
+      var dx = p.b.x - p.a.x, dy = p.b.y - p.a.y;
+      var stretch = Math.sqrt(dx * dx + dy * dy + SPRING_SOFTENING * SPRING_SOFTENING) - spring.restLength;
+      total += 0.5 * springEffectiveStiffness(spring, bodies, dt) * stretch * stretch;
+    });
+    return total;
+  }
+
+  // ---- Springs and the frame's edges ----
+  //
+  // A hinged assembly already has a rule for the edges (see the frame-wrap
+  // helpers below): whatever is pinned to the background never wraps, however
+  // far it swings out of frame, and neither does anything hinged to it; bodies
+  // hinged only to each other wrap TOGETHER, as one rigid translation. A
+  // spring follows the same rule, for the same reason - wrapping one end of
+  // it alone would stretch it by a whole frame in a single step.
+  //
+  // A spring joins things the hinge walk cannot describe, though: that walk
+  // follows each hinge from its bodyA down to its bodyB and assumes a body has
+  // one parent, which holds for hinges and does not for springs (a ball
+  // between two others has two). So bodies joined by springs - directly, or
+  // through each other's hinges - are gathered into GROUPS, each with:
+  //
+  //   tethered  it holds a spring to the background, or an anchored body.
+  //             It never wraps.
+  //   leader    otherwise, its lowest-index body that is free to wrap (not
+  //             anchored, not hinged onto another body). The group wraps when
+  //             the leader does - by its world-hinge pin if it has one, as a
+  //             hinged root always has - and every member moves with it.
+  //
+  // A body in no group keeps the hinge rules exactly as they were, which is
+  // every body of every scene without a spring. Returns null for such a scene.
+  function springGroups(scene) {
+    var springs = sceneSprings(scene);
+    if (!springs.length) return null;
+    var n = scene.bodies.length, parent = new Array(n), i;
+    for (i = 0; i < n; i++) parent[i] = i;
+    function find(x) { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
+    function union(a, b) { a = find(a); b = find(b); if (a !== b) parent[Math.max(a, b)] = Math.min(a, b); }
+    var sprung = {};
+    springs.forEach(function (s) {
+      sprung[s.bodyB] = true;
+      if (s.bodyA !== null) { sprung[s.bodyA] = true; union(s.bodyA, s.bodyB); }
+    });
+    var isHingeChild = {};
+    scene.hinges.forEach(function (h) {
+      if (h.bodyA !== null) { union(h.bodyA, h.bodyB); isHingeChild[h.bodyB] = true; }
+    });
+    var byRoot = {}, groups = [], groupOf = new Array(n);
+    for (i = 0; i < n; i++) groupOf[i] = null;
+    // Only components a spring actually touches - a hinged assembly with no
+    // spring anywhere in it is not a group, and keeps the hinge rules.
+    for (i = 0; i < n; i++) if (sprung[i] && !byRoot[find(i)]) {
+      byRoot[find(i)] = { members: [], tethered: false, leader: -1 };
+      groups.push(byRoot[find(i)]);
+    }
+    for (i = 0; i < n; i++) {
+      var g = byRoot[find(i)];
+      if (!g) continue;
+      groupOf[i] = g;
+      g.members.push(i);
+      if (scene.bodies[i].isAnchored) g.tethered = true;
+      else if (g.leader === -1 && !isHingeChild[i]) g.leader = i;
+    }
+    springs.forEach(function (s) { if (s.bodyA === null) groupOf[s.bodyB].tethered = true; });
+    return { groups: groups, groupOf: groupOf };
   }
 
   function computeMass(body) {
@@ -1171,6 +1410,22 @@
     });
   }
 
+  // The same pure translation for a spring group (see springGroups), which
+  // is a flat list of members rather than a tree to walk: every member moves,
+  // and so does every background pin a member hangs from - a pin left behind
+  // would tear its hinge exactly as wrapping a hinge child alone would.
+  function translateSpringGroup(scene, group, dx, dy) {
+    var isMember = {};
+    group.members.forEach(function (m) {
+      isMember[m] = true;
+      scene.bodies[m].x += dx;
+      scene.bodies[m].y += dy;
+    });
+    scene.hinges.forEach(function (h) {
+      if (h.bodyA === null && isMember[h.bodyB]) h.localAnchorA = { x: h.localAnchorA.x + dx, y: h.localAnchorA.y + dy };
+    });
+  }
+
   // A body created by a split (see step()'s splitting section) carries an
   // explicit .lineage pointing back at whichever body index Output/Input
   // mapping actually names - every other body's lineage is implicitly its
@@ -1313,6 +1568,13 @@
     // moves down.
     var maxSpeed = speedCapFor(scene);
     var acc = computeAccelerations(scene);
+    // Springs add to that, and bring the one thing gravity never has: an
+    // ANGULAR acceleration, from a pull that lands off-center. Fixed for the
+    // whole step like `acc`, and split across the two legs the same way (see
+    // leg 1). All zeros - and every line below that reads it a no-op - for a
+    // scene with no springs.
+    var alpha = new Array(bodies.length).fill(0), swing = new Array(bodies.length).fill(0);
+    if (sceneSprings(scene).length) addSpringAccelerations(scene, acc, alpha, swing, dt);
 
     // Entering velocity (u, before any gravity this step) and the whole-step
     // gravity-advanced velocity (vFull) for every non-static body. vFull
@@ -1542,7 +1804,11 @@
       } else {
         b1.x += vFull[i].x * th; b1.y += vFull[i].y * th;
       }
-      b1.angle += b1.w * th;
+      // The angular twin of the two lines around it: turn at the WHOLE
+      // step's spin (w + alpha*dt, as the position moves at vFull), then
+      // leave `w` with only the part of the torque that had acted by tHit.
+      b1.angle += springSpin(b1.w, alpha[i], swing[i], dt) * th;
+      b1.w = springSpin(b1.w, alpha[i], swing[i], th);
       var vPre = advanceVelocity(u[i].x, u[i].y, th, acc[i].x, acc[i].y, maxSpeed);
       b1.vx = vPre.x; b1.vy = vPre.y;
     }
@@ -1568,6 +1834,9 @@
       var tRest = dt - bodyTHit[i];
       var vPost = advanceVelocity(b2.vx, b2.vy, tRest, acc[i].x, acc[i].y, maxSpeed);
       b2.vx = vPost.x; b2.vy = vPost.y;
+      // The rest of the torque onto the post-impulse spin, then turn by it -
+      // the same order as the velocity and position either side.
+      b2.w = springSpin(b2.w, alpha[i], swing[i], tRest);
       b2.x += vPost.x * tRest; b2.y += vPost.y * tRest; b2.angle += b2.w * tRest;
     }
 
@@ -1590,6 +1859,10 @@
     // the frame-wrap helpers above for why a hinge child must never
     // independently wrap, and why a world-hinged root wraps by its PIN's
     // position, not its own center.
+    //
+    // A body joined to anything by a spring answers to its GROUP instead -
+    // see springGroups: a tethered group never wraps, and any other wraps as
+    // one, when its leader does.
     if (wrapsAtEdges(scene)) {
       var isHingeChild = {};
       var ownWorldHinge = {};
@@ -1597,14 +1870,21 @@
         if (h.bodyA === null) ownWorldHinge[h.bodyB] = h;
         else isHingeChild[h.bodyB] = true;
       });
+      var sprung = springGroups(scene);
       for (i = 0; i < bodies.length; i++) {
         var wb = bodies[i];
         if (wb.isAnchored || isHingeChild[i]) continue;
+        var group = sprung ? sprung.groupOf[i] : null;
+        if (group && (group.tethered || group.leader !== i)) continue;
         var worldHinge = ownWorldHinge[i];
         var ref = worldHinge ? worldHinge.localAnchorA : wb;
         var dx = wrapCoord(ref.x, scene.frameWidth) - ref.x;
         var dy = wrapCoord(ref.y, scene.frameHeight) - ref.y;
         if (dx === 0 && dy === 0) continue;
+        if (group) {
+          translateSpringGroup(scene, group, dx, dy);
+          continue;
+        }
         if (worldHinge) worldHinge.localAnchorA = { x: worldHinge.localAnchorA.x + dx, y: worldHinge.localAnchorA.y + dy };
         wrapTranslateAndCascade(scene, i, dx, dy, {});
       }
@@ -1663,6 +1943,28 @@
         localAnchorB: h.localAnchorB,
       };
     });
+    // A spring goes with either body it was tied to, like a hinge - it has
+    // nothing left to pull on. (A scene that never had the field is left
+    // without one rather than being handed an empty list.)
+    if (scene.springs) scene.springs = scene.springs.filter(function (s) {
+      return s.bodyA !== index && s.bodyB !== index;
+    }).map(function (s) {
+      var copy = cloneSpring(s);
+      if (copy.bodyA !== null && copy.bodyA > index) copy.bodyA -= 1;
+      if (copy.bodyB > index) copy.bodyB -= 1;
+      return copy;
+    });
+  }
+
+  function cloneSpring(s) {
+    return {
+      bodyA: s.bodyA,
+      bodyB: s.bodyB,
+      localAnchorA: { x: s.localAnchorA.x, y: s.localAnchorA.y },
+      localAnchorB: { x: s.localAnchorB.x, y: s.localAnchorB.y },
+      stiffness: s.stiffness,
+      restLength: s.restLength,
+    };
   }
 
   function cloneScene(scene) {
@@ -1696,6 +1998,9 @@
           localAnchorB: { x: h.localAnchorB.x, y: h.localAnchorB.y },
         };
       }),
+      // Absent on every scene from before springs existed, and on most of the
+      // regression suite's hand-built ones.
+      springs: sceneSprings(scene).map(cloneSpring),
       // Previously omitted here, which silently wiped every mapping on a
       // Play -> Reset cycle (physics-ui.js clones the live scene into
       // initialScene on Play, then clones initialScene back on Reset) -
@@ -1998,6 +2303,22 @@
     worldToLocal: worldToLocal,
     getHingeWorldPoint: getHingeWorldPoint,
     hingeConnects: hingeConnects,
+    // Springs - see the section of that name. The constants are exported so
+    // physics-gpu.js bakes the same law, and the editor's sliders span the
+    // same range a loaded scene is clamped into.
+    SPRING_SOFTENING: SPRING_SOFTENING,
+    SPRING_STABILITY: SPRING_STABILITY,
+    SPRING_STIFFNESS_MIN: SPRING_STIFFNESS_MIN,
+    SPRING_STIFFNESS_MAX: SPRING_STIFFNESS_MAX,
+    SPRING_REST_LENGTH_MAX: SPRING_REST_LENGTH_MAX,
+    sceneSprings: sceneSprings,
+    cloneSpring: cloneSpring,
+    getSpringWorldPoints: getSpringWorldPoints,
+    springStableStiffness: springStableStiffness,
+    springEffectiveStiffness: springEffectiveStiffness,
+    springPotentialEnergy: springPotentialEnergy,
+    springGroups: springGroups,
+    translateSpringGroup: translateSpringGroup,
     LINE_THICKNESS: LINE_THICKNESS,
     // Exported so the Set Velocity tool can clamp a drag to the same ceiling
     // the first step would silently trim it to anyway, and so physics-gpu.js

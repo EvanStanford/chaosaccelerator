@@ -20,19 +20,19 @@
      show them at once (see transition.js). physics.css styles the editor
      view and fractal-grid.css the grid view; the handful of rules that
      would otherwise collide are scoped to #grid-view inside the latter. -->
-<link rel="stylesheet" href="physics.css?v=m15">
-<link rel="stylesheet" href="fractal-grid.css?v=m15">
-<link rel="stylesheet" href="app-shell.css?v=m15">
-<link rel="stylesheet" href="fractal-stats.css?v=m15">
-<link rel="stylesheet" href="responsive-layout.css?v=m15">
+<link rel="stylesheet" href="physics.css?v=m16">
+<link rel="stylesheet" href="fractal-grid.css?v=m16">
+<link rel="stylesheet" href="app-shell.css?v=m16">
+<link rel="stylesheet" href="fractal-stats.css?v=m16">
+<link rel="stylesheet" href="responsive-layout.css?v=m16">
 <!-- The small-window (phone) layout and the touch-input adjustments. Last, so
      it wins the cascade over everything above without needing !important;
      every rule in it is scoped to a class layout-mode.js puts on <html>. -->
-<link rel="stylesheet" href="mobile.css?v=m15">
+<link rel="stylesheet" href="mobile.css?v=m16">
 <!-- In <head>, ahead of any layout: decides which layout/input/performance
      classes <html> carries, and both views measure their canvas area as they
      start - so the answer has to be in place before they do. -->
-<script src="layout-mode.js?v=m15"></script>
+<script src="layout-mode.js?v=m16"></script>
 <!-- A link to the map (see share-url.js) should open ON the map. The editor
      is the view the markup starts with, and everything that would swap them
      is a script at the end of the body - by which time the editor has been
@@ -87,6 +87,7 @@
               <button class="tool-btn" data-tool="line" title="Drag on canvas: start is one end, release is the other">+ Line</button>
               <button class="tool-btn" data-tool="anchor" title="Click an object to fix it in place">+ Anchor</button>
               <button class="tool-btn" data-tool="hinge" title="Click a point to pin objects there. Drag a hinge onto the X to remove it">+ Hinge</button>
+              <button class="tool-btn" data-tool="spring" title="Drag from one object to another, or to the background, to join them with a spring. Click a spring to tune it; drag it onto the X to remove it">+ Spring</button>
               <button class="tool-btn" data-tool="velocity" title="Drag a non-anchored object: the drag's direction and length set its starting velocity">Set Velocity</button>
             </div>
             <details class="collapsible">
@@ -98,6 +99,26 @@
                 </div>
               </div>
             </details>
+          </section>
+
+          <!-- Only while a spring is selected - shown, filled in and hidden
+               again by refreshSpringPanel in physics-ui.js. The stiffness
+               slider is a position on a LOG scale (see springSliderToStiffness),
+               so its min/max here are just its resolution. -->
+          <section class="panel-section" id="spring-section" hidden>
+            <h2>Spring</h2>
+            <label class="field">
+              <span>Stiffness: <b id="spring-stiffness-readout"></b></span>
+              <input type="range" id="spring-stiffness-slider" min="0" max="1000" step="1" value="500" title="How hard the spring pulls per pixel of stretch. Shown as the spring's thickness.">
+            </label>
+            <p class="readout" id="spring-stiffness-note"></p>
+            <label class="field">
+              <span>Rest Length: <b id="spring-rest-readout"></b></span>
+              <input type="range" id="spring-rest-slider" min="0" max="1000" step="1" value="100" title="The length the spring relaxes to - the tick across the selected spring. Longer than that it pulls, shorter it pushes.">
+            </label>
+            <div class="editor-actions">
+              <button id="btn-delete-spring" class="danger">Delete Spring</button>
+            </div>
           </section>
 
           <section class="panel-section">
@@ -882,20 +903,20 @@
 
 </div>
 
-<script src="physics-engine.js?v=m15"></script>
-<script src="physics-coords.js?v=m15"></script>
-<script src="share-url.js?v=m15"></script>
-<script src="movie-path.js?v=m15"></script>
-<script src="physics-sound.js?v=m15"></script>
-<script src="physics-hinge-geometry.js?v=m15"></script>
-<script src="physics-df.js?v=m15"></script>
-<script src="physics-gpu.js?v=m15"></script>
-<script src="physics-gpu-df.js?v=m15"></script>
-<script src="physics-grid-codegen.js?v=m15"></script>
-<script src="physics-ui.js?v=m15"></script>
-<script src="fractal-stats.js?v=m15"></script>
-<script src="fractal-stats-panel.js?v=m15"></script>
-<script src="fractal-grid.js?v=m15"></script>
-<script src="transition.js?v=m15"></script>
+<script src="physics-engine.js?v=m16"></script>
+<script src="physics-coords.js?v=m16"></script>
+<script src="share-url.js?v=m16"></script>
+<script src="movie-path.js?v=m16"></script>
+<script src="physics-sound.js?v=m16"></script>
+<script src="physics-hinge-geometry.js?v=m16"></script>
+<script src="physics-df.js?v=m16"></script>
+<script src="physics-gpu.js?v=m16"></script>
+<script src="physics-gpu-df.js?v=m16"></script>
+<script src="physics-grid-codegen.js?v=m16"></script>
+<script src="physics-ui.js?v=m16"></script>
+<script src="fractal-stats.js?v=m16"></script>
+<script src="fractal-stats-panel.js?v=m16"></script>
+<script src="fractal-grid.js?v=m16"></script>
+<script src="transition.js?v=m16"></script>
 </body>
 </html>

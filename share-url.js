@@ -290,6 +290,29 @@
     };
   }
 
+  // A spring is a hinge's six parts and two more: its stiffness and its rest
+  // length. "w" is the background here too.
+  function encodeSpring(sp) {
+    return [
+      sp.bodyA === null || sp.bodyA === undefined ? "w" : sp.bodyA, sp.bodyB,
+      sceneNum(sp.localAnchorA.x), sceneNum(sp.localAnchorA.y), sceneNum(sp.localAnchorB.x), sceneNum(sp.localAnchorB.y),
+      sceneNum(sp.stiffness), sceneNum(sp.restLength),
+    ].join(":");
+  }
+  function decodeSpring(text, i) {
+    var what = "spring " + (i + 1);
+    var parts = text.split(":");
+    if (parts.length !== 8) throw new Error(what + " needs two ends, two anchor points, a stiffness and a rest length");
+    return {
+      bodyA: parts[0] === "w" ? null : parseIndex(parts[0], what + "'s first end"),
+      bodyB: parseIndex(parts[1], what + "'s second end"),
+      localAnchorA: { x: parseNum(parts[2], what), y: parseNum(parts[3], what) },
+      localAnchorB: { x: parseNum(parts[4], what), y: parseNum(parts[5], what) },
+      stiffness: parseNum(parts[6], what + "'s stiffness"),
+      restLength: parseNum(parts[7], what + "'s rest length"),
+    };
+  }
+
   // "0.ang" is body 0's rotation; "1.2.dist" an Output read from a pair;
   // "life" alone is Scene Lifespan, which belongs to no body.
   function encodeMapping(m) {
@@ -310,9 +333,10 @@
 
   function encodeScene(scene) {
     var fields = [];
-    var bodies = scene.bodies || [], hinges = scene.hinges || [];
+    var bodies = scene.bodies || [], hinges = scene.hinges || [], springs = scene.springs || [];
     if (bodies.length) fields.push("body:" + bodies.map(encodeBody).join(";"));
     if (hinges.length) fields.push("hnge:" + hinges.map(encodeHinge).join(";"));
+    if (springs.length) fields.push("sprg:" + springs.map(encodeSpring).join(";"));
     if (scene.xInput) fields.push("xinp:" + encodeMapping(scene.xInput));
     if (scene.yInput) fields.push("yinp:" + encodeMapping(scene.yInput));
     if (scene.output) fields.push("outp:" + encodeMapping(scene.output));
@@ -344,6 +368,7 @@
       simulationSteps: fields.step === undefined ? DEFAULT_STEPS : parseNum(fields.step, "step"),
       bodies: splitList(fields.body).map(decodeBody),
       hinges: splitList(fields.hnge || "").map(decodeHinge),
+      springs: splitList(fields.sprg || "").map(decodeSpring),
       xInput: fields.xinp ? decodeMapping(fields.xinp, "xinp", false) : null,
       yInput: fields.yinp ? decodeMapping(fields.yinp, "yinp", false) : null,
       output: fields.outp ? decodeMapping(fields.outp, "outp", true) : null,

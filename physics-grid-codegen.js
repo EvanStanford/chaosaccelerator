@@ -214,6 +214,13 @@
     // translateBodyPreservingHinges mutate the real hinge objects.
     var anchorA = scene.hinges.map(function (h) { return { x: B.lit(h.localAnchorA.x), y: B.lit(h.localAnchorA.y) }; });
     var anchorB = scene.hinges.map(function (h) { return { x: B.lit(h.localAnchorB.x), y: B.lit(h.localAnchorB.y) }; });
+    // Springs, in the same symbolic shape (see PhysicsGPU.springLinksFor,
+    // whose descriptors these are) - the anchors start as the authored
+    // literals and are rescaled below when the body they sit on is resized.
+    // Nothing else about a spring varies per pixel: a body an Input MOVES
+    // takes its end of the spring with it and the spring simply starts
+    // stretched by that much, which is the point of linking it.
+    var springs = PhysicsGPU.springLinksFor(scene, B.lit);
 
     var lines = [];
     var counter = 0;
@@ -370,10 +377,30 @@
         }
       }
 
+      // A spring's attachment point keeps its place ON the body - the end of
+      // a line stays the end of the line - whether or not the body is hinged
+      // to anything: mirrors PhysicsHingeGeometry.rescaleSpringAnchorsOnBody.
+      // A dead-center anchor is left alone (zero times anything), which is
+      // what lets it stay a compile-time "no lever arm here".
+      var ratio = null;
+      if (isResize) {
+        var sprungHere = springs.some(function (sp) {
+          return (!sp.aIsWorld && sp.a === bodyIndex && !sp.localA.zero) || (sp.b === bodyIndex && !sp.localB.zero);
+        });
+        if (sprungHere || ownHingeIdx !== -1) ratio = num(B.div(shapeState[bodyIndex].half, oldHalf));
+        springs.forEach(function (sp) {
+          function rescaled(anchor) {
+            var scaled = scaleAnchor(anchor, ratio, consts[bodyIndex].type);
+            return { x: scaled.x, y: scaled.y, zero: false };
+          }
+          if (!sp.aIsWorld && sp.a === bodyIndex && !sp.localA.zero) sp.localA = rescaled(sp.localA);
+          if (sp.b === bodyIndex && !sp.localB.zero) sp.localB = rescaled(sp.localB);
+        });
+      }
+
       if (ownHingeIdx === -1) return; // no own hinge -> no recenter, no cascade (matches PhysicsHingeGeometry exactly)
 
       if (isResize) {
-        var ratio = num(B.div(shapeState[bodyIndex].half, oldHalf));
         var bodyType = consts[bodyIndex].type;
         scene.hinges.forEach(function (h, hi) {
           if (h.bodyA === bodyIndex) anchorA[hi] = scaleAnchor(anchorA[hi], ratio, bodyType);
@@ -472,9 +499,19 @@
       // against a value of the pass's own precision.
       var frameW = fnum(scene.frameWidth), frameH = fnum(scene.frameHeight);
       var frameWLit = B.lit(scene.frameWidth), frameHLit = B.lit(scene.frameHeight);
+      // Bodies joined by springs settle the way they wrap - see
+      // PhysicsEngine.springGroups: a group tethered to the background (or to
+      // an anchored body) is left wherever its pixel put it, and any other
+      // moves as one, by its leader's position. Settling one end of a spring
+      // on its own would start it a whole frame longer than the pixel next
+      // door - the seam this block otherwise only puts BETWEEN bodies, put
+      // through the middle of a force. Null for a scene with no springs.
+      var springGroups = PhysicsEngine.springGroups(scene);
       for (var wi = 0; wi < n; wi++) {
         var isHingeChild = scene.hinges.some(function (h) { return h.bodyB === wi && h.bodyA !== null; });
         if (isHingeChild) continue;
+        var springGroup = springGroups ? springGroups.groupOf[wi] : null;
+        if (springGroup && (springGroup.tethered || springGroup.leader !== wi)) continue;
         var bx = state[wi].x, by = state[wi].y;
         var dxExpr, dyExpr;
         if (consts[wi].isAnchored) {
@@ -509,6 +546,18 @@
           dxExpr = B.sub(B.mod(bx, frameW), bx);
           dyExpr = B.sub(B.mod(by, frameH), by);
         }
+        if (springGroup) {
+          // Every member, and every background pin one of them hangs from -
+          // mirrors PhysicsEngine.translateSpringGroup.
+          var gdx = num(dxExpr), gdy = num(dyExpr);
+          springGroup.members.forEach(function (m) {
+            state[m].x = num(B.add(state[m].x, gdx));
+            state[m].y = num(B.add(state[m].y, gdy));
+            var pin = findWorldHingeIndex(scene, m);
+            if (pin !== -1) anchorA[pin] = { x: num(B.add(anchorA[pin].x, gdx)), y: num(B.add(anchorA[pin].y, gdy)) };
+          });
+          continue;
+        }
         applyTranslateTarget(wi, num(dxExpr), num(dyExpr));
       }
     }
@@ -534,6 +583,9 @@
       n: n,
       pairs: pairs,
       hingeAnchors: hingeAnchors,
+      // For generateStepOnceGLSL / stepOnceCallArgs, beside hingeAnchors -
+      // empty for a scene with no springs.
+      springs: springs,
       // null for every scene without a splitter, which is what every
       // downstream generator reads as "no spawn slots, emit what you always
       // did".
@@ -642,7 +694,7 @@
     lines.push("");
     lines.push(PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(scene)));
     lines.push("");
-    lines.push(PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), initial.spawnBase));
+    lines.push(PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), initial.spawnBase, initial.springs));
     lines.push("");
     // Locals rather than globals: a global's initializer has to be a constant
     // expression, which a uniform is not. They are declared first, so every
@@ -652,7 +704,7 @@
       B.scalar + " worldY = " + global.PhysicsDF.wordUniformValue("u_hoverWorld", "y", precision) + ";";
     var bodyDecl = worldDecl + "\n" + initial.declarationLines.join("\n") + "\n" + generateCanonicalBodyDeclarationsGLSL(initial) +
       "\n" + PhysicsGPU.generateHingeAnchorLocalsGLSL(initial.hingeAnchors, precision);
-    lines.push(PhysicsGPU.generateTrajectoryMainGLSL(initial.n, bodyDecl, initial.hingeAnchors, precision, initial.spawnBase, chunk));
+    lines.push(PhysicsGPU.generateTrajectoryMainGLSL(initial.n, bodyDecl, initial.hingeAnchors, precision, initial.spawnBase, chunk, initial.springs));
 
     var words = global.PhysicsDF.wordUniformValues(worldX, worldXLo, worldY, worldYLo);
     var uniforms = {};
@@ -738,7 +790,9 @@
     // matching skip is in generateGridInitialStateGLSL, and these two must
     // agree or the hover preview would show a different starting scene from
     // the pixel it is previewing.
-    if (PhysicsEngine.wrapsAtEdges(result)) PhysicsHingeGeometry.normalizeAllBodiesIntoFrame(result);
+    // `true`: by spring group, as the GLSL above settles them - NOT the
+    // editor's own per-body settle (see normalizeAllBodiesIntoFrame).
+    if (PhysicsEngine.wrapsAtEdges(result)) PhysicsHingeGeometry.normalizeAllBodiesIntoFrame(result, true);
     return result;
   }
 

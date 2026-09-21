@@ -187,6 +187,7 @@
     cellCtx.fillRect(0, 0, cellCanvas.width, cellCanvas.height);
     cellCtx.setTransform(s, 0, 0, s, 0, 0);
     global.PhysicsUI.drawSceneBodies(cellCtx, scene.bodies);
+    global.PhysicsUI.drawSceneSprings(cellCtx, scene);
   }
 
   // Stamps the cell across the whole viewport at `cellPx` per copy, but only

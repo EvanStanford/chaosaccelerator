@@ -84,6 +84,13 @@
   var outputBodySelect = document.getElementById("output-body");
   var outputPropertySelect = document.getElementById("output-property");
   var outputBodyBSelect = document.getElementById("output-body-b");
+  var springSection = document.getElementById("spring-section");
+  var springStiffnessSlider = document.getElementById("spring-stiffness-slider");
+  var springStiffnessReadout = document.getElementById("spring-stiffness-readout");
+  var springStiffnessNote = document.getElementById("spring-stiffness-note");
+  var springRestSlider = document.getElementById("spring-rest-slider");
+  var springRestReadout = document.getElementById("spring-rest-readout");
+  var btnDeleteSpring = document.getElementById("btn-delete-spring");
   var btnSendToGrid = document.getElementById("btn-send-to-grid");
   var sendToGridErrorEl = document.getElementById("send-to-grid-error");
 
@@ -183,6 +190,7 @@
     simulationSteps: DEFAULT_SIMULATION_STEPS,
     bodies: [],
     hinges: [],
+    springs: [],
     xInput: null,
     yInput: null,
     output: null,
@@ -222,6 +230,17 @@
   // reach by taking one of its bodies with it. `current` is the pointer, for
   // the ghost dot render() draws there.
   var hingeDrag = null; // { hingeIndex, current: {x,y} }
+  // Which spring is selected, if any - never at the same time as a body
+  // (selectBody and selectSpring each clear the other). A selected spring is
+  // what the panel's two Spring sliders edit, and what Delete removes.
+  var selectedSpring = -1;
+  // The Spring tool, mid-drag: where the press landed (see pickSpringEnd) and
+  // where the pointer is now. Committed on release by finalizeSpringDrawing.
+  var springDraw = null; // { start: <spring end>, current: {x,y} }
+  // A drag that began on a spring (select tool only) - the same gesture as
+  // hingeDrag and for the same purpose: it moves nothing, and exists to carry
+  // the spring to the delete zone.
+  var springDrag = null; // { springIndex, current: {x,y} }
   // Click-and-drag shape creation: set on mousedown while the Circle/Line
   // tool is active, updated on every mousemove to drive the temp preview
   // (see drawShapePreview), and consumed (cleared, turned into a real body)
@@ -639,6 +658,42 @@
     ctx.restore();
   }
 
+  // The Spring tool's drag, as the spring it would become: from wherever the
+  // press landed to wherever a release right now would (both snapped exactly
+  // as finalizeSpringDrawing will snap them), relaxed, at the softest weight -
+  // its real stiffness is not decided until it exists.
+  function drawSpringPreview(draw) {
+    var end = pickSpringEnd(draw.current.x, draw.current.y);
+    var dx = end.world.x - draw.start.world.x, dy = end.world.y - draw.start.world.y;
+    drawSpringShape(draw.start.world, end.world, PhysicsEngine.SPRING_STIFFNESS_MIN, Math.sqrt(dx * dx + dy * dy), false, 0.7);
+  }
+
+  // The thing under the pointer during a spring drag - see drawHingeDragGhost,
+  // whose gesture this is. The spring itself never moves; it is already drawn
+  // selected, which is what says which one the ghost stands for.
+  function drawSpringDragGhost(drag) {
+    var spring = scene.springs[drag.springIndex];
+    if (!spring) return;
+    var p = PhysicsEngine.getSpringWorldPoints(spring, scene.bodies);
+    var mx = (p.a.x + p.b.x) / 2, my = (p.a.y + p.b.y) / 2;
+    ctx.save();
+    ctx.globalAlpha = 0.6;
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = SPRING_SELECTED_COLOR;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(mx, my);
+    ctx.lineTo(drag.current.x, drag.current.y);
+    ctx.stroke();
+    ctx.restore();
+    var half = { x: (p.b.x - p.a.x) / 2, y: (p.b.y - p.a.y) / 2 };
+    var scale = Math.min(1, 30 / Math.max(1, Math.sqrt(half.x * half.x + half.y * half.y)));
+    drawSpringShape(
+      { x: drag.current.x - half.x * scale, y: drag.current.y - half.y * scale },
+      { x: drag.current.x + half.x * scale, y: drag.current.y + half.y * scale },
+      spring.stiffness, 60, false, 0.6);
+  }
+
   // Which hinge's dot is under this point, or -1. Last-drawn first, matching
   // what is visibly on top. Only HALF the touch slop the bodies get: a hinge
   // always sits on a body, so every pixel given to it is taken from that
@@ -652,6 +707,204 @@
       if (dx * dx + dy * dy <= r * r) return i;
     }
     return -1;
+  }
+
+  // ---- Springs ----
+  //
+  // Drawn as a zigzag between its two attachment points. Two things about it
+  // are readouts rather than decoration: its THICKNESS is its stiffness (on
+  // the slider's own log scale, so equal slider travel is equal change in
+  // weight), and its number of coils is fixed by its REST length - so a
+  // spring that has been stretched shows long, open coils and a compressed
+  // one shows them packed, which is how a real one tells you the same thing.
+  var SPRING_COLOR = "#c8d3e6";
+  var SPRING_SELECTED_COLOR = "#ffcf4d";
+  var SPRING_COIL_AMPLITUDE = 8;   // half the zigzag's width
+  var SPRING_COIL_PITCH = 16;      // one full zig-and-zag per this much REST length
+  var SPRING_COIL_MAX_PITCH = 44;  // ...but never drawn more open than this, however far it is stretched
+  var SPRING_LEAD = 10;            // the straight stub at each end
+  var SPRING_WIDTH_MIN = 1.5, SPRING_WIDTH_MAX = 6;
+  var SPRING_HIT_PAD = 3;
+  // Within this of a body's center, an end snaps TO the center. Dead center is
+  // the one attachment with no lever arm - a ball hung a pixel off it slowly
+  // starts to spin - and it is nobody's intent to miss it by a pixel.
+  var SPRING_CENTER_SNAP = 8;
+
+  // 0 at the softest spring the slider allows, 1 at the stiffest.
+  function springStiffnessT(stiffness) {
+    var lo = PhysicsEngine.SPRING_STIFFNESS_MIN, hi = PhysicsEngine.SPRING_STIFFNESS_MAX;
+    return clamp(Math.log(stiffness / lo) / Math.log(hi / lo), 0, 1);
+  }
+  function springLineWidth(stiffness) {
+    return SPRING_WIDTH_MIN + (SPRING_WIDTH_MAX - SPRING_WIDTH_MIN) * springStiffnessT(stiffness);
+  }
+
+  function traceSpringPath(a, b, restLength) {
+    var dx = b.x - a.x, dy = b.y - a.y;
+    var len = Math.sqrt(dx * dx + dy * dy);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    if (len < 1e-6) return;
+    var ux = dx / len, uy = dy / len, px = -uy, py = ux;
+    var lead = Math.min(SPRING_LEAD, len * 0.2);
+    // By rest length, so stretch reads as open coils - with a floor from the
+    // drawn length, or a spring with little or no rest length (every coil it
+    // has spread over hundreds of pixels) stops looking like a spring at all.
+    var coils = clamp(Math.max(Math.round(restLength / SPRING_COIL_PITCH), Math.ceil(len / SPRING_COIL_MAX_PITCH)), 6, 40);
+    var span = len - 2 * lead;
+    ctx.lineTo(a.x + ux * lead, a.y + uy * lead);
+    // Two points per coil, alternating sides, each centered in its half-coil.
+    for (var k = 0; k < coils * 2; k++) {
+      var along = lead + span * (k + 0.5) / (coils * 2);
+      var side = (k % 2 === 0 ? 1 : -1) * SPRING_COIL_AMPLITUDE;
+      ctx.lineTo(a.x + ux * along + px * side, a.y + uy * along + py * side);
+    }
+    ctx.lineTo(b.x - ux * lead, b.y - uy * lead);
+    ctx.lineTo(b.x, b.y);
+  }
+
+  function drawSpringShape(a, b, stiffness, restLength, selected, alpha, color) {
+    ctx.save();
+    ctx.globalAlpha = alpha === undefined ? 1 : alpha;
+    color = color || SPRING_COLOR;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    var width = springLineWidth(stiffness);
+    traceSpringPath(a, b, restLength);
+    if (selected) {
+      ctx.lineWidth = width + 4;
+      ctx.strokeStyle = SPRING_SELECTED_COLOR;
+      ctx.stroke();
+    }
+    ctx.lineWidth = width;
+    ctx.strokeStyle = color;
+    ctx.stroke();
+    [a, b].forEach(function (p) {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, Math.max(3.5, width * 0.9), 0, Math.PI * 2);
+      ctx.fillStyle = selected ? SPRING_SELECTED_COLOR : color;
+      ctx.fill();
+    });
+    ctx.restore();
+  }
+
+  // Where this spring would sit relaxed, as a tick across its own axis
+  // measured from end A - only for the selected one, which is the one whose
+  // Rest Length slider is on screen. Without it that slider changes a number
+  // and a coil count and nothing that says "this is slack, that is taut".
+  function drawSpringRestMarker(a, b, restLength) {
+    var dx = b.x - a.x, dy = b.y - a.y;
+    var len = Math.sqrt(dx * dx + dy * dy);
+    if (len < 1e-6) return;
+    var ux = dx / len, uy = dy / len;
+    var rx = a.x + ux * restLength, ry = a.y + uy * restLength;
+    ctx.save();
+    ctx.strokeStyle = SPRING_SELECTED_COLOR;
+    ctx.globalAlpha = 0.85;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([3, 4]);
+    ctx.beginPath();
+    ctx.moveTo(b.x, b.y);
+    ctx.lineTo(rx, ry);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(rx + uy * 13, ry - ux * 13);
+    ctx.lineTo(rx - uy * 13, ry + ux * 13);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawSpring(spring, selected) {
+    var p = PhysicsEngine.getSpringWorldPoints(spring, scene.bodies);
+    drawSpringShape(p.a, p.b, spring.stiffness, spring.restLength, selected);
+    if (selected && !isPlaying) drawSpringRestMarker(p.a, p.b, spring.restLength);
+  }
+
+  // Which spring is under this point, or -1 - by distance to the straight
+  // line between its ends, out to the zigzag's own half-width. Half the touch
+  // slop, as a hinge gets (see hitTestHinge): a spring usually crosses open
+  // background, but where it does cross a body it should not swallow it.
+  function hitTestSpring(px, py) {
+    var reach = SPRING_COIL_AMPLITUDE + SPRING_HIT_PAD + pointerSlop / 2;
+    for (var i = scene.springs.length - 1; i >= 0; i--) {
+      var p = PhysicsEngine.getSpringWorldPoints(scene.springs[i], scene.bodies);
+      var dx = p.b.x - p.a.x, dy = p.b.y - p.a.y;
+      var lenSq = dx * dx + dy * dy;
+      var t = lenSq > 0 ? clamp(((px - p.a.x) * dx + (py - p.a.y) * dy) / lenSq, 0, 1) : 0;
+      var cx = p.a.x + dx * t - px, cy = p.a.y + dy * t - py;
+      if (cx * cx + cy * cy <= reach * reach) return i;
+    }
+    return -1;
+  }
+
+  // What a Spring-tool press or release landed on: a body (with the point in
+  // that body's own frame, snapped to dead center when it is close) or, with
+  // nothing under it, a fixed point on the background.
+  function pickSpringEnd(x, y) {
+    var hit = hitTestTopmost(x, y);
+    if (hit < 0) return { body: null, local: { x: x, y: y }, world: { x: x, y: y } };
+    var body = scene.bodies[hit];
+    var snap = SPRING_CENTER_SNAP + pointerSlop / 2;
+    var ox = x - body.x, oy = y - body.y;
+    if (ox * ox + oy * oy <= snap * snap) return { body: hit, local: { x: 0, y: 0 }, world: { x: body.x, y: body.y } };
+    var local = PhysicsEngine.worldToLocal(ox, oy, body.angle);
+    return { body: hit, local: { x: local.x, y: local.y }, world: { x: x, y: y } };
+  }
+
+  // A new spring starts RELAXED - its rest length is the length it was drawn
+  // at, so placing one disturbs nothing until something moves - and at a
+  // stiffness that bobs whatever it is tied to about once a second, whatever
+  // that weighs: one fixed number would be a rod on the smallest circle and
+  // slack thread on the largest. springStableStiffness already knows how
+  // readily the two ends give way (it is SPRING_STABILITY / (w * dt^2)), so
+  // the stiffness for a frequency f is that times (2*pi*f*dt)^2 / STABILITY.
+  var NEW_SPRING_HZ = 1;
+  function defaultSpringStiffness(spring) {
+    var stable = PhysicsEngine.springStableStiffness(spring, scene.bodies, PhysicsGPU.FIXED_DT);
+    var wdt = 2 * Math.PI * NEW_SPRING_HZ * PhysicsGPU.FIXED_DT;
+    var k = isFinite(stable) ? stable * wdt * wdt / PhysicsEngine.SPRING_STABILITY : PhysicsEngine.SPRING_STIFFNESS_MIN;
+    // Two significant figures: this is a starting point, not a measurement.
+    var mag = Math.pow(10, Math.floor(Math.log10(k)) - 1);
+    return clamp(Math.round(k / mag) * mag, PhysicsEngine.SPRING_STIFFNESS_MIN, PhysicsEngine.SPRING_STIFFNESS_MAX);
+  }
+
+  function finalizeSpringDrawing(draw, endPoint) {
+    var start = draw.start, end = pickSpringEnd(endPoint.x, endPoint.y);
+    var dx = end.world.x - start.world.x, dy = end.world.y - start.world.y;
+    var length = Math.sqrt(dx * dx + dy * dy);
+    if (length < CLICK_DRAG_THRESHOLD) {
+      flashStatus("Drag from one object to another, or to the background");
+      return;
+    }
+    if (start.body === null && end.body === null) {
+      flashStatus("A spring needs an object on at least one end");
+      return;
+    }
+    if (start.body === end.body) {
+      flashStatus("A spring joins two different things");
+      return;
+    }
+    function canMove(e) { return e.body !== null && !scene.bodies[e.body].isAnchored; }
+    if (!canMove(start) && !canMove(end)) {
+      flashStatus("Neither end of that spring can move");
+      return;
+    }
+    // bodyB is always a body; a background end is always A (the convention a
+    // hinge uses, and the one PhysicsEngine reads).
+    var a = start, b = end;
+    if (b.body === null) { a = end; b = start; }
+    var spring = {
+      bodyA: a.body, bodyB: b.body,
+      localAnchorA: { x: a.local.x, y: a.local.y },
+      localAnchorB: { x: b.local.x, y: b.local.y },
+      stiffness: PhysicsEngine.SPRING_STIFFNESS_MIN,
+      restLength: Math.min(PhysicsEngine.SPRING_REST_LENGTH_MAX, Math.round(length)),
+    };
+    spring.stiffness = defaultSpringStiffness(spring);
+    scene.springs.push(spring);
+    selectSpring(scene.springs.length - 1);
   }
 
   // ---- Radius/Length/Size drag handle ----
@@ -1058,8 +1311,8 @@
   //
   // Appears only while an existing body is being dragged by hand (the
   // `dragging` state - not a resize/rotation/anchor drag, and not a new
-  // shape being drawn) or a hinge is (`hingeDrag`, whose drag exists for
-  // nothing else), fixed at the top center of the frame regardless of
+  // shape being drawn) or a hinge or a spring is (`hingeDrag` / `springDrag`,
+  // whose drags exist for nothing else), fixed at the top center of the frame regardless of
   // where the drag itself is, same as the "drag an icon up to X" gesture on
   // an Android or iOS home screen.
   var DELETE_ZONE_RADIUS = 20;
@@ -1279,6 +1532,9 @@
     drawOutputKeyRing();
     updateOutputKeyControls();
     for (var i = 0; i < scene.bodies.length; i++) drawBody(scene.bodies[i], i === selectedIndex);
+    // Over the bodies, so where each one is attached can be seen; under the
+    // hinges, which are small and would otherwise be lost beneath a coil.
+    for (var sp = 0; sp < scene.springs.length; sp++) drawSpring(scene.springs[sp], sp === selectedSpring);
     for (var j = 0; j < scene.hinges.length; j++) drawHinge(scene.hinges[j], !!hingeDrag && hingeDrag.hingeIndex === j);
     drawOutputKeyBodyDot(w, h);
     drawVelocityArrows();
@@ -1288,9 +1544,12 @@
       drawRotationHandle(selectedIndex); // no-op for anything but a line
       drawAnchorIcon(selectedIndex); // no-op unless this body is anchored
     }
-    if ((dragging && selectedIndex >= 0) || hingeDrag) drawDeleteZone(deleteZoneArmed);
+    if ((dragging && selectedIndex >= 0) || hingeDrag || springDrag) drawDeleteZone(deleteZoneArmed);
     if (hingeDrag) drawHingeDragGhost(hingeDrag);
+    if (springDrag) drawSpringDragGhost(springDrag);
     if (drawingShape) drawShapePreview(drawingShape);
+    if (springDraw) drawSpringPreview(springDraw);
+    refreshSpringPanel();
     // render() already runs after every editing mutation (drag, add/delete,
     // property edits, hinges) - piggyback the auto-save here instead of
     // instrumenting each call site separately. Skipped during playback: it
@@ -1492,6 +1751,8 @@
     if (drawingShape) { drawingShape = null; render(); } // cancel the in-progress drag instead of still placing it on the eventual mouseup
     if (velocityDrag) { velocityDrag = null; render(); } // same, for a velocity aim in progress: leave the body's existing velocity alone
     if (hingeDrag) { hingeDrag = null; deleteZoneArmed = false; canvas.classList.remove("dragging"); render(); } // same, for a hinge on its way to the delete zone: it stays
+    if (springDrag) { springDrag = null; deleteZoneArmed = false; canvas.classList.remove("dragging"); render(); } // and for a spring on its way there
+    if (springDraw) { springDraw = null; render(); } // and for a spring half drawn: nothing is placed
     setActiveTool("select");
   });
 
@@ -1644,6 +1905,86 @@
 
   function selectBody(index) {
     selectedIndex = index;
+    selectedSpring = -1;
+    render();
+  }
+
+  // One thing selected at a time - see selectedSpring.
+  function selectSpring(index) {
+    selectedSpring = index;
+    selectedIndex = -1;
+    render();
+  }
+
+  // ---- The Spring section of the panel ----
+  //
+  // The stiffness slider is a position on a LOG scale between the engine's
+  // own limits: stiffness spans three decades, and what reads as "a bit
+  // stiffer" is a ratio, not a difference - a linear slider would spend
+  // nine tenths of its travel on springs too stiff to tell apart.
+  function springSliderToStiffness(v) {
+    var lo = PhysicsEngine.SPRING_STIFFNESS_MIN, hi = PhysicsEngine.SPRING_STIFFNESS_MAX;
+    var k = lo * Math.pow(hi / lo, clamp(v / Number(springStiffnessSlider.max), 0, 1));
+    // Three significant figures - the slider has a thousand stops, and the
+    // number is going into a scene file a person may read.
+    var mag = Math.pow(10, Math.floor(Math.log10(k)) - 2);
+    return clamp(Math.round(k / mag) * mag, lo, hi);
+  }
+  function stiffnessToSpringSlider(k) {
+    return Math.round(springStiffnessT(k) * Number(springStiffnessSlider.max));
+  }
+
+  // Called from render(), so it follows everything that can change what it
+  // shows - the selection, a slider, a body the spring is tied to being
+  // resized - without any of them having to know it exists. Cheap when
+  // nothing changed: it writes to the DOM only on a difference, which is
+  // also what keeps it from fighting the slider the user is dragging.
+  function refreshSpringPanel() {
+    var spring = !isPlaying && selectedSpring >= 0 ? scene.springs[selectedSpring] : null;
+    if (springSection.hidden !== !spring) {
+      springSection.hidden = !spring;
+      // The panel scrolls; a section that appears below the fold has not,
+      // as far as the user can tell, appeared.
+      if (spring && springSection.scrollIntoView) springSection.scrollIntoView({ block: "nearest" });
+    }
+    if (!spring) return;
+    function setValue(el, v) { if (el.value !== String(v)) el.value = String(v); }
+    function setText(el, t) { if (el.textContent !== t) el.textContent = t; }
+    // Only when the slider does not already MEAN this stiffness: the value it
+    // holds while being dragged rounds (three figures) to what was stored, and
+    // writing the nearest stop back could nudge the thumb under the finger.
+    if (springSliderToStiffness(Number(springStiffnessSlider.value)) !== spring.stiffness) {
+      setValue(springStiffnessSlider, stiffnessToSpringSlider(spring.stiffness));
+    }
+    setText(springStiffnessReadout, Math.round(spring.stiffness).toLocaleString());
+    setValue(springRestSlider, Math.round(spring.restLength));
+    setText(springRestReadout, Math.round(spring.restLength) + " px");
+    // The engine will not run a spring stiffer than the things on its ends
+    // can take (see PhysicsEngine's SPRING_STABILITY). Saying so here beats
+    // a slider whose top stretch silently does nothing.
+    var stable = PhysicsEngine.springStableStiffness(spring, scene.bodies, PhysicsGPU.FIXED_DT);
+    setText(springStiffnessNote, spring.stiffness > stable
+      ? "What it is tied to is light enough that the simulation limits this to " + Math.round(stable).toLocaleString() + "."
+      : "");
+  }
+
+  springRestSlider.max = String(PhysicsEngine.SPRING_REST_LENGTH_MAX);
+  springStiffnessSlider.addEventListener("input", function () {
+    if (selectedSpring < 0) return;
+    scene.springs[selectedSpring].stiffness = springSliderToStiffness(Number(springStiffnessSlider.value));
+    render();
+  });
+  springRestSlider.addEventListener("input", function () {
+    if (selectedSpring < 0) return;
+    scene.springs[selectedSpring].restLength = clamp(Number(springRestSlider.value), 0, PhysicsEngine.SPRING_REST_LENGTH_MAX);
+    render();
+  });
+  btnDeleteSpring.addEventListener("click", function () { deleteSelectedSpring(); });
+
+  function deleteSelectedSpring() {
+    if (selectedSpring < 0) return;
+    scene.springs.splice(selectedSpring, 1);
+    selectedSpring = -1;
     render();
   }
 
@@ -1661,8 +2002,13 @@
   window.addEventListener("keydown", function (e) {
     if (isPlaying) return;
     if (e.key !== "Delete" && e.key !== "Backspace") return;
-    if (document.activeElement && document.activeElement.tagName === "INPUT") return;
-    deleteSelectedBody();
+    // A focused text field owns these keys. A focused SLIDER does not - it has
+    // no use for them, and the Spring sliders are focused the moment they are
+    // touched, which is exactly when Delete should still mean the spring.
+    var focused = document.activeElement;
+    if (focused && focused.tagName === "INPUT" && focused.type !== "range") return;
+    if (selectedSpring >= 0) deleteSelectedSpring();
+    else deleteSelectedBody();
   });
 
   // ---- Canvas interaction ----
@@ -1728,6 +2074,19 @@
         render();
         return;
       }
+      // A spring, unless a body is squarely under the pointer: a spring
+      // usually ends INSIDE the bodies it joins, and a press there has to
+      // keep meaning the body, or a sprung ball could only be grabbed by its
+      // rim. Everywhere else along its length the spring is what was pressed.
+      // Selecting is the press; the drag that may follow carries it nowhere
+      // but the delete zone (see springDrag).
+      var springHit = hitTestExact(p.x, p.y) >= 0 ? -1 : hitTestSpring(p.x, p.y);
+      if (springHit >= 0) {
+        springDrag = { springIndex: springHit, current: p };
+        canvas.classList.add("dragging");
+        selectSpring(springHit);
+        return;
+      }
       var hit = hitTestTopmost(p.x, p.y);
       selectBody(hit);
       if (hit >= 0) {
@@ -1761,6 +2120,12 @@
     } else if (activeTool === "hinge") {
       addHingeAt(p.x, p.y);
       setActiveTool("select");
+      render();
+    } else if (activeTool === "spring") {
+      // A drag, like the shape tools: the press is one end, the release the
+      // other (see finalizeSpringDrawing). Either may be a body or the bare
+      // background, so there is nothing to reject until both are known.
+      springDraw = { start: pickSpringEnd(p.x, p.y), current: p };
       render();
     } else if (activeTool === "velocity") {
       // Unlike the click-once tools around it this one is a drag: mousedown
@@ -1851,6 +2216,17 @@
       render();
       return;
     }
+    if (springDrag) {
+      springDrag.current = canvasPoint(e);
+      deleteZoneArmed = isOverDeleteZone(springDrag.current.x, springDrag.current.y);
+      render();
+      return;
+    }
+    if (springDraw) {
+      springDraw.current = canvasPoint(e);
+      render();
+      return;
+    }
     if (!dragging || selectedIndex < 0) return;
     var p = canvasPoint(e);
     var body = scene.bodies[selectedIndex];
@@ -1873,6 +2249,8 @@
     velocityDrag = null;
     drawingShape = null;
     hingeDrag = null;
+    springDrag = null;
+    springDraw = null;
     dragging = false;
     deleteZoneArmed = false;
     canvas.classList.remove("dragging");
@@ -1920,6 +2298,27 @@
       // bodies), so removing one is only this. Released anywhere else, the
       // drag simply ends - it never moved anything to put back.
       if (droppedHinge >= 0) scene.hinges.splice(droppedHinge, 1);
+      render();
+      return;
+    }
+    if (springDrag) {
+      // The same release rule as a hinge's, just above. The spring was
+      // selected by the press that began this, so dropping it on the zone is
+      // deleting the selection.
+      var springUp = canvasPoint(e);
+      var droppedSpring = isOverDeleteZone(springUp.x, springUp.y);
+      springDrag = null;
+      deleteZoneArmed = false;
+      canvas.classList.remove("dragging");
+      if (droppedSpring) deleteSelectedSpring();
+      else render();
+      return;
+    }
+    if (springDraw) {
+      var draw = springDraw;
+      springDraw = null;
+      finalizeSpringDrawing(draw, canvasPoint(e));
+      setActiveTool("select");
       render();
       return;
     }
@@ -2365,6 +2764,11 @@
       if (h.bodyA !== null) return;
       h.localAnchorA = { x: h.localAnchorA.x + dx, y: h.localAnchorA.y + dy };
     });
+    // A spring's background end is a world point too, for the same reason.
+    scene.springs.forEach(function (sp) {
+      if (sp.bodyA !== null) return;
+      sp.localAnchorA = { x: sp.localAnchorA.x + dx, y: sp.localAnchorA.y + dy };
+    });
   }
 
   function serializeScene() {
@@ -2394,6 +2798,16 @@
           bodyB: h.bodyB,
           localAnchorA: { x: roundNum(h.localAnchorA.x), y: roundNum(h.localAnchorA.y) },
           localAnchorB: { x: roundNum(h.localAnchorB.x), y: roundNum(h.localAnchorB.y) },
+        };
+      }),
+      springs: PhysicsEngine.sceneSprings(scene).map(function (sp) {
+        return {
+          bodyA: sp.bodyA,
+          bodyB: sp.bodyB,
+          localAnchorA: { x: roundNum(sp.localAnchorA.x), y: roundNum(sp.localAnchorA.y) },
+          localAnchorB: { x: roundNum(sp.localAnchorB.x), y: roundNum(sp.localAnchorB.y) },
+          stiffness: roundNum(sp.stiffness),
+          restLength: roundNum(sp.restLength),
         };
       }),
       xInput: scene.xInput ? { body: scene.xInput.body, property: scene.xInput.property } : null,
@@ -2468,6 +2882,39 @@
       }
     }
 
+    // Absent from every scene saved before springs existed. Indices are
+    // checked like a hinge's; the two numbers are CLAMPED into the sliders'
+    // own range rather than rejected, the way maxSimulationBodies is, so a
+    // hand-edited value lands somewhere the editor can show.
+    var newSprings = [];
+    if (Array.isArray(parsed.springs)) {
+      for (var si = 0; si < parsed.springs.length; si++) {
+        var sp = parsed.springs[si];
+        var springA = sp.bodyA === null || sp.bodyA === undefined ? null : Number(sp.bodyA);
+        var springB = Number(sp.bodyB);
+        if (springA !== null && !(springA >= 0 && springA < newBodies.length)) {
+          throw new Error("springs[" + si + "]: bodyA index out of range.");
+        }
+        if (!(springB >= 0 && springB < newBodies.length)) {
+          throw new Error("springs[" + si + "]: bodyB index out of range.");
+        }
+        if (springA === springB) throw new Error("springs[" + si + "]: both ends are on the same object.");
+        if (!sp.localAnchorA || !sp.localAnchorB) {
+          throw new Error("springs[" + si + "]: needs localAnchorA and localAnchorB.");
+        }
+        var stiffness = Number(sp.stiffness), restLength = Number(sp.restLength);
+        newSprings.push({
+          bodyA: springA,
+          bodyB: springB,
+          localAnchorA: { x: Number(sp.localAnchorA.x) || 0, y: Number(sp.localAnchorA.y) || 0 },
+          localAnchorB: { x: Number(sp.localAnchorB.x) || 0, y: Number(sp.localAnchorB.y) || 0 },
+          stiffness: clamp(isFinite(stiffness) ? stiffness : PhysicsEngine.SPRING_STIFFNESS_MIN,
+            PhysicsEngine.SPRING_STIFFNESS_MIN, PhysicsEngine.SPRING_STIFFNESS_MAX),
+          restLength: clamp(isFinite(restLength) ? restLength : 0, 0, PhysicsEngine.SPRING_REST_LENGTH_MAX),
+        });
+      }
+    }
+
     function parseMapping(raw, label, propsList, allowLifespan) {
       if (raw === null || raw === undefined) return null;
       // Scene Lifespan has no body of its own - checked before the
@@ -2506,6 +2953,7 @@
     return {
       bodies: newBodies,
       hinges: newHinges,
+      springs: newSprings,
       xInput: parseMapping(parsed.xInput, "xInput"),
       yInput: parseMapping(parsed.yInput, "yInput"),
       output: parseMapping(parsed.output, "output", OUTPUT_PROPERTIES, true),
@@ -2529,6 +2977,7 @@
   function applySceneData(data) {
     scene.bodies = data.bodies;
     scene.hinges = data.hinges;
+    scene.springs = data.springs || [];
     scene.xInput = data.xInput;
     scene.yInput = data.yInput;
     scene.output = data.output;
@@ -2611,6 +3060,7 @@
   btnClearAll.addEventListener("click", function () {
     scene.bodies = [];
     scene.hinges = [];
+    scene.springs = [];
     scene.xInput = null;
     scene.yInput = null;
     scene.output = null;
@@ -3656,6 +4106,33 @@
       ctx = targetCtx;
       try {
         for (var i = 0; i < bodies.length; i++) drawBody(bodies[i], false);
+      } finally {
+        ctx = previous;
+      }
+    },
+    // One spring between two world points, into someone else's canvas - the
+    // same trick as drawSceneBodies, so the map's replay panel and the
+    // transition draw a spring exactly the way the editor does (coils by
+    // rest length, weight by stiffness) instead of from a copy of their own.
+    // `color` is optional: an inspected point's own hue, on the map.
+    drawSpringBetween: function (targetCtx, a, b, stiffness, restLength, color) {
+      var previous = ctx;
+      ctx = targetCtx;
+      try {
+        drawSpringShape(a, b, stiffness, restLength, false, 1, color);
+      } finally {
+        ctx = previous;
+      }
+    },
+    // Every spring of a scene whose bodies are where they should be drawn.
+    drawSceneSprings: function (targetCtx, sceneToDraw) {
+      var previous = ctx;
+      ctx = targetCtx;
+      try {
+        PhysicsEngine.sceneSprings(sceneToDraw).forEach(function (sp) {
+          var p = PhysicsEngine.getSpringWorldPoints(sp, sceneToDraw.bodies);
+          drawSpringShape(p.a, p.b, sp.stiffness, sp.restLength, false);
+        });
       } finally {
         ctx = previous;
       }

@@ -120,9 +120,11 @@
   // so (unlike when this logic lived inside physics-ui.js) there's no need
   // to load a whole hidden copy of #editor-view in an iframe just to reach
   // it - a direct <script> tag above is enough.
-  window.__physicsTests.runAll();
+  // ?only=<text> runs just the tests whose name contains it - see runAll.
+  var only = new URLSearchParams(location.search).get("only");
+  window.__physicsTests.runAll(only);
   document.getElementById("btn-rerun").addEventListener("click", function () {
-    window.__physicsTests.runAll();
+    window.__physicsTests.runAll(only);
   });
 </script>
 </body>

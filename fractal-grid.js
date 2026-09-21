@@ -1075,8 +1075,8 @@
     // wrap at all, which is exactly what that mode is.
     var frame = PhysicsEngine.wrapsAtEdges(sceneToCompile)
       ? { width: sceneToCompile.frameWidth, height: sceneToCompile.frameHeight } : undefined;
-    var stepOnceSource = PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, sceneToCompile.mutualGravity, PhysicsEngine.collisionsEnabled(sceneToCompile), initial.spawnBase);
-    var stepOnceCall = "stepOnce(" + PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, precision, initial.spawnBase) + ");";
+    var stepOnceSource = PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, sceneToCompile.mutualGravity, PhysicsEngine.collisionsEnabled(sceneToCompile), initial.spawnBase, initial.springs);
+    var stepOnceCall = "stepOnce(" + PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, precision, initial.spawnBase, initial.springs) + ");";
 
     // "Stop on wrap": every pixel is its own independent simulation, so
     // there's no single moment "the sim stopped" the way there is on
@@ -7415,6 +7415,33 @@
     }
   }
 
+  // The scene's springs, over a set of bodies this panel has just drawn.
+  // `rows` is indexed by AUTHORED body ({ x, y, angle, half }, as a
+  // trajectory row is), which is all a spring ever refers to - a ball that
+  // splits keeps its spring on the half that kept its slot.
+  //
+  // An end's place on its body is not always what was authored: X/Y Input
+  // can be linked to a size, and the grid rescales a spring's anchor with the
+  // body it sits on (see physics-grid-codegen.js). The row's own `half` over
+  // the authored one is that same ratio, read back off the trajectory.
+  function drawHoverSprings(rows, colorOverride) {
+    PhysicsEngine.sceneSprings(scene).forEach(function (sp) {
+      function end(bodyIndex, anchor) {
+        if (bodyIndex === null) return anchor; // a fixed point on the background
+        var row = rows[bodyIndex];
+        if (!row) return null;
+        var authoredHalf = PhysicsGPU.shapeHalf(scene.bodies, bodyIndex);
+        var ratio = authoredHalf > 0 ? row.half / authoredHalf : 1;
+        var isLine = scene.bodies[bodyIndex].type === "line";
+        var r = PhysicsEngine.rotateVec({ x: anchor.x * ratio, y: anchor.y * (isLine ? 1 : ratio) }, row.angle);
+        return { x: row.x + r.x, y: row.y + r.y };
+      }
+      var a = end(sp.bodyA, sp.localAnchorA), b = end(sp.bodyB, sp.localAnchorB);
+      if (!a || !b) return;
+      PhysicsUI.drawSpringBetween(hoverCtx, a, b, sp.stiffness, sp.restLength, colorOverride ? colorOverride.fill : undefined);
+    });
+  }
+
   // Draws every inspected point's bodies at `step` (each capped to its own
   // effectiveMaxStep, independently of however far the hovered scene's own
   // replay has gotten) - called from both the instant preview (step 0) and
@@ -7437,15 +7464,19 @@
         var isFinalFrame = s >= entry.effectiveMaxStep - 1;
         var row = entry.trajectory[s];
         var color = entry.color;
-        var effective = [];
+        var effective = [], shown = [];
         for (var i = 0; i < row.length; i++) {
           var bodyRow = (isFinalFrame && entry.wrapOverride && entry.wrapOverride.bodyIndex === i)
             ? { x: entry.wrapOverride.x, y: entry.wrapOverride.y, angle: entry.wrapOverride.angle, half: row[i].half }
             : row[i];
           if (!hoverRowIsLive(i, row)) continue;
           effective.push(bodyRow);
+          shown[i] = bodyRow;
           drawHoverBody(hoverBodySpec(i), bodyRow, color);
         }
+        // From where each body was DRAWN (the wrap-corrected row on a frozen
+        // final frame), so a spring still ends on its body there.
+        drawHoverSprings(shown, color);
         // Each inspected point gets its own off-screen arrow in its own hue,
         // so a dozen inspected playbacks that have all left the frame still
         // read as a dozen distinguishable runs rather than one anonymous
@@ -7606,6 +7637,9 @@
         half: PhysicsGPU.shapeHalf([body], 0),
       });
     });
+    drawHoverSprings(offsetScene.bodies.map(function (body) {
+      return { x: body.x, y: body.y, angle: body.angle, half: PhysicsGPU.shapeHalf([body], 0) };
+    }));
     drawHoverInputVelocityArrows(offsetScene);
     // The inspected point's own t=0 state - "both play on top of each other"
     // starts here, before either has even upgraded to a real replay.
@@ -7667,7 +7701,7 @@
       hoveredStep = Math.min(effectiveMaxStep - 1, step);
       row = activeReplay.trajectory[hoveredStep];
       isFinalFrame = hoveredStep >= effectiveMaxStep - 1;
-      var effectiveRow = [];
+      var effectiveRow = [], shownRows = [];
       for (var i = 0; i < row.length; i++) {
         // wrapOverride has no `half` (a resize-link's rendered size is
         // unaffected by this x/y/angle correction) - keep this step's own.
@@ -7676,8 +7710,11 @@
           : row[i];
         if (!hoverRowIsLive(i, row)) continue;
         effectiveRow.push(bodyRow);
+        shownRows[i] = bodyRow;
         drawHoverBody(hoverBodySpec(i), bodyRow);
       }
+      // Indexed by body, and from where each was drawn - see drawInspectedAtStep.
+      drawHoverSprings(shownRows);
       // The corrected row, not the raw one, so an arrow points at where its
       // body was actually drawn on a wrap-stopped final frame.
       drawOffscreenMappingArrows(effectiveRow);

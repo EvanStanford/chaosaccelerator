@@ -62,7 +62,8 @@
 
   function shapeSize(body) {
     if (body.type === "circle") return body.radius;
-    if (body.type === "funnel") return body.size;
+    // A splitter is the same trapezoid as a funnel, sized by the same field.
+    if (body.type === "funnel" || body.type === "splitter") return body.size;
     return body.length;
   }
 
@@ -81,6 +82,22 @@
     scene.hinges.forEach(function (h) {
       if (h.bodyA === bodyIndex) h.localAnchorA = scaleAnchorForResize(body, h.localAnchorA, ratio);
       if (h.bodyB === bodyIndex) h.localAnchorB = scaleAnchorForResize(body, h.localAnchorB, ratio);
+    });
+  }
+
+  // A spring's attachment point keeps its place ON the body through a resize
+  // - the end of a line stays the end of the line, a point on a rim stays on
+  // the rim - by the same proportional rule a hinge anchor follows. Unlike a
+  // hinge's, it applies whether or not the body is hinged to anything: a
+  // spring asks nothing of the body's position, so there is no recenter to do
+  // and nothing to cascade, only the anchor itself to keep where the user put
+  // it. (A move or a rotation needs nothing at all: the anchor is in the
+  // body's own frame, and the spring simply ends up longer or shorter.)
+  function rescaleSpringAnchorsOnBody(scene, bodyIndex, ratio) {
+    var body = scene.bodies[bodyIndex];
+    global.PhysicsEngine.sceneSprings(scene).forEach(function (s) {
+      if (s.bodyA === bodyIndex) s.localAnchorA = scaleAnchorForResize(body, s.localAnchorA, ratio);
+      if (s.bodyB === bodyIndex) s.localAnchorB = scaleAnchorForResize(body, s.localAnchorB, ratio);
     });
   }
 
@@ -121,12 +138,18 @@
   // (world) or derived from the parent's own position/angle.
   function applyBodyEditPreservingHinge(scene, bodyIndex, isResize, mutate) {
     var ownHinge = findOwnHinge(scene, bodyIndex);
-    if (!ownHinge) { mutate(); return; }
-
     var body = scene.bodies[bodyIndex];
+    var oldSize = isResize ? shapeSize(body) : null;
+    // Hinged or not - see rescaleSpringAnchorsOnBody.
+    function rescaleSprings() {
+      if (!isResize) return;
+      var springRatio = oldSize > 1e-9 ? shapeSize(body) / oldSize : 1;
+      if (isFinite(springRatio) && springRatio !== 1) rescaleSpringAnchorsOnBody(scene, bodyIndex, springRatio);
+    }
+    if (!ownHinge) { mutate(); rescaleSprings(); return; }
+
     var oldAngle = body.angle;
     var oldX = body.x, oldY = body.y;
-    var oldSize = isResize ? shapeSize(body) : null;
 
     // Snapshot every child attachment point (in this body's OLD local
     // frame) before anything changes, so we can tell exactly how far each
@@ -142,6 +165,7 @@
     var pivot = hingeWorldPointA(scene, ownHinge);
 
     mutate();
+    rescaleSprings();
 
     if (isResize) {
       var ratio = oldSize > 1e-9 ? shapeSize(body) / oldSize : 1;
@@ -242,11 +266,26 @@
   // fully correct after exactly one pass: roots don't depend on each other,
   // and each root's own correction already cascades to its entire subtree
   // in one call.
-  function normalizeAllBodiesIntoFrame(scene) {
+  //
+  // bySpringGroup: settle bodies joined by springs the way the engine WRAPS
+  // them (see PhysicsEngine.springGroups) - a tethered group not at all, any
+  // other as one, by its leader. This is what a pixel's starting scene needs
+  // (computeOffsetSceneNumeric, mirroring the GLSL settle beside it): one end
+  // of a spring settled on its own would start it a whole frame longer than
+  // in the pixel next door. The EDITOR deliberately does not ask for it. Its
+  // settle is about keeping every body where the user can reach it, a spring
+  // there only stretches to follow, and the user can see where things landed.
+  function normalizeAllBodiesIntoFrame(scene, bySpringGroup) {
     if (!scene.frameWidth || !scene.frameHeight) return;
+    var groups = bySpringGroup ? global.PhysicsEngine.springGroups(scene) : null;
     for (var i = 0; i < scene.bodies.length; i++) {
       if (isHingeChild(scene, i)) continue;
-      normalizeBodyIntoFrame(scene, i);
+      var group = groups ? groups.groupOf[i] : null;
+      if (!group) { normalizeBodyIntoFrame(scene, i); continue; }
+      if (group.tethered || group.leader !== i) continue;
+      // The leader is never anchored, so this is the plain center wrap.
+      var delta = frameWrapDelta(scene.bodies[i], scene.frameWidth, scene.frameHeight);
+      if (delta.dx !== 0 || delta.dy !== 0) global.PhysicsEngine.translateSpringGroup(scene, group, delta.dx, delta.dy);
     }
   }
 
@@ -258,11 +297,21 @@
   // independently wraps - only ever corrected as a cascade side effect of
   // its own root's wrap; watching it separately here would just be
   // re-detecting the same crossing its root already reports).
+  //
+  // A body joined to anything by a spring wraps only as its group's leader,
+  // and not at all if the group is tethered (see PhysicsEngine.springGroups) -
+  // so those are the only sprung bodies worth watching. A member that merely
+  // follows its leader's wrap would register the same crossing, but from a
+  // position nowhere near the edge, and findWrapStopStep would then solve for
+  // a crossing instant that never happened.
   function wrapWatchedBodyIndices(scene) {
     var result = [];
+    var groups = global.PhysicsEngine.springGroups(scene);
     for (var i = 0; i < scene.bodies.length; i++) {
       if (scene.bodies[i].isAnchored) continue;
       if (isHingeChild(scene, i)) continue;
+      var group = groups ? groups.groupOf[i] : null;
+      if (group && (group.tethered || group.leader !== i)) continue;
       result.push(i);
     }
     return result;

@@ -5216,7 +5216,8 @@
 
   // One of everything a scene can hold: all four shapes, an anchored body, a
   // starting velocity on some and none on others, a hinge to the world and
-  // one between bodies, a pair Output, and every setting off its default.
+  // one between bodies, a spring to the background and one between bodies, a
+  // pair Output, and every setting off its default.
   function everythingScene() {
     return {
       mutualGravity: true, collisionsEnabled: false, simulationSteps: 2300,
@@ -5230,6 +5231,10 @@
       hinges: [
         { bodyA: null, bodyB: 0, localAnchorA: { x: -188, y: 51.5 }, localAnchorB: { x: -70, y: 1 } },
         { bodyA: 0, bodyB: 4, localAnchorA: { x: 70, y: 0 }, localAnchorB: { x: -71.25, y: 1 } },
+      ],
+      springs: [
+        { bodyA: null, bodyB: 3, localAnchorA: { x: 40.5, y: 220 }, localAnchorB: { x: 0, y: 0 }, stiffness: 112000, restLength: 187.25 },
+        { bodyA: 3, bodyB: 4, localAnchorA: { x: -12, y: 8.5 }, localAnchorB: { x: 0, y: -18.5 }, stiffness: 2530, restLength: 0 },
       ],
       xInput: { body: 0, property: "vx" }, yInput: { body: 4, property: "radius" },
       output: { body: 0, bodyB: 4, property: "distance" },
@@ -5268,7 +5273,7 @@
       var wrong = Object.keys(want).filter(function (k) { return decoded[k] !== want[k]; });
       var body = decoded.bodies[0];
       var restOk = body.vx === 0 && body.vy === 0 && body.w === 0 && body.isAnchored === false &&
-        decoded.hinges.length === 0 && decoded.xInput === null && decoded.yInput === null && decoded.output === null;
+        decoded.hinges.length === 0 && decoded.springs.length === 0 && decoded.xInput === null && decoded.yInput === null && decoded.output === null;
       return {
         pass: wrong.length === 0 && restOk,
         detail: wrong.length ? "wrong defaults for: " + wrong.join(", ") : "all five settings, the three velocities, anchoring and the mappings come back explicit",
@@ -5499,6 +5504,322 @@
     }
   );
 
+  // ---- Springs ----
+  //
+  // A spring is a force with a lever arm, which makes it the first thing in
+  // the engine to produce a torque - and it exists three times over (the JS
+  // engine, the float32 GLSL and the multi-float GLSL), with a fourth and
+  // fifth copy of how its anchors follow a resized body (physics-hinge-
+  // geometry.js and physics-grid-codegen.js). Everything below is one of
+  // those pairs being held to the other, or the engine being held to physics.
+
+  // Kinetic + spring + (uniform) gravitational energy. `dt` because the
+  // stiffness actually in force can depend on it - see
+  // PhysicsEngine.springEffectiveStiffness.
+  function springSceneEnergy(scene, dt) {
+    var e = PhysicsEngine.springPotentialEnergy(scene, dt);
+    scene.bodies.forEach(function (b) {
+      if (b.isAnchored) return;
+      e += 0.5 * b.mass * (b.vx * b.vx + b.vy * b.vy) + 0.5 * b.inertia * b.w * b.w - b.mass * PhysicsEngine.GRAVITY * b.y;
+    });
+    return e;
+  }
+
+  // A ball on a spring from the background, a second ball on a spring from
+  // the first - both springs attached OFF-center, so every term of the force,
+  // the torque and the angular integration is exercised.
+  function buildSpringChain() {
+    var a = PhysicsEngine.createCircle(300, 300, 30, false), b = PhysicsEngine.createCircle(520, 340, 20, false);
+    a.vx = 50; b.vy = -80;
+    return {
+      bodies: [a, b], hinges: [], collisionsEnabled: false, edgeMode: "infinite",
+      springs: [
+        { bodyA: null, bodyB: 0, localAnchorA: { x: 300, y: 100 }, localAnchorB: { x: -12, y: 0 }, stiffness: 80000, restLength: 150 },
+        { bodyA: 0, bodyB: 1, localAnchorA: { x: 10, y: 5 }, localAnchorB: { x: 0, y: -8 }, stiffness: 60000, restLength: 120 },
+      ],
+    };
+  }
+
+  addTest(
+    "A spring conserves energy, and its torque is the torque of its force",
+    "springs are the engine's only source of angular acceleration: a force and a torque that disagreed (a sign, a lever arm taken from the wrong end) would not crash anything - it would quietly pump energy in, and only an energy audit says so. Semi-implicit Euler makes the total wobble by an amount proportional to the step, so the wobble has to SHRINK with the step; an inconsistent force leaves a drift that does not",
+    function () {
+      function wobble(sub) {
+        var dt = DT / sub, scene = buildSpringChain();
+        var e0 = springSceneEnergy(scene, dt), scale = PhysicsEngine.springPotentialEnergy(scene, dt) + 1e7, worst = 0;
+        for (var i = 0; i < 1500 * sub; i++) {
+          PhysicsEngine.step(scene, dt);
+          worst = Math.max(worst, Math.abs(springSceneEnergy(scene, dt) - e0) / scale);
+        }
+        return { worst: worst, spun: Math.abs(scene.bodies[1].w) > 0 };
+      }
+      var full = wobble(1), fine = wobble(8);
+      return {
+        pass: full.worst < 0.12 && fine.worst < full.worst / 4 && full.spun,
+        detail: "energy wobble " + (full.worst * 100).toFixed(2) + "% at 1/60s, " + (fine.worst * 100).toFixed(2) + "% at 1/480s (must shrink with the step); the off-center ball was turned=" + full.spun,
+      };
+    }
+  );
+
+  addTest(
+    "A two-body spring pushes both ends equally: momentum and angular momentum hold",
+    "the force on end B must be exactly the opposite of the force on end A, lever arms included, or a pair of bodies joined by a spring drifts off (or spins up) by itself. Run under Mutual Gravity, whose pull between two free bodies is equal and opposite too: under ordinary gravity the pair free-falls into the speed cap, which rescales the whole velocity vector and so does not conserve anything",
+    function () {
+      var scene = buildSpringChain();
+      scene.springs = [scene.springs[1]]; // just the body-to-body one: nothing acts from outside
+      scene.mutualGravity = true;
+      function momenta(s) {
+        var px = 0, py = 0, L = 0;
+        s.bodies.forEach(function (q) {
+          px += q.mass * q.vx; py += q.mass * q.vy;
+          L += q.mass * (q.x * q.vy - q.y * q.vx) + q.inertia * q.w;
+        });
+        return { px: px, py: py, L: L };
+      }
+      var before = momenta(scene), scale = 0;
+      scene.bodies.forEach(function (q) { scale += q.mass * Math.hypot(q.vx, q.vy); });
+      runJS(scene, 1500);
+      var after = momenta(scene);
+      var dp = Math.hypot(after.px - before.px, after.py - before.py) / scale;
+      var dL = Math.abs(after.L - before.L) / Math.abs(before.L);
+      return {
+        pass: dp < 1e-9 && dL < 1e-9 && Math.abs(scene.bodies[1].w) > 0,
+        detail: "linear momentum changed by " + dp.toExponential(2) + " of the bodies' own, angular momentum by " + dL.toExponential(2) +
+          " of itself, over 1500 steps in which the small ball was spun to " + scene.bodies[1].w.toFixed(2) + " rad/s",
+      };
+    }
+  );
+
+  // Hinge + background spring on a lever arm + body-to-body spring + a
+  // zero-rest-length spring attached dead center (the two compile-time
+  // special cases: no sqrt, and no lever arm at all).
+  function buildSpringLockstepScene() {
+    var line = PhysicsEngine.createLine(500, 300, 240, 0, false);
+    var ball = PhysicsEngine.createCircle(560, 480, 28, false);
+    var top = PhysicsEngine.createCircle(760, 250, 22, false);
+    return {
+      bodies: [line, ball, top],
+      hinges: [{ bodyA: null, bodyB: 0, localAnchorA: { x: 380, y: 300 }, localAnchorB: { x: -120, y: 0 } }],
+      springs: [
+        { bodyA: null, bodyB: 0, localAnchorA: { x: 640, y: 120 }, localAnchorB: { x: 120, y: 0 }, stiffness: 90000, restLength: 150 },
+        { bodyA: 0, bodyB: 1, localAnchorA: { x: 40, y: 0 }, localAnchorB: { x: 0, y: -20 }, stiffness: 120000, restLength: 110 },
+        { bodyA: 1, bodyB: 2, localAnchorA: { x: 0, y: 0 }, localAnchorB: { x: 0, y: 0 }, stiffness: 50000, restLength: 0 },
+      ],
+      frameWidth: 1200, frameHeight: 800, edgeMode: "infinite",
+    };
+  }
+
+  function worstTrajectoryGap(js, traj, steps, bodyCount) {
+    var worst = 0;
+    for (var i = 0; i < steps; i++) {
+      for (var b = 0; b < bodyCount; b++) {
+        worst = Math.max(worst, Math.abs(js[i][b].x - traj[i][b].x), Math.abs(js[i][b].y - traj[i][b].y), Math.abs(js[i][b].angle - traj[i][b].angle) * 50);
+      }
+    }
+    return worst;
+  }
+
+  addTest(
+    "JS engine and GPU compiler agree on springs (float32 and double-float)",
+    "PhysicsEngine.addSpringAccelerations and its GLSL port in generateStepOnceGLSL are a hand-synced pair in each precision - force, torque, the stability limit on the stiffness, and the angular half of both integration legs. The double-float run is the real check: it tracks the float64 engine to a fraction of a thousandth of a pixel for hundreds of steps or it is not the same physics. float32 is held only over a short run, before its own rounding (this scene is chaotic) has had time to grow",
+    function () {
+      var js = PhysicsEngine.runTrajectory(buildSpringLockstepScene(), 300, DT);
+      var f32 = worstTrajectoryGap(js, PhysicsGPU.runSceneOnGPU(buildSpringLockstepScene(), 60), 60, 3);
+      var df = worstTrajectoryGap(js, PhysicsGPU.runSceneOnGPU(buildSpringLockstepScene(), 300, "df"), 300, 3);
+      return {
+        pass: f32 < 0.02 && df < 0.002,
+        detail: "worst gap from the JS engine: float32 " + f32.toExponential(2) + "px over 60 steps, double-float " + df.toExponential(2) + "px over 300 (angles weighted as 50px per radian)",
+      };
+    }
+  );
+
+  addTest(
+    "A spring too stiff for a small body is limited, not unstable - in JS and on the GPU alike",
+    "the step is fixed, so past (omega*dt)^2 = 4 an oscillation's energy grows without limit, and ANGULAR speed has no cap to run into. Two things guard it, and the GLSL has to apply both identically from per-pixel masses: springEffectiveStiffness limits the stiffness to what the two ends can take, and springSpin integrates the spin implicitly once a body's swing about its own center - driven by the spring's TENSION, which no stiffness limit bounds - is too fast for the step. Unguarded, this exact scene spun its circle to 7,000 rad/s and multiplied its energy by 580",
+    function () {
+      // The smallest circle, the stiffest spring, attached off-center, and stretched far enough
+      // (see `swing` below) that its swing is past what the step can follow.
+      function build() {
+        var tiny = PhysicsEngine.createCircle(476, 300, 5, false);
+        tiny.vy = 120;
+        return {
+          bodies: [tiny], hinges: [], edgeMode: "infinite", mutualGravity: true,
+          springs: [{ bodyA: null, bodyB: 0, localAnchorA: { x: 400, y: 300 }, localAnchorB: { x: 3, y: 0 }, stiffness: PhysicsEngine.SPRING_STIFFNESS_MAX, restLength: 60 }],
+        };
+      }
+      var scene = build(), body = scene.bodies[0];
+      var limit = PhysicsEngine.springEffectiveStiffness(scene.springs[0], scene.bodies, DT);
+      var e0 = springSceneEnergy(scene, DT) + body.mass * PhysicsEngine.GRAVITY * body.y; // no gravity in this scene
+      var peakEnergy = 0, peakSpin = 0, peakSwing = 0;
+      for (var i = 0; i < 3000; i++) {
+        PhysicsEngine.step(scene, DT);
+        peakEnergy = Math.max(peakEnergy, (springSceneEnergy(scene, DT) + body.mass * PhysicsEngine.GRAVITY * body.y) / e0);
+        peakSpin = Math.max(peakSpin, Math.abs(body.w));
+        var p = PhysicsEngine.getSpringWorldPoints(scene.springs[0], scene.bodies);
+        peakSwing = Math.max(peakSwing, limit * Math.abs(Math.hypot(p.b.x - p.a.x, p.b.y - p.a.y) - 60) * 3 * body.invInertia * DT * DT);
+      }
+      var finite = isFinite(body.x + body.y + body.angle + body.w);
+      // 60 steps and no further: this scene is chaotic (a 1e-9px nudge to the
+      // JS engine alone is 0.2px by step 112), so a longer run would be
+      // measuring that, not whether the two engines apply the same guard.
+      // Energy is allowed the wobble a step this coarse for the spring gives
+      // (omega*dt is 0.53 here) - what it must not do is CLIMB.
+      var js = PhysicsEngine.runTrajectory(build(), 60, DT);
+      var gap = worstTrajectoryGap(js, PhysicsGPU.runSceneOnGPU(build(), 60, "df"), 60, 1);
+      return {
+        pass: limit < PhysicsEngine.SPRING_STIFFNESS_MAX / 10 && peakSwing > PhysicsEngine.SPRING_STABILITY && finite && peakEnergy < 1.6 && peakSpin < 300 && gap < 0.002,
+        detail: "asked for " + PhysicsEngine.SPRING_STIFFNESS_MAX + ", ran at " + Math.round(limit) + "; swing reached (omega*dt)^2=" + peakSwing.toFixed(2) +
+          " (the guard engages past " + PhysicsEngine.SPRING_STABILITY + "); over 3000 steps finite=" + finite + ", energy never exceeded " + peakEnergy.toFixed(3) +
+          "x what it started with, spin peaked at " + peakSpin.toFixed(0) + " rad/s; GPU (double-float) within " + gap.toExponential(2) + "px of JS over 60 steps",
+      };
+    }
+  );
+
+  addTest(
+    "Springs at the frame's edges: a tethered group never wraps, a free one wraps as one (JS and GPU)",
+    "wrapping one end of a spring alone stretches it by a whole frame in a single step. PhysicsEngine.springGroups is the rule that prevents it - a group tied to the background never wraps, any other wraps together when its leader does - and generateStepOnceGLSL runs the same rule at codegen time. A member that merely follows must also stay OFF Sticky Edges' watch list, or findWrapStopStep solves for a crossing that never happened",
+    function () {
+      var W = 600, H = 400;
+      function tethered() {
+        var ball = PhysicsEngine.createCircle(560, 200, 20, false); ball.vx = 900;
+        return { bodies: [ball], hinges: [], frameWidth: W, frameHeight: H, edgeMode: "wrap", mutualGravity: true,
+          springs: [{ bodyA: null, bodyB: 0, localAnchorA: { x: 300, y: 200 }, localAnchorB: { x: 0, y: 0 }, stiffness: 20000, restLength: 100 }] };
+      }
+      function pair() {
+        // Body 0 leads (lowest index); body 1 trails it by 150px and follows it through the edge.
+        var lead = PhysicsEngine.createCircle(560, 200, 20, false), trail = PhysicsEngine.createCircle(410, 200, 20, false);
+        lead.vx = 600; trail.vx = 600;
+        return { bodies: [lead, trail], hinges: [], frameWidth: W, frameHeight: H, edgeMode: "wrap", mutualGravity: true, collisionsEnabled: false,
+          springs: [{ bodyA: 0, bodyB: 1, localAnchorA: { x: 0, y: 0 }, localAnchorB: { x: 0, y: 0 }, stiffness: 30000, restLength: 150 }] };
+      }
+      // Tethered: flies out past the right edge and is pulled back, never teleported.
+      var t = PhysicsEngine.runTrajectory(tethered(), 60, DT), tMax = 0, tJump = 0;
+      for (var i = 0; i < t.length; i++) { tMax = Math.max(tMax, t[i][0].x); if (i) tJump = Math.max(tJump, Math.abs(t[i][0].x - t[i - 1][0].x)); }
+      var tGpu = worstTrajectoryGap(t, PhysicsGPU.runSceneOnGPU(tethered(), 60), 60, 1);
+      // Free pair: both shift by exactly one frame on the same step, so their separation never jumps.
+      var p = PhysicsEngine.runTrajectory(pair(), 60, DT), wrapStep = -1, sepJump = 0, trailOutside = false;
+      for (i = 1; i < p.length; i++) {
+        if (wrapStep === -1 && p[i][0].x < p[i - 1][0].x - W / 2) { wrapStep = i; trailOutside = p[i][1].x < 0; }
+        sepJump = Math.max(sepJump, Math.abs((p[i][0].x - p[i][1].x) - (p[i - 1][0].x - p[i - 1][1].x)));
+      }
+      var pGpu = worstTrajectoryGap(p, PhysicsGPU.runSceneOnGPU(pair(), 60), 60, 2);
+      var watched = PhysicsHingeGeometry.wrapWatchedBodyIndices(pair()).join(",") + "|" + PhysicsHingeGeometry.wrapWatchedBodyIndices(tethered()).join(",");
+      return {
+        pass: tMax > W + 50 && tJump < 20 && tGpu < 0.02 && wrapStep > 0 && trailOutside && sepJump < 5 && pGpu < 0.02 && watched === "0|",
+        detail: "tethered ball reached x=" + tMax.toFixed(0) + " (frame is " + W + ") with no jump over " + tJump.toFixed(1) + "px, GPU gap " + tGpu.toExponential(1) +
+          "; free pair wrapped together at step " + wrapStep + " (trailing ball carried outside the frame=" + trailOutside + "), separation never jumped more than " + sepJump.toFixed(2) +
+          "px, GPU gap " + pGpu.toExponential(1) + "; Sticky Edges watches [" + watched + "] (expected the pair's leader only, and nothing tethered)",
+      };
+    }
+  );
+
+  addTest(
+    "The grid's per-pixel springs match the numeric mirror: anchors follow a linked size, groups settle as one",
+    "physics-grid-codegen.js rescales a spring's anchor when X/Y Input resizes the body it sits on, and settles spring groups into the frame by their leader; PhysicsHingeGeometry (rescaleSpringAnchorsOnBody, normalizeAllBodiesIntoFrame's bySpringGroup) is the JS mirror the hover preview and the seam detection read. If the two disagree the preview shows a different scene from the pixel it is previewing",
+    function () {
+      function build(edge, xin, yin) {
+        var line = PhysicsEngine.createLine(500, 300, 240, 0.2, false), ball = PhysicsEngine.createCircle(560, 480, 28, false), top = PhysicsEngine.createCircle(760, 250, 22, false);
+        return {
+          bodies: [line, ball, top], hinges: [],
+          springs: [
+            { bodyA: 0, bodyB: 1, localAnchorA: { x: 120, y: 0 }, localAnchorB: { x: 0, y: -20 }, stiffness: 120000, restLength: 110 },
+            { bodyA: 1, bodyB: 2, localAnchorA: { x: 0, y: 0 }, localAnchorB: { x: 10, y: 0 }, stiffness: 50000, restLength: 60 },
+          ],
+          xInput: xin, yInput: yin, output: { body: 1, bodyB: null, property: "y" },
+          frameWidth: 1200, frameHeight: 800, edgeMode: edge,
+        };
+      }
+      function gap(scene, wx, wy, steps) {
+        var compiled = PhysicsGridCodegen.compileHoverTrajectoryGLSL(scene, wx, wy, steps, "df");
+        var traj = PhysicsGPU.runCompiledTrajectoryOnGPU(compiled, steps);
+        var start = PhysicsGridCodegen.computeOffsetSceneNumeric(scene, wx, wy);
+        return { gap: worstTrajectoryGap(PhysicsEngine.runTrajectory(start, steps, DT), traj, steps, 3), start: start };
+      }
+      var resized = gap(build("infinite", { body: 0, property: "length" }, { body: 2, property: "radius" }), 37.5, -6.25, 100);
+      var anchorA = resized.start.springs[0].localAnchorA.x, anchorB = resized.start.springs[1].localAnchorB.x;
+      // Leader (body 0) pushed 2950.5px right: it settles to 1050.5 and BOTH others go with it, off-frame.
+      var settled = gap(build("wrap", { body: 0, property: "x" }, null), 2950.5, 0, 100);
+      var xs = settled.start.bodies.map(function (b) { return b.x; });
+      // A non-leader pushed the same distance is left where its pixel put it: the spring just starts stretched.
+      var follower = gap(build("wrap", { body: 2, property: "x" }, null), 2950.5, 0, 60);
+      return {
+        pass: Math.abs(anchorA - 138.75) < 1e-9 && Math.abs(anchorB - 10 * (22 - 6.25) / 22) < 1e-9 && resized.gap < 0.005 &&
+          Math.abs(xs[0] - 1050.5) < 1e-9 && Math.abs(xs[1] - (560 - 2400)) < 1e-9 && Math.abs(xs[2] - (760 - 2400)) < 1e-9 && settled.gap < 0.005 &&
+          Math.abs(follower.start.bodies[2].x - 3710.5) < 1e-9 && follower.gap < 0.05,
+        detail: "length-linked line's anchor 120 -> " + anchorA + " (expected 138.75), radius-linked ball's 10 -> " + anchorB.toFixed(4) + ", GPU gap " + resized.gap.toExponential(1) +
+          "; settled group at x=[" + xs.map(function (x) { return x.toFixed(1); }).join(", ") + "], GPU gap " + settled.gap.toExponential(1) +
+          "; unsettled follower at x=" + follower.start.bodies[2].x + ", GPU gap " + follower.gap.toExponential(1),
+      };
+    }
+  );
+
+  addTest(
+    "Springs survive every copy of a scene: clone, delete-and-reindex, authored JSON, and a share link",
+    "a field one of these forgets is wiped silently - physics-ui.js clones the scene on Play and back on Reset, deleteBody renumbers everything after the deleted body, and a link or an exported file is the only copy of a scene someone else ever sees. A scene WITHOUT springs must also come through unchanged, so nothing written before they existed reads differently now",
+    function () {
+      var scene = buildSpringLockstepScene();
+      var cloned = JSON.stringify(PhysicsEngine.cloneScene(scene).springs) === JSON.stringify(scene.springs);
+      // Delete body 1 (the ball): both springs touching it go; the background spring on body 0 stays.
+      var cut = PhysicsEngine.cloneScene(scene);
+      PhysicsEngine.deleteBody(cut, 1);
+      var cutOk = cut.springs.length === 1 && cut.springs[0].bodyA === null && cut.springs[0].bodyB === 0;
+      // Delete body 0 instead: the 1-2 spring survives, renumbered 0-1.
+      var shifted = PhysicsEngine.cloneScene(scene);
+      PhysicsEngine.deleteBody(shifted, 0);
+      var shiftedOk = shifted.springs.length === 1 && shifted.springs[0].bodyA === 0 && shifted.springs[0].bodyB === 1;
+      // Authored space and back: a background end takes the full position map, a local anchor only flips y.
+      var json = { bodies: [{ type: "circle", x: 300, y: 200, angle: 0, radius: 30 }], hinges: [], frameWidth: 1000, frameHeight: 600,
+        springs: [{ bodyA: null, bodyB: 0, localAnchorA: { x: 250, y: 100 }, localAnchorB: { x: 5, y: -7 }, stiffness: 123000, restLength: 88 }] };
+      var authored = PhysicsCoords.toAuthoredJSON(json);
+      var a = authored.springs[0];
+      var authoredOk = a.localAnchorA.x === -250 && a.localAnchorA.y === 200 && a.localAnchorB.x === 5 && a.localAnchorB.y === 7 && a.stiffness === 123000 && a.restLength === 88;
+      var backOk = JSON.stringify(PhysicsCoords.toEngineJSON(authored, json).springs) === JSON.stringify(json.springs);
+      var noSpringsUntouched = PhysicsCoords.toAuthoredJSON({ bodies: [], hinges: [] }).springs === undefined;
+      // The link: "sprg", and absent entirely from a scene with none.
+      authored.bodies[0].isAnchored = false; authored.bodies[0].vx = 0; authored.bodies[0].vy = 0; authored.bodies[0].w = 0;
+      var fragment = ShareUrl.encode({ page: "bldr", scene: authored });
+      var linkOk = JSON.stringify(ShareUrl.decode(fragment).scene.springs) === JSON.stringify(authored.springs);
+      var silent = ShareUrl.encode({ page: "bldr", scene: { bodies: authored.bodies, hinges: [], frameWidth: 1000, frameHeight: 600 } }).indexOf("sprg") === -1;
+      var oldLinkOk = ShareUrl.decode("#bldr/body:ci:0:0:0:30").scene.springs.length === 0;
+      return {
+        pass: cloned && cutOk && shiftedOk && authoredOk && backOk && noSpringsUntouched && linkOk && silent && oldLinkOk,
+        detail: "clone=" + cloned + "; delete removes/renumbers=" + cutOk + "/" + shiftedOk + "; authored space=" + authoredOk + " and back=" + backOk +
+          "; a spring-less scene gains no field=" + noSpringsUntouched + "; link round trip=" + linkOk + ", silent without springs=" + silent + ", a link from before springs reads as none=" + oldLinkOk +
+          "; " + fragment.slice(fragment.indexOf("sprg")),
+      };
+    }
+  );
+
+  addTest(
+    "A scene with no springs compiles to exactly the shader it always did",
+    "every existing scene, sample and shared link has no springs. The spring codegen is written to emit nothing at all for them - no accumulator, no parameter, no angular term in either leg - so their shaders (and with them every picture already made) are untouched. An empty `springs` list and no list at all must both produce that same source",
+    function () {
+      function build(withField) {
+        var scene = {
+          bodies: [PhysicsEngine.createLine(400, 560, 700, 0, true), PhysicsEngine.createCircle(270, 150, 30, false), PhysicsEngine.createLine(530, 150, 140, 0.3, false)],
+          hinges: [{ bodyA: null, bodyB: 2, localAnchorA: { x: 460, y: 150 }, localAnchorB: { x: -70, y: 0 } }],
+          frameWidth: 1200, frameHeight: 800, edgeMode: "wrap",
+        };
+        if (withField) scene.springs = [];
+        return scene;
+      }
+      var same = ["f32", "df"].every(function (precision) {
+        return PhysicsGPU.compileSceneToTrajectoryGLSL(build(false), 10, precision).fragmentSource ===
+          PhysicsGPU.compileSceneToTrajectoryGLSL(build(true), 10, precision).fragmentSource;
+      });
+      var source = PhysicsGPU.compileSceneToTrajectoryGLSL(build(true), 10, "f32").fragmentSource;
+      var clean = !/spr[A-Z]|SPRING\d|accel\d/.test(source);
+      // And the JS engine: identical bits with and without the field.
+      var a = build(false), b = build(true);
+      runJS(a, 200); runJS(b, 200);
+      var bits = a.bodies.every(function (body, i) { return body.x === b.bodies[i].x && body.y === b.bodies[i].y && body.angle === b.bodies[i].angle; });
+      return {
+        pass: same && clean && bits,
+        detail: "same source with and without an empty list=" + same + "; no spring code in it=" + clean + "; JS engine bit-identical over 200 steps=" + bits,
+      };
+    }
+  );
+
   // ---- Runner / report rendering ----
 
   function renderRow(tbody, name, bugRef, outcome) {
@@ -5524,12 +5845,19 @@
     el.className = passCount === total ? "summary-ok" : "summary-fail";
   }
 
-  function runAll() {
+  // `only`, when given, runs just the tests whose name contains it (case
+  // ignored) - physics-tests.html?only=spring. The whole suite takes minutes,
+  // which is the wrong loop to be in while working on one corner of it; the
+  // summary says how many were left out, so a filtered pass can't be
+  // mistaken for a clean bill.
+  function runAll(only) {
     var tbody = document.querySelector("#results tbody");
     tbody.innerHTML = "";
     var passCount = 0;
+    var needle = only ? String(only).toLowerCase() : "";
+    var selected = TESTS.filter(function (t) { return !needle || t.name.toLowerCase().indexOf(needle) !== -1; });
 
-    TESTS.forEach(function (t) {
+    selected.forEach(function (t) {
       var outcome;
       try {
         outcome = t.fn();
@@ -5539,7 +5867,10 @@
       if (renderRow(tbody, t.name, t.bugRef, outcome)) passCount++;
     });
 
-    updateSummary(passCount, TESTS.length);
+    updateSummary(passCount, selected.length);
+    if (selected.length !== TESTS.length) {
+      document.getElementById("summary").textContent += " (only \"" + only + "\": " + (TESTS.length - selected.length) + " not run)";
+    }
   }
 
   // gridResidualAtPoint and cpuStateAt are exported alongside the runner

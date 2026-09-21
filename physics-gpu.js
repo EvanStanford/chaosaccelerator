@@ -677,7 +677,59 @@
     return out;
   }
 
-  function stepOnceParams(n, hingeAnchors, precision, spawnBase) {
+  // ---- Springs, as the generators see them ----
+  //
+  // `springs` is to a scene's springs what `hingeAnchors` is to its hinges:
+  // one { aIsWorld, a, b, localA, localB, stiffness, restLength } per spring,
+  // with the anchors already GLSL TEXT ({ x, y }, in the pass's own
+  // precision) because a spring on a body whose size is linked to a pixel has
+  // per-pixel anchors (see physics-grid-codegen.js), and stiffness/restLength
+  // plain numbers because nothing can vary them. An anchor may carry
+  // `zero: true` - attached dead center - which is worth knowing at compile
+  // time: that end has no lever arm, so it needs no rotation (a sin/cos, the
+  // dearest thing a multi-float pass can do), no torque and no parameter.
+  // Omitted (undefined) by every caller with no springs to pass, which is
+  // what keeps those shaders spelled exactly as they were.
+  function springEndNeedsParam(sp, end) {
+    return end === "A" ? (sp.aIsWorld || !sp.localA.zero) : !sp.localB.zero;
+  }
+  // The descriptors for a scene whose anchors are just its authored numbers.
+  function springLinksFor(scene, lit) {
+    return global.PhysicsEngine.sceneSprings(scene).map(function (s) {
+      function anchor(a, isLocal) {
+        return { x: lit(a.x), y: lit(a.y), zero: isLocal && a.x === 0 && a.y === 0 };
+      }
+      return {
+        aIsWorld: s.bodyA === null, a: s.bodyA, b: s.bodyB,
+        localA: anchor(s.localAnchorA, s.bodyA !== null), localB: anchor(s.localAnchorB, true),
+        stiffness: s.stiffness, restLength: s.restLength,
+      };
+    });
+  }
+
+  // PhysicsEngine.springSpin, in GLSL: a body's spin after `t` of this step's
+  // torque, explicit until the swing feeding it is too fast for the step and
+  // implicit in the excess beyond that - see that function for the why.
+  // Emitted only into a shader with a spring that can turn something. The
+  // multi-float form branches rather than taking a max: its divide is the
+  // expensive half, and on every ordinary step it is a divide by exactly one.
+  function springSpinGLSL(df) {
+    var stability = (df ? global.PhysicsDF.num : fnum)(global.PhysicsEngine.SPRING_STABILITY);
+    return df ? [
+      "MF dfSpringSpin(MF w, MF alpha, MF swing, MF t) {",
+      "  MF spun = dfAdd(w, dfMul(alpha, t));",
+      "  MF excess = dfSub(dfMul(swing, dfSqr(t)), " + stability + ");",
+      "  if (dfGreater(excess, DF_ZERO)) spun = dfDiv(spun, dfAdd(DF_ONE, excess));",
+      "  return spun;",
+      "}",
+    ].join("\n") : [
+      "float springSpin(float w, float alpha, float swing, float t) {",
+      "  return (w + alpha * t) / (1.0 + max(0.0, swing * t * t - " + stability + "));",
+      "}",
+    ].join("\n");
+  }
+
+  function stepOnceParams(n, hingeAnchors, precision, spawnBase, springs) {
     var df = global.PhysicsDF.isExtended(precision);
     // In df mode the shape constants are df too. They are per-pixel values
     // whenever a size axis is linked, so leaving them float32 would put a
@@ -709,6 +761,14 @@
       params.push((hg.aIsWorld ? "inout " : "") + (df ? "DVec2" : "vec2") + " HINGE" + h + "_A",
         (df ? "DVec2" : "vec2") + " HINGE" + h + "_B");
     });
+    // A spring's anchors, for the reason a hinge's are parameters. Never
+    // inout, the background end included: a group tethered to the background
+    // never wraps (see PhysicsEngine.springGroups), so unlike a hinge's pin
+    // that point has nothing to carry from one step to the next.
+    (springs || []).forEach(function (sp, s) {
+      if (springEndNeedsParam(sp, "A")) params.push((df ? "DVec2" : "vec2") + " SPRING" + s + "_A");
+      if (springEndNeedsParam(sp, "B")) params.push((df ? "DVec2" : "vec2") + " SPRING" + s + "_B");
+    });
     // How many slots are in use right now. The split that fills a slot has
     // to see what the split before it in this same step already took, and
     // the next STEP has to see both, so this is one counter threaded through
@@ -724,7 +784,7 @@
     // many parameters" against a line number in generated code.
     if (params.length > MAX_GLSL_FUNCTION_PARAMS) {
       throw new Error("This scene needs " + params.length + " stepOnce() parameters, past GLSL's limit of " +
-        MAX_GLSL_FUNCTION_PARAMS + " - lower Max Objects (currently " + n + " slots) or remove a hinge.");
+        MAX_GLSL_FUNCTION_PARAMS + " - lower Max Objects (currently " + n + " slots) or remove a hinge or spring.");
     }
     return params;
   }
@@ -732,7 +792,7 @@
   // The anchor expressions in `hingeAnchors` are float32 GLSL text in f32
   // mode and df (vec2) GLSL text in df mode - whoever built them knows
   // which, and this just has to spell the right constructor.
-  function stepOnceCallArgs(n, hingeAnchors, precision, spawnBase) {
+  function stepOnceCallArgs(n, hingeAnchors, precision, spawnBase, springs) {
     var df = global.PhysicsDF.isExtended(precision);
     function localVec(a) {
       return df ? "dv2(" + a.x + ", " + a.y + ")" : "vec2(" + a.x + ", " + a.y + ")";
@@ -752,6 +812,10 @@
       // no persistent state to thread through, so it's still just
       // reconstructed fresh every call.
       args.push(hg.aIsWorld ? ("hingeAnchor" + h) : localVec(hg.localA), localVec(hg.localB));
+    });
+    (springs || []).forEach(function (sp) {
+      if (springEndNeedsParam(sp, "A")) args.push(localVec(sp.localA));
+      if (springEndNeedsParam(sp, "B")) args.push(localVec(sp.localB));
     });
     if (spawnSlots.length) args.push("liveCount");
     return args.join(", ");
@@ -887,10 +951,23 @@
   // Defaults to on when omitted, matching PhysicsEngine.collisionsEnabled.
   // spawnBase: the authored body count of a splitter scene - see
   // padSceneForSplitting and spawnSlotsFrom. Omitted for every other scene.
-  function generateStepOnceGLSL(n, consts, pairs, hingeAnchors, frame, precision, mutualGravity, collisions, spawnBase) {
+  // springs: the scene's springs - see "Springs, as the generators see them"
+  // above. Omitted for every scene without one.
+  function generateStepOnceGLSL(n, consts, pairs, hingeAnchors, frame, precision, mutualGravity, collisions, spawnBase, springs) {
     var df = global.PhysicsDF.isExtended(precision);
     if (df) global.PhysicsDF.usePrecision(precision);
     var collisionsOn = collisions !== false;
+    var springList = springs || [];
+    var PE = global.PhysicsEngine;
+    // Which bodies a spring pulls on at all, and which of those it can TURN
+    // (attached off-center) - see the Springs section below, which is what
+    // these are for. Worked out up here because the second decides whether
+    // springSpinGLSL has to be emitted ahead of stepOnce().
+    var sprung = {}, turned = {};
+    springList.forEach(function (sp) {
+      if (!sp.aIsWorld && !consts[sp.a].isAnchored) { sprung[sp.a] = true; if (!sp.localA.zero) turned[sp.a] = true; }
+      if (!consts[sp.b].isAnchored) { sprung[sp.b] = true; if (!sp.localB.zero) turned[sp.b] = true; }
+    });
     // One generator, two spellings. GLSL can't give a user type operators,
     // so the df path has to say dfAdd(a, b) where float32 says a + b - but
     // the STRUCTURE of the step is identical, and keeping it in one
@@ -1069,7 +1146,8 @@
       });
     }
     lines.push("");
-    lines.push("void stepOnce(" + stepOnceParams(n, hingeAnchors, precision, spawnBase).join(", ") + ") {");
+    if (Object.keys(turned).length) lines.push(springSpinGLSL(df), "");
+    lines.push("void stepOnce(" + stepOnceParams(n, hingeAnchors, precision, spawnBase, springList).join(", ") + ") {");
     if (staticGeomLines.length) {
       lines.push("  if (!g_dfStaticGeomReady) {");
       staticGeomLines.forEach(function (l) { lines.push(l); });
@@ -1241,9 +1319,143 @@
       }
       lines.push("");
     }
-    function accelFor(i) {
+    function gravityAccelFor(i) {
       if (mutualGravity) return accelExpr[i];
       return df ? "dv2(DF_ZERO, DF_GRAVITY)" : "vec2(0.0, GRAVITY)";
+    }
+
+    // ---- Springs ----
+    //
+    // The GLSL port of PhysicsEngine.addSpringAccelerations - the same law,
+    // the same softened length, the same stability limit on the stiffness,
+    // written to be read against it line for line. Each spring adds to the
+    // linear acceleration of whatever it is tied to (on top of gravity,
+    // whichever kind) and, where it is attached off-center, to an ANGULAR
+    // acceleration that nothing else in the step contributes to: sprAlphaN
+    // exists only for a body some spring can actually turn, and the two legs
+    // below only mention it for those, so every other body's integration is
+    // spelled exactly as it was.
+    //
+    // The stiffness limit is evaluated here, per step, from BODYn_INV_MASS /
+    // INV_INERTIA and the anchors rather than baked in: all of those are
+    // per-pixel values once an X/Y Input is linked to a size, and a pixel
+    // whose body has shrunk is exactly the one the limit exists for.
+    if (springList.length) {
+      var slit = df ? global.PhysicsDF.num : fnum;
+      for (var sb = 0; sb < n; sb++) {
+        if (!sprung[sb]) continue;
+        lines.push("  " + E.vecType + " sprAcc" + sb + " = " + E.zeroVec + ";");
+        if (turned[sb]) lines.push("  " + E.scalarType + " sprAlpha" + sb + " = " + E.zero + ", sprSwing" + sb + " = " + E.zero + ";");
+      }
+      // df only: one sin/cos per body a spring is attached to off-center, shared
+      // by every spring on it (an anchored body's lever arm still has to be
+      // rotated into place, even though nothing will turn it).
+      var armed = {};
+      springList.forEach(function (sp) {
+        if (!sp.aIsWorld && !sp.localA.zero) armed[sp.a] = true;
+        if (!sp.localB.zero) armed[sp.b] = true;
+      });
+      if (df) {
+        Object.keys(armed).forEach(function (idx) {
+          lines.push("  MF sprSin" + idx + ", sprCos" + idx + "; dfSinCos(" + B(idx) + ".angle, sprSin" + idx + ", sprCos" + idx + ");");
+        });
+      }
+      springList.forEach(function (sp, s) {
+        var aMoves = !sp.aIsWorld && !consts[sp.a].isAnchored, bMoves = !consts[sp.b].isAnchored;
+        if (!aMoves && !bMoves) return; // nothing here can move - the JS engine skips it too
+        // One end: where it is in the world, its lever arm (null dead center
+        // or on the background), and how readily it gives way.
+        function end(which) {
+          var idx = which === "A" ? sp.a : sp.b;
+          var param = "SPRING" + s + "_" + which;
+          if (which === "A" && sp.aIsWorld) return { point: param, arm: null, weight: null };
+          var center = E.vec(B(idx) + ".x", B(idx) + ".y");
+          var moves = !consts[idx].isAnchored;
+          var zero = which === "A" ? sp.localA.zero : sp.localB.zero;
+          if (zero) return { point: center, arm: null, weight: moves ? "BODY" + idx + "_INV_MASS" : null };
+          var arm = "sprR" + which + s;
+          lines.push("    " + E.vecType + " " + arm + " = " + (df
+            ? "dv2RotateBy(" + param + ", sprSin" + idx + ", sprCos" + idx + ")"
+            : "rotateVec(" + param + ", " + B(idx) + ".angle)") + ";");
+          return {
+            point: df ? "dv2Add(" + center + ", " + arm + ")" : center + " + " + arm,
+            arm: arm,
+            // The lever arm's length, for the swing tally below. Rotation
+            // does not change it, so it comes off the local anchor.
+            armLength: df ? "dfSqrt(dv2LengthSq(" + param + "))" : "length(" + param + ")",
+            weight: !moves ? null : (df
+              ? "dfAdd(BODY" + idx + "_INV_MASS, dfMul(BODY" + idx + "_INV_INERTIA, dv2LengthSq(" + param + ")))"
+              : "(BODY" + idx + "_INV_MASS + BODY" + idx + "_INV_INERTIA * dot(" + param + ", " + param + "))"),
+          };
+        }
+        lines.push("  {");
+        var endA = end("A"), endB = end("B");
+        var weights = [endA.weight, endB.weight].filter(Boolean);
+        var stable = slit(PE.SPRING_STABILITY / (FIXED_DT * FIXED_DT));
+        var soft2 = slit(PE.SPRING_SOFTENING * PE.SPRING_SOFTENING);
+        // The softened length is needed by the law itself unless the rest
+        // length is exactly zero (the linear spring: the factor is exactly 1
+        // in the JS engine too, so leaving the sqrt and the divide out changes
+        // nothing but the cost) - and by the swing tally whenever an end
+        // that can turn has a lever arm.
+        var limited = (aMoves && endA.arm) || (bMoves && endB.arm);
+        var needsLength = sp.restLength !== 0 || limited;
+        if (df) {
+          lines.push("    DVec2 sprD = dv2Sub(" + endB.point + ", " + endA.point + ");");
+          lines.push("    MF sprK = dfMin(" + slit(sp.stiffness) + ", dfDiv(" + stable + ", " +
+            (weights.length === 2 ? "dfAdd(" + weights[0] + ", " + weights[1] + ")" : weights[0]) + "));");
+          if (needsLength) lines.push("    MF sprLs = dfSqrt(dfAdd(dv2LengthSq(sprD), " + soft2 + "));");
+          lines.push("    MF sprF = " + (sp.restLength === 0 ? "sprK" :
+            "dfMul(sprK, dfSub(DF_ONE, dfDiv(" + slit(sp.restLength) + ", sprLs)))") + ";");
+          lines.push("    DVec2 sprFv = dv2Scale(sprD, sprF);");
+          if (limited) lines.push("    MF sprTension = dfMul(dfAbs(sprF), sprLs);");
+        } else {
+          lines.push("    vec2 sprD = (" + endB.point + ") - (" + endA.point + ");");
+          lines.push("    float sprK = min(" + slit(sp.stiffness) + ", " + stable + " / (" + weights.join(" + ") + "));");
+          if (needsLength) lines.push("    float sprLs = sqrt(dot(sprD, sprD) + " + soft2 + ");");
+          lines.push("    float sprF = " + (sp.restLength === 0 ? "sprK" :
+            "sprK * (1.0 - " + slit(sp.restLength) + " / sprLs)") + ";");
+          lines.push("    vec2 sprFv = sprF * sprD;");
+          if (limited) lines.push("    float sprTension = abs(sprF) * sprLs;");
+        }
+        // The force on end A points at B while the spring is stretched; end B
+        // gets its opposite.
+        [[sp.a, endA, aMoves, true], [sp.b, endB, bMoves, false]].forEach(function (side) {
+          var idx = side[0], e = side[1], plus = side[3];
+          if (!side[2]) return;
+          // The torque, and this end's share of the body's `swing` - the
+          // pendulum-like oscillation about its own center that the spring's
+          // TENSION drives, which springSpin integrates implicitly once it
+          // is too fast for the step (see PhysicsEngine.springSpin).
+          if (df) {
+            lines.push("    sprAcc" + idx + " = " + (plus ? "dv2Add" : "dv2Sub") + "(sprAcc" + idx + ", dv2Scale(sprFv, BODY" + idx + "_INV_MASS));");
+            if (e.arm) {
+              lines.push("    sprAlpha" + idx + " = " + (plus ? "dfAdd" : "dfSub") + "(sprAlpha" + idx +
+                ", dfMul(dv2Cross(" + e.arm + ", sprFv), BODY" + idx + "_INV_INERTIA));");
+              lines.push("    sprSwing" + idx + " = dfAdd(sprSwing" + idx + ", dfMul(dfMul(sprTension, " + e.armLength + "), BODY" + idx + "_INV_INERTIA));");
+            }
+          } else {
+            lines.push("    sprAcc" + idx + " " + (plus ? "+" : "-") + "= sprFv * BODY" + idx + "_INV_MASS;");
+            if (e.arm) {
+              lines.push("    sprAlpha" + idx + " " + (plus ? "+" : "-") + "= (" + e.arm + ".x * sprFv.y - " + e.arm + ".y * sprFv.x) * BODY" + idx + "_INV_INERTIA;");
+              lines.push("    sprSwing" + idx + " += sprTension * " + e.armLength + " * BODY" + idx + "_INV_INERTIA;");
+            }
+          }
+        });
+        lines.push("  }");
+      });
+      for (var sa = 0; sa < n; sa++) {
+        if (!sprung[sa]) continue;
+        lines.push("  " + E.vecType + " accel" + sa + " = " + (df
+          ? "dv2Add(" + gravityAccelFor(sa) + ", sprAcc" + sa + ")"
+          : gravityAccelFor(sa) + " + sprAcc" + sa) + ";");
+      }
+      lines.push("");
+    }
+    function accelFor(i) { return sprung[i] ? "accel" + i : gravityAccelFor(i); }
+    // A turned body's spin after `t` of this step's torque - see springSpinGLSL.
+    function spinExpr(i, t) {
+      return (df ? "dfSpringSpin(" : "springSpin(") + B(i) + ".w, sprAlpha" + i + ", sprSwing" + i + ", " + t + ")";
     }
 
     // Entering velocity (u, before any gravity this step) and the
@@ -1556,7 +1768,15 @@
         lines.push("  " + B(g3) + ".x = " + E.add(B(g3) + ".x", E.mul("vFull" + g3 + ".x", t1)) + ";");
         lines.push("  " + B(g3) + ".y = " + E.add(B(g3) + ".y", E.mul("vFull" + g3 + ".y", t1)) + ";");
       }
-      lines.push("  " + B(g3) + ".angle = " + E.add(B(g3) + ".angle", E.mul(B(g3) + ".w", t1)) + ";");
+      if (turned[g3]) {
+        // The angular twin of the lines around it, for a body a spring can
+        // turn: rotate at the WHOLE step's spin (as the position moves at
+        // vFull), then leave `w` with only the torque that had acted by tHit.
+        lines.push("  " + B(g3) + ".angle = " + E.add(B(g3) + ".angle", E.mul(spinExpr(g3, E.DT), t1)) + ";");
+        lines.push("  " + B(g3) + ".w = " + spinExpr(g3, t1) + ";");
+      } else {
+        lines.push("  " + B(g3) + ".angle = " + E.add(B(g3) + ".angle", E.mul(B(g3) + ".w", t1)) + ";");
+      }
       lines.push("  " + E.vecType + " vPre" + g3 + " = " + E.advanceVelocity + "(u" + g3 + ", " + t1 + ", " + accelFor(g3) + ");");
       lines.push("  " + B(g3) + ".vx = vPre" + g3 + ".x; " + B(g3) + ".vy = vPre" + g3 + ".y;");
     }
@@ -1669,6 +1889,9 @@
       lines.push("  " + E.scalarType + " " + t2 + " = " + E.sub(E.DT, "body" + g2 + "THit") + ";");
       lines.push("  " + E.vecType + " vPost" + g2 + " = " + E.advanceVelocity + "(" + E.vec(B(g2) + ".vx", B(g2) + ".vy") + ", " + t2 + ", " + accelFor(g2) + ");");
       lines.push("  " + B(g2) + ".vx = vPost" + g2 + ".x; " + B(g2) + ".vy = vPost" + g2 + ".y;");
+      // The rest of a spring's torque onto the post-impulse spin, before the
+      // turn below reads it - the same order as the velocity and the position.
+      if (turned[g2]) lines.push("  " + B(g2) + ".w = " + spinExpr(g2, t2) + ";");
       lines.push("  " + B(g2) + ".x = " + E.add(B(g2) + ".x", E.mul("vPost" + g2 + ".x", t2)) + ";");
       lines.push("  " + B(g2) + ".y = " + E.add(B(g2) + ".y", E.mul("vPost" + g2 + ".y", t2)) + ";");
       if (df && hingeBodies[g2]) {
@@ -1731,10 +1954,23 @@
           if (!hg.aIsWorld && hg.a === root && !visited[hg.b]) collectDescendants(hg.b, visited);
         });
       }
+      // A body joined to anything by a spring answers to its GROUP instead:
+      // a tethered group never wraps, and any other wraps as one when its
+      // leader does. PhysicsEngine.springGroups is the single definition of
+      // that, run here at codegen time over the same topology the JS engine
+      // runs it over every step - null for a scene with no springs, which
+      // then emits exactly what it always did.
+      var springGroups = PE.springGroups({
+        bodies: consts,
+        hinges: hingeAnchors.map(function (hg) { return { bodyA: hg.aIsWorld ? null : hg.a, bodyB: hg.b }; }),
+        springs: springList.map(function (sp) { return { bodyA: sp.aIsWorld ? null : sp.a, bodyB: sp.b }; }),
+      });
       var frameW = fnum(frame.width), frameH = fnum(frame.height);
       lines.push("");
       for (var root = 0; root < n; root++) {
         if (consts[root].isAnchored || isChild[root]) continue;
+        var springGroup = springGroups ? springGroups.groupOf[root] : null;
+        if (springGroup && (springGroup.tethered || springGroup.leader !== root)) continue;
         var hasWorldHinge = ownWorldHingeIdx[root] !== undefined;
         var wrapTarget = hasWorldHinge ? "HINGE" + ownWorldHingeIdx[root] + "_A" : B(root);
         var refX = wrapTarget + ".x", refY = wrapTarget + ".y";
@@ -1752,14 +1988,24 @@
           lines.push("  if (" + refX + " > " + frameW + ") " + dxVar + " = -" + frameW + "; else if (" + refX + " < 0.0) " + dxVar + " = " + frameW + ";");
           lines.push("  if (" + refY + " > " + frameH + ") " + dyVar + " = -" + frameH + "; else if (" + refY + " < 0.0) " + dyVar + " = " + frameH + ";");
         }
-        if (hasWorldHinge) {
-          var hv = "HINGE" + ownWorldHingeIdx[root] + "_A";
+        // What moves with this root: its own pin and its hinge descendants -
+        // or, for a spring group's leader, every member of the group and
+        // every background pin any of them hangs from (see
+        // PhysicsEngine.translateSpringGroup).
+        var movedPins = [], descendants = {};
+        if (springGroup) {
+          springGroup.members.forEach(function (m) { descendants[m] = true; });
+          hingeAnchors.forEach(function (hg, hi) { if (hg.aIsWorld && descendants[hg.b]) movedPins.push(hi); });
+        } else {
+          if (hasWorldHinge) movedPins.push(ownWorldHingeIdx[root]);
+          collectDescendants(root, descendants);
+        }
+        movedPins.forEach(function (hi) {
+          var hv = "HINGE" + hi + "_A";
           lines.push(df
             ? "  " + hv + ".x = dfAddFloat(" + hv + ".x, " + dxVar + "); " + hv + ".y = dfAddFloat(" + hv + ".y, " + dyVar + ");"
             : "  " + hv + " += vec2(" + dxVar + ", " + dyVar + ");");
-        }
-        var descendants = {};
-        collectDescendants(root, descendants);
+        });
         Object.keys(descendants).forEach(function (memberStr) {
           lines.push(df
             ? "  " + E.body + memberStr + ".x = dfAddFloat(" + E.body + memberStr + ".x, " + dxVar + "); " + E.body + memberStr + ".y = dfAddFloat(" + E.body + memberStr + ".y, " + dyVar + ");"
@@ -1953,12 +2199,12 @@
     ].join("\n");
   }
 
-  function generateTrajectoryMainGLSL(n, bodyDeclarationsGLSL, hingeAnchors, precision, spawnBase, chunk) {
+  function generateTrajectoryMainGLSL(n, bodyDeclarationsGLSL, hingeAnchors, precision, spawnBase, chunk, springs) {
     var df = global.PhysicsDF.isExtended(precision);
     var isSpawnSlot = {};
     spawnSlotsFrom(n, spawnBase).forEach(function (i) { isSpawnSlot[i] = true; });
     function readField(i, field) { return df ? "dfToFloat(dbody" + i + "." + field + ")" : "body" + i + "." + field; }
-    var stepCall = "stepOnce(" + stepOnceCallArgs(n, hingeAnchors, precision, spawnBase) + ");";
+    var stepCall = "stepOnce(" + stepOnceCallArgs(n, hingeAnchors, precision, spawnBase, springs) + ");";
     var lines = [];
     lines.push("void main() {");
     lines.push("  " + bodyDeclarationsGLSL.split("\n").join("\n  "));
@@ -2074,12 +2320,13 @@
     // Nothing in the source depends on maxSteps any more - the runner walks
     // the run a chunk at a time - so a different run length reuses the
     // compiled program instead of building another.
-    lines.push(generateStepOnceGLSL(n, consts, pairs, hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), spawnBase));
+    var springs = springLinksFor(scene, df ? dfnum : fnum);
+    lines.push(generateStepOnceGLSL(n, consts, pairs, hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), spawnBase, springs));
     lines.push("");
     var locals = generateBodyLocalsGLSL(consts, precision) + "\n" + generateHingeAnchorLocalsGLSL(hingeAnchors, precision);
     var spawnLocals = generateSpawnSlotLocalsGLSL(n, spawnBase);
     if (spawnLocals) locals += "\n" + spawnLocals;
-    lines.push(generateTrajectoryMainGLSL(n, locals, hingeAnchors, precision, spawnBase, chunk));
+    lines.push(generateTrajectoryMainGLSL(n, locals, hingeAnchors, precision, spawnBase, chunk, springs));
 
     return { fragmentSource: lines.join("\n"), numBodies: n, precision: df ? precision : "f32", chunk: chunk };
   }
@@ -2583,6 +2830,7 @@
     generatePlaybackStateStoreGLSL: generatePlaybackStateStoreGLSL,
     generateStepOnceGLSL: generateStepOnceGLSL,
     stepOnceCallArgs: stepOnceCallArgs,
+    springLinksFor: springLinksFor,
     generateBodyLocalsGLSL: generateBodyLocalsGLSL,
     generateHingeAnchorLocalsGLSL: generateHingeAnchorLocalsGLSL,
     compileShader: compileShader,

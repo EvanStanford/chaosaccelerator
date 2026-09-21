@@ -39,6 +39,7 @@
 // only ever has its own y negated. A hinge to the WORLD (bodyA === null) is
 // the exception - its localAnchorA is a world point, not a local one (see
 // PhysicsEngine.hingeBodyA's WORLD_BODY), so it takes the full position map.
+// A spring's two anchors follow exactly the same two rules.
 (function (global) {
   "use strict";
 
@@ -88,21 +89,29 @@
       return body;
     });
 
-    out.hinges = (json.hinges || []).map(function (h) {
-      var hinge = {};
-      Object.keys(h).forEach(function (k) { hinge[k] = h[k]; });
+    // A hinge and a spring are the same shape where it matters here - two
+    // anchors, with end A a WORLD point when bodyA is null - so one walk
+    // serves both. Everything else on the link (a spring's stiffness and rest
+    // length) is a magnitude, and rides along untouched.
+    function convertLink(h) {
+      var link = {};
+      Object.keys(h).forEach(function (k) { link[k] = h[k]; });
       var worldAnchored = h.bodyA === null || h.bodyA === undefined;
       var ax = Number(h.localAnchorA && h.localAnchorA.x) || 0;
       var ay = Number(h.localAnchorA && h.localAnchorA.y) || 0;
-      hinge.localAnchorA = worldAnchored
+      link.localAnchorA = worldAnchored
         ? { x: round(mapX(ax, frame)), y: round(mapY(ay, frame)) }
         : { x: round(ax), y: round(-ay) };
-      hinge.localAnchorB = {
+      link.localAnchorB = {
         x: round(Number(h.localAnchorB && h.localAnchorB.x) || 0),
         y: round(-(Number(h.localAnchorB && h.localAnchorB.y) || 0)),
       };
-      return hinge;
-    });
+      return link;
+    }
+    out.hinges = (json.hinges || []).map(convertLink);
+    // Left off entirely when the scene has none, so a scene from before
+    // springs existed converts to exactly what it always did.
+    if (json.springs) out.springs = json.springs.map(convertLink);
 
     return out;
   }
