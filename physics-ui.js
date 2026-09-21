@@ -214,6 +214,14 @@
   // decide whether releasing there deletes the body instead of just moving
   // it, and read by render() to draw the zone at its "about to delete" size.
   var deleteZoneArmed = false;
+  // A drag that began on a hinge's dot (select tool only). It moves nothing -
+  // not the hinge, not either body: a hinge's position is where two bodies
+  // were pinned, and sliding it would mean re-deriving both local anchors
+  // under the user's finger. All the drag is for is carrying the hinge to the
+  // delete zone, which until this existed was something a hinge could only
+  // reach by taking one of its bodies with it. `current` is the pointer, for
+  // the ghost dot render() draws there.
+  var hingeDrag = null; // { hingeIndex, current: {x,y} }
   // Click-and-drag shape creation: set on mousedown while the Circle/Line
   // tool is active, updated on every mousemove to drive the temp preview
   // (see drawShapePreview), and consumed (cleared, turned into a real body)
@@ -581,15 +589,69 @@
     }
   }
 
-  function drawHinge(hinge) {
+  var HINGE_RADIUS = 6;
+  var HINGE_HIT_PAD = 4; // a 6px dot is a small thing to land a mouse on
+
+  function drawHinge(hinge, grabbed) {
     var p = PhysicsEngine.getHingeWorldPoint(hinge, scene.bodies);
     ctx.beginPath();
-    ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+    ctx.arc(p.x, p.y, HINGE_RADIUS, 0, Math.PI * 2);
     ctx.fillStyle = "#ffcf4d";
     ctx.fill();
     ctx.strokeStyle = "#8a6d1a";
     ctx.lineWidth = 2;
     ctx.stroke();
+    if (grabbed) {
+      // The hinge stays put while it is dragged (see hingeDrag), so this ring
+      // is what says WHICH one the ghost under the pointer stands for.
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, HINGE_RADIUS + 5, 0, Math.PI * 2);
+      ctx.strokeStyle = "#ffcf4d";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+  }
+
+  // The thing actually under the pointer during a hinge drag: a faded copy of
+  // the dot, tethered back to the real one, so the gesture reads as "carrying
+  // this hinge somewhere" even though the hinge itself never moves.
+  function drawHingeDragGhost(drag) {
+    var hinge = scene.hinges[drag.hingeIndex];
+    if (!hinge) return;
+    var p = PhysicsEngine.getHingeWorldPoint(hinge, scene.bodies);
+    ctx.save();
+    ctx.globalAlpha = 0.6;
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = "#ffcf4d";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    ctx.lineTo(drag.current.x, drag.current.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.arc(drag.current.x, drag.current.y, HINGE_RADIUS, 0, Math.PI * 2);
+    ctx.fillStyle = "#ffcf4d";
+    ctx.fill();
+    ctx.strokeStyle = "#8a6d1a";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Which hinge's dot is under this point, or -1. Last-drawn first, matching
+  // what is visibly on top. Only HALF the touch slop the bodies get: a hinge
+  // always sits on a body, so every pixel given to it is taken from that
+  // body's own grab area, and a pendulum bob pinned through its center (a
+  // 30px circle) would otherwise be nearly all hinge to a finger.
+  function hitTestHinge(px, py) {
+    var r = HINGE_RADIUS + HINGE_HIT_PAD + pointerSlop / 2;
+    for (var i = scene.hinges.length - 1; i >= 0; i--) {
+      var p = PhysicsEngine.getHingeWorldPoint(scene.hinges[i], scene.bodies);
+      var dx = px - p.x, dy = py - p.y;
+      if (dx * dx + dy * dy <= r * r) return i;
+    }
+    return -1;
   }
 
   // ---- Radius/Length/Size drag handle ----
@@ -996,7 +1058,8 @@
   //
   // Appears only while an existing body is being dragged by hand (the
   // `dragging` state - not a resize/rotation/anchor drag, and not a new
-  // shape being drawn), fixed at the top center of the frame regardless of
+  // shape being drawn) or a hinge is (`hingeDrag`, whose drag exists for
+  // nothing else), fixed at the top center of the frame regardless of
   // where the drag itself is, same as the "drag an icon up to X" gesture on
   // an Android or iOS home screen.
   var DELETE_ZONE_RADIUS = 20;
@@ -1216,7 +1279,7 @@
     drawOutputKeyRing();
     updateOutputKeyControls();
     for (var i = 0; i < scene.bodies.length; i++) drawBody(scene.bodies[i], i === selectedIndex);
-    for (var j = 0; j < scene.hinges.length; j++) drawHinge(scene.hinges[j]);
+    for (var j = 0; j < scene.hinges.length; j++) drawHinge(scene.hinges[j], !!hingeDrag && hingeDrag.hingeIndex === j);
     drawOutputKeyBodyDot(w, h);
     drawVelocityArrows();
     drawMappingBadges();
@@ -1225,7 +1288,8 @@
       drawRotationHandle(selectedIndex); // no-op for anything but a line
       drawAnchorIcon(selectedIndex); // no-op unless this body is anchored
     }
-    if (dragging && selectedIndex >= 0) drawDeleteZone(deleteZoneArmed);
+    if ((dragging && selectedIndex >= 0) || hingeDrag) drawDeleteZone(deleteZoneArmed);
+    if (hingeDrag) drawHingeDragGhost(hingeDrag);
     if (drawingShape) drawShapePreview(drawingShape);
     // render() already runs after every editing mutation (drag, add/delete,
     // property edits, hinges) - piggyback the auto-save here instead of
@@ -1427,6 +1491,7 @@
     if (!modalBackdrop.hidden) { closeModal(); return; }
     if (drawingShape) { drawingShape = null; render(); } // cancel the in-progress drag instead of still placing it on the eventual mouseup
     if (velocityDrag) { velocityDrag = null; render(); } // same, for a velocity aim in progress: leave the body's existing velocity alone
+    if (hingeDrag) { hingeDrag = null; deleteZoneArmed = false; canvas.classList.remove("dragging"); render(); } // same, for a hinge on its way to the delete zone: it stays
     setActiveTool("select");
   });
 
@@ -1653,6 +1718,16 @@
         resizeHandleDrag = { bodyIndex: selectedIndex };
         return;
       }
+      // Before the bodies: a hinge is drawn over whatever it pins, so the dot
+      // is what the user sees themselves pressing. The selection is left as
+      // it was - nothing about this gesture is about a body.
+      var hingeHit = hitTestHinge(p.x, p.y);
+      if (hingeHit >= 0) {
+        hingeDrag = { hingeIndex: hingeHit, current: p };
+        canvas.classList.add("dragging");
+        render();
+        return;
+      }
       var hit = hitTestTopmost(p.x, p.y);
       selectBody(hit);
       if (hit >= 0) {
@@ -1770,6 +1845,12 @@
       render();
       return;
     }
+    if (hingeDrag) {
+      hingeDrag.current = canvasPoint(e);
+      deleteZoneArmed = isOverDeleteZone(hingeDrag.current.x, hingeDrag.current.y);
+      render();
+      return;
+    }
     if (!dragging || selectedIndex < 0) return;
     var p = canvasPoint(e);
     var body = scene.bodies[selectedIndex];
@@ -1791,6 +1872,7 @@
     resizeHandleDrag = null;
     velocityDrag = null;
     drawingShape = null;
+    hingeDrag = null;
     dragging = false;
     deleteZoneArmed = false;
     canvas.classList.remove("dragging");
@@ -1824,6 +1906,21 @@
       var shape = drawingShape;
       drawingShape = null;
       finalizeShapeDrawing(shape, canvasPoint(e));
+      return;
+    }
+    if (hingeDrag) {
+      // Decided from where the pointer IS, not from the last pointermove's
+      // deleteZoneArmed: a touch can lift without a final move event.
+      var upPoint = canvasPoint(e);
+      var droppedHinge = isOverDeleteZone(upPoint.x, upPoint.y) ? hingeDrag.hingeIndex : -1;
+      hingeDrag = null;
+      deleteZoneArmed = false;
+      canvas.classList.remove("dragging");
+      // Nothing else in a scene refers to a hinge by index (mappings name
+      // bodies), so removing one is only this. Released anywhere else, the
+      // drag simply ends - it never moved anything to put back.
+      if (droppedHinge >= 0) scene.hinges.splice(droppedHinge, 1);
+      render();
       return;
     }
     if (!dragging) return;
