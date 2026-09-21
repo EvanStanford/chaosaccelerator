@@ -7,7 +7,7 @@
 }
 
 /* ---- The two views, in one document ----
-   index.html holds both shells at once, rather than the two separate
+   chaos.html holds both shells at once, rather than the two separate
    pages (physics.html and fractal-grid.html) they used to be. They have
    to be able to be on screen
    SIMULTANEOUSLY - the transition between them cross-fades one into the
@@ -35,7 +35,7 @@
 
 /* A visit that arrived by a link to the map: the editor stays laid out (it
    measures its own canvas as it starts up) but is not shown, so it doesn't
-   flash up ahead of the map the link is for. Set by index.html's inline
+   flash up ahead of the map the link is for. Set by chaos.html's inline
    script and cleared by transition.js once it has routed the visit. */
 .opening-map #editor-view {
   visibility: hidden;
@@ -102,7 +102,7 @@
    so it stays anchored to the viewport corner rather than scrolling or
    resizing with any container. pointer-events: none so it never blocks a
    click on whatever's underneath it. Plain text, no link, no build step -
-   delete this block and its one line in index.html to remove it. */
+   delete this block and its one line in chaos.html to remove it. */
 #watermark {
   position: fixed;
   right: 12px;
@@ -152,6 +152,32 @@
   cursor: pointer;
 }
 .floating-settings-btn:hover {
+  background: var(--bg-input);
+}
+
+/* Its mirror in the scene's other top corner: back to the landing page. The
+   same card, positioned against #canvas-area (it lives inside it, so it sits
+   over the scene rather than over the docked panel). */
+.floating-home-btn {
+  position: absolute;
+  top: var(--panel-inset);
+  left: var(--panel-inset);
+  z-index: 12;
+  width: var(--settings-btn-size);
+  height: var(--settings-btn-size);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+  background: var(--bg-panel-float);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  text-decoration: none;
+}
+.floating-home-btn:hover {
   background: var(--bg-input);
 }
 
@@ -331,7 +357,7 @@
 
 /* The speaker icon shared by #btn-mute/#hover-mute (playback area) and each
    settings panel's own .volume-icon - same SVG markup in all four spots
-   (see index.html), with .vol-arc-1/.vol-arc-2/.vol-mute-x shown or hidden
+   (see chaos.html), with .vol-arc-1/.vol-arc-2/.vol-mute-x shown or hidden
    by JS (setVolumeIconState in physics-ui.js/fractal-grid.js) rather than
    swapped for a different icon, so one small function keeps every instance
    of it in sync with PhysicsSound's own volume. Toggled via style.display

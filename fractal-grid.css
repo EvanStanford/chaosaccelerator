@@ -431,7 +431,7 @@ button.secondary:hover { background: var(--bg-input); }
 }
 /* ---- Scoped to #grid-view ----
    These eight rules style the same class/element differently on the two
-   views, and both stylesheets load into one document now (see index.html).
+   views, and both stylesheets load into one document now (see chaos.html).
    The editor's copies stay global; the grid's are scoped here so loading
    order stops deciding which view wins. Every other rule in this file is
    already unique to the grid (its ids are namespaced) or byte-identical to
@@ -880,7 +880,7 @@ input[type="range"] {
   white-space: nowrap;
 }
 /* Both rings share one path (see each pair's identical cx/cy/r in
-   index.html) so progress reads as one ring changing color, not two
+   chaos.html) so progress reads as one ring changing color, not two
    concentric ones. Rotated 90deg so the dash pattern's start point - the
    circle's own 3-o'clock point - lands at 6 o'clock (south) instead;
    stroke-dasharray/dashoffset are set from JS, where the sweep direction
@@ -907,7 +907,7 @@ input[type="range"] {
 }
 
 /* ---- The timeline transport ----
-   The body of the Map Evolution card (see #menu-playback in index.html and
+   The body of the Map Evolution card (see #menu-playback in chaos.html and
    the Playback section of fractal-grid.js): the shared .playback-controls
    row, the frame readout under it, then the Simulation Duration slider that
    sets where that timeline ends. The card itself needs no look of its own -
@@ -1432,7 +1432,7 @@ input[type="range"] {
   visibility: hidden;
 }
 /* The controls the slider sets, folded away under it (see #perf-details in
-   index.html) - the editor's own "Advanced" disclosure, whose legend has to
+   chaos.html) - the editor's own "Advanced" disclosure, whose legend has to
    sit on this card's fill rather than the editor panel's. */
 #perf-details {
   margin-top: 0;

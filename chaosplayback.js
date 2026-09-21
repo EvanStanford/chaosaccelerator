@@ -69,8 +69,8 @@
   // the Movie card comes up holding the movie this was rendered from - ready
   // to be changed and rendered again - on the first keyframe's view.
   var first = movie.keyframes[0];
-  $("back-to-scene").href = "index.html#" + ShareUrl.encode({ page: ShareUrl.PAGE_BUILDER, scene: link.scene });
-  $("back-to-map").href = "index.html#" + ShareUrl.encode({
+  $("back-to-scene").href = "chaos.html#" + ShareUrl.encode({ page: ShareUrl.PAGE_BUILDER, scene: link.scene });
+  $("back-to-map").href = "chaos.html#" + ShareUrl.encode({
     page: ShareUrl.PAGE_MAP,
     scene: link.scene,
     view: { center: first.center, zoom: first.zoom, display: link.view.display, precision: link.view.precision, movie: movie },
@@ -273,7 +273,7 @@
     });
     // The app, opened on this movie's map - drawn the way the movie is to be
     // drawn, and otherwise at its defaults.
-    engine.src = "index.html#" + ShareUrl.encode({
+    engine.src = "chaos.html#" + ShareUrl.encode({
       page: ShareUrl.PAGE_MAP,
       scene: link.scene,
       view: { display: link.view.display, precision: link.view.precision },

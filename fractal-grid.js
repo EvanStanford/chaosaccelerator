@@ -18,7 +18,7 @@
 
   // ---- Started on demand, not at load ----
   //
-  // Both views live in one document now (index.html), and the grid has no
+  // Both views live in one document now (chaos.html), and the grid has no
   // scene to compile until the editor hands one over. So the whole module
   // body below is a function: nothing touches WebGL, reads the handoff or
   // binds a listener until FractalGrid.start(scene) runs, which the app
@@ -3663,7 +3663,7 @@
   // just a reminder (see showInspectToast) to drag instead, since only a
   // real drag can mean something other than panning.
   //
-  // "point" is the touch-only third (see #btn-inspect-point in index.html):
+  // "point" is the touch-only third (see #btn-inspect-point in chaos.html):
   // a finger's tap locks a point only once it has been armed, because a
   // finger has no hover to preview with and its taps share the map with
   // one-finger pans and pinches. Unlike the other two it never takes the
@@ -5174,7 +5174,7 @@
   // ---- Rendering progress ring ----
   //
   // Two stacked circle outlines in the lower right (#render-progress-ring in
-  // index.html/fractal-grid.css) tracking this same progressive state,
+  // chaos.html/fractal-grid.css) tracking this same progressive state,
   // translated into a continuous 0..1 fraction rather than the coarse,
   // per-level jumps the text readout above uses - so the ring visibly creeps
   // forward band by band instead of snapping in a handful of big steps.
@@ -5188,7 +5188,7 @@
   // still ends up full once `progressive.complete` says there is nothing
   // left to do, rather than stranding the ring wherever it happened to be.
   var RENDER_RING_STRIDE_CHECKPOINTS = [32, 16, 8, 4, 2];
-  var RENDER_RING_CIRCUMFERENCE = 2 * Math.PI * 17; // matches the r=17 circles in index.html
+  var RENDER_RING_CIRCUMFERENCE = 2 * Math.PI * 17; // matches the r=17 circles in chaos.html
 
   // Fraction (0..1) through whichever sub-lattice/band is currently being
   // drawn at progressive.stride - the finest-grained unit of progress this
@@ -6532,12 +6532,16 @@
   // Slider position, readout and hint, all from whatever simulationSteps
   // currently is - so there is one way to put this control back in step with
   // the value behind it, used both at boot and on every scene adoption.
+  //
+  // The number beside the slider can be typed, to any whole frame the slider
+  // could reach - so the duration is not always a notch, and the slider just
+  // rests on the nearest one.
   function syncStepsUI() {
-    stepsSlider.value = String(simulationSteps / SIMULATION_STEPS_PER_NOTCH);
+    stepsSlider.value = String(clamp(Math.round(simulationSteps / SIMULATION_STEPS_PER_NOTCH), Number(stepsSlider.min), Number(stepsSlider.max)));
     updateStepsUI(simulationSteps);
   }
   function updateStepsUI(value) {
-    stepsReadout.textContent = value.toLocaleString();
+    if (stepsReadout.value !== String(value)) stepsReadout.value = String(value);
   }
   // Every inspected point cached a trajectory of the OLD length, so after a
   // change they'd replay against a grid that no longer agrees with them.
@@ -6571,8 +6575,22 @@
   }
   syncStepsUI();
   stepsSlider.addEventListener("input", function () { updateStepsUI(stepsFromSlider()); });
-  stepsSlider.addEventListener("change", function () {
-    var next = stepsFromSlider();
+  stepsSlider.addEventListener("change", function () { applySimulationSteps(stepsFromSlider()); });
+  // Typed: on commit (Enter, or leaving the field), never per keystroke -
+  // every intermediate number would be a full re-render. Anything unusable
+  // puts the current value back.
+  stepsReadout.addEventListener("change", function () {
+    var typed = Math.round(Number(stepsReadout.value));
+    if (isFinite(typed) && typed >= 1) {
+      applySimulationSteps(Math.min(typed, Number(stepsSlider.max) * SIMULATION_STEPS_PER_NOTCH));
+    }
+    syncStepsUI();
+  });
+  stepsReadout.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") stepsReadout.blur();
+    e.stopPropagation(); // digits and arrows here are not the map's shortcuts
+  });
+  function applySimulationSteps(next) {
     if (next === simulationSteps) return;
     // The timeline ends at the duration. One resting at its end moves with
     // it, which is all this slider ever did before there was a timeline; one
@@ -6601,7 +6619,7 @@
     markDirty();
     if (inspectedGroups.length > 0) recomputeLockedTrajectories();
     else restartCurrentPreview();
-  });
+  }
 
   colorZoomCheckbox.addEventListener("change", function () {
     colorZoomEnabled = colorZoomCheckbox.checked;
@@ -6622,7 +6640,7 @@
 
   // ---- The Display Mode menu's rows ----
   //
-  // Built from DISPLAY_MODES rather than written out in index.html, so the
+  // Built from DISPLAY_MODES rather than written out in chaos.html, so the
   // GLSL MODE_* constants, the sample counts, the thumbnails and this list
   // cannot drift apart.
   //
@@ -6668,7 +6686,7 @@
     // Standard paints (see colorMap's u_colorZoom branch), so it reads as
     // this row's own control rather than a separate settings-panel toggle -
     // colorZoomField is the exact <input id="color-zoom-checkbox"> element
-    // from index.html, moved here (not cloned), so every existing
+    // from chaos.html, moved here (not cloned), so every existing
     // change-event/tip listener on it keeps working untouched.
     if (isStandard) text.appendChild(colorZoomField);
     else text.appendChild(document.createTextNode(mode.blurb));
@@ -11626,7 +11644,7 @@
   // Every menu but one. There is no Movie tab: a movie is hundreds of
   // finished pictures rendered back to back, which is not something to start
   // on a phone, and five tabs is what a phone's width holds comfortably. Its
-  // button and card stay where index.html put them, in the right-hand column
+  // button and card stay where chaos.html put them, in the right-hand column
   // - which this layout hides (see #grid-right-menu-column in mobile.css) -
   // so the card is simply not reachable here, and is shut on the way in if
   // it was open. Nothing about a movie is lost by that: the keyframes are
@@ -11713,7 +11731,7 @@
         dockTabsEl.appendChild(menu.toggle);
         dockSheetEl.appendChild(menu.card);
       } else {
-        // Back where index.html put them: the button first, then its card.
+        // Back where chaos.html put them: the button first, then its card.
         menu.item.insertBefore(menu.toggle, menu.item.firstChild);
         menu.item.appendChild(menu.card);
       }

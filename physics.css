@@ -200,6 +200,22 @@ button.danger:hover { background: var(--danger); color: white; }
   color: var(--text-dim);
 }
 .field span b { color: var(--text); font-weight: 600; }
+/* The Simulation Duration readout, typed into: sits where the bold number
+   was and reads like it, until it is focused. 16px on a phone, or iOS zooms
+   the page the moment it is tapped. */
+.steps-number {
+  width: 5.2em;
+  padding: 1px 4px;
+  font: inherit;
+  font-weight: 600;
+  text-align: right;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.steps-number:focus { outline: none; border-color: var(--accent, #5b8cff); }
+html.input-coarse .steps-number { font-size: 16px; }
 
 input[type="range"] {
   width: 100%;
@@ -334,7 +350,7 @@ select:disabled { opacity: 0.5; }
 }
 
 /* The Play transport, floated top-center over the scene instead of docked
-   in #panel (see index.html's comment on #playback-toolbar) - same
+   in #panel (see chaos.html's comment on #playback-toolbar) - same
    #canvas-area-relative centering #fractalize-wrap uses above, mirrored to
    the top edge. Needs its own translucent card (--bg-panel-float, the same
    fill fractal-grid.css's floating panel/settings-panel use) since

@@ -17,6 +17,20 @@
   // the same thing on both pages' identical sliders.
   var SIMULATION_STEPS_PER_NOTCH = 100;
   var SIMULATION_STEPS_MAX_NOTCHES = 50;
+  // The slider moves in hundreds; the number beside it can be typed, to any
+  // whole step up to the slider's own top. So a duration is no longer always
+  // a notch - the slider just rests on the nearest one - and everything that
+  // takes a duration in (a loaded scene, a link, the map's own control) keeps
+  // the exact value, clamped, rather than snapping it.
+  var SIMULATION_STEPS_MAX = SIMULATION_STEPS_PER_NOTCH * SIMULATION_STEPS_MAX_NOTCHES;
+  function clampSimulationSteps(v) {
+    v = Number(v);
+    if (!isFinite(v) || v <= 0) return null;
+    return Math.min(SIMULATION_STEPS_MAX, Math.max(1, Math.round(v)));
+  }
+  function simulationStepsNotch(steps) {
+    return Math.min(SIMULATION_STEPS_MAX_NOTCHES, Math.max(1, Math.round(steps / SIMULATION_STEPS_PER_NOTCH)));
+  }
   // Auto-saved on every edit so navigating away and back (e.g. via the
   // above, or the topbar's back-link) restores exactly what was there
   // before, instead of resetting to the hardcoded seed scene.
@@ -1567,7 +1581,7 @@
   // in playing mode is what "unlocked" means, including right after Reset.
   //
   // Also gated on canvasArea actually having a size: this page now shares a
-  // document with the grid view (see index.html/transition.js), and a
+  // document with the grid view (see chaos.html/transition.js), and a
   // display:none element's clientWidth/clientHeight are always 0 - with no
   // guard, switching to the grid view (which fires a resize so other layout
   // notices the swap) would zero out the authored frame permanently, since
@@ -1701,7 +1715,7 @@
   // Every tool button says what it wants done in its title - which a mouse
   // reads by hovering, and a finger never sees. So a tool picked BY TOUCH
   // says the same thing in a toast over the canvas instead (#editor-hint-
-  // toast - see index.html), from the same title attribute so there is
+  // toast - see chaos.html), from the same title attribute so there is
   // still one copy of each instruction, with its "click" read as "tap".
   // Which kind of pointer pressed last is noted at the window, in the
   // capture phase, so it is already known by the time the click it produces
@@ -1759,7 +1773,7 @@
   // ---- Settings panel (gear button, upper right) ----
   //
   // More can just be added into #settings-panel-body (see #editor-view in
-  // index.html) without needing anything else here to change.
+  // chaos.html) without needing anything else here to change.
   btnSettings.addEventListener("click", function () {
     settingsPanel.classList.toggle("open");
   });
@@ -1789,9 +1803,13 @@
     if (!editorTopbar || !playbackToolbar) return;
     if (active === !!topbarHomes) return;
     if (active) {
-      topbarHomes = [playbackToolbar, btnSettings].map(function (el) {
+      // The back chevron goes first - the leading edge of a top bar is where
+      // every phone app keeps it. (Absent on a page that has none.)
+      var btnHome = document.getElementById("btn-home");
+      topbarHomes = [btnHome, playbackToolbar, btnSettings].filter(Boolean).map(function (el) {
         return { el: el, parent: el.parentNode, next: el.nextSibling };
       });
+      if (btnHome) editorTopbar.appendChild(btnHome);
       editorTopbar.appendChild(playbackToolbar);
       editorTopbar.appendChild(btnSettings);
     } else {
@@ -2378,8 +2396,24 @@
   });
 
   function updateSimulationStepsReadout(value) {
-    simulationStepsReadout.textContent = value.toLocaleString();
+    if (simulationStepsReadout.value !== String(value)) simulationStepsReadout.value = String(value);
   }
+  // Typed: applied when the field is committed (Enter, or leaving it), not per
+  // keystroke - "1200" passes through 1, 12 and 120 on the way. Anything
+  // unusable just puts the current value back.
+  simulationStepsReadout.addEventListener("change", function () {
+    var typed = clampSimulationSteps(simulationStepsReadout.value);
+    if (typed !== null) {
+      scene.simulationSteps = typed;
+      simulationStepsSlider.value = String(simulationStepsNotch(typed));
+      if (!isPlaying) playbackProgressSlider.max = String(typed);
+    }
+    updateSimulationStepsReadout(scene.simulationSteps);
+    render(); // sweeps it into the autosave and the address bar
+  });
+  simulationStepsReadout.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") simulationStepsReadout.blur();
+  });
   simulationStepsSlider.addEventListener("input", function () {
     scene.simulationSteps = Number(simulationStepsSlider.value) * SIMULATION_STEPS_PER_NOTCH;
     updateSimulationStepsReadout(scene.simulationSteps);
@@ -2976,14 +3010,9 @@
       mutualGravity: parsed.mutualGravity === true,
       maxSimulationBodies: PhysicsEngine.maxSimulationBodiesFor(parsed),
       collisionsEnabled: PhysicsEngine.collisionsEnabled(parsed),
-      // Snapped onto the slider's own grid of hundreds so the control can
-      // always show exactly what got loaded.
-      simulationSteps: (function () {
-        var v = Number(parsed.simulationSteps);
-        if (!isFinite(v) || v <= 0) return DEFAULT_SIMULATION_STEPS;
-        var notches = Math.min(SIMULATION_STEPS_MAX_NOTCHES, Math.max(1, Math.round(v / SIMULATION_STEPS_PER_NOTCH)));
-        return notches * SIMULATION_STEPS_PER_NOTCH;
-      })(),
+      // Kept exact (see clampSimulationSteps) - the number field shows it as
+      // it is, and the slider rests on the nearest hundred.
+      simulationSteps: clampSimulationSteps(parsed.simulationSteps) || DEFAULT_SIMULATION_STEPS,
     };
   }
 
@@ -3004,7 +3033,7 @@
     setMaxBodiesUI(scene.maxSimulationBodies);
     mutualGravityCheckbox.checked = scene.mutualGravity;
     collisionsCheckbox.checked = scene.collisionsEnabled;
-    simulationStepsSlider.value = String(scene.simulationSteps / SIMULATION_STEPS_PER_NOTCH);
+    simulationStepsSlider.value = String(simulationStepsNotch(scene.simulationSteps));
     updateSimulationStepsReadout(scene.simulationSteps);
     playbackProgressSlider.max = String(scene.simulationSteps);
   }
@@ -3199,13 +3228,13 @@
   // the control's own handler run - against that now-editable scene. Not
   // in this list: btnPlayPause/btnMute/playbackProgressSlider/btnSpeed/
   // btnReset (the playback transport itself, now its own floating toolbar
-  // - see index.html) and outputBodyBSelect/the "Advanced" disclosures,
+  // - see chaos.html) and outputBodyBSelect/the "Advanced" disclosures,
   // which stay plain toggles/selects with no reset side effect.
   var lockedDuringPlaybackControls = toolButtons.concat([
     btnExportScene, btnImportScene,
     btnSampleDoublePendulum, btnSamplePinball, btnSampleBinaryStar, btnClearAll,
     mutualGravityCheckbox, collisionsCheckbox,
-    edgeModeSelect, maxBodiesSlider, simulationStepsSlider,
+    edgeModeSelect, maxBodiesSlider, simulationStepsSlider, simulationStepsReadout,
     xInputBodySelect, yInputBodySelect, outputBodySelect,
     xInputPropertySelect, yInputPropertySelect, outputPropertySelect,
   ]);
@@ -4092,7 +4121,7 @@
   // and cheap - and it's what keeps a fresh (seeded) scene's slider in sync
   // with scene.simulationSteps without relying on the HTML's own default
   // value staying hand-matched to DEFAULT_SIMULATION_STEPS forever.
-  simulationStepsSlider.value = String(scene.simulationSteps / SIMULATION_STEPS_PER_NOTCH);
+  simulationStepsSlider.value = String(simulationStepsNotch(scene.simulationSteps));
   updateSimulationStepsReadout(scene.simulationSteps);
   playbackProgressSlider.max = String(scene.simulationSteps);
   updatePlayPauseButtonUI();
@@ -4228,14 +4257,10 @@
     // value between notches would leave the slider unable to represent what
     // the scene says.
     setSimulationSteps: function (steps) {
-      var v = Number(steps);
-      if (!isFinite(v) || v <= 0) return;
-      var notches = Math.min(SIMULATION_STEPS_MAX_NOTCHES,
-        Math.max(1, Math.round(v / SIMULATION_STEPS_PER_NOTCH)));
-      var next = notches * SIMULATION_STEPS_PER_NOTCH;
-      if (next === scene.simulationSteps) return;
+      var next = clampSimulationSteps(steps);
+      if (next === null || next === scene.simulationSteps) return;
       scene.simulationSteps = next;
-      simulationStepsSlider.value = String(notches);
+      simulationStepsSlider.value = String(simulationStepsNotch(next));
       updateSimulationStepsReadout(next);
       // The same guard the slider's own handler uses: during a run the
       // progress slider's range belongs to the run, not to the setting.

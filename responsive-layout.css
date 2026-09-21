@@ -13,7 +13,7 @@
    height, so the picture is never entirely buried.
 
    The grid's ids are namespaced because both shells live in one document
-   (see index.html).
+   (see chaos.html).
 
    Deliberately keyed on orientation:portrait - a pure aspect-ratio media
    feature - rather than any device/UA check, so a desktop window resized
@@ -23,7 +23,7 @@
    both instead of two hand-kept copies of the same layout.
 
    Loaded after both views' own stylesheets (see the <link> order in
-   index.html) so these rules win the cascade over the base (landscape)
+   chaos.html) so these rules win the cascade over the base (landscape)
    #panel/#main/#canvas-area rules without needing higher specificity or
    !important. */
 @media (orientation: portrait) {

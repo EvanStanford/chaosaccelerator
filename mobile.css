@@ -15,7 +15,7 @@
      html.input-coarse               ...and is the PRIMARY pointer: bigger
                                      targets, no text selection, 16px fields.
 
-   Loaded last (see index.html), so a rule here beats the same selector in
+   Loaded last (see chaos.html), so a rule here beats the same selector in
    any of the view stylesheets without !important. Nothing outside a class
    above changes the desktop layout, with four deliberate exceptions, all at
    the top: the viewport-height unit, overscroll, and the two new elements
@@ -24,7 +24,7 @@
 
 :root {
   /* A phone's notch, status bar and home indicator, which viewport-fit=cover
-     (see index.html) lets the canvas run underneath. Zero everywhere else.
+     (see chaos.html) lets the canvas run underneath. Zero everywhere else.
      Named once because nearly every floating control needs one of them. */
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
@@ -117,13 +117,13 @@ html.layout-mobile body {
   image-rendering: auto;
 }
 
-/* The back link's phone face (see #back-link in index.html) - not shown
+/* The back link's phone face (see #back-link in chaos.html) - not shown
    anywhere else. */
 .menu-back-chevron {
   display: none;
 }
 
-/* Touch only - see its comment in index.html. */
+/* Touch only - see its comment in chaos.html. */
 #btn-inspect-point {
   display: none;
   /* The same idle/armed pair Line and Grid have in fractal-grid.css. */
@@ -454,7 +454,8 @@ html.layout-mobile #editor-topbar {
 #editor-topbar #playback-toolbar .readout {
   text-align: center;
 }
-#editor-topbar .floating-settings-btn {
+#editor-topbar .floating-settings-btn,
+#editor-topbar .floating-home-btn {
   position: static;
   flex-shrink: 0;
   box-shadow: none;

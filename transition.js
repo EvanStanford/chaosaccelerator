@@ -2,11 +2,11 @@
 // Attribution License, Version 1.0 (CPAL-1.0) - see LICENSE in the project
 // root, or https://chaosaccelerator.com/license for a hosted copy.
 
-// The app shell: which of index.html's two views is on screen, the
+// The app shell: which of chaos.html's two views is on screen, the
 // animated explainer that runs between them, and the address bar that says
 // which one (and what is in it) - see "The address bar" at the end.
 //
-// Both views exist in one document (see index.html and app-shell.css) so
+// Both views exist in one document (see chaos.html and app-shell.css) so
 // this can show them AT ONCE, which is the whole point: the transition has
 // to make the editor's scene visibly collapse into a single pixel of the
 // fractal grid, and that needs the outgoing and incoming views alive
@@ -770,7 +770,7 @@
   }
 
   openAddress(true);
-  // Set by index.html's own inline script for a map link, to keep the editor
+  // Set by chaos.html's own inline script for a map link, to keep the editor
   // from flashing up before this script has had its turn.
   document.documentElement.classList.remove("opening-map");
   syncAddress();
