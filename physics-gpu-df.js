@@ -264,6 +264,8 @@
     "DVec2 dfAdvanceVelocity(DVec2 v, MF dt, DVec2 accel) {",
     "  v.x = dfAdd(v.x, dfMul(accel.x, dt));",
     "  v.y = dfAdd(v.y, dfMul(accel.y, dt));",
+    // PhysicsEngine.AIR_DRAG (experimental) - no line at all when it is 0.
+    (global.PhysicsEngine.AIR_DRAG ? "  v = dv2Scale(v, dfSub(DF_ONE, dfMul(" + d(global.PhysicsEngine.AIR_DRAG) + ", dt)));" : ""),
     "  MF sq = dv2LengthSq(v);",
     "  if (dfGreater(sq, dfSqr(DF_MAX_SPEED))) v = dv2Scale(v, dfDiv(DF_MAX_SPEED, dfSqrt(sq)));",
     "  return v;",

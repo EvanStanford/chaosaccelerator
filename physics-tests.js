@@ -5675,6 +5675,86 @@
     }
   );
 
+  // The scene the zero-length flip was reported from: two free circles under
+  // Mutual Gravity with collisions off, joined by a spring stretched to twice
+  // its rest length, so they pass THROUGH each other every half cycle. `t` is
+  // how far body 0's start is slid along the line of centers.
+  function buildPassThroughScene(t) {
+    var ux = -0.80421, uy = 0.59434; // from body 1 toward body 0, engine space
+    return {
+      mutualGravity: true, collisionsEnabled: false, edgeMode: "infinite", hinges: [],
+      bodies: [PhysicsEngine.createCircle(-424.79 + ux * t, 845.4 + uy * t, 30, false), PhysicsEngine.createCircle(226, 364.44, 30, false)],
+      springs: [{ bodyA: 1, bodyB: 0, localAnchorA: { x: 0, y: 0 }, localAnchorB: { x: 0, y: 0 }, stiffness: 56000, restLength: 406 }],
+    };
+  }
+
+  addTest(
+    "A spring whose ends pass through each other no longer puts ridges in the map",
+    "a Hookean spring with a rest length pushes hardest at zero length, and as its ends pass through each other that push reverses in no distance at all - so each pass landed one 1/60s sample just before the flip or just after it, and starts a hair apart got a whole step of k*rest/m in opposite directions. Measured before the fix on this scene: neighbours 0.005px apart came out up to 261px apart, 124 such jumps in 2px of travel, and a gap that would not close under refinement (71px at 0.0005px). Inside an eighth of its rest length the law is now a smooth polynomial (PhysicsEngine.springForceFactor) meeting Hooke in value, slope and curvature",
+    function () {
+      function finalY(t, sub) {
+        var scene = buildPassThroughScene(t), dt = DT / sub;
+        for (var i = 0; i < 400 * sub; i++) PhysicsEngine.step(scene, dt);
+        return scene.bodies[0].y;
+      }
+      // 1. The law itself joins Hooke smoothly at the core's rim and vanishes at zero length.
+      var L0 = 406, c = PhysicsEngine.SPRING_CORE * L0, h = 1e-3;
+      function q(r) { return PhysicsEngine.springForceFactor(r, L0); }
+      function hooke(r) { return 1 - L0 / r; }
+      var valueGap = Math.abs(q(c - 1e-9) - hooke(c));
+      var slopeGap = Math.abs((q(c) - q(c - h)) / h - (hooke(c + h) - hooke(c)) / h) / (L0 / (c * c));
+      var curveIn = (q(c - 2 * h) - 2 * q(c - h) + q(c)) / (h * h), curveOut = (hooke(c) - 2 * hooke(c + h) + hooke(c + 2 * h)) / (h * h);
+      var curveGap = Math.abs(curveIn - curveOut) / Math.abs(curveOut);
+      var linearSpring = PhysicsEngine.springForceFactor(0, 0) === 1 && PhysicsEngine.springForceFactor(123, 0) === 1;
+      // 2. Neighbouring starts give neighbouring results, and the passes really happen.
+      var worst = 0, prev = null;
+      for (var i = 0; i <= 200; i++) { var y = finalY((i / 200 - 0.5) * 2, 1); if (prev !== null) worst = Math.max(worst, Math.abs(y - prev)); prev = y; }
+      var probe = buildPassThroughScene(0), passes = 0, side = 1;
+      for (i = 0; i < 400; i++) {
+        PhysicsEngine.step(probe, DT);
+        var along = (probe.bodies[0].x - probe.bodies[1].x) * -0.80421 + (probe.bodies[0].y - probe.bodies[1].y) * 0.59434;
+        if ((along < 0 ? -1 : 1) !== side) { side = -side; passes++; }
+      }
+      // 3. And the 1/60s answer is the physics, not the step: it agrees with 1/960s.
+      var stepGap = Math.abs(finalY(0, 1) - finalY(0, 16));
+      return {
+        pass: valueGap < 1e-9 && slopeGap < 1e-3 && curveGap < 1e-2 && q(0) * 0 === 0 && linearSpring && passes >= 6 && worst < 1 && stepGap < 40,
+        detail: "at the core's rim the law meets Hooke to " + valueGap.toExponential(1) + " in value, " + slopeGap.toExponential(1) + " in slope, " + curveGap.toExponential(1) +
+          " in curvature; rest length 0 stays exactly linear=" + linearSpring + "; the balls passed through each other " + passes + " times, and 201 starts across 2px never differed from a neighbour by more than " +
+          worst.toFixed(3) + "px (was 261); 1/60s vs 1/960s differ by " + stepGap.toFixed(1) + "px (was ~350)",
+      };
+    }
+  );
+
+  addTest(
+    "The spring's smooth core is the same law, with the same energy, in JS and on the GPU",
+    "the core is a second branch of the spring law, written three times (springForceFactor, and the float32 and multi-float spellings in generateStepOnceGLSL) plus once more as its own integral in springPotentialEnergy. A pass through zero length exercises every one: if the GLSL branch disagreed the trajectories would part on the first pass, and if the potential were not the force's integral the energy audit would show a step at the core's rim",
+    function () {
+      var js = PhysicsEngine.runTrajectory(buildPassThroughScene(0), 120, DT);
+      var f32 = worstTrajectoryGap(js, PhysicsGPU.runSceneOnGPU(buildPassThroughScene(0), 60), 60, 2);
+      var df = worstTrajectoryGap(js, PhysicsGPU.runSceneOnGPU(buildPassThroughScene(0), 120, "df"), 120, 2);
+      // The energy audit wants nothing in the scene but the spring: one ball
+      // (Mutual Gravity with a single body is no gravity at all) on a spring
+      // from the background, released stretched to twice its rest length so
+      // it swings straight through the attachment point and out the far side.
+      function wobble(sub) {
+        var ball = PhysicsEngine.createCircle(1000, 300, 30, false), dt = DT / sub;
+        var scene = { mutualGravity: true, edgeMode: "infinite", bodies: [ball], hinges: [],
+          springs: [{ bodyA: null, bodyB: 0, localAnchorA: { x: 200, y: 300 }, localAnchorB: { x: 0, y: 0 }, stiffness: 110000, restLength: 406 }] };
+        function energy() { return PhysicsEngine.springPotentialEnergy(scene, dt) + 0.5 * ball.mass * (ball.vx * ball.vx + ball.vy * ball.vy); }
+        var e0 = energy(), lo = e0, hi = e0, farSide = false;
+        for (var i = 0; i < 240 * sub; i++) { PhysicsEngine.step(scene, dt); var e = energy(); lo = Math.min(lo, e); hi = Math.max(hi, e); if (ball.x < 200 - 406 * PhysicsEngine.SPRING_CORE) farSide = true; }
+        return { range: (hi - lo) / e0, farSide: farSide };
+      }
+      var coarse = wobble(1), fine = wobble(16);
+      return {
+        pass: f32 < 0.05 && df < 0.002 && coarse.farSide && coarse.range < 0.25 && fine.range < coarse.range / 8,
+        detail: "through two passes: float32 within " + f32.toExponential(1) + "px of JS over 60 steps, double-float within " + df.toExponential(1) + "px over 120; a lone ball swung through its spring's attachment point and out the far side=" +
+          coarse.farSide + ", its energy ranging over " + (coarse.range * 100).toFixed(2) + "% at 1/60s and " + (fine.range * 100).toFixed(3) + "% at 1/960s (a potential that was not the force's integral would leave a step at the core's rim that no step size removes)",
+      };
+    }
+  );
+
   addTest(
     "Springs at the frame's edges: a tethered group never wraps, a free one wraps as one (JS and GPU)",
     "wrapping one end of a spring alone stretches it by a whole frame in a single step. PhysicsEngine.springGroups is the rule that prevents it - a group tied to the background never wraps, any other wraps together when its leader does - and generateStepOnceGLSL runs the same rule at codegen time. A member that merely follows must also stay OFF Sticky Edges' watch list, or findWrapStopStep solves for a crossing that never happened",

@@ -172,6 +172,8 @@
     // uniform gravity is just the case where every body's is (0, GRAVITY).
     "vec2 advanceVelocity(vec2 v, float dt, vec2 accel) {",
     "  v += accel * dt;",
+    // PhysicsEngine.AIR_DRAG (experimental) - no line at all when it is 0.
+    (global.PhysicsEngine.AIR_DRAG ? "  v *= 1.0 - " + fnum(global.PhysicsEngine.AIR_DRAG) + " * dt;" : ""),
     "  float sq = dot(v, v);",
     "  if (sq > MAX_SPEED * MAX_SPEED) v *= MAX_SPEED / sqrt(sq);",
     "  return v;",
@@ -1392,31 +1394,50 @@
         var endA = end("A"), endB = end("B");
         var weights = [endA.weight, endB.weight].filter(Boolean);
         var stable = slit(PE.SPRING_STABILITY / (FIXED_DT * FIXED_DT));
-        var soft2 = slit(PE.SPRING_SOFTENING * PE.SPRING_SOFTENING);
-        // The softened length is needed by the law itself unless the rest
-        // length is exactly zero (the linear spring: the factor is exactly 1
-        // in the JS engine too, so leaving the sqrt and the divide out changes
-        // nothing but the cost) - and by the swing tally whenever an end
-        // that can turn has a lever arm.
+        // The law itself - PhysicsEngine.springForceFactor, and see the Springs
+        // header there for why it leaves Hooke inside a core: exact
+        // 1 - rest/r outside c = SPRING_CORE * rest, a polynomial in r^2
+        // inside that meets it in value, slope and curvature and reaches zero
+        // at zero length, so nothing flips as the ends pass through each
+        // other. A rest length of exactly zero has no core and no flip - the
+        // factor is exactly 1 in the JS engine too - so it needs no length at
+        // all, unless an end that can turn has a lever arm for the swing
+        // tally to weigh.
         var limited = (aMoves && endA.arm) || (bMoves && endB.arm);
-        var needsLength = sp.restLength !== 0 || limited;
+        var hasRest = sp.restLength !== 0;
+        var core = PE.SPRING_CORE * sp.restLength;
         if (df) {
           lines.push("    DVec2 sprD = dv2Sub(" + endB.point + ", " + endA.point + ");");
           lines.push("    MF sprK = dfMin(" + slit(sp.stiffness) + ", dfDiv(" + stable + ", " +
             (weights.length === 2 ? "dfAdd(" + weights[0] + ", " + weights[1] + ")" : weights[0]) + "));");
-          if (needsLength) lines.push("    MF sprLs = dfSqrt(dfAdd(dv2LengthSq(sprD), " + soft2 + "));");
-          lines.push("    MF sprF = " + (sp.restLength === 0 ? "sprK" :
-            "dfMul(sprK, dfSub(DF_ONE, dfDiv(" + slit(sp.restLength) + ", sprLs)))") + ";");
+          if (hasRest || limited) lines.push("    MF sprR2 = dv2LengthSq(sprD);", "    MF sprR = dfSqrt(sprR2);");
+          if (hasRest) {
+            lines.push("    MF sprQ;");
+            // Compared in df: this is a branch, and a float32 comparison
+            // would put its boundary on a float32 grid.
+            lines.push("    if (!dfLess(sprR2, " + slit(core * core) + ")) {");
+            lines.push("      sprQ = dfSub(DF_ONE, dfDiv(" + slit(sp.restLength) + ", sprR));");
+            lines.push("    } else {");
+            lines.push("      MF sprU = dfDiv(sprR2, " + slit(core * core) + ");");
+            lines.push("      sprQ = dfSub(DF_ONE, dfMul(" + slit(sp.restLength / core) + ", dfAdd(dfSub(" + slit(15 / 8) + ", dfMul(" + slit(5 / 4) + ", sprU)), dfMul(" + slit(3 / 8) + ", dfSqr(sprU)))));");
+            lines.push("    }");
+          }
+          lines.push("    MF sprF = " + (hasRest ? "dfMul(sprK, sprQ)" : "sprK") + ";");
           lines.push("    DVec2 sprFv = dv2Scale(sprD, sprF);");
-          if (limited) lines.push("    MF sprTension = dfMul(dfAbs(sprF), sprLs);");
+          if (limited) lines.push("    MF sprTension = dfMul(dfAbs(sprF), sprR);");
         } else {
           lines.push("    vec2 sprD = (" + endB.point + ") - (" + endA.point + ");");
           lines.push("    float sprK = min(" + slit(sp.stiffness) + ", " + stable + " / (" + weights.join(" + ") + "));");
-          if (needsLength) lines.push("    float sprLs = sqrt(dot(sprD, sprD) + " + soft2 + ");");
-          lines.push("    float sprF = " + (sp.restLength === 0 ? "sprK" :
-            "sprK * (1.0 - " + slit(sp.restLength) + " / sprLs)") + ";");
+          if (hasRest || limited) lines.push("    float sprR2 = dot(sprD, sprD);", "    float sprR = sqrt(sprR2);");
+          if (hasRest) {
+            lines.push("    float sprU = sprR2 / " + slit(core * core) + ";");
+            lines.push("    float sprQ = (sprR2 >= " + slit(core * core) + ")");
+            lines.push("      ? 1.0 - " + slit(sp.restLength) + " / sprR");
+            lines.push("      : 1.0 - " + slit(sp.restLength / core) + " * (15.0 / 8.0 - 5.0 / 4.0 * sprU + 3.0 / 8.0 * sprU * sprU);");
+          }
+          lines.push("    float sprF = " + (hasRest ? "sprK * sprQ" : "sprK") + ";");
           lines.push("    vec2 sprFv = sprF * sprD;");
-          if (limited) lines.push("    float sprTension = abs(sprF) * sprLs;");
+          if (limited) lines.push("    float sprTension = abs(sprF) * sprR;");
         }
         // The force on end A points at B while the spring is stretched; end B
         // gets its opposite.

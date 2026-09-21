@@ -7345,10 +7345,90 @@
     hoverCtx.closePath();
   }
 
-  function drawHoverBody(spec, row, colorOverride) {
+  // ---- Solid for the Output's body, an outline for everything else ----
+  //
+  // The panel's background is the Output's color, so the body it is read
+  // from is the one to follow - and two identical balls passing through each
+  // other are otherwise impossible to tell apart: did they swap sides, or
+  // bounce? Drawn solid, the tracked one answers that at a glance.
+  //
+  // Which body slots are "the Output's": its one or two authored bodies, or
+  // with a splitter every slot in their lineage (see outputLineageSlotsAt) -
+  // the same set the background color is averaged over. Null when the Output
+  // names no body at all (Scene Lifespan), and then nothing is hollowed:
+  // with nothing singled out there is nothing to tell apart from.
+  function trackedBodySlots(lineageSlots) {
+    var heads = PhysicsEngine.outputBodyIndices(scene.output);
+    if (!heads.length) return null;
+    var tracked = {};
+    (lineageSlots ? [].concat.apply([], lineageSlots) : heads).forEach(function (slot) { tracked[slot] = true; });
+    return tracked;
+  }
+  function isHollow(tracked, i) { return !!tracked && !tracked[i]; }
+
+  var HOLLOW_OUTLINE_WIDTH = 2.5;
+  // Under every outline, a slightly wider dark one. The background here is
+  // the Output's color and runs the whole hue wheel, so a lone light-blue
+  // ring vanishes whenever the Output happens to be blue; light-on-dark
+  // reads against anything.
+  var HOLLOW_UNDERLAY = "rgba(0, 0, 0, 0.6)";
+  var HOLLOW_UNDERLAY_EXTRA = 2.5;
+
+  // A thick stroked shape (a line, a trapezoid's walls) as an outline: the
+  // stroke itself, then its inside taken back out. What shows through is the
+  // canvas's own CSS background - the Output color - which is exactly what a
+  // hollow body should be filled with; the cost is that it also clears
+  // anything already drawn underneath, which for bodies crossing is a few
+  // pixels of another outline.
+  function strokeHollow(trace, color) {
+    hoverCtx.lineWidth = PhysicsEngine.LINE_THICKNESS + HOLLOW_UNDERLAY_EXTRA;
+    hoverCtx.strokeStyle = HOLLOW_UNDERLAY;
+    trace();
+    hoverCtx.stroke();
+    hoverCtx.lineWidth = PhysicsEngine.LINE_THICKNESS;
+    hoverCtx.strokeStyle = color;
+    trace();
+    hoverCtx.stroke();
+    hoverCtx.save();
+    hoverCtx.globalCompositeOperation = "destination-out";
+    hoverCtx.lineWidth = PhysicsEngine.LINE_THICKNESS - 2 * HOLLOW_OUTLINE_WIDTH;
+    hoverCtx.strokeStyle = "#000";
+    trace();
+    hoverCtx.stroke();
+    hoverCtx.restore();
+  }
+
+  function drawHoverBody(spec, row, colorOverride, hollow) {
     var fill = colorOverride ? colorOverride.fill : (spec.isAnchored ? "#5a6178" : "#3a63d1");
     var stroke = colorOverride ? colorOverride.stroke : (spec.type === "circle" ? (spec.isAnchored ? "#7a8199" : "#7ea0ff") : (spec.isAnchored ? "#5a6178" : "#3a63d1"));
     hoverCtx.fillStyle = fill;
+    if (hollow) {
+      // In the body's own identifying color - an inspected point's hue, not
+      // the black it outlines its solid bodies with.
+      var outline = colorOverride ? colorOverride.fill : stroke;
+      hoverCtx.lineCap = "round";
+      hoverCtx.lineJoin = "round";
+      if (spec.type === "circle") {
+        hoverCtx.beginPath();
+        hoverCtx.arc(row.x, row.y, Math.max(row.half, MIN_DISPLAY_RADIUS), 0, Math.PI * 2);
+        hoverCtx.strokeStyle = HOLLOW_UNDERLAY;
+        hoverCtx.lineWidth = HOLLOW_OUTLINE_WIDTH + HOLLOW_UNDERLAY_EXTRA;
+        hoverCtx.stroke();
+        hoverCtx.strokeStyle = outline;
+        hoverCtx.lineWidth = HOLLOW_OUTLINE_WIDTH;
+        hoverCtx.stroke();
+      } else if (isTrapezoidType(spec.type)) {
+        strokeHollow(function () { traceTrapezoid(row); }, outline);
+      } else {
+        var ox = Math.cos(row.angle) * row.half, oy = Math.sin(row.angle) * row.half;
+        strokeHollow(function () {
+          hoverCtx.beginPath();
+          hoverCtx.moveTo(row.x - ox, row.y - oy);
+          hoverCtx.lineTo(row.x + ox, row.y + oy);
+        }, outline);
+      }
+      return;
+    }
     if (spec.type === "circle") {
       hoverCtx.strokeStyle = stroke;
       hoverCtx.lineWidth = 2;
@@ -7464,7 +7544,7 @@
         var isFinalFrame = s >= entry.effectiveMaxStep - 1;
         var row = entry.trajectory[s];
         var color = entry.color;
-        var effective = [], shown = [];
+        var effective = [], shown = [], tracked = trackedBodySlots(entry.lineageSlots);
         for (var i = 0; i < row.length; i++) {
           var bodyRow = (isFinalFrame && entry.wrapOverride && entry.wrapOverride.bodyIndex === i)
             ? { x: entry.wrapOverride.x, y: entry.wrapOverride.y, angle: entry.wrapOverride.angle, half: row[i].half }
@@ -7472,7 +7552,7 @@
           if (!hoverRowIsLive(i, row)) continue;
           effective.push(bodyRow);
           shown[i] = bodyRow;
-          drawHoverBody(hoverBodySpec(i), bodyRow, color);
+          drawHoverBody(hoverBodySpec(i), bodyRow, color, isHollow(tracked, i));
         }
         // From where each body was DRAWN (the wrap-corrected row on a frozen
         // final frame), so a spring still ends on its body there.
@@ -7621,6 +7701,7 @@
     hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);
     hoverCtx.setTransform(hoverFit.scale, 0, 0, hoverFit.scale, hoverFit.offsetX, hoverFit.offsetY);
     drawFrameBoundary();
+    var previewTracked = trackedBodySlots(null);
     offsetScene.bodies.forEach(function (body, i) {
       drawHoverBody(hoverBodySpec(i), {
         x: body.x,
@@ -7635,7 +7716,7 @@
         // which is why a funnel or splitter was invisible until the replay
         // loaded and supplied a real number.
         half: PhysicsGPU.shapeHalf([body], 0),
-      });
+      }, undefined, isHollow(previewTracked, i));
     });
     drawHoverSprings(offsetScene.bodies.map(function (body) {
       return { x: body.x, y: body.y, angle: body.angle, half: PhysicsGPU.shapeHalf([body], 0) };
@@ -7701,7 +7782,7 @@
       hoveredStep = Math.min(effectiveMaxStep - 1, step);
       row = activeReplay.trajectory[hoveredStep];
       isFinalFrame = hoveredStep >= effectiveMaxStep - 1;
-      var effectiveRow = [], shownRows = [];
+      var effectiveRow = [], shownRows = [], replayTracked = trackedBodySlots(activeReplay.lineageSlots);
       for (var i = 0; i < row.length; i++) {
         // wrapOverride has no `half` (a resize-link's rendered size is
         // unaffected by this x/y/angle correction) - keep this step's own.
@@ -7711,7 +7792,7 @@
         if (!hoverRowIsLive(i, row)) continue;
         effectiveRow.push(bodyRow);
         shownRows[i] = bodyRow;
-        drawHoverBody(hoverBodySpec(i), bodyRow);
+        drawHoverBody(hoverBodySpec(i), bodyRow, undefined, isHollow(replayTracked, i));
       }
       // Indexed by body, and from where each was drawn - see drawInspectedAtStep.
       drawHoverSprings(shownRows);

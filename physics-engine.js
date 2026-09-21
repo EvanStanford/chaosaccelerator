@@ -161,9 +161,37 @@
   // scalar, because under Mutual Gravity (see computeAccelerations) every
   // body pulls in its own direction - uniform gravity is then simply the
   // special case where every body's acceleration is (0, GRAVITY).
+  // ---- Air drag (EXPERIMENTAL - 0 turns it off, exactly) ----
+  //
+  // A trial, to see whether a little real friction makes the map more
+  // predictable than the integrator's own. Semi-implicit Euler does not hand
+  // back exactly the energy an encounter took: measured on two sprung circles
+  // passing through each other, a rebound lands 0.05-0.55px higher than it
+  // started, by an amount set by where the step's samples fall - a "friction"
+  // that is sometimes negative and depends on timing. Right at a pass/no-pass
+  // threshold that is enough to decide the NEXT encounter, and because the
+  // balls linger there the timing sweeps through many whole steps over a
+  // hair's width of starts: a chirped square wave, ~0.5px wide.
+  //
+  // Drag cannot remove that wobble, but it takes the second encounter's
+  // threshold away from the first's - to starts that cleared the first
+  // comfortably, without lingering - where the timing barely varies across
+  // the band and the stripes should open out into (nearly) one edge.
+  //
+  // Linear drag, a = -AIR_DRAG * v, on every moving body's linear velocity
+  // (spin is left alone): 0.005/s takes ~1px a cycle off a 356px swing,
+  // about twice the worst of the integrator's error, and ~0.01% a second off
+  // anything's speed. Applied with the acceleration, before the speed cap,
+  // as a factor of (1 - AIR_DRAG*dt): continuous in dt and the identity at
+  // dt = 0, as advanceVelocity has to be. With AIR_DRAG = 0 the factor is
+  // exactly 1 here and the GLSL ports emit no line for it at all.
+  var AIR_DRAG = 0.005;
+
   function advanceVelocity(vx, vy, dt, ax, ay, maxSpeed) {
     vx += ax * dt;
     vy += ay * dt;
+    var drag = 1 - AIR_DRAG * dt;
+    vx *= drag; vy *= drag;
     var speedSq = vx * vx + vy * vy;
     if (speedSq > maxSpeed * maxSpeed) {
       var scale = maxSpeed / Math.sqrt(speedSq);
@@ -361,23 +389,72 @@
   // produces an angular acceleration. Gravity acts through the center of
   // mass and every other change to `w` is an impulse (see step()).
   //
-  // The law is Hooke's, with the length softened so it can never be zero:
+  // The law is Hooke's, F = k * (r - restLength) along the spring - down to a
+  // eighth of the rest length. Inside that CORE it is not, and on purpose.
   //
-  //   Ls = sqrt(|d|^2 + SPRING_SOFTENING^2),   F = k * (Ls - restLength) * d / Ls
+  // Nothing stops a spring's two ends passing through each other: collisions
+  // keep two BODIES apart, but a point on the background is not a body, and
+  // with collisions off neither is anything else. A Hookean spring with a
+  // rest length pushes its ends apart hardest of all at zero length, k *
+  // restLength - and as the ends pass through each other "apart" reverses, so
+  // the force flips from full strength one way to full strength the other in
+  // no distance at all. A step samples the force once, ~10-30px apart on a
+  // pass, so each pass lands one sample either just before that flip or just
+  // after it, and two starts a hair apart that land on opposite sides get a
+  // whole step of k * restLength / m in opposite directions. Measured on the
+  // scene this was reported from (two free circles, rest 406, stretched to
+  // twice that and released): starts 0.005px apart came out up to 261px
+  // apart, 124 such jumps within 2px of travel, and bringing two starts 1000x
+  // closer across one left a 71px gap - a gap that will not close is a
+  // discontinuity, not chaos. At 1/240s the same sweep was perfectly smooth:
+  // the physics is a plain oscillation, and every ridge was this flip.
   //
-  // which is exactly the gradient of U = k/2 * (Ls - restLength)^2, so the
-  // softening costs nothing in energy conservation. Without it a spring with
-  // a rest length has no direction at the instant its two ends coincide (0/0)
-  // - and nothing stops them coinciding: collisions keep two BODIES apart,
-  // but an attachment point on the background is not a body, and a ball is
-  // free to pass straight through it. One pixel of softening shortens a 100px
-  // spring's natural length by 0.005px. With restLength 0 the factor is
-  // exactly 1 and the spring is perfectly linear, F = k * d.
+  // (This first shipped as that same law with its length softened by one
+  // pixel, sqrt(r^2 + 1) - enough to keep 0/0 out, and twenty times too
+  // narrow to be seen by a step. It is the lesson computeAccelerations'
+  // smooth interior already records: the rounding has to be BROAD.)
+  //
+  // So inside the core the pull follows a polynomial in r^2 instead,
+  //
+  //   F = k * r * (1 - (restLength/c) * (15/8 - 5/4*u + 3/8*u^2)),  u = (r/c)^2
+  //
+  // with c = SPRING_CORE * restLength. At r == c it matches Hooke in value,
+  // slope AND curvature (the same three conditions, for the same reason, as
+  // gravity's interior); it reaches 0 at r == 0 and is smooth through it, so
+  // there is nothing to flip and no 0/0 to guard. It peaks at ~0.90 * k *
+  // restLength on the way in. It is still a central force of r alone, so it
+  // still has a potential (springPotentialEnergy integrates it) and costs
+  // nothing in energy conservation. A spring that never shortens below a
+  // eighth of its rest length - nearly all of them - is exactly Hooke's.
+  // Scaling the core with the rest length rather than fixing it in pixels
+  // lets a short spring's core shrink along with the force at stake in it.
+  // With restLength 0 there is no core and no flip: F = k * d, exactly.
+  //
+  // WHY AN EIGHTH. Any core this broad removes the ridges; what the fraction
+  // sets is how hard the spring still pushes near zero length - its slope
+  // there is (15/(8*SPRING_CORE) - 1) * k, whatever the rest length. At a
+  // quarter (where this started) that is 6.5k, and under Mutual Gravity with
+  // collisions off it met gravity's own smooth interior almost exactly: for
+  // two default circles on a 56,000 spring, 129 px/s^2 per px of push against
+  // 143 of pull. Gravity won by a hair, so the middle 25px had next to no net
+  // force at all, with an unstable balance point at 20px each side - and a
+  // pair arriving there with no speed to spare parked for 100+ steps, left by
+  // whichever way the step's sampling happened to tip it, and came back as a
+  // square wave along a line of starts 6e-5px long. An eighth makes it 14k
+  // (277 against that same 143): the spring wins at the center, which is then
+  // an ordinary hilltop to cross rather than a plateau to park on. The cost
+  // is a narrower core on a short spring - 5px on a 40px one, under a step's
+  // travel - where the force it rounds off is correspondingly small.
+  //
+  // What is left is real. Where two ends arrive at zero length with no speed
+  // to spare they balance there, as a pendulum does upright, and which way
+  // they fall is decided by less and less - a band of genuinely steep, but
+  // continuous, dependence on the start.
   //
   // No damping, on purpose: the rest of the engine is lossless (no friction,
   // fully elastic), and a spring that bled energy would be the one thing in a
   // scene that ran down.
-  var SPRING_SOFTENING = 1;
+  var SPRING_CORE = 0.125;
   // What the editor's Stiffness slider spans, and what a loaded scene is
   // clamped into. In force per pixel of stretch, against masses that run from
   // ~80 (the smallest circle) through 2,827 (the default one) to ~280,000:
@@ -451,6 +528,17 @@
     return { a: { x: bodyA.x + rA.x, y: bodyA.y + rA.y }, b: { x: bodyB.x + rB.x, y: bodyB.y + rB.y } };
   }
 
+  // The spring law as the factor f in F = f * d, d being the vector from one
+  // end to the other: Hooke's 1 - restLength/r outside the core, the smooth
+  // polynomial inside it. See the Springs header for both.
+  function springForceFactor(length, restLength) {
+    if (restLength === 0) return 1;
+    var c = SPRING_CORE * restLength;
+    if (length >= c) return 1 - restLength / length;
+    var u = (length * length) / (c * c);
+    return 1 - (restLength / c) * (15 / 8 - 5 / 4 * u + 3 / 8 * u * u);
+  }
+
   function springArmLength(localAnchor) {
     return Math.sqrt(localAnchor.x * localAnchor.x + localAnchor.y * localAnchor.y);
   }
@@ -489,12 +577,11 @@
       var dx = (bodyB.x + rB.x) - (bodyA.x + rA.x);
       var dy = (bodyB.y + rB.y) - (bodyA.y + rA.y);
       var k = springEffectiveStiffness(spring, bodies, dt);
-      var softLength = Math.sqrt(dx * dx + dy * dy + SPRING_SOFTENING * SPRING_SOFTENING);
-      var f = k * (1 - spring.restLength / softLength);
+      var length = Math.sqrt(dx * dx + dy * dy);
+      var f = k * springForceFactor(length, spring.restLength);
       // The force on end A, toward B while stretched; end B gets its opposite.
       var fx = f * dx, fy = f * dy;
-      // |F|, near enough (the softened length stands in for |d|, erring large).
-      var tension = Math.abs(f) * softLength;
+      var tension = Math.abs(f) * length; // |F|
       if (!bodyA.isAnchored) {
         acc[spring.bodyA].x += fx * bodyA.invMass;
         acc[spring.bodyA].y += fy * bodyA.invMass;
@@ -517,8 +604,13 @@
     sceneSprings(scene).forEach(function (spring) {
       var p = getSpringWorldPoints(spring, bodies);
       var dx = p.b.x - p.a.x, dy = p.b.y - p.a.y;
-      var stretch = Math.sqrt(dx * dx + dy * dy + SPRING_SOFTENING * SPRING_SOFTENING) - spring.restLength;
-      total += 0.5 * springEffectiveStiffness(spring, bodies, dt) * stretch * stretch;
+      var r = Math.sqrt(dx * dx + dy * dy), L0 = spring.restLength, c = SPRING_CORE * L0;
+      var k = springEffectiveStiffness(spring, bodies, dt);
+      if (L0 === 0 || r >= c) { total += 0.5 * k * (r - L0) * (r - L0); return; }
+      // Inside the core: Hooke's energy at its rim, less the work the
+      // polynomial does from there in - G is the integral of f(r) * r.
+      function G(x) { var u = (x * x) / (c * c); return k * x * x * (0.5 - (L0 / c) * (15 / 16 - 5 / 16 * u + 1 / 16 * u * u)); }
+      total += 0.5 * k * (c - L0) * (c - L0) + G(r) - G(c);
     });
     return total;
   }
@@ -2251,6 +2343,7 @@
     // Exported so physics-gpu.js's GLSL port bakes the very same numbers
     // rather than keeping its own copies to drift out of sync.
     GRAVITY: GRAVITY,
+    AIR_DRAG: AIR_DRAG,
     ANCHORED_GRAVITY_DENSITY: ANCHORED_GRAVITY_DENSITY,
     MUTUAL_GRAVITY_CONSTANT: MUTUAL_GRAVITY_CONSTANT,
     gravitationalMass: gravitationalMass,
@@ -2306,7 +2399,8 @@
     // Springs - see the section of that name. The constants are exported so
     // physics-gpu.js bakes the same law, and the editor's sliders span the
     // same range a loaded scene is clamped into.
-    SPRING_SOFTENING: SPRING_SOFTENING,
+    SPRING_CORE: SPRING_CORE,
+    springForceFactor: springForceFactor,
     SPRING_STABILITY: SPRING_STABILITY,
     SPRING_STIFFNESS_MIN: SPRING_STIFFNESS_MIN,
     SPRING_STIFFNESS_MAX: SPRING_STIFFNESS_MAX,

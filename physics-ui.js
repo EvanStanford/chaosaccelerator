@@ -2643,8 +2643,21 @@
   // Checked in a fixed order - body count, then input, then output - so the
   // message always points at the SINGLE earliest thing actually in the way,
   // never several at once.
+  //
+  // "Body count" means: is there anything here for a map to be a picture OF.
+  // One body on its own is a thing falling, and the rule used to be simply
+  // "more than one body" - which also turned away a lone ball on a spring,
+  // a complete scene (and a chaotic one: it swings and bounces at once).
+  // So one body counts once something is attached to it.
+  // Shared with gridSceneFromShared, which asks the same of a scene arriving
+  // in a map link - a link to a lone sprung ball has to open, too.
+  function hasSomethingToMap(s) {
+    var attached = (s.springs || []).length > 0 || (s.hinges || []).length > 0;
+    return s.bodies.length > 1 || (s.bodies.length === 1 && attached);
+  }
+
   function gridReadiness() {
-    if (scene.bodies.length <= 1) {
+    if (!hasSomethingToMap(scene)) {
       return {
         ready: false,
         message: "Try loading a sample scene first",
@@ -4190,7 +4203,7 @@
       var frame = { frameWidth: Number(authored.frameWidth), frameHeight: Number(authored.frameHeight) };
       if (!(frame.frameWidth > 0 && frame.frameHeight > 0)) throw new Error("it doesn't say how big the scene's frame is");
       var data = parseSceneData(PhysicsCoords.toEngineJSON(authored, frame));
-      if (data.bodies.length <= 1 || !data.xInput || !data.yInput || !data.output) {
+      if (!hasSomethingToMap(data) || !data.xInput || !data.yInput || !data.output) {
         throw new Error("its scene has no X / Y Input and Output mapped yet");
       }
       data.frameWidth = frame.frameWidth;
