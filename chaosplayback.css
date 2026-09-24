@@ -1,9 +1,9 @@
 /* This file is part of Chaos Accelerator, licensed under the Common Public
-   Attribution License, Version 1.0 (CPAL-1.0) - see LICENSE in the project
+   Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in the project
    root, or https://chaosaccelerator.com/license for a hosted copy. */
 
 /* The movie player (chaosplayback.html). Same palette as the app it came
-   from - see :root in physics.css. */
+   from: see :root in physics.css. */
 :root {
   --bg: #14161c;
   --bg-panel: #1b1e27;
@@ -88,9 +88,9 @@ button.bar-link:disabled {
 }
 
 /* The renderer: the app itself, sized in pixels by chaosplayback.js to the
-   resolution the movie is rendered at. In the layout and painted - it only
+   resolution the movie is rendered at. In the layout and painted, it only
    renders inside animation frames, which a frame that isn't painted doesn't
-   get - but underneath #screen, and out of reach of the pointer and Tab. */
+   get, but underneath #screen, and out of reach of the pointer and Tab. */
 #engine {
   position: absolute;
   left: 0;
@@ -234,7 +234,7 @@ button.bar-link:disabled {
 /* ---- Phones, and fingers ----
    The same adjustments mobile.css makes for the app itself, in miniature:
    this page is one bar, one picture and one row of buttons, and needs no
-   layout of its own for a small window - only to keep clear of the notch and
+   layout of its own for a small window, only to keep clear of the notch and
    the home indicator (viewport-fit=cover, see chaosplayback.html), not to
    bounce or zoom, and to give a finger targets it can hit. */
 

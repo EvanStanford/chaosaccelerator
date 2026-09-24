@@ -1,5 +1,5 @@
 // This file is part of Chaos Accelerator, licensed under the Common Public
-// Attribution License, Version 1.0 (CPAL-1.0) - see LICENSE in the project
+// Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in the project
 // root, or https://chaosaccelerator.com/license for a hosted copy.
 
 // The multi-float (double-, triple- and quad-float) port of physics-gpu.js's
@@ -12,12 +12,12 @@
 // collision and solver math on the theory that every geometric computation
 // already works on small differences. Measurement said otherwise: coarsen
 // any ONE of the six state fields by 16x and re-run 500 steps, and the
-// answer moves by 1e-4 to 3e-4 - five of the six matter about equally. The
+// answer moves by 1e-4 to 3e-4, five of the six matter about equally. The
 // float32 layer, not the accumulators, was setting the floor, and the real
 // gain over float32 was about one decade rather than the four a bad metric
 // had suggested. See the README's precision section for the numbers.
 //
-// So this file carries the whole step in df - collisions, both solvers,
+// So this file carries the whole step in df: collisions, both solvers,
 // the funnel and splitter, and (in physics-gpu.js's generated step) Mutual
 // Gravity's force sum. The float64 JS engine holds a proportional response
 // down to a starting-position difference of ~1e-12, which is the target;
@@ -27,7 +27,7 @@
 // --------------
 // Every function here is a port of its namesake in physics-gpu.js's
 // GLSL_LIBRARY, which is itself a line-for-line port of physics-engine.js.
-// Same formulas, same variable names, same order of operations - only the
+// Same formulas, same variable names, same order of operations, only the
 // spelling changes, because GLSL cannot give a user type operators.
 // `a + b` becomes `dfAdd(a, b)` for scalars and `dv2Add(a, b)` for vectors;
 // `dot(a, b)` becomes `dv2Dot(a, b)`; a float literal `1.0` becomes
@@ -36,7 +36,7 @@
 // MF is the scalar type: a macro physics-df.js defines as vec2, vec3 or vec4
 // depending on how many float32 words the shader being built carries. This
 // file is written once against it and serves double-, triple- and
-// quad-float alike - the "df" in every name is historical, and means
+// quad-float alike: the "df" in every name is historical, and means
 // "whatever multi-float precision this shader is", not "two words".
 //
 // That makes this a THIRD hand-synced implementation of the same physics,
@@ -50,7 +50,7 @@
 // WHERE THIS IS NOT A STRAIGHT PORT
 // ---------------------------------
 // A df operation costs 10-20 float32 ones and a df sin/cos about forty of
-// THOSE, where float32 has a hardware instruction - so work the float32
+// THOSE, where float32 has a hardware instruction, so work the float32
 // library happily repeats is worth lifting out here. Every item below
 // computes the SAME values the straight port would; it only computes each
 // of them once. (The one exception is marked.)
@@ -76,11 +76,11 @@
 //    turns each hinged body by a tiny correction several times a step. The
 //    straight port re-evaluates sin/cos from scratch before each one; here
 //    each body's pair is carried through the loop and advanced by the
-//    correction itself (dfSinCosNudge - angle-sum identities with a short
+//    correction itself (dfSinCosNudge: angle-sum identities with a short
 //    series for the small delta). That agrees with a fresh evaluation to
 //    within a df ulp or two rather than bit for bit. OPTIONS.nudgeTrig
 //    turns it off, which makes the whole file bit-identical to the
-//    straight port again - physics-tests.js uses that to check the rest.
+//    straight port again: physics-tests.js uses that to check the rest.
 (function (global) {
   "use strict";
 
@@ -88,7 +88,7 @@
   function d(n) { return PhysicsDF.num(n); }
 
   // Mirrors physics-gpu.js's own constants. Prefixed so a df shader can
-  // include both libraries without colliding - the float32 one is still
+  // include both libraries without colliding: the float32 one is still
   // pulled in for the per-pixel cascade's f32 helpers and for `Body`.
   var LINE_THICKNESS = 20;
   var LINE_PARALLEL_EPS = 0.05;
@@ -128,7 +128,7 @@
     "struct DBody { MF x; MF y; MF angle; MF vx; MF vy; MF w; };",
     "",
     "// .point is carried for fidelity with the float32 Contact even though",
-    "// nothing downstream reads it - both solvers work from .normal, .rA,",
+    "// nothing downstream reads it: both solvers work from .normal, .rA,",
     "// .rB and .penetration. Keeping it means this struct can be compared",
     "// field-for-field against the float32 one when the two disagree.",
     "// invMassSum/pushA/pushB are dfPrepareContact's: what the two solvers",
@@ -150,7 +150,7 @@
     "//",
     "// Everything the collision tests ever ask of a segment, built once: see",
     "// this file's header. physics-gpu.js's generated step decides how often",
-    "// 'once' is - per step for anything that can move, per run for anything",
+    "// 'once' is: per step for anything that can move, per run for anything",
     "// anchored. g_dfStaticGeomReady is the flag that second case runs on; it",
     "// lives here rather than in the generated code so that every df shader",
     "// has it, including ones that declare bodies without ever stepping them.",
@@ -260,11 +260,11 @@
     // accel is the body's whole acceleration (see advanceVelocity's own
     // comment in physics-gpu.js): the df gravity constant in the uniform
     // case, and under Mutual Gravity the df force sum the generated step
-    // builds - at the pass's own precision, like everything else here.
+    // builds, at the pass's own precision, like everything else here.
     "DVec2 dfAdvanceVelocity(DVec2 v, MF dt, DVec2 accel) {",
     "  v.x = dfAdd(v.x, dfMul(accel.x, dt));",
     "  v.y = dfAdd(v.y, dfMul(accel.y, dt));",
-    // PhysicsEngine.AIR_DRAG (experimental) - no line at all when it is 0.
+    // PhysicsEngine.AIR_DRAG (experimental): no line at all when it is 0.
     (global.PhysicsEngine.AIR_DRAG ? "  v = dv2Scale(v, dfSub(DF_ONE, dfMul(" + d(global.PhysicsEngine.AIR_DRAG) + ", dt)));" : ""),
     "  MF sq = dv2LengthSq(v);",
     "  if (dfGreater(sq, dfSqr(DF_MAX_SPEED))) v = dv2Scale(v, dfDiv(DF_MAX_SPEED, dfSqrt(sq)));",
@@ -278,7 +278,7 @@
     "  MF rsum = dfAdd(ra, rb);",
     "  DContact c = dfNoContact();",
     "  if (!dfLess(dist, rsum)) {",
-    "    // Not touching at the start of the step - solve for whether",
+    "    // Not touching at the start of the step: solve for whether",
     "    // straight-line motion brings them together before DT elapses. See",
     "    // the float32 collideCircleCircle for why this sub-step solve is",
     "    // what keeps the bounce a continuous function of the start.",
@@ -317,7 +317,7 @@
     "}",
     "",
     "// Swept capsule (segment g, half-thickness halfThickness, moving at",
-    "// constant velocity segVel, otherwise rigid) vs. circle - the port of",
+    "// constant velocity segVel, otherwise rigid) vs. circle: the port of",
     "// sweptCapsuleCircleContact, and shared the same way: a line's own body",
     "// (refCenter = its center) and every funnel/splitter edge (refCenter =",
     "// the TRAPEZOID's center, since rA is a lever arm on the whole body).",
@@ -452,7 +452,7 @@
     "// One DTrapezoid holds all four sides as segments plus the throat",
     "// center's offset from the body's own center, from a single sin/cos.",
     "// mouth runs mouthLeft -> mouthRight, throat throatLeft -> throatRight,",
-    "// leg1 mouthLeft -> throatLeft and leg2 mouthRight -> throatRight - the",
+    "// leg1 mouthLeft -> throatLeft and leg2 mouthRight -> throatRight: the",
     "// same endpoints, in the same order, physics-gpu.js's wallsFor() names.",
     "const MF DF_FUNNEL_MOUTH_HALF = " + d(global.PhysicsEngine.FUNNEL_MOUTH_HALF) + ";",
     "const MF DF_FUNNEL_THROAT_HALF = " + d(global.PhysicsEngine.FUNNEL_THROAT_HALF) + ";",
@@ -492,7 +492,7 @@
     "DSplitHit dfCollideSplitterShortSideTHit(DBody splitter, DTrapezoid t, DBody circle, MF radius) {",
     "  DSplitHit s;",
     "  s.hit = false; s.tHit = DF_ZERO; s.offset1 = dv2Zero(); s.offset2 = dv2Zero();",
-    "  // Only a FRESH crossing splits - see the float32 version for why the",
+    "  // Only a FRESH crossing splits: see the float32 version for why the",
     "  // guard has to sit ahead of the swept test.",
     "  DVec2 p0 = dv2(circle.x, circle.y);",
     "  DVec2 startClosest = dfClosestPointOnSegment(t.throat, p0);",
@@ -646,7 +646,7 @@
     "  dfApplyImpulse(bodyB, invMassB, invInertiaB, impulse, h.rB);",
     "}",
     "",
-    "// Turn a body by delta and bring its carried sin/cos along - by the",
+    "// Turn a body by delta and bring its carried sin/cos along: by the",
     "// short series when delta is small enough for it, from scratch when not.",
     "void dfTurn(inout MF angle, inout MF sn, inout MF cs, MF delta) {",
     "  angle = dfAdd(angle, delta);",

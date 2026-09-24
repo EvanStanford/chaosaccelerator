@@ -1,13 +1,13 @@
 // This file is part of Chaos Accelerator, licensed under the Common Public
-// Attribution License, Version 1.0 (CPAL-1.0) - see LICENSE in the project
+// Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in the project
 // root, or https://chaosaccelerator.com/license for a hosted copy.
 
 // Regression suite for the physics engine/GPU compiler/hinge-editing logic.
 // Each test reproduces a bug that was actually found and fixed during
-// development - run this page after any physics change to make sure none of
+// development: run this page after any physics change to make sure none of
 // them came back. Everything under test (PhysicsEngine, PhysicsGPU,
 // PhysicsHingeGeometry, PhysicsGridCodegen) is plain DOM-free scene math,
-// loaded directly - no iframe/live-page indirection needed anywhere here.
+// loaded directly: no iframe/live-page indirection needed anywhere here.
 (function () {
   "use strict";
 
@@ -42,8 +42,8 @@
 
   // ---- 0. A scene round-tripped through JSON has no mass fields to clone ----
   //
-  // serializeScene() deliberately omits mass/invMass/inertia/invInertia -
-  // they're derived from radius/length, not authored data - so anything
+  // serializeScene() deliberately omits mass/invMass/inertia/invInertia,
+  // they're derived from radius/length, not authored data, so anything
   // that JSON.parses a saved scene (the Send-to-Fractal-Grid handoff, the
   // Scene JSON textarea) gets bodies with those fields simply absent.
   // PhysicsEngine.cloneScene only copies whatever properties a body
@@ -51,7 +51,7 @@
   // PhysicsEngine.step on such a scene silently produces NaN everywhere on
   // the very first step (this exact bug shipped once, in fractal-grid.js's
   // output-baseline computation, and was only caught by testing the actual
-  // rendered page, not by the codegen-level tests below - bodyConst already
+  // rendered page, not by the codegen-level tests below: bodyConst already
   // guards every codegen path against it, but a raw JS step() call doesn't
   // go through bodyConst at all).
   addTest(
@@ -60,7 +60,7 @@
     function () {
       // Needs a hinge (or a contact): gravity and plain integration never
       // read invMass/invInertia at all, so a lone, unconstrained body steps
-      // "fine" (wrong, but not NaN) even with them undefined - the actual
+      // "fine" (wrong, but not NaN) even with them undefined, the actual
       // bug this reproduces only showed up via solveHingeVelocity's
       // solve2x2, which multiplies invMass/invInertia directly. A version
       // of this test without a hinge would silently test nothing.
@@ -122,7 +122,7 @@
     "Anchoring a body clears its starting velocity, so nothing bounces off it like a moving wall",
     "computeMass left vx/vy/w on a body anchored after Set Velocity; velocityAt still read them in the contact solver",
     function () {
-      // Give the line a big upward velocity FIRST, then anchor it - the exact
+      // Give the line a big upward velocity FIRST, then anchor it: the exact
       // order the builder produces when Set Velocity is followed by Anchor.
       var line = PhysicsEngine.createLine(400, 600, 700, 0, false);
       line.vx = 300; line.vy = -PhysicsEngine.MAX_SPEED; line.w = 2;
@@ -162,7 +162,7 @@
       PhysicsEngine.step(scene, DT);
       var ball = scene.bodies[0];
       var bounced = ball.vx < 0 && ball.x < 10;
-      var detail = "after 1 step: x=" + ball.x.toFixed(3) + ", vx=" + ball.vx.toFixed(3) + " (want vx<0 and x<10 - bounced back, didn't pass through to x=16.67 with vx still 1000)";
+      var detail = "after 1 step: x=" + ball.x.toFixed(3) + ", vx=" + ball.vx.toFixed(3) + " (want vx<0 and x<10: bounced back, didn't pass through to x=16.67 with vx still 1000)";
       return { pass: bounced, detail: detail };
     }
   );
@@ -209,7 +209,7 @@
       // RESTITUTION_THRESHOLD is a SEPARATE, still-unfixed hard on/off
       // switch on the coefficient of restitution (elsewhere in this same
       // scene's wider neighborhood, a starting X exists whose grazing angle
-      // puts the closing speed within ~1e-3px/s of that threshold - a real,
+      // puts the closing speed within ~1e-3px/s of that threshold, a real,
       // known, pre-existing discontinuity, but not the one CCD fixes or
       // this test is targeting). A wide blanket sweep would eventually
       // catch that other threshold too and fail for an unrelated reason.
@@ -224,7 +224,7 @@
         prev = cur;
       }
       var detail = "max adjacent-sample (0.1px apart) change across x=442.0-442.6=" + maxJump.toFixed(2) +
-        "px at x=" + jumpAt + " (want <20px - before this fix, x=442.3->442.4 alone jumped ~267px)";
+        "px at x=" + jumpAt + " (want <20px, before this fix, x=442.3->442.4 alone jumped ~267px)";
       return { pass: maxJump < 20, detail: detail };
     }
   );
@@ -241,7 +241,7 @@
         ],
         hinges: [],
       };
-      // Contacts are perfectly elastic, so the rod never settles - it keeps
+      // Contacts are perfectly elastic, so the rod never settles: it keeps
       // bouncing for the whole run. What has to hold throughout is that it
       // lands on both ends at once: a single contact point pushes up one end
       // only, and that off-center impulse is what set rods spinning.
@@ -469,14 +469,14 @@
   );
 
   // ---- Milestone 2: physics-grid-codegen.js (per-pixel offset+cascade,
-  // compiled to GLSL) - every scene here reuses a scenario already verified
+  // compiled to GLSL), every scene here reuses a scenario already verified
   // against a direct PhysicsHingeGeometry call elsewhere in this file, so
   // the only new thing under test is whether the GLSL port reaches the
   // same answer. ----
 
   // Compiles the codegen's declaration lines into a tiny debug shader that
   // evaluates them once at a hardcoded (worldX, worldY) and reads back every
-  // body's resulting (x, y, angle) - the same WebGL2/OffscreenCanvas/
+  // body's resulting (x, y, angle): the same WebGL2/OffscreenCanvas/
   // RGBA32F machinery as PhysicsGPU.runSceneOnGPU, just a single sample
   // point over bodies instead of a (body, step) trajectory.
   function runGridCodegenAtPoint(scene, worldX, worldY) {
@@ -540,7 +540,7 @@
   }
 
   // Same idea as runGridCodegenAtPoint, but also runs the shared
-  // PhysicsGPU.generateStepOnceGLSL loop `steps` times first - this is
+  // PhysicsGPU.generateStepOnceGLSL loop `steps` times first: this is
   // fractal-grid.js's actual shader shape (offset -> canonical Body structs
   // -> step loop -> read result), not just the offset half of it.
   function runGridSimulationAtPoint(scene, steps, worldX, worldY) {
@@ -608,19 +608,19 @@
     "Grid codegen + step loop matches the JS reference (early steps)",
     "fractal-grid.js's shader shape: offset -> canonical Body structs -> stepOnce loop",
     function () {
-      // Any hinged body is an oscillator, however small its swing - even
+      // Any hinged body is an oscillator, however small its swing, even
       // hinged 2px from its own center (barely any lever arm for gravity's
       // torque), low rotational inertia still lets its ANGLE drift out of
       // phase between JS (float64) and GPU (float32) well before its
       // position visibly moves (confirmed empirically: this scene's angle
       // was already ~0.13rad off from the JS reference by step 60, despite
-      // sub-pixel position agreement - a real consequence of comparing an
+      // sub-pixel position agreement, a real consequence of comparing an
       // oscillating quantity at a fixed distant step, not a bug). So this
       // checks early steps only, where phase drift hasn't had room to
-      // accumulate yet - enough to prove resize+rescale+recenter ->
+      // accumulate yet: enough to prove resize+rescale+recenter ->
       // canonical-struct -> stepOnce(...) is wired correctly. Whether the
       // hinge constraint itself holds up over a FULL run is checked
-      // separately below via joint gap, which - unlike raw angle - stays
+      // separately below via joint gap, which, unlike raw angle, stays
       // meaningful regardless of oscillation phase.
       var scene = {
         bodies: [PhysicsEngine.createCircle(500, 300, 50, false)],
@@ -633,7 +633,7 @@
       var jsScene = PhysicsEngine.cloneScene(scene);
       // Hinge-preserving resize: radius 50->70 (ratio 1.4) rescales the
       // hinge anchor 2->2.8, then recenters so the hinge still lands on its
-      // fixed pivot (502,300) - same algebra as the "resize-link cascade"
+      // fixed pivot (502,300), same algebra as the "resize-link cascade"
       // test above. Skipping this would start the JS reference from a
       // constraint-violating state the grid codegen never produces.
       jsScene.bodies[0].radius = 70;
@@ -654,7 +654,7 @@
 
   addTest(
     "Grid codegen + step loop: hinge stays satisfied over a full 500-step run",
-    "fractal-grid.js's shader shape - self-consistency, not cross-implementation phase",
+    "fractal-grid.js's shader shape: self-consistency, not cross-implementation phase",
     function () {
       var hinge = { bodyA: null, bodyB: 0, localAnchorA: { x: 502, y: 300 }, localAnchorB: { x: 2, y: 0 } };
       var scene = {
@@ -679,11 +679,11 @@
 
   addTest(
     "Grid codegen: numeric offset scene (instant JS preview) matches the GLSL path",
-    "physics-grid-codegen.js computeOffsetSceneNumeric vs. generateGridInitialStateGLSL - a third independent path to the same answer",
+    "physics-grid-codegen.js computeOffsetSceneNumeric vs. generateGridInitialStateGLSL: a third independent path to the same answer",
     function () {
       // Exact same scenario as the "resize-link cascade" test below (which
       // itself matches the direct PhysicsHingeGeometry call elsewhere in
-      // this file) - three independent routes to the same numbers: the
+      // this file): three independent routes to the same numbers: the
       // editor's own function, the GLSL the grid actually runs, and this
       // JS-only shortcut the hover-preview uses for its instant first
       // frame. All three had better agree.
@@ -710,7 +710,7 @@
 
   addTest(
     "Hover-replay compiler: logged trajectory matches the JS reference",
-    "physics-grid-codegen.js compileHoverTrajectoryGLSL - the same offset math as the grid, but with per-step logging on",
+    "physics-grid-codegen.js compileHoverTrajectoryGLSL: the same offset math as the grid, but with per-step logging on",
     function () {
       // Reuses the exact scenario already validated for the plain (no
       // logging) grid codegen below, so any mismatch here is specifically
@@ -780,7 +780,7 @@
         yInput: null,
       };
       // worldX = +200 -> length 200 -> 400, the exact same edit as the
-      // "Resizing a hinged body..." test elsewhere in this file - expect
+      // "Resizing a hinged body..." test elsewhere in this file: expect
       // the exact same resulting positions, just reached through the grid
       // shader instead of a direct function call.
       var bodies = runGridCodegenAtPoint(scene, 200, 0);
@@ -823,7 +823,7 @@
 
   addTest(
     "Grid codegen: a child hinged to another body (not world) is recentered too, matching the JS reference",
-    "physics-grid-codegen.js's applyResizeRotateTarget only ever recentered around a WORLD hinge, the exact same gap as applyBodyEditPreservingHinge - reported via this exact double-pendulum scene, whose yInput links the CHILD body's own angle",
+    "physics-grid-codegen.js's applyResizeRotateTarget only ever recentered around a WORLD hinge, the exact same gap as applyBodyEditPreservingHinge: reported via this exact double-pendulum scene, whose yInput links the CHILD body's own angle",
     function () {
       var scene = {
         bodies: [
@@ -864,7 +864,7 @@
       var bodies = runGridCodegenAtPoint(scene, 0, 50);
       var ok = Math.abs(bodies[0].x - 500) < 1e-3 && Math.abs(bodies[0].y - 250) < 1e-3;
       var detail = "at worldY=+50: body0=" + bodies[0].x.toFixed(3) + "," + bodies[0].y.toFixed(3) +
-        " (want 500,250 - moving 'up' in the grid should move the body up, i.e. smaller physics-y)";
+        " (want 500,250, moving 'up' in the grid should move the body up, i.e. smaller physics-y)";
       return { pass: ok, detail: detail };
     }
   );
@@ -903,7 +903,7 @@
     function () {
       // X resizes body0 (radius 50 -> 80, ratio 1.6); Y then moves body0's
       // center directly. Resize's recenter runs first (an absolute
-      // assignment) and translate's += runs second, on top of it - so both
+      // assignment) and translate's += runs second, on top of it, so both
       // effects should show up, not just the last one applied. Hand-derived:
       // ratio 1.6 rescales localAnchorB 20->32 and body1's attachment point
       // 40->64; recenter puts body0 at (488,300); body1's attachment moves
@@ -939,7 +939,7 @@
   // ---- Pac-Man frame wrapping (opt-in via scene.frameWidth/frameHeight) ----
   addTest(
     "Pac-Man wrap: a body crossing any edge reappears on the opposite side, velocity unchanged",
-    "PhysicsEngine.step's frame-wrap - the whole point of this feature",
+    "PhysicsEngine.step's frame-wrap: the whole point of this feature",
     function () {
       function run(edgeMode) {
         var scene = {
@@ -962,7 +962,7 @@
       // Gravity acts on every body along the way, so the reference is the
       // same two steps with no edges at all: wrapping must move each body by
       // exactly one frame length along the axis it crossed, and change
-      // nothing else - not the other axis, and not the velocity.
+      // nothing else, not the other axis, and not the velocity.
       var wrapped = run("wrap"), free = run("infinite");
       var checks = [
         { axis: "x", shift: -200, otherAxis: "y" },
@@ -999,7 +999,7 @@
       for (var i = 0; i < 30; i++) PhysicsEngine.step(scene, DT);
       var body = scene.bodies[0];
       var pass = body.x === 300 && body.y === 100;
-      return { pass: pass, detail: "static body at x=" + body.x + ", y=" + body.y + " (want unchanged 300,100 - static bodies are exempt from wrapping)" };
+      return { pass: pass, detail: "static body at x=" + body.x + ", y=" + body.y + " (want unchanged 300,100: static bodies are exempt from wrapping)" };
     }
   );
 
@@ -1034,7 +1034,7 @@
       // The exact reported scenario: a line hinged near one end, released
       // horizontal. Its center legitimately swings past x=0 (a normal part
       // of the pendulum's arc) while its pin (x=77) stays nowhere near
-      // either edge of a 1198-wide frame - under the old per-body-center
+      // either edge of a 1198-wide frame: under the old per-body-center
       // rule this wrapped the body but not the pin, tearing the joint.
       var scene = {
         bodies: [PhysicsEngine.createLine(336.15, 568, 511, 0, false)],
@@ -1054,7 +1054,7 @@
       var centerActuallySwungOutOfFrame = minCenterX < 0; // proves this scenario really exercises the bug, not just a scene that never leaves the frame anyway
       var pass = maxGap < 0.01 && pinUntouched && centerActuallySwungOutOfFrame;
       var detail = "max joint gap over 1000 steps=" + maxGap.toExponential(2) + "px, min center x reached=" + minCenterX.toFixed(2) +
-        " (negative = did swing outside the frame), pin untouched=" + pinUntouched + " (want true - it never needed to move)";
+        " (negative = did swing outside the frame), pin untouched=" + pinUntouched + " (want true: it never needed to move)";
       return { pass: pass, detail: detail };
     }
   );
@@ -1083,7 +1083,7 @@
 
   addTest(
     "Pac-Man wrap: a world-hinged root's wrap cascades to its hinge child, joints stay satisfied",
-    "PhysicsEngine.step's cascade for a body hinged to another body - it must never independently wrap, only move as its parent's wrap carries it along",
+    "PhysicsEngine.step's cascade for a body hinged to another body: it must never independently wrap, only move as its parent's wrap carries it along",
     function () {
       // Pin authored just outside the frame (an extreme case, but the
       // mechanism has to fire correctly whenever the pin IS out of bounds,
@@ -1114,7 +1114,7 @@
   );
 
   // ---- Stop-on-wrap: findWrapStopStep must give a CONTINUOUS answer, not
-  //      just a "did it wrap" boolean - the whole point of this feature is
+  //      just a "did it wrap" boolean, the whole point of this feature is
   //      coloring a fractal grid by it, and a jumpy answer means a jumpy
   //      plot. See the function's own comment for why a raw logged sample
   //      isn't good enough on its own. ----
@@ -1143,7 +1143,7 @@
       var results = [];
       // worldY is NEGATED for a y-property link (see the Y-axis-flip test
       // elsewhere in this file), so sweeping [-2, 0] here moves the actual
-      // starting y from 1120 up to 1122 - the exact range hand-verified
+      // starting y from 1120 up to 1122: the exact range hand-verified
       // (in the browser console, against this same scene) to straddle
       // several step boundaries (steps 8, 7, 6 all appear in it).
       for (var y = -2.0; y <= 0; y += 0.1) results.push(runWrapStopStepAtPoint(scene, 0, y, 500));
@@ -1159,14 +1159,14 @@
 
   addTest(
     "findWrapStopStep: interpolated value matches hand-derived kinematics exactly",
-    "sanity check on the actual formula, not just 'is it smooth' - a circle already at MAX_SPEED (terminal velocity) when it crosses has a closed-form answer: boundary - MAX_SPEED*DT, independent of exactly which step notices",
+    "sanity check on the actual formula, not just 'is it smooth', a circle already at MAX_SPEED (terminal velocity) when it crosses has a closed-form answer: boundary, MAX_SPEED*DT, independent of exactly which step notices",
     function () {
       // Launched already AT terminal velocity rather than falling until
       // gravity saturates it: with the cap at 5000 a body would need to fall
       // 15,000px to reach it under gravity, far more than any frame here.
-      // Starting there is the same physical situation - gravity keeps adding
+      // Starting there is the same physical situation, gravity keeps adding
       // speed and the clamp keeps removing it, so it descends at exactly
-      // MAX_SPEED - and it holds whatever that constant is set to.
+      // MAX_SPEED, and it holds whatever that constant is set to.
       var scene = {
         bodies: [PhysicsEngine.createCircle(600, 50, 20, false)],
         hinges: [], xInput: null, yInput: { body: 0, property: "y" },
@@ -1174,7 +1174,7 @@
       };
       scene.bodies[0].vy = PhysicsEngine.MAX_SPEED;
       var result = runWrapStopStepAtPoint(scene, 0, 0, 500);
-      var expectedY = 1128 - PhysicsEngine.MAX_SPEED * DT; // boundary - MAX_SPEED * DT
+      var expectedY = 1128 - PhysicsEngine.MAX_SPEED * DT; // boundary: MAX_SPEED * DT
       var err = Math.abs(result.y - expectedY);
       var detail = "interpolated y=" + result.y.toFixed(4) + ", hand-derived boundary-MAX_SPEED*DT=" + expectedY.toFixed(4) + ", error=" + err.toFixed(4) + "px";
       return { pass: err < 0.01, detail: detail };
@@ -1183,7 +1183,7 @@
 
   addTest(
     "findWrapStopStep: GPU grid shader's inline wrap-stop agrees with the JS reference",
-    "fractal-grid.js's buildFragmentShader ports this same one-step-before-crossing interpolation into the per-pixel GLSL loop (using body.vx/vy directly instead of finite-differencing, since it has live velocity - see its own comment)",
+    "fractal-grid.js's buildFragmentShader ports this same one-step-before-crossing interpolation into the per-pixel GLSL loop (using body.vx/vy directly instead of finite-differencing, since it has live velocity: see its own comment)",
     function () {
       var scene = {
         bodies: [PhysicsEngine.createCircle(600, 1120, 20, false)],
@@ -1263,7 +1263,7 @@
         return { x: pixels[0], y: pixels[1], angle: pixels[2] };
       }
       // Deliberately NOT computeOffsetSceneNumeric/runWrapStopStepAtPoint
-      // here - those apply the y-property "up in the grid means up in the
+      // here: those apply the y-property "up in the grid means up in the
       // scene" negation (already covered by its own test elsewhere), which
       // the hand-rolled GLSL harness above does not replicate. Both sides
       // of this comparison use the same plain (base + worldY) convention
@@ -1322,7 +1322,7 @@
         if (ratio > maxRatio) { maxRatio = ratio; ratioAtStep = i + 1; }
       }
       var detail = "worldX=277.75 vs 277.76 (0.01px apart), steps 1-70: max one-step separation-growth ratio=" +
-        maxRatio.toFixed(2) + "x at step " + ratioAtStep + " (want <50x - before this fix, step 62 alone jumped 0.01px->14.69px, a ~1470x ratio)";
+        maxRatio.toFixed(2) + "x at step " + ratioAtStep + " (want <50x, before this fix, step 62 alone jumped 0.01px->14.69px, a ~1470x ratio)";
       return { pass: maxRatio < 50, detail: detail };
     }
   );
@@ -1354,7 +1354,7 @@
   //
   // The physics editor lets you type/paste a coordinate anywhere, and the
   // fractal grid can offset a linked property by a huge worldX/worldY once
-  // zoomed out far enough - either can land a body many frame-widths away
+  // zoomed out far enough, either can land a body many frame-widths away
   // in one shot, unlike ordinary per-step motion (bounded by MAX_SPEED*dt).
   // PhysicsHingeGeometry.frameWrapDelta/normalizeAllBodiesIntoFrame (and
   // physics-grid-codegen.js's GLSL port of the same rules) settle that back
@@ -1362,19 +1362,19 @@
 
   addTest(
     "frameWrapDelta: a non-anchored body's center wraps by any distance in one shot",
-    "PhysicsHingeGeometry.frameWrapDelta - mod(), not a single frame-width subtract, is what makes an arbitrarily large starting offset safe",
+    "PhysicsHingeGeometry.frameWrapDelta: mod(), not a single frame-width subtract, is what makes an arbitrarily large starting offset safe",
     function () {
       var body = { x: 5190.5, y: -3050.25, isAnchored: false };
       var d = PhysicsHingeGeometry.frameWrapDelta(body, 200, 400);
       var cx = body.x + d.dx, cy = body.y + d.dy;
       var pass = Math.abs(cx - 190.5) < 1e-9 && Math.abs(cy - 149.75) < 1e-9 && cx >= 0 && cx < 200 && cy >= 0 && cy < 400;
-      return { pass: pass, detail: "corrected=(" + cx + "," + cy + ") (want 190.5,149.75 - both many frame-lengths from where they started)" };
+      return { pass: pass, detail: "corrected=(" + cx + "," + cy + ") (want 190.5,149.75: both many frame-lengths from where they started)" };
     }
   );
 
   addTest(
     "frameWrapDelta: an anchored circle only wraps once its WHOLE shape clears the edge",
-    "PhysicsHingeGeometry.frameWrapDelta's isAnchored branch - a merely-overhanging anchored body must not move",
+    "PhysicsHingeGeometry.frameWrapDelta's isAnchored branch: a merely-overhanging anchored body must not move",
     function () {
       var partiallyOut = { type: "circle", x: 195, y: 100, radius: 10, isAnchored: true }; // right edge at 205 > 200, but center (and most of the shape) is still inside
       var fullyOut = { type: "circle", x: 215, y: 100, radius: 10, isAnchored: true }; // left edge at 205 > 200 -> the whole circle has cleared it
@@ -1400,10 +1400,10 @@
 
   addTest(
     "normalizeAllBodiesIntoFrame never wraps a hinge CHILD directly, only cascades to it",
-    "PhysicsHingeGeometry.isHingeChild - wrapping a child's own position independently of its parent tears the joint",
+    "PhysicsHingeGeometry.isHingeChild, wrapping a child's own position independently of its parent tears the joint",
     function () {
       // body0: world-hinged, 5000 units outside a 200-wide frame. body1: hinged
-      // to body0's local (100,0) - sitting exactly at that joint, also far
+      // to body0's local (100,0), sitting exactly at that joint, also far
       // outside the frame, but rigidly so (it must NOT be wrapped on its own).
       var scene = {
         bodies: [PhysicsEngine.createLine(5100, 300, 200, 0, false), PhysicsEngine.createCircle(5200, 300, 20, false)],
@@ -1512,7 +1512,7 @@
 
     // The interactive editor never offers rotating a circle, and never
     // rotates anything via applyBodyEditPreservingHinge's isResize=false
-    // path in the existing tests above (both only exercise resize) - but
+    // path in the existing tests above (both only exercise resize), but
     // the X/Y mapping UI does let "angle" be linked on either shape, so the
     // fractal grid (Milestone 2) is what first exercises this for real.
     // Check the INVARIANT the function promises (hinge stays put, cascade
@@ -1661,7 +1661,7 @@
   // Everything below exists because the failure mode of extended-precision
   // emulation is SILENT. A driver that reassociates float arithmetic turns
   // every error term into 0.0 and the shader still compiles, still runs,
-  // and still produces plausible-looking pictures - just with none of the
+  // and still produces plausible-looking pictures, just with none of the
   // extra precision it was supposed to have. See physics-df.js's header,
   // and df-probe.html for the same checks in a standalone page.
 
@@ -1670,7 +1670,7 @@
   //
   // Keep the df tests SHORT. A df step costs roughly an order of magnitude
   // more than a float32 one, and a page that queues up enough of them can
-  // trip the GPU's watchdog - after which every draw on that page returns
+  // trip the GPU's watchdog, after which every draw on that page returns
   // all zeros, with no error raised anywhere, and two dozen unrelated
   // float32 tests start "failing" with plausible-looking numbers. Same OffscreenCanvas/readback machinery as
   // runGridCodegenAtPoint above, factored out because the df tests need
@@ -1680,7 +1680,7 @@
   //
   // Keep the df tests SHORT. A df step costs roughly an order of magnitude
   // more than a float32 one, and a page that queues up enough of them can
-  // trip the GPU's watchdog - after which every draw on that page returns
+  // trip the GPU's watchdog, after which every draw on that page returns
   // all zeros, with no error raised anywhere, and two dozen unrelated
   // float32 tests start "failing" with plausible-looking numbers. Same OffscreenCanvas/readback machinery as
   // runGridCodegenAtPoint above, factored out because the df tests need
@@ -1688,7 +1688,7 @@
   //
   // ONE context, kept for the whole run. This used to make a fresh one per
   // call and lose it explicitly at the end, because browsers cap how many
-  // WebGL contexts can be live at once and silently drop the oldest - after
+  // WebGL contexts can be live at once and silently drop the oldest, after
   // which draws stop happening and readPixels returns all zeros with no
   // error raised. Losing them explicitly was not enough: a lost context is
   // only really gone once it is garbage-collected, and a suite this
@@ -1747,7 +1747,7 @@
   // coordinate.
   //
   // This is not a nicety. The readback texture is RGBA32F, so an absolute
-  // coordinate of order 700 comes back quantized at ~6e-5 - which is the
+  // coordinate of order 700 comes back quantized at ~6e-5, which is the
   // same size as the error being measured. Subtracting the reference INSIDE
   // the shader (in df, where that subtraction is exact) leaves a small
   // number that float32 carries with ~10 significant digits, so the test
@@ -1788,10 +1788,10 @@
   }
 
   // The same measurement for a whole ROW of starting points in one draw:
-  // texel k simulates worldX = x0 + k*dx (df only - the add is the one that
+  // texel k simulates worldX = x0 + k*dx (df only, the add is the one that
   // has to survive), all against the same reference. One shader compile and
   // one WebGL context however many points are asked for, which is what makes
-  // a proportional-response sweep affordable here at all - see
+  // a proportional-response sweep affordable here at all: see
   // runFloatShader's note on how close this page already runs to the
   // browser's context ceiling and the GPU's watchdog.
   function gridResidualRow(scene, steps, x0, dx, count, worldY, bodyIndex, ref) {
@@ -1829,7 +1829,7 @@
   // How faithfully df answers a starting difference of `dx`: the df shader's
   // response to it (texel 1 minus texel 0) against the float64 engine's
   // response to the same nudge, as a relative error. ~0 means the dynamics
-  // resolved the distinction; ~1 means they never saw it - which is what a
+  // resolved the distinction; ~1 means they never saw it, which is what a
   // float32 stage hiding anywhere in the df chain looks like.
   function dfResponseError(scene, steps, x0, dx, worldY, bodyIndex) {
     var ref = cpuStateAt(scene, x0, worldY, steps, bodyIndex);
@@ -1898,7 +1898,7 @@
       var reassociates = px[0] !== 0;
       var veilHolds = px[1] === 0;
       return {
-        // The bare result is allowed to be either - some drivers are
+        // The bare result is allowed to be either: some drivers are
         // IEEE-conservative and some aren't, and that's exactly the point:
         // only the veiled one is REQUIRED to be right.
         pass: veilHolds,
@@ -1947,7 +1947,7 @@
   // A float64 cannot referee this one: it has 53 bits and the values under
   // test have 72 and 96. So the references are computed here in BigInt fixed
   // point (FP_BITS fractional bits, far past anything being checked), handed
-  // to the shader as exact N-word literals, and SUBTRACTED there - what comes
+  // to the shader as exact N-word literals, and SUBTRACTED there, what comes
   // back is the residual, which a float32 readback carries fine however
   // small it is.
   var FP_BITS = 300;
@@ -1992,9 +1992,9 @@
 
   addTest(
     "Triple- and quad-float arithmetic reach ~21 and ~28 digits",
-    "past two words nothing about the arithmetic is hand-written - physics-df.js generates the add/mul/div/sqrt cascades and their constants - and the failure mode is the usual one for this file: a kernel that drops a carry, or a constant that only had a float64's 53 bits to begin with, still compiles and runs, and is simply a few words less precise than it claims",
+    "past two words nothing about the arithmetic is hand-written, physics-df.js generates the add/mul/div/sqrt cascades and their constants, and the failure mode is the usual one for this file: a kernel that drops a carry, or a constant that only had a float64's 53 bits to begin with, still compiles and runs, and is simply a few words less precise than it claims",
     function () {
-      if (!PhysicsDF.isSupported("qf")) return { pass: true, detail: "no BigInt in this browser - the multi-word precisions are unavailable here, so there is nothing to check" };
+      if (!PhysicsDF.isSupported("qf")) return { pass: true, detail: "no BigInt in this browser: the multi-word precisions are unavailable here, so there is nothing to check" };
       var A = fpFromDecimal("1234.56789012345678901234567890123456789");
       var B = fpFromDecimal("0.00000000000000000000370000000001234567890123");
       var C = fpFromDecimal("3.1415926535897932384626433832795028841971");
@@ -2068,7 +2068,7 @@
     function () {
       var scene = buildDeepZoomScene();
       // A separation far below float32's ULP at these coordinates (~6e-5)
-      // and far above df's (~3e-13) - i.e. exactly the regime this exists
+      // and far above df's (~3e-13): i.e. exactly the regime this exists
       // to serve.
       var X0 = 13.7, DX = 1e-9, STEPS = 25;
       var ref = cpuStateAt(scene, X0, 0, STEPS, 0);
@@ -2081,7 +2081,7 @@
       // NOTE what this does and does not prove. It proves the input-side
       // distinction survives, which is necessary and is exactly what the
       // 32-bit wall destroys. It does NOT prove the df pass RESOLVES that
-      // distinction correctly - below a certain separation the difference
+      // distinction correctly: below a certain separation the difference
       // it produces is float32 dynamics noise rather than physics, which
       // the fidelity test below is the one to measure. An earlier version
       // of this project used "the pixels differ at all" as its headline
@@ -2091,7 +2091,7 @@
         pass: f32Spread === 0 && dfSpread > 0,
         detail: "starting positions " + DX + " apart -> outcomes differ by " +
           dfSpread.toExponential(2) + " under df, " + f32Spread.toExponential(2) +
-          " under float32 (float32 must be exactly 0 - that IS the wall)",
+          " under float32 (float32 must be exactly 0: that IS the wall)",
       };
     }
   );
@@ -2118,7 +2118,7 @@
       var r = dfResponseError(scene, STEPS, 3.3, DX, -2.1, 2);
       // The tidal field here grows a separation by about half over one
       // second, so an unamplified nudge (what a float32 force produces)
-      // would read as a relative error of ~0.3 - six times the bar. The
+      // would read as a relative error of ~0.3: six times the bar. The
       // second condition keeps that true if the scene is ever retuned.
       return {
         pass: r.relErr < 0.05 && r.want > DX * 1.25,
@@ -2133,7 +2133,7 @@
   //
   // The arithmetic test above shows three and four words can hold ~21 and
   // ~28 digits. This asks the question that matters to a picture: after a
-  // whole simulation - collisions, hinge solves, trig, the gravity sum - is
+  // whole simulation, collisions, hinge solves, trig, the gravity sum, is
   // a starting difference far below the rung beneath still there, grown by
   // the right amount? One stage anywhere in the chain that quietly rounds
   // to fewer words erases it, exactly as a float32 stage used to in df.
@@ -2141,7 +2141,7 @@
   // Texel k starts at x0 + NUDGES[k]. Each texel's position comes back WORD
   // BY WORD (a word is a float32, which RGBA32F stores exactly), so the
   // difference between two texels is formed exactly in float64 however
-  // small it is - no reference value, no residual, nothing for the readback
+  // small it is: no reference value, no residual, nothing for the readback
   // to round. Dividing by the nudge gives a slope, and the float64 engine
   // supplies what that slope should be from a nudge IT can resolve (1e-7):
   // the map from start to finish is smooth at these scales, so the slope is
@@ -2201,7 +2201,7 @@
   }
 
   // Three runs, one per kind of machinery, each with a slope that is NOT
-  // (1, 0) - the signature of a start that merely rode along untouched,
+  // (1, 0): the signature of a start that merely rode along untouched,
   // which would test nothing but addition. (The pinball start is aimed AT a
   // wall for that reason; from the grid's usual corner the ball drops
   // through the gap and never meets one.)
@@ -2286,7 +2286,7 @@
     function () {
       var scene = buildDeepZoomScene();
       // Short enough that the scene's own chaos hasn't had time to amplify
-      // the ~1e-7 difference between the two paths into a visible one -
+      // the ~1e-7 difference between the two paths into a visible one:
       // past a bounce or two it legitimately will, and that is the df
       // answer being MORE right, not the two disagreeing.
       var STEPS = 30;
@@ -2321,7 +2321,7 @@
       var f32 = gridResidualAtPoint(scene, STEPS, WORLD_X, WORLD_Y, "f32", 0, ref);
       var df = gridResidualAtPoint(scene, STEPS, WORLD_X, WORLD_Y, "df", 0, ref);
       var inFrame = Math.abs(ref.y) < scene.frameHeight && ref.y >= 0;
-      // Both must land in the same frame period as the JS engine - a
+      // Both must land in the same frame period as the JS engine: a
       // mis-wrapped body is off by a whole frameHeight (819), not by
       // rounding.
       return {
@@ -2350,7 +2350,7 @@
       };
       // *360: an angle-linked X/Y Input is scaled down 360x from a
       // straight radians-per-world-unit mapping (see ANGLE_INPUT_SCALE in
-      // physics-grid-codegen.js) - scaling these back up keeps the same
+      // physics-grid-codegen.js), scaling these back up keeps the same
       // effective 0.35/-0.2 rad offsets this test always exercised.
       var STEPS = 20, WORLD_X = 0.35 * 360, WORLD_Y = -0.2 * 360;
       var ref = cpuStateAt(scene, WORLD_X, WORLD_Y, STEPS, 1);
@@ -2366,7 +2366,7 @@
 
   addTest(
     "A starting velocity survives into the fractal grid's own shader",
-    "generateCanonicalBodyDeclarationsGLSL hardcoded all three velocity accumulators to zero - correct back when nothing could give a body a starting velocity, silently wrong once the Set Velocity tool could. The JS mirror (computeOffsetSceneNumeric, via cloneScene) kept the velocity all along, so the grid ran a different scene than its own hover preview claimed",
+    "generateCanonicalBodyDeclarationsGLSL hardcoded all three velocity accumulators to zero: correct back when nothing could give a body a starting velocity, silently wrong once the Set Velocity tool could. The JS mirror (computeOffsetSceneNumeric, via cloneScene) kept the velocity all along, so the grid ran a different scene than its own hover preview claimed",
     function () {
       var scene = {
         bodies: [PhysicsEngine.createCircle(300, 250, 28, false)],
@@ -2383,7 +2383,7 @@
       var trajectory = PhysicsGPU.runCompiledTrajectoryOnGPU(compiled, N);
 
       // The same offset scene the grid builds for this point, stepped by the
-      // JS engine - which has always carried vx/vy through.
+      // JS engine, which has always carried vx/vy through.
       var jsScene = PhysicsGridCodegen.computeOffsetSceneNumeric(scene, WORLD_X, 0);
       var maxErr = 0;
       for (var i = 0; i < N; i++) {
@@ -2407,7 +2407,7 @@
 
   addTest(
     "Mutual Gravity: JS engine and GPU compiler agree step-by-step",
-    "the n-body attraction is a second hand-synced pair of implementations (PhysicsEngine.computeAccelerations and its GLSL port in generateStepOnceGLSL) - exactly the kind of split that has drifted before. Checked over two regimes on purpose: several mutually-attracting bodies IS the n-body problem, i.e. genuinely chaotic, so there the two are compared only over the horizon where float32-vs-float64 rounding hasn't yet been amplified into visibility (measured: they agree to ~3e-5px at step 1 and the gap then grows about 10x per 20 steps, which is the physics, not a porting error). A two-body orbit is integrable rather than chaotic, so that one is held to the same tight bound for 300 steps and catches any slow, systematic disagreement the short run would miss.",
+    "the n-body attraction is a second hand-synced pair of implementations (PhysicsEngine.computeAccelerations and its GLSL port in generateStepOnceGLSL): exactly the kind of split that has drifted before. Checked over two regimes on purpose: several mutually-attracting bodies IS the n-body problem, i.e. genuinely chaotic, so there the two are compared only over the horizon where float32-vs-float64 rounding hasn't yet been amplified into visibility (measured: they agree to ~3e-5px at step 1 and the gap then grows about 10x per 20 steps, which is the physics, not a porting error). A two-body orbit is integrable rather than chaotic, so that one is held to the same tight bound for 300 steps and catches any slow, systematic disagreement the short run would miss.",
     function () {
       function maxErrAt(jsScene, traj, target, stepped) {
         while (stepped.n < target) { PhysicsEngine.step(jsScene, DT); stepped.n++; }
@@ -2434,7 +2434,7 @@
       // Two bounds rather than one: an EARLY one, tight, before four-body
       // chaos has had time to amplify float32-vs-float64 rounding at all, and
       // a late one that only has to catch gross divergence. Measured here,
-      // the gap is 2.7e-5px at step 1 growing to 2.9e-2px by step 40 - the
+      // the gap is 2.7e-5px at step 1 growing to 2.9e-2px by step 40: the
       // early number is what actually tests whether the port is faithful,
       // and a real mismatch (the df speed cap left out of sync, say) showed
       // up as ~100px, three orders clear of even the loose bound.
@@ -2450,7 +2450,7 @@
       // distance of 39px. An orbit that grazes contact is no use here: bodies
       // in contact exert no mutual gravity (see computeAccelerations), so a
       // grazing orbit crosses that switch every lap and which side a given
-      // step lands on is decided by the last bit of the float - the two
+      // step lands on is decided by the last bit of the float, the two
       // implementations then diverge chaotically for reasons that have
       // nothing to do with whether the port is faithful. Measured: the orbit
       // this test used to use dipped to 70.5px inside a 75px contact and
@@ -2476,7 +2476,7 @@
 
       // The orbit's bound is 0.5px rather than the chaotic case's 0.01px, and
       // deliberately so: this orbit peaks at ~1500px/s, which used to be
-      // clamped to MAX_SPEED. That clamp was a contraction - it forced both
+      // clamped to MAX_SPEED. That clamp was a contraction: it forced both
       // implementations onto exactly the same value every time it fired, and
       // so hid their float32-vs-float64 difference. With the Mutual Gravity
       // ceiling raised the orbit runs uncapped and the two drift apart on
@@ -2497,7 +2497,7 @@
 
   addTest(
     "Mutual Gravity: an anchored body pulls at 10x density and never gets pulled",
-    "the one rule that isn't plain Newton - anchored bodies have mass 0 in the solver (that IS how 'immovable' is spelled), so gravitational mass has to come from the shape instead, with the 10x applied",
+    "the one rule that isn't plain Newton: anchored bodies have mass 0 in the solver (that IS how 'immovable' is spelled), so gravitational mass has to come from the shape instead, with the 10x applied",
     function () {
       function pullOn0(secondAnchored) {
         var scene = {
@@ -2556,8 +2556,8 @@
   );
 
   addTest(
-    "Mutual Gravity: bodies that collide bounce - nothing welds them together",
-    "Mutual Gravity used to weld touching bodies into one (merge-on-contact). That feature was retired: a collision under Mutual Gravity is now the same impulse bounce it is everywhere else, and Collisions=off is the recommended way to avoid contact altogether. This pins the retirement on the JS side - a leftover weld would hold the pair at contact forever",
+    "Mutual Gravity: bodies that collide bounce, nothing welds them together",
+    "Mutual Gravity used to weld touching bodies into one (merge-on-contact). That feature was retired: a collision under Mutual Gravity is now the same impulse bounce it is everywhere else, and Collisions=off is the recommended way to avoid contact altogether. This pins the retirement on the JS side: a leftover weld would hold the pair at contact forever",
     function () {
       function c(x) {
         return { type: "circle", x: x, y: 300, angle: 0, radius: 30, vx: 0, vy: 0, w: 0, isAnchored: false };
@@ -2591,7 +2591,7 @@
 
   addTest(
     "Mutual Gravity: a collision conserves momentum",
-    "between two free bodies the pull is equal and opposite and so is the contact impulse, so a bounce under Mutual Gravity must leave the pair's total momentum where it was - and must actually be a bounce, not the perfectly inelastic weld this engine used to apply",
+    "between two free bodies the pull is equal and opposite and so is the contact impulse, so a bounce under Mutual Gravity must leave the pair's total momentum where it was, and must actually be a bounce, not the perfectly inelastic weld this engine used to apply",
     function () {
       // A small fast body into a big stationary one, far from anything else,
       // with the frame off so nothing wraps.
@@ -2627,7 +2627,7 @@
     function () {
       // Needs a third body to pull on it: under Mutual Gravity there is no
       // "down", and two hinged links on their own only attract each other
-      // along the hinge, which the hinge cancels - such a pendulum sits
+      // along the hinge, which the hinge cancels, such a pendulum sits
       // still for entirely legitimate reasons and would pass this test
       // whether or not something had frozen it.
       var scene = {
@@ -2643,7 +2643,7 @@
         ],
       };
       // What freezing would destroy is the links' freedom to move RELATIVE to
-      // each other - the assembly as a whole could still swing on its world
+      // each other: the assembly as a whole could still swing on its world
       // hinge even if the two links had been fused.
       var startAngleGap = scene.bodies[1].angle - scene.bodies[0].angle;
       var maxAngleChange = 0;
@@ -2662,7 +2662,7 @@
 
   addTest(
     "The speed cap is raised for Mutual Gravity and unchanged for ordinary gravity",
-    "reported as an orbit dropping to a lower one on its first pass and then looking correct forever after. The cause was MAX_SPEED: a close perihelion legitimately needs ~2000px/s, and clamping it to 1000 deleted that energy once - after which the smaller orbit never reached the cap again, which is why it then looked stable. Raised only for Mutual Gravity, so every existing downward-gravity scene, and every fractal image already rendered from one, is untouched",
+    "reported as an orbit dropping to a lower one on its first pass and then looking correct forever after. The cause was MAX_SPEED: a close perihelion legitimately needs ~2000px/s, and clamping it to 1000 deleted that energy once, after which the smaller orbit never reached the cap again, which is why it then looked stable. Raised only for Mutual Gravity, so every existing downward-gravity scene, and every fractal image already rendered from one, is untouched",
     function () {
       var plain = PhysicsEngine.speedCapFor({ mutualGravity: false });
       var mutual = PhysicsEngine.speedCapFor({ mutualGravity: true });
@@ -2696,9 +2696,9 @@
 
   addTest(
     "Mutual Gravity: an orbit clear of the surface is a closed Kepler ellipse",
-    "reported as an orbit coming out 'a very different shape' from what Kepler predicts. Widening MUTUAL_GRAVITY_SOFTENING for the bounce had put a flattened, non-inverse-square region around every body, and an orbit dipping into one precesses instead of closing - 177 degrees per lap on the reported scene. This pins the property that matters: an orbit that stays clear of the bodies themselves must close, lap after lap, at the distance Kepler says",
+    "reported as an orbit coming out 'a very different shape' from what Kepler predicts. Widening MUTUAL_GRAVITY_SOFTENING for the bounce had put a flattened, non-inverse-square region around every body, and an orbit dipping into one precesses instead of closing: 177 degrees per lap on the reported scene. This pins the property that matters: an orbit that stays clear of the bodies themselves must close, lap after lap, at the distance Kepler says",
     function () {
-      // Started 500px out at 300px/s tangential - a wide, ordinary ellipse
+      // Started 500px out at 300px/s tangential: a wide, ordinary ellipse
       // whose closest approach is nowhere near either surface.
       var scene = {
         mutualGravity: true,
@@ -2711,7 +2711,7 @@
       scene.bodies[0].vy = 300;
 
       // Closed form for these initial conditions, from the same constants the
-      // engine uses - so this compares against Kepler, not against itself.
+      // engine uses, so this compares against Kepler, not against itself.
       var mu = PhysicsEngine.MUTUAL_GRAVITY_CONSTANT * PhysicsEngine.gravitationalMass(scene.bodies[1]);
       var r0 = 500, v0 = 300, L = r0 * v0;
       var E = v0 * v0 / 2 - mu / r0;
@@ -2751,7 +2751,7 @@
 
   addTest(
     "Mutual Gravity's softening leaves orbital distances on an exact inverse square",
-    "the softening that fixed the bounce works by flattening the force near contact, so it has to be checked that it flattens ONLY there - a scene whose bodies orbit rather than collide must be completely unaffected by it",
+    "the softening that fixed the bounce works by flattening the force near contact, so it has to be checked that it flattens ONLY there: a scene whose bodies orbit rather than collide must be completely unaffected by it",
     function () {
       function pullAt(sep) {
         function c(x) {
@@ -2780,7 +2780,7 @@
 
   addTest(
     "Mutual Gravity never invents energy against a body it is resting on",
-    "reported as a ball that bounced, stopped, and then whipped round the anchored body at rising speed. A body at rest sits a fraction of a pixel inside the surface, and the contact solver's positional correction pushes it out WITHOUT changing its velocity - free work, done in a field of ~19,600px/s^2 right at contact. Gravity turned it back into speed, the body drove deeper, the correction pushed harder: energy climbed on 401 of 900 steps. Bodies in contact now exert no mutual gravity, which is also the honest reading (the contact normal force is what answers the attraction, and the solver already supplies it)",
+    "reported as a ball that bounced, stopped, and then whipped round the anchored body at rising speed. A body at rest sits a fraction of a pixel inside the surface, and the contact solver's positional correction pushes it out WITHOUT changing its velocity: free work, done in a field of ~19,600px/s^2 right at contact. Gravity turned it back into speed, the body drove deeper, the correction pushed harder: energy climbed on 401 of 900 steps. Bodies in contact now exert no mutual gravity, which is also the honest reading (the contact normal force is what answers the attraction, and the solver already supplies it)",
     function () {
       // The exact reported scene: a free circle released far from an
       // anchored one, left to fall in, bounce, and settle.
@@ -2805,7 +2805,7 @@
       }
       // What matters is that it SETTLES rather than winding up: the runaway
       // showed as speed climbing without bound long after the bounces were
-      // over. So compare the second half of the run against the first - a
+      // over. So compare the second half of the run against the first: a
       // pump makes the late half the faster one.
       var earlyPeak = 0, latePeak = 0;
       for (var i = 0; i < 900; i++) {
@@ -2824,16 +2824,16 @@
         detail: "after 900 steps: resting " + finalSep.toFixed(1) + "px apart (they touch at 60) at " +
           finalSpeed.toFixed(0) + "px/s; fastest in the first half " + earlyPeak.toFixed(0) +
           "px/s vs the second half " + latePeak.toFixed(0) +
-          "px/s (a pump makes the second half faster - it used to end at 57.4px doing 1110px/s and rising)",
+          "px/s (a pump makes the second half faster: it used to end at 57.4px doing 1110px/s and rising)",
       };
     }
   );
 
   addTest(
     "Bounce Count counts contact episodes, not steps spent in contact",
-    "PhysicsEngine.runBounceCounts - a body resting or sliding on a surface is touching for hundreds of consecutive steps, which a naive per-step tally would report as hundreds of bounces for what is visibly one",
+    "PhysicsEngine.runBounceCounts: a body resting or sliding on a surface is touching for hundreds of consecutive steps, which a naive per-step tally would report as hundreds of bounces for what is visibly one",
     function () {
-      // Set down on the floor already moving, so it slides - frictionless,
+      // Set down on the floor already moving, so it slides: frictionless,
       // it keeps going the whole run without ever leaving the surface.
       var scene = {
         bodies: [
@@ -2871,7 +2871,7 @@
 
   addTest(
     "A body with nothing to collide with never registers a bounce",
-    "PhysicsEngine.step's contactFlags must be rewritten each step, not accumulated - a stale true would make every later step read as still-touching",
+    "PhysicsEngine.step's contactFlags must be rewritten each step, not accumulated: a stale true would make every later step read as still-touching",
     function () {
       var scene = {
         bodies: [{ type: "circle", x: 400, y: 200, angle: 0, isAnchored: false, radius: 20, vx: 0, vy: 0, w: 0 }],
@@ -2888,10 +2888,10 @@
   // ---- df.8 The honest version of "does df buy resolution" ----
   addTest(
     "Where float32 renders one flat color, df still tracks the float64 engine",
-    "measuring the gain as \"do neighbouring pixels differ\" counts quantization noise as detail - it overstated this by ~3 decades",
+    "measuring the gain as \"do neighbouring pixels differ\" counts quantization noise as detail: it overstated this by ~3 decades",
     function () {
       // The metric that matters is agreement with PhysicsEngine (float64),
-      // which is the answer both shaders are approximating - not whether
+      // which is the answer both shaders are approximating, not whether
       // adjacent pixels happen to differ at all. Noise decorrelates from
       // the truth; real signal doesn't.
       //
@@ -2954,7 +2954,7 @@
       }
       var dfCorr = correlation(rowAt(collapsedWidth, "df"), rowAt(collapsedWidth, "cpu"));
       // 0.5 is the floor this has to clear. With the df solver in place it
-      // reaches 1.000 here - the interesting question became "how much
+      // reaches 1.000 here: the interesting question became "how much
       // further down", but answering that inside the suite costs another
       // ~30 shader compiles and this page is already close to the
       // browser's live-WebGL-context ceiling (see runFloatShader), so that
@@ -2992,7 +2992,7 @@
 
   addTest(
     "Infinite Space: JS engine and GPU compiler agree",
-    "turning the wrap off is a change in the generated shader as well as the engine - the GPU path stops being handed a frame, so this checks the two still walk together once bodies are far outside it",
+    "turning the wrap off is a change in the generated shader as well as the engine: the GPU path stops being handed a frame, so this checks the two still walk together once bodies are far outside it",
     function () {
       function build() {
         var s = {
@@ -3026,7 +3026,7 @@
 
   addTest(
     "Infinite Space lets a pixel's offset start a body outside the frame",
-    "the other two edge modes settle a body's STARTING position back into the frame with a mod(), so sweeping the X/Y Input far enough cycles it through the frame over and over. Infinite Space has no frame to settle into, so the mapping is linear instead - and the two implementations of that settle (generateGridInitialStateGLSL's GLSL and computeOffsetSceneNumeric's JS) have to skip it together, or the hover preview would show a different starting scene from the pixel it is previewing",
+    "the other two edge modes settle a body's STARTING position back into the frame with a mod(), so sweeping the X/Y Input far enough cycles it through the frame over and over. Infinite Space has no frame to settle into, so the mapping is linear instead, and the two implementations of that settle (generateGridInitialStateGLSL's GLSL and computeOffsetSceneNumeric's JS) have to skip it together, or the hover preview would show a different starting scene from the pixel it is previewing",
     function () {
       function base(mode) {
         return {
@@ -3087,7 +3087,7 @@
 
   addTest(
     "Off-screen pointers sit on the frame edge and fade to nothing at it",
-    "PhysicsHingeGeometry.offscreenPointer - where the arrow marking a body that has left the view goes, shared by the editor's playback and the fractal grid's replay panel. Two properties matter: the tip is exactly where the line from the frame's center crosses the edge, and the length reaches zero as the body arrives at that edge, so the arrow shrinks away instead of popping out of existence when the body comes back on screen",
+    "PhysicsHingeGeometry.offscreenPointer, where the arrow marking a body that has left the view goes, shared by the editor's playback and the fractal grid's replay panel. Two properties matter: the tip is exactly where the line from the frame's center crosses the edge, and the length reaches zero as the body arrives at that edge, so the arrow shrinks away instead of popping out of existence when the body comes back on screen",
     function () {
       var W = 900, H = 600, MAX = 70;
       function p(x, y) { return PhysicsHingeGeometry.offscreenPointer(x, y, W, H, MAX); }
@@ -3120,7 +3120,7 @@
 
   // ---- Funnel: mouth teleports a circle to the throat, legs/throat bounce
   // it like a line. Supported so far only in Pac-Man edge mode with
-  // standard (non-mutual) gravity - see physics-engine.js's Funnel header
+  // standard (non-mutual) gravity: see physics-engine.js's Funnel header
   // comment. ----
 
   addTest(
@@ -3146,10 +3146,10 @@
 
   addTest(
     "A circle touching a funnel's mouth teleports to the throat center with its velocity unchanged",
-    "the mouth (length-3 side) is a teleport trigger, not a wall - see collideFunnelMouthTHit and step()'s teleportWins handling",
+    "the mouth (length-3 side) is a teleport trigger, not a wall: see collideFunnelMouthTHit and step()'s teleportWins handling",
     function () {
       // Funnel at angle 0: mouth (wide) faces -y (up), throat (narrow) faces
-      // +y (down) - a ball dropped on the mouth's centerline should fall
+      // +y (down), a ball dropped on the mouth's centerline should fall
       // through and reappear at the throat's centerline, still falling.
       var scene = {
         bodies: [
@@ -3185,14 +3185,14 @@
 
   addTest(
     "A circle hitting the middle of a funnel's leg bounces like a line, without teleporting",
-    "the 2 legs (and the throat) are solid capsule colliders (see collideFunnelCircle) - only the mouth teleports",
+    "the 2 legs (and the throat) are solid capsule colliders (see collideFunnelCircle), only the mouth teleports",
     function () {
       // Funnel at angle 0 (mouth up at y=348.04, throat down at y=451.96);
       // leg2 runs from the mouth corner (490, 348.04) to the throat corner
       // (430, 451.96). The ball starts well INSIDE the funnel's vertical
       // span (y=400, more than a capsule-width below the mouth line, so it
       // can never be mistaken for touching the mouth) and just inside leg2
-      // horizontally (leg2 sits at x=460 at that height) - falling further
+      // horizontally (leg2 sits at x=460 at that height), falling further
       // only closes that gap, since leg2 slants toward smaller x as y
       // grows, so it can only ever hit the flat side of leg2 itself.
       var scene = {
@@ -3213,14 +3213,14 @@
         prevVy = b.vy;
       }
       var detail = "first event: bounced=" + bounced + ", teleported=" + teleported +
-        " (want a bounce off the leg - the ball's path never reaches the mouth)";
+        " (want a bounce off the leg: the ball's path never reaches the mouth)";
       return { pass: bounced && !teleported, detail: detail };
     }
   );
 
   addTest(
     "A rotated, anchored funnel teleports along its own rotated axis, not the world axis",
-    "getFunnelEdges/collideFunnelMouthTHit rotate every vertex by body.angle - a scene with angle=0 in every other test would not catch a sign/axis error here",
+    "getFunnelEdges/collideFunnelMouthTHit rotate every vertex by body.angle: a scene with angle=0 in every other test would not catch a sign/axis error here",
     function () {
       var angle = Math.PI / 2; // mouth now faces -x instead of -y
       var scene = {
@@ -3337,7 +3337,7 @@
 
   addTest(
     "A funnel teleport and a leg bounce run in double-float, in step with the float64 engine",
-    "funnels and splitters used to be float32-only: a df compile threw, and the grid quietly fell back to float32 however deep the zoom. physics-gpu-df.js now ports the trapezoid functions (dfSweptCapsuleCircleContact, dfTrapezoid, dfCollideFunnelMouthTHit) and generateStepOnceGLSL emits its funnel block at either precision - this pins both halves of that block, the mouth teleport and the solid-edge contacts, against the JS engine, where a float32 stage left in the chain shows up as an error ~1000x larger",
+    "funnels and splitters used to be float32-only: a df compile threw, and the grid quietly fell back to float32 however deep the zoom. physics-gpu-df.js now ports the trapezoid functions (dfSweptCapsuleCircleContact, dfTrapezoid, dfCollideFunnelMouthTHit) and generateStepOnceGLSL emits its funnel block at either precision: this pins both halves of that block, the mouth teleport and the solid-edge contacts, against the JS engine, where a float32 stage left in the chain shows up as an error ~1000x larger",
     function () {
       function sceneWith(circleX, circleY, radius) {
         return {
@@ -3371,7 +3371,7 @@
 
   addTest(
     "A splitter scene runs in double-float, in step with the float64 engine",
-    "the splitter shares the funnel's trapezoid port, plus its own end-of-step machinery - spawn slots waking as DBody values, df alive-gating, the split offsets applied in df. The body checked is the one that stays in the parent's slot, so this passes only if the split itself landed where the JS engine put it",
+    "the splitter shares the funnel's trapezoid port, plus its own end-of-step machinery: spawn slots waking as DBody values, df alive-gating, the split offsets applied in df. The body checked is the one that stays in the parent's slot, so this passes only if the split itself landed where the JS engine put it",
     function () {
       // buildSplitterScene's own geometry (its ball splits at step 27), with
       // the slot ceiling pulled down to what this run needs: every spawn slot
@@ -3397,11 +3397,11 @@
   // ---- Splitter: the short side turns one circle into two on the long
   // side, each keeping the parent's velocity, and Output then tracks the
   // AVERAGE over that lineage. Same trapezoid as a funnel, opposite trigger
-  // edge - see physics-engine.js's createSplitter. ----
+  // edge: see physics-engine.js's createSplitter. ----
 
   // The reported worked example, exactly: a length-1 short side hit 0.75 of
   // the way along it, against a length-3 long side, must put one ball 0.75
-  // from its own edge and the other 0.25 from its own edge - landing them
+  // from its own edge and the other 0.25 from its own edge, landing them
   // exactly 2 units apart. size=120 makes "1 unit" 60px (throat = size/2,
   // mouth = 3*size/2, legs = size), and angle=PI turns the short side to
   // face the falling ball.
@@ -3446,7 +3446,7 @@
 
   addTest(
     "Both balls a splitter produces carry the parent's velocity unchanged",
-    "\"They each have the same velocity as the initial ball\" - the split is a position/identity event, never an impulse",
+    "\"They each have the same velocity as the initial ball\": the split is a position/identity event, never an impulse",
     function () {
       var scene = buildSplitterScene(385);
       var beforeV = null, split = null;
@@ -3470,7 +3470,7 @@
 
   addTest(
     "Output tracks the AVERAGE over a split lineage, and that average is continuous through the split",
-    "computeOutputLineageAverage / lineageOf - the whole point of the mapping surviving a body becoming two",
+    "computeOutputLineageAverage / lineageOf: the whole point of the mapping surviving a body becoming two",
     function () {
       var scene = buildSplitterScene(385);
       var beforeX = null, afterX = null, beforeCount = 0, afterCount = 0;
@@ -3496,7 +3496,7 @@
   );
 
   addTest(
-    "A splitter's long side and legs bounce like a funnel's - only the short side splits",
+    "A splitter's long side and legs bounce like a funnel's, only the short side splits",
     "collideSplitterCircle covers mouth + both legs; a ball arriving at the long side must not spawn anything",
     function () {
       // Default angle (0) puts the LONG side up, so a ball dropped from
@@ -3517,7 +3517,7 @@
         if (prevVy > 50 && scene.bodies[1].vy < prevVy - 50) bounced = true;
         prevVy = scene.bodies[1].vy;
       }
-      var detail = "after 60 steps: bodies=" + scene.bodies.length + " (want 2 - no split), bounced off the long side=" + bounced;
+      var detail = "after 60 steps: bodies=" + scene.bodies.length + " (want 2: no split), bounced off the long side=" + bounced;
       return { pass: scene.bodies.length === 2 && bounced, detail: detail };
     }
   );
@@ -3528,7 +3528,7 @@
     function () {
       // Two splitters stacked: the upper one splits the dropped ball, and
       // the lower one (offset under one of the two halves) splits that half
-      // again - 1 -> 2 -> 3 balls, all in lineage 1.
+      // again, 1 -> 2 -> 3 balls, all in lineage 1.
       var scene = {
         mutualGravity: false,
         bodies: [
@@ -3568,7 +3568,7 @@
 
   addTest(
     "A two-body Output averages the pair, and a one-body Output still reads exactly what it always did",
-    "PhysicsEngine.computeOutputValue is the single definition of what an Output means - physics-ui.js's playback color, fractal-grid.js's instant preview and the grid shader's GLSL are all written against it, so the one-body case has to come through it completely unchanged or every existing scene shifts color",
+    "PhysicsEngine.computeOutputValue is the single definition of what an Output means: physics-ui.js's playback color, fractal-grid.js's instant preview and the grid shader's GLSL are all written against it, so the one-body case has to come through it completely unchanged or every existing scene shifts color",
     function () {
       var scene = twoBallScene("wrap", 100, 200, 700, 500);
       var cases = [
@@ -3591,7 +3591,7 @@
 
   addTest(
     "Distance Apart takes the short way round when the frame wraps",
-    "without this, a Pac-Man scene's distance Output jumps the width of the frame the instant either body crosses an edge - for a pair that never actually moved apart. That is a discontinuity in the exact quantity the grid is a picture of, and on a toroidal world the shortest separation IS the distance. Infinite Space has no edges to go round, so there it stays the plain one.",
+    "without this, a Pac-Man scene's distance Output jumps the width of the frame the instant either body crosses an edge: for a pair that never actually moved apart. That is a discontinuity in the exact quantity the grid is a picture of, and on a toroidal world the shortest separation IS the distance. Infinite Space has no edges to go round, so there it stays the plain one.",
     function () {
       // 100 and 700 on an 800-wide frame: 600 apart the long way, 200 the short way.
       var wrapped = PhysicsEngine.computeOutputValue(twoBallScene("wrap", 100, 300, 700, 300), { body: 0, bodyB: 1, property: "distance" });
@@ -3614,10 +3614,10 @@
 
   addTest(
     "A pair Output weighs each half once, however many times either has split",
-    "each half is its own lineage average FIRST, then the two are averaged - flattening every body into one mean instead would let whichever ball split more times drag the answer toward itself, which is not what \"the average of object 1 and object 2\" means",
+    "each half is its own lineage average FIRST, then the two are averaged, flattening every body into one mean instead would let whichever ball split more times drag the answer toward itself, which is not what \"the average of object 1 and object 2\" means",
     function () {
       var scene = twoBallScene("infinite", 0, 0, 200, 0);
-      // A third ball that is a split child of body 0 - same lineage tag the
+      // A third ball that is a split child of body 0: same lineage tag the
       // engine's own splitter gives it (see step()'s splitting section).
       var child = PhysicsEngine.createCircle(100, 0, 10, false);
       child.lineage = 0;
@@ -3625,7 +3625,7 @@
       PhysicsEngine.computeMass(child);
       var got = PhysicsEngine.computeOutputValue(scene, { body: 0, bodyB: 1, property: "x" });
       // lineage 0 averages (0 + 100)/2 = 50; lineage 1 is 200; the pair is 125.
-      // A flat mean over all three bodies would be 100 - the bug this pins.
+      // A flat mean over all three bodies would be 100: the bug this pins.
       var flat = (0 + 200 + 100) / 3;
       return {
         pass: Math.abs(got - 125) < 1e-9,
@@ -3636,7 +3636,7 @@
 
   addTest(
     "Output survives a Play/Reset round trip with its second body intact",
-    "PhysicsEngine.cloneScene is what physics-ui.js round-trips the live scene through on every Play and Reset - an omitted field there silently resets mid-edit, which is how simulationSteps and edgeMode each got lost once, and a dropped bodyB would quietly turn a pair Output back into a one-body one",
+    "PhysicsEngine.cloneScene is what physics-ui.js round-trips the live scene through on every Play and Reset: an omitted field there silently resets mid-edit, which is how simulationSteps and edgeMode each got lost once, and a dropped bodyB would quietly turn a pair Output back into a one-body one",
     function () {
       var scene = twoBallScene("wrap", 100, 200, 700, 500);
       scene.output = { body: 0, bodyB: 1, property: "distance" };
@@ -3657,7 +3657,7 @@
 
   addTest(
     "Only the three real Output shapes validate, and each bad one says what's actually wrong",
-    "Scene Lifespan is `{ body: null, property: \"lifespan\" }` and \"lifespan\" is deliberately in neither body-property list - so a guard that re-picked an out-of-list property rewrote it to \"x\" while body stayed null, leaving a mapping naming no body AND no run tally. The fractal page could only report that as \"missing an Output mapping\" even though one was plainly there, which is how picking Scene Lifespan broke that page.",
+    "Scene Lifespan is `{ body: null, property: \"lifespan\" }` and \"lifespan\" is deliberately in neither body-property list, so a guard that re-picked an out-of-list property rewrote it to \"x\" while body stayed null, leaving a mapping naming no body AND no run tally. The fractal page could only report that as \"missing an Output mapping\" even though one was plainly there, which is how picking Scene Lifespan broke that page.",
     function () {
       var E = PhysicsEngine, N = 3;
       var good = [
@@ -3691,7 +3691,7 @@
 
   addTest(
     "Every body type has a finite rendered half-extent, including a trapezoid",
-    "fractal-grid.js's instant hover preview asked for `body.length / 2`, and a funnel/splitter has no `length` at all - undefined/2 is NaN, and a NaN coordinate makes canvas draw nothing silently. Reported as \"the preview doesn't show the funnel or splitter until the replay loads\": the GPU trajectory carries a real half in its alpha channel, so the shape appeared the moment the replay took over. Both paths read PhysicsGPU.shapeHalf now, so they cannot disagree again.",
+    "fractal-grid.js's instant hover preview asked for `body.length / 2`, and a funnel/splitter has no `length` at all: undefined/2 is NaN, and a NaN coordinate makes canvas draw nothing silently. Reported as \"the preview doesn't show the funnel or splitter until the replay loads\": the GPU trajectory carries a real half in its alpha channel, so the shape appeared the moment the replay took over. Both paths read PhysicsGPU.shapeHalf now, so they cannot disagree again.",
     function () {
       var bodies = [
         PhysicsEngine.createCircle(100, 100, 17, false),
@@ -3710,7 +3710,7 @@
   );
 
   addTest(
-    "A trapezoid's outline can be rebuilt from just (x, y, angle, half) - what the hover preview draws from",
+    "A trapezoid's outline can be rebuilt from just (x, y, angle, half), what the hover preview draws from",
     "the preview has a trajectory ROW, not a body: x/y/angle and the one packed half. Drawing the four corners from that has to land on the same trapezoid the engine collides against, or the preview would show a shape the simulation isn't using.",
     function () {
       var body = PhysicsEngine.createSplitter(437, 618, 140, 0.7, true);
@@ -3727,7 +3727,7 @@
       });
       return {
         pass: worst < 1e-9,
-        detail: "worst corner disagreement " + worst.toFixed(12) + "px across all four corners (want 0 - the rebuilt outline IS the collided one)",
+        detail: "worst corner disagreement " + worst.toFixed(12) + "px across all four corners (want 0: the rebuilt outline IS the collided one)",
       };
     }
   );
@@ -3756,7 +3756,7 @@
       if (entries.some(function (e) { return e === null; })) {
         return { pass: false, detail: "a ball failed to split within 80 steps" };
       }
-      // Every entry point must produce the same velocity - the parent's -
+      // Every entry point must produce the same velocity, the parent's,
       // which for a straight drop means vx exactly 0 and one identical
       // positive vy across all five.
       var vy0 = entries[2].vy; // the dead-center drop, which never touched a leg
@@ -3772,7 +3772,7 @@
 
   addTest(
     "The split is a pure translation, so the ball's own overshoot survives it",
-    "collideSplitterShortSideTHit returns offsets, not points on the long side - an absolute landing point would discard how far past the short side the ball actually got and replace it with a constant, which is a discontinuity in exactly the variable the fractal grid is a picture of",
+    "collideSplitterShortSideTHit returns offsets, not points on the long side: an absolute landing point would discard how far past the short side the ball actually got and replace it with a constant, which is a discontinuity in exactly the variable the fractal grid is a picture of",
     function () {
       // Two balls dropped from slightly different heights cross the short
       // side with different amounts of the step left over, so they sit at
@@ -3822,7 +3822,7 @@
 
   addTest(
     "At the body ceiling a ball still passes through the splitter, it just stops duplicating",
-    "PhysicsEngine.MAX_SIMULATION_BODIES: the old rule skipped the whole split, leaving the ball behind on the short side. Being at the ceiling is a fact about the scene, not a reason to stop the warp - and `continue` rather than `break`, so a later ball that hit a splitter this same step isn't skipped along with it.",
+    "PhysicsEngine.MAX_SIMULATION_BODIES: the old rule skipped the whole split, leaving the ball behind on the short side. Being at the ceiling is a fact about the scene, not a reason to stop the warp, and `continue` rather than `break`, so a later ball that hit a splitter this same step isn't skipped along with it.",
     function () {
       // One splitter, MAX balls already in the scene: nothing can be added,
       // but the one that reaches the short side must still come out the
@@ -3843,14 +3843,14 @@
       var detail = crossed
         ? "ball reached y=" + scene.bodies[1].y.toFixed(1) + ", past the long side at " + edges.mouth[0].y.toFixed(1) +
           "; bodies " + countAfter + " (capped at " + cap + ", so no duplicate)"
-        : "the ball never got past the long side - it was left behind on the short side";
+        : "the ball never got past the long side: it was left behind on the short side";
       return { pass: crossed && countAfter === cap, detail: detail };
     }
   );
 
   addTest(
     "A scene's own maxSimulationBodies caps the run, and the GPU pads to exactly that",
-    "the ceiling is a per-scene control (#editor-view's Max Objects), not a constant - and it decides the compiled shader's whole size, so the JS engine's ball count and the GPU's slot count have to come from the same number or the grid renders a different scene than it plays back",
+    "the ceiling is a per-scene control (#editor-view's Max Objects), not a constant, and it decides the compiled shader's whole size, so the JS engine's ball count and the GPU's slot count have to come from the same number or the grid renders a different scene than it plays back",
     function () {
       function cascade(cap) {
         var scene = {
@@ -3874,7 +3874,7 @@
         return { cap: cap, grew: grew, slots: slots, want: want };
       });
       // The uncapped run has to grow PAST both low caps, or neither of them
-      // proves anything - "stopped at 5" and "ran out of splits at 4" look
+      // proves anything: "stopped at 5" and "ran out of splits at 4" look
       // identical otherwise. It is NOT asserted to reach the default
       // ceiling exactly: this cascade runs out of splitters to fall through
       // before it gets there, which is a fact about the scene, not the cap.
@@ -3891,8 +3891,8 @@
   );
 
   addTest(
-    "maxSimulationBodies is clamped, never trusted - and survives a Play/Reset round trip",
-    "it arrives from hand-edited JSON and from a slider, and PhysicsEngine.cloneScene is what physics-ui.js round-trips the live scene through on every Play and Reset - an omission there silently resets the ceiling mid-edit, which is exactly how simulationSteps and edgeMode each got lost once",
+    "maxSimulationBodies is clamped, never trusted, and survives a Play/Reset round trip",
+    "it arrives from hand-edited JSON and from a slider, and PhysicsEngine.cloneScene is what physics-ui.js round-trips the live scene through on every Play and Reset: an omission there silently resets the ceiling mid-edit, which is exactly how simulationSteps and edgeMode each got lost once",
     function () {
       var F = PhysicsEngine.maxSimulationBodiesFor;
       var LO = PhysicsEngine.MIN_SIMULATION_BODIES, HI = PhysicsEngine.MAX_SIMULATION_BODIES_LIMIT;
@@ -3919,7 +3919,7 @@
 
   addTest(
     "A ceiling too high to compile is refused with a readable message, not a driver error",
-    "stepOnce() takes 4 parameters per authored body and 6 per spawn slot against GLSL's hard limit of 256 - the slider's own max is set below that for any authorable scene, but a hand-edited scene can ask for more, and the driver's own answer is \"'stepOnce' : Function has too many parameters\" against a line number in generated code",
+    "stepOnce() takes 4 parameters per authored body and 6 per spawn slot against GLSL's hard limit of 256: the slider's own max is set below that for any authorable scene, but a hand-edited scene can ask for more, and the driver's own answer is \"'stepOnce' : Function has too many parameters\" against a line number in generated code",
     function () {
       function attempt(authored, total) {
         var bodies = [];
@@ -3946,7 +3946,7 @@
 
   addTest(
     "The GPU runs a splitter scene, and agrees with the JS engine step for step",
-    "a split adds a body, which a compiled fixed-body shader cannot do - so PhysicsGPU.padSceneForSplitting pre-allocates spawn slots up to MAX_SIMULATION_BODIES and a split wakes one instead of creating one. This is the check that the two engines' splitting agrees: same trigger step, same two halves, same recursion.",
+    "a split adds a body, which a compiled fixed-body shader cannot do, so PhysicsGPU.padSceneForSplitting pre-allocates spawn slots up to MAX_SIMULATION_BODIES and a split wakes one instead of creating one. This is the check that the two engines' splitting agrees: same trigger step, same two halves, same recursion.",
     function () {
       var STEPS = 90;
       var scene = buildSplitterScene(385);
@@ -3979,7 +3979,7 @@
 
   addTest(
     "The fractal grid's own per-pixel codegen splits too, and matches the JS engine for that pixel",
-    "the grid builds each pixel's scene symbolically (generateGridInitialStateGLSL) and hands it to the shared step loop - a different declaration path from compileSceneToTrajectoryGLSL's baked literals, so the spawn slots it emits (and the padding that has to leave every authored body's index alone) need their own check. This is the path the fractal image is actually made of.",
+    "the grid builds each pixel's scene symbolically (generateGridInitialStateGLSL) and hands it to the shared step loop: a different declaration path from compileSceneToTrajectoryGLSL's baked literals, so the spawn slots it emits (and the padding that has to leave every authored body's index alone) need their own check. This is the path the fractal image is actually made of.",
     function () {
       var STEPS = 90, WORLD_X = 12;
       var scene = {
@@ -4092,10 +4092,10 @@
 
   addTest(
     "A circle resting against a splitter's short side never splits",
-    "only a FRESH crossing splits - a circle already inside the trigger capsule at the start of a step would otherwise re-split every step, which is exponential in steps rather than an occasional extra ball",
+    "only a FRESH crossing splits: a circle already inside the trigger capsule at the start of a step would otherwise re-split every step, which is exponential in steps rather than an occasional extra ball",
     function () {
       // The short side stands vertical at x=448 (angle PI/2), spanning
-      // y=470-530, and the ball sits on a floor 12px to its left - inside
+      // y=470-530, and the ball sits on a floor 12px to its left: inside
       // the trigger's capsule, which reaches 18px out (LINE_THICKNESS/2 +
       // radius). The floor holds it against gravity, so it stays inside the
       // capsule the whole run without ever having crossed into it. Without
@@ -4115,7 +4115,7 @@
       }
       var circles = scene.bodies.filter(function (b) { return b.type === "circle"; }).length;
       var detail = "after 400 steps resting against the short side: " + circles +
-        " circle(s) (want exactly 1 - it never crossed in, so it never splits)" +
+        " circle(s) (want exactly 1: it never crossed in, so it never splits)" +
         (firstSplit ? "; first split at step " + firstSplit : "");
       return { pass: circles === 1, detail: detail };
     }
@@ -4124,7 +4124,7 @@
   // ---- df.N The double-float pass must actually BUY its extra digits ----
   //
   // Not "df runs" (other tests cover that) but "df resolves adjacent PIXELS
-  // that float32 cannot" - the one property the whole df path exists for,
+  // that float32 cannot": the one property the whole df path exists for,
   // and the one a single float32 operation anywhere in the chain silently
   // destroys, since precision is set by the weakest link. Measured as: give
   // two neighbouring pixels' world coordinates at a given zoom, and check
@@ -4133,7 +4133,7 @@
   // Measured walls for this scene at 500 steps, which is where the bounds
   // below come from: float32 stops distinguishing neighbours between 1e5
   // and 1e6 (~5 ooms, matching what the app reports in practice), df keeps
-  // going past 1e12 (~12 ooms - df's ~46-bit significand at this scene's
+  // going past 1e12 (~12 ooms, df's ~46-bit significand at this scene's
   // coordinate magnitude of ~700). The assertions sit well inside both
   // walls so this can't go flaky, while still failing loudly if df's
   // advantage collapses back toward float32's.
@@ -4199,7 +4199,7 @@
 
   addTest(
     "Grid codegen + step loop: a vx/vy Input offset reaches the GPU shader, not just the JS mirror",
-    "vx/vy used to be baked as a compile-time literal in generateCanonicalBodyDeclarationsGLSL - a Input link to them would silently do nothing on the actual grid/Play GPU path while still working in computeOffsetSceneNumeric's JS-only hover preview",
+    "vx/vy used to be baked as a compile-time literal in generateCanonicalBodyDeclarationsGLSL: a Input link to them would silently do nothing on the actual grid/Play GPU path while still working in computeOffsetSceneNumeric's JS-only hover preview",
     function () {
       var scene = {
         bodies: [PhysicsEngine.createCircle(500, 300, 20, false)],
@@ -4214,7 +4214,7 @@
       for (var i = 0; i < STEPS; i++) PhysicsEngine.step(jsScene, PhysicsGPU.FIXED_DT);
       var gpuBodies = runGridSimulationAtPoint(scene, STEPS, WORLD_X, WORLD_Y);
       var posErr = Math.max(Math.abs(gpuBodies[0].x - jsScene.bodies[0].x), Math.abs(gpuBodies[0].y - jsScene.bodies[0].y));
-      // A scene with NO vx/vy Input at all - the offset should be exactly
+      // A scene with NO vx/vy Input at all: the offset should be exactly
       // zero, so this must land on the authored (5, -10) velocity, not on
       // the frozen-at-compile-time value some other regression could leave
       // it at.
@@ -4233,7 +4233,7 @@
 
   addTest(
     "collisionsEnabled:false lets a body pass straight through a wall it would otherwise bounce off",
-    "the Collisions toggle - every detection loop in step() (ordinary contacts, funnel mouth, splitter short side) is gated on PhysicsEngine.collisionsEnabled",
+    "the Collisions toggle: every detection loop in step() (ordinary contacts, funnel mouth, splitter short side) is gated on PhysicsEngine.collisionsEnabled",
     function () {
       function scene(collisionsEnabled) {
         var s = {
@@ -4266,7 +4266,7 @@
 
   addTest(
     "collisionsEnabled:false also passes a circle through a funnel and a splitter, not just ordinary bodies",
-    "\"objects can pass right through each other\" was read as applying uniformly - a funnel/splitter's solid edges and triggers use the exact same swept detection as an ordinary bounce, so leaving them collidable while turning off everything else would be an inconsistent carve-out",
+    "\"objects can pass right through each other\" was read as applying uniformly: a funnel/splitter's solid edges and triggers use the exact same swept detection as an ordinary bounce, so leaving them collidable while turning off everything else would be an inconsistent carve-out",
     function () {
       var funnelScene = {
         mutualGravity: false, collisionsEnabled: false,
@@ -4278,7 +4278,7 @@
       };
       for (var i = 0; i < 60; i++) PhysicsEngine.step(funnelScene, DT);
       var noTeleport = funnelScene.bodies.length === 2 && funnelScene.bodies[0].y > 460; // fell straight past the throat, no snap
-      // Reuses buildSplitterScene(385) - the exact setup the earlier "becomes
+      // Reuses buildSplitterScene(385): the exact setup the earlier "becomes
       // two... 0.75/0.25" test already proved DOES split within 60 steps
       // with collisions on, so this is a real negative control, not just an
       // arrangement that happened to never reach the short side at all.
@@ -4294,7 +4294,7 @@
 
   addTest(
     "JS engine and GPU compiler agree with collisions off (including a body that starts already overlapping)",
-    "physics-gpu.js's fix is passing collisionPairs an empty array rather than a flag threaded through generateStepOnceGLSL - this proves that actually reaches the compiled shader, not just the JS engine",
+    "physics-gpu.js's fix is passing collisionPairs an empty array rather than a flag threaded through generateStepOnceGLSL: this proves that actually reaches the compiled shader, not just the JS engine",
     function () {
       function buildScene() {
         return {
@@ -4326,7 +4326,7 @@
 
   addTest(
     "Mutual Gravity with collisions off: the pull is continuous across the contact shell, and smooth inside it",
-    "the touching-bodies rule switched the pull from ~1963px/s^2 to exactly 0 at r=contact. With collisions on that's fine (the contact solver answers for it, and the overlap lasts a step) but with collisions off nothing answers for it and bodies coast through, making the shell a step discontinuity in the field itself. Its first replacement, the uniform-density ramp G*m*r/contact^3, was continuous but turned sharply from rising to falling at the shell - a corner the fixed step catches at a different phase for every starting state, which came out as a sawtooth across neighbouring pixels. The interior now meets G*m/r^2 at the shell in value, slope and curvature",
+    "the touching-bodies rule switched the pull from ~1963px/s^2 to exactly 0 at r=contact. With collisions on that's fine (the contact solver answers for it, and the overlap lasts a step) but with collisions off nothing answers for it and bodies coast through, making the shell a step discontinuity in the field itself. Its first replacement, the uniform-density ramp G*m*r/contact^3, was continuous but turned sharply from rising to falling at the shell: a corner the fixed step catches at a different phase for every starting state, which came out as a sawtooth across neighbouring pixels. The interior now meets G*m/r^2 at the shell in value, slope and curvature",
     function () {
       function pullAt(r, collisions) {
         var scene = {
@@ -4418,7 +4418,7 @@
 
   addTest(
     "Mutual Gravity with collisions off: a pass through another body no longer turns a smooth sweep into a sawtooth",
-    "reported on a scene where a 6.18px circle passes through a free 30px one: 30 samples along a 10px line came out as a sawtooth - falling for ~5 samples, then jumping back up by as much as 67px, every ~6 samples. Not a discontinuity (the jumps shrank under refinement) and not chaos (a 1/128th-size step gave a smooth line): the old interior ramp met 1/r^2 at the contact shell with a sharp corner, and each start caught that corner at a different step phase. This pins the sweep itself - no slope reversals, no sharp bends",
+    "reported on a scene where a 6.18px circle passes through a free 30px one: 30 samples along a 10px line came out as a sawtooth, falling for ~5 samples, then jumping back up by as much as 67px, every ~6 samples. Not a discontinuity (the jumps shrank under refinement) and not chaos (a 1/128th-size step gave a smooth line): the old interior ramp met 1/r^2 at the contact shell with a sharp corner, and each start caught that corner at a different step phase. This pins the sweep itself: no slope reversals, no sharp bends",
     function () {
       // The reported scene, in engine space (authored in a 1044x862 frame).
       var SCENE = {
@@ -4459,7 +4459,7 @@
 
   addTest(
     "Mutual Gravity with collisions off: JS engine and GPU compiler agree through an overlapping pass",
-    "the interior law is a second hand-synced pair of implementations (PhysicsEngine.computeAccelerations and its GLSL port in generateStepOnceGLSL). generateStepOnceGLSL learns collisions are off from a new argument rather than from `pairs` being empty, since the Mutual Gravity accel loop walks every body rather than the pair list - this proves that argument is actually threaded through from every caller",
+    "the interior law is a second hand-synced pair of implementations (PhysicsEngine.computeAccelerations and its GLSL port in generateStepOnceGLSL). generateStepOnceGLSL learns collisions are off from a new argument rather than from `pairs` being empty, since the Mutual Gravity accel loop walks every body rather than the pair list: this proves that argument is actually threaded through from every caller",
     function () {
       function buildScene() {
         return {
@@ -4500,7 +4500,7 @@
   // Unlike everything above, these don't reproduce a shipped bug: they pin
   // the analysis math to answers that can be worked out in advance. That is
   // a different job from the rest of this file and it is here for a
-  // different reason - a structure tensor or a circular mean will
+  // different reason: a structure tensor or a circular mean will
   // happily return a plausible-looking wrong number for as long as nobody
   // feeds it a picture whose answer is already known, and by the time one
   // of them is wrong on a real fractal there is nothing to compare against.
@@ -4509,7 +4509,7 @@
   // color wheel's wrap point) and checks the number that comes back.
   //
   // FractalStats is DOM-free and WebGL-free by design, precisely so it can
-  // be loaded straight into this page - see its own header.
+  // be loaded straight into this page: see its own header.
 
   // Runs a job to completion. The real caller (see runStatsSlice in
   // fractal-grid.js) spreads these same steps across idle callbacks; from
@@ -4534,7 +4534,7 @@
     return { width: w, height: h, t: t };
   }
 
-  // mulberry32 - a real generator, not a one-line LCG. Written out because
+  // mulberry32: a real generator, not a one-line LCG. Written out because
   // the white-noise test below genuinely depends on the input being white:
   // an LCG whose low bits are correlated has structure of its own, and would
   // fail that test for a reason that has nothing to do with the code under
@@ -4570,7 +4570,7 @@
         ["edges read as vertical (90 degrees)", Math.abs(or.dominantEdgeDegrees - 90) < 0.01],
         ["coherence = 1", Math.abs(or.coherence - 1) < 1e-6],
         // A ramp has zero curvature everywhere, so Topography calls all of
-        // it flat - no ridge, valley or saddle anywhere.
+        // it flat: no ridge, valley or saddle anywhere.
         ["curves nowhere", res.groups.features.flatFraction === 1],
       ];
       var failed = checks.filter(function (c) { return !c[1]; });
@@ -4588,7 +4588,7 @@
     function () {
       // Three orientations, one period. Row 0 is the BOTTOM row (see
       // fractal-stats.js's own header), so lines of constant (c + r) run
-      // up to the LEFT - 135 degrees, not 45.
+      // up to the LEFT: 135 degrees, not 45.
       var cases = [
         { name: "horizontal", fn: function (c, r) { return (r % 8 < 4) ? 0.2 : 0.8; }, degrees: 0 },
         { name: "vertical", fn: function (c) { return (c % 8 < 4) ? 0.2 : 0.8; }, degrees: 90 },
@@ -4641,7 +4641,7 @@
     function () {
       // A smooth ramp that passes through t = 1 -> t = 0 twice. The real
       // slope between neighbours is 2/W everywhere; a naive difference sees
-      // a near-1.0 cliff at each wrap - which the rose would weigh as an
+      // a near-1.0 cliff at each wrap, which the rose would weigh as an
       // edge (its total weight is the summed Sobel |grad|, so the mean per
       // sample should be exactly the slope) and Topography would curve
       // around (a ramp has zero curvature, so every sample should be flat).
@@ -4668,7 +4668,7 @@
 
   addTest(
     "A wrapping Output averages round the wheel, not across it",
-    "The mean of 0.98 and 0.02 is 0, not 0.5 - a plain average lands on the opposite side",
+    "The mean of 0.98 and 0.02 is 0, not 0.5: a plain average lands on the opposite side",
     function () {
       var W = 8, H = 8;
       var f = statsField(W, H, function (c, r) { return ((c + r) % 2 === 0) ? 0.98 : 0.02; });
@@ -4731,7 +4731,7 @@
 
   addTest(
     "A block too tall for one step is still counted exactly once, all of it",
-    "Every pass is split by rows so a full-resolution block never hitches a frame - a split that skipped or repeated a row would be invisible in the numbers",
+    "Every pass is split by rows so a full-resolution block never hitches a frame: a split that skipped or repeated a row would be invisible in the numbers",
     function () {
       // Tall enough to force the row splitting to actually split (see
       // addRowPass and SAMPLES_PER_STEP in fractal-stats.js). Each row
@@ -4771,14 +4771,14 @@
       //   t = 0.5 + 0.3 cos(pi c / 2) + 0.2 cos(pi r / H)
       //
       // Across the columns it is a cosine of period four, so every column
-      // c = 0 (mod 4) is a crest - the highest point looking east-west, with
-      // both neighbours 0.3 lower - and every column c = 2 (mod 4) a
+      // c = 0 (mod 4) is a crest, the highest point looking east-west, with
+      // both neighbours 0.3 lower, and every column c = 2 (mod 4) a
       // trough. Along the columns the surface only tilts gently (the
       // second difference of the slow cosine is a few ten-thousandths, far
       // inside the "level along the ridge" allowance), so each crest runs
       // the full interior height: rows 1 to 62, sixty-two samples, sixty-one
       // unit steps. The odd columns are monotone slopes across and along,
-      // maxima in no direction, and so belong to no line at all - which is
+      // maxima in no direction, and so belong to no line at all, which is
       // what keeps every crest its own piece.
       var W = 64, H = 64;
       var f = statsField(W, H, function (c, r) {
@@ -4793,12 +4793,12 @@
       if (!g.longestRidge) problems.push("no ridge found at all");
       if (!g.longestValley) problems.push("no valley found at all");
       if (g.longestRidge && g.longestValley) {
-        // Every step is one row, so the length is a plain count - no
+        // Every step is one row, so the length is a plain count: no
         // diagonal steps to weigh at root two.
         check("ridge length", g.longestRidge.length, 61);
         check("valley length", g.longestValley.length, 61);
-        check("ridge in screens", g.longestRidgeDiagonals, 61 / diag);
-        check("valley in screens", g.longestValleyDiagonals, 61 / diag);
+        check("ridge in of the diagonal", g.longestRidgeDiagonals, 61 / diag);
+        check("valley in of the diagonal", g.longestValleyDiagonals, 61 / diag);
         check("diagonal", g.diagonalSamples, diag);
         // The path is what the map overlay draws, so its SHAPE matters as
         // much as its length: one column, every row in it, no repeats.
@@ -4831,7 +4831,7 @@
         pass: problems.length === 0,
         detail: problems.length ? problems.join("; ")
           : "ridge " + g.longestRidge.length + " samples (" + g.longestRidgeDiagonals.toFixed(4) +
-            " screens), valley " + g.longestValley.length + " samples (" + g.longestValleyDiagonals.toFixed(4) + ")",
+            " of the diagonal), valley " + g.longestValley.length + " samples (" + g.longestValleyDiagonals.toFixed(4) + ")",
       };
     }
   );
@@ -4843,7 +4843,7 @@
       var W = 64, H = 64, diag = Math.sqrt(W * W + H * H), problems = [], detail = [];
       // Smooth bands running up to the left: crests along c + r = 64 (and
       // every 32 either side). The middle one crosses the whole interior
-      // corner to corner as a chain of diagonal steps - 61 samples, 60 root-
+      // corner to corner as a chain of diagonal steps: 61 samples, 60 root-
       // two steps, 94% of the block's own diagonal. Diagonal bands are the
       // hard case: the across-ridge direction is not one of the two axes,
       // and consecutive crest samples are diagonal neighbours.
@@ -4857,9 +4857,9 @@
         var got = sign > 0 ? g.longestRidgeDiagonals : g.longestValleyDiagonals;
         var found = sign > 0 ? g.longestRidge : g.longestValley;
         if (!found || Math.abs(got - want) > 0.03) {
-          problems.push(name + " " + (found ? got.toFixed(3) : "missing") + " screens (expected " + want.toFixed(3) + ")");
+          problems.push(name + " " + (found ? got.toFixed(3) : "missing") + " of the diagonal (expected " + want.toFixed(3) + ")");
         }
-        detail.push(name + " " + (found ? got.toFixed(3) : "-") + " screens");
+        detail.push(name + " " + (found ? got.toFixed(3) : "-") + " of the diagonal");
       });
 
       // Horizontal bands: the crest is a row, 62 samples and 61 unit steps
@@ -4867,7 +4867,7 @@
       var rows = statsField(W, H, function (c, r) { return 0.5 + 0.5 * Math.cos(2 * Math.PI * r / 16); });
       var h = runStatsJob({ width: W, height: H, t: rows.t, circular: false, groups: { features: true } }).groups.features;
       if (!h.longestRidge || Math.abs(h.longestRidgeDiagonals - 61 / diag) > 1e-9) {
-        problems.push("horizontal crest " + (h.longestRidge ? h.longestRidgeDiagonals.toFixed(3) : "missing") + " screens (expected " + (61 / diag).toFixed(3) + ")");
+        problems.push("horizontal crest " + (h.longestRidge ? h.longestRidgeDiagonals.toFixed(3) : "missing") + " of the diagonal (expected " + (61 / diag).toFixed(3) + ")");
       }
       detail.push("horizontal crest " + (h.longestRidge ? h.longestRidgeDiagonals.toFixed(3) : "-"));
 
@@ -4881,14 +4881,14 @@
         var ng = runStatsJob({ width: N, height: N, t: noise.t, circular: false, groups: { features: true } }).groups.features;
         worst = Math.max(worst, ng.longestRidgeDiagonals, ng.longestValleyDiagonals);
         if (ng.longestRidgeDiagonals > 0.15 || ng.longestValleyDiagonals > 0.15) {
-          problems.push("noise (seed " + seed + ") ridge " + ng.longestRidgeDiagonals.toFixed(3) + ", valley " + ng.longestValleyDiagonals.toFixed(3) + " screens");
+          problems.push("noise (seed " + seed + ") ridge " + ng.longestRidgeDiagonals.toFixed(3) + ", valley " + ng.longestValleyDiagonals.toFixed(3) + " of the diagonal");
         }
       });
-      detail.push("longest line in noise " + worst.toFixed(3) + " screens");
+      detail.push("longest line in noise " + worst.toFixed(3) + " of the diagonal");
 
       // A float32 plateau is not flat to the last bit: its rounding is a
       // staircase of one-bit steps, and a one-bit groove one column wide is
-      // a perfect valley by every geometric test above - straight, level
+      // a perfect valley by every geometric test above, straight, level
       // along itself, lower than both neighbours. A view that is nothing
       // but such a plateau, every other column two bits lower, must report
       // no valley at all rather than sixty-two grooves the full height of
@@ -4911,11 +4911,11 @@
       function edgeOf(fn, w, h) {
         return runStatsJob({ width: w || W, height: h || H, t: statsField(w || W, h || H, fn).t, circular: false, groups: { features: true } }).groups.features;
       }
-      // A vertical step: the edge is one column, every interior row - 62
+      // A vertical step: the edge is one column, every interior row, 62
       // samples, 61 unit steps.
       var v = edgeOf(function (c) { return c < 32 ? 0.2 : 0.8; });
       if (!v.longestEdge || Math.abs(v.longestEdgeDiagonals - 61 / diag) > 1e-9) {
-        problems.push("vertical step: " + (v.longestEdge ? v.longestEdgeDiagonals.toFixed(3) : "missing") + " screens (expected " + (61 / diag).toFixed(3) + ")");
+        problems.push("vertical step: " + (v.longestEdge ? v.longestEdgeDiagonals.toFixed(3) : "missing") + " of the diagonal (expected " + (61 / diag).toFixed(3) + ")");
       }
       // A diagonal step, corner to corner: the hard case for the direction
       // snapping, and for consecutive edge samples being diagonal
@@ -4923,23 +4923,23 @@
       var d = edgeOf(function (c, r) { return c + r < 64 ? 0.2 : 0.8; });
       var wantDiag = 60 * Math.SQRT2 / diag;
       if (!d.longestEdge || Math.abs(d.longestEdgeDiagonals - wantDiag) > 0.04) {
-        problems.push("diagonal step: " + (d.longestEdge ? d.longestEdgeDiagonals.toFixed(3) : "missing") + " screens (expected " + wantDiag.toFixed(3) + ")");
+        problems.push("diagonal step: " + (d.longestEdge ? d.longestEdgeDiagonals.toFixed(3) : "missing") + " of the diagonal (expected " + wantDiag.toFixed(3) + ")");
       }
-      detail.push("vertical " + v.longestEdgeDiagonals.toFixed(3) + ", diagonal " + (d.longestEdge ? d.longestEdgeDiagonals.toFixed(3) : "-") + " screens");
+      detail.push("vertical " + v.longestEdgeDiagonals.toFixed(3) + ", diagonal " + (d.longestEdge ? d.longestEdgeDiagonals.toFixed(3) : "-") + " of the diagonal");
       // A one-sample line is a ridge, not an edge: its two flanks are steps
       // that do NOT hold their level, and the plateau test is what says so.
       var line = edgeOf(function (c) { return c === 32 ? 0.9 : 0.2; });
       if (line.longestEdge) problems.push("a one-sample line read as an edge " + line.longestEdge.length + " samples long");
       if (!line.longestRidge || line.longestRidge.length !== 61) problems.push("the same line was not found as a 61-sample ridge");
       // A smooth ramp steps 2/63 of the range between two samples: over
-      // the follow threshold, under the seed one - so candidates everywhere
+      // the follow threshold, under the seed one, so candidates everywhere
       // and no edge anywhere, which is the hysteresis doing its job.
       var ramp = edgeOf(function (c) { return c / (W - 1); });
       if (ramp.longestEdge) problems.push("a smooth ramp read as an edge");
       // A step that fades: 0.6 of the range at the bottom row, shrinking
       // smoothly to 0.04 (under the seed, over the follow threshold) at the
       // top. One edge the full height, followed through the faint rows from
-      // the strong ones - which is what the second threshold is for.
+      // the strong ones, which is what the second threshold is for.
       var fading = edgeOf(function (c, r) { return c < 32 ? 0.2 : 0.2 + 0.6 * (1 - (r / (H - 1)) * (14 / 15)); });
       if (!fading.longestEdge || fading.longestEdge.length !== 61) {
         problems.push("a fading edge came out " + (fading.longestEdge ? fading.longestEdge.length : 0) + " samples (expected 61)");
@@ -4951,9 +4951,92 @@
         var rnd = mulberry32(seed), N = 128;
         var ng = edgeOf(function () { return rnd(); }, N, N);
         worst = Math.max(worst, ng.longestEdgeDiagonals);
-        if (ng.longestEdgeDiagonals > 0.15) problems.push("noise (seed " + seed + ") edge " + ng.longestEdgeDiagonals.toFixed(3) + " screens");
+        if (ng.longestEdgeDiagonals > 0.15) problems.push("noise (seed " + seed + ") edge " + ng.longestEdgeDiagonals.toFixed(3) + " of the diagonal");
       });
-      detail.push("longest edge in noise " + worst.toFixed(3) + " screens");
+      detail.push("longest edge in noise " + worst.toFixed(3) + " of the diagonal");
+      return { pass: problems.length === 0, detail: problems.length ? problems.join("; ") : detail.join(", ") };
+    }
+  );
+
+  addTest(
+    "Contours and catchments each find the picture they were built for",
+    "Topography's remaining rows: exact level sets (closed and open, median, return level) and the watershed",
+    function () {
+      var W = 64, H = 64, diag = Math.sqrt(W * W + H * H), problems = [], detail = [];
+      function feat(fn, opts) {
+        var spec = { width: W, height: H, t: statsField(W, H, fn).t, circular: false, groups: { features: true } };
+        if (opts) for (var k in opts) spec[k] = opts[k];
+        return runStatsJob(spec).groups.features;
+      }
+      // A round bump on a flat floor: every contour is a loop, so there is
+      // no open contour at all, and the return level 0.7 is a circle of
+      // radius sqrt(200 ln 2) = 11.8 samples, so about 74 samples round.
+      var bump = feat(function (c, r) { return 0.5 + 0.4 * Math.exp(-((c - 32) * (c - 32) + (r - 32) * (r - 32)) / 200); }, { returnT: 0.7 });
+      if (bump.longestOpenContour) problems.push("bump: an open contour " + bump.longestOpenContour.length.toFixed(1) + " long on a picture with none");
+      if (!bump.returnContour || Math.abs(bump.returnContour.length - 2 * Math.PI * Math.sqrt(200 * Math.LN2)) > 3) {
+        problems.push("bump: return line " + (bump.returnContour ? bump.returnContour.length.toFixed(1) : "missing") + " (expected " + (2 * Math.PI * Math.sqrt(200 * Math.LN2)).toFixed(1) + ")");
+      }
+      if (bump.returnContour && bump.returnContour.path && bump.returnContour.path.length < 40) problems.push("bump: return line path has only " + bump.returnContour.path.length / 2 + " points");
+      detail.push("bump return line " + (bump.returnContour ? bump.returnContour.length.toFixed(1) : "-") + " samples round");
+      // The same bump with a column of NaN cut through it (a simulation
+      // that blew up): every ring is severed there, and the longest open
+      // contour is a ring walked from one side of the cut round to the
+      // other. A contour that ends at a hole (or at an input seam) is open,
+      // however far from the block's border it ends, and the walk has to
+      // start at that end to cover the whole of it.
+      var cut = feat(function (c, r) { return c === 40 ? NaN : 0.5 + 0.4 * Math.exp(-((c - 32) * (c - 32) + (r - 32) * (r - 32)) / 200); });
+      if (!cut.longestOpenContour || !cut.longestOpenContour.path) problems.push("cut bump: no open contour");
+      else {
+        var cp = cut.longestOpenContour.path;
+        var endsAtCut = Math.abs(cp[0] - 40) <= 1.5 && Math.abs(cp[cp.length - 2] - 40) <= 1.5;
+        if (!endsAtCut) problems.push("cut bump: the open contour runs from x=" + cp[0].toFixed(1) + " to x=" + cp[cp.length - 2].toFixed(1) + " (expected both ends at the cut, x=40)");
+        // The outer ring, radius 30.4 round (32, 32), keeps the 211 degrees
+        // of its circumference left of the cut: about 112 samples.
+        if (Math.abs(cut.longestOpenContour.length - 112) > 8) problems.push("cut bump: the open contour is " + cut.longestOpenContour.length.toFixed(0) + " long (expected about 112)");
+      }
+      detail.push("cut bump open contour " + (cut.longestOpenContour ? cut.longestOpenContour.length.toFixed(0) : "-") + " long");
+      // A ramp: every contour is a straight column, bottom border to top,
+      // 63 samples long, and none is a loop. The median contour is the
+      // middle column.
+      var ramp = feat(function (c) { return c / (W - 1); });
+      if (!ramp.longestOpenContour || Math.abs(ramp.longestOpenContour.length - (H - 1)) > 1e-6) {
+        problems.push("ramp: open contour " + (ramp.longestOpenContour ? ramp.longestOpenContour.length.toFixed(3) : "missing") + " (expected " + (H - 1) + ")");
+      }
+      if (!ramp.medianContour || Math.abs(ramp.medianContour.length - (H - 1)) > 1e-6 || Math.abs(ramp.medianContour.level - 0.5) > 0.01) {
+        problems.push("ramp: median contour " + (ramp.medianContour ? ramp.medianContour.length.toFixed(3) + " at " + ramp.medianContour.level.toFixed(3) : "missing"));
+      }
+      if (ramp.returnContour !== undefined) problems.push("ramp: a return line with no return level given");
+      // A thin ridge line that ends inside the block: every contour round
+      // it is closed, a hairpin up one side and down the other, so there is
+      // no open contour, and the return level 0.5 is one such hairpin,
+      // reported as the return line.
+      var S = 256;
+      function pow8(x) { x = x * x; x = x * x; return x * x; }
+      var spike = runStatsJob({ width: S, height: S, circular: false, groups: { features: true }, returnT: 0.5,
+        t: statsField(S, S, function (c, r) {
+          return 0.2 + 0.7 * Math.exp(-pow8((c - 128) / 1.2)) * Math.exp(-pow8((r - 128) / 80));
+        }).t }).groups.features;
+      if (spike.longestOpenContour) problems.push("spike: an open contour on a picture whose contours all close");
+      if (!spike.returnContour || !spike.returnContour.closed) problems.push("spike: the return line " + (spike.returnContour ? "is not the closed hairpin" : "is missing"));
+      detail.push("spike return hairpin " + (spike.returnContour ? spike.returnContour.length.toFixed(0) : "-") + " long");
+      // Two wells: exactly two catchments, divided along the middle column.
+      var wells = feat(function (c, r) {
+        var d1 = (c - 16) * (c - 16) + (r - 32) * (r - 32), d2 = (c - 48) * (c - 48) + (r - 32) * (r - 32);
+        return 1 - 0.4 * Math.exp(-d1 / 400) - 0.4 * Math.exp(-d2 / 400);
+      });
+      if (!wells.watershed || wells.watershed.basins !== 2) problems.push("wells: " + (wells.watershed ? wells.watershed.basins : "no") + " catchments (expected 2)");
+      if (wells.watershed && wells.watershed.mask) {
+        var onMiddle = 0, elsewhere = 0;
+        for (var r2 = 0; r2 < H; r2++) for (var c2 = 0; c2 < W; c2++) {
+          if (!wells.watershed.mask[r2 * W + c2]) continue;
+          if (Math.abs(c2 - 31.5) <= 1.5) onMiddle++; else elsewhere++;
+        }
+        if (onMiddle < H - 2 || elsewhere > 0) problems.push("wells: divides " + onMiddle + " on the middle column, " + elsewhere + " elsewhere");
+      }
+      detail.push("wells " + (wells.watershed ? wells.watershed.basins : "-") + " basins");
+      // A wrapping Output gets no median contour and no catchments.
+      var wrapped = runStatsJob({ width: W, height: H, t: statsField(W, H, function (c) { return c / (W - 1); }).t, circular: true, groups: { features: true } }).groups.features;
+      if (wrapped.medianContour !== undefined || wrapped.watershed) problems.push("a wrapping Output reported a median contour or catchments");
       return { pass: problems.length === 0, detail: problems.length ? problems.join("; ") : detail.join(", ") };
     }
   );
@@ -4965,7 +5048,7 @@
   // and keeps each simulation in RGBA32F texture layers between draws (see
   // physics-grid-codegen.js's playbackStateVariables). That only matches an
   // uninterrupted run if the round trip is lossless AND nothing a later step
-  // reads was left out of the state - and both failures look the same from
+  // reads was left out of the state, and both failures look the same from
   // here: run a strip of pixels straight through, run the same strip again
   // in legs with a save and reload between each, and compare every state
   // float bit for bit.
@@ -5029,7 +5112,7 @@
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, t);
       gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA32F, width, 1, layers);
       // A float texture isn't filterable, and a sampler whose filter asks
-      // for filtering reads back as incomplete - all zeros - even through
+      // for filtering reads back as incomplete, all zeros, even through
       // texelFetch.
       gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
@@ -5127,7 +5210,7 @@
 
   addTest(
     "Grid playback: pinball's state round trip is exact in both precisions, written across several draws",
-    "Anchored walls are deliberately NOT carried in the state (stepOnce never writes them) - if that ever stops being true, this is where it shows",
+    "Anchored walls are deliberately NOT carried in the state (stepOnce never writes them), if that ever stops being true, this is where it shows",
     function () {
       var scene = buildDeepZoomScene();
       scene.edgeMode = "wrap";
@@ -5139,7 +5222,7 @@
 
   addTest(
     "Grid playback: a splitter scene's spawn slots survive the round trip",
-    "A split rewrites a spawn slot's size, mass, alive flag and lineage mid-run, and liveCount decides which slot the next split takes - all of it has to be state",
+    "A split rewrites a spawn slot's size, mass, alive flag and lineage mid-run, and liveCount decides which slot the next split takes: all of it has to be state",
     function () {
       var scene = buildSplitterScene(385);
       scene.xInput = { body: 1, property: "x" };
@@ -5150,7 +5233,7 @@
 
   addTest(
     "Grid playback: mutual gravity's state round trip is exact",
-    "Mutual Gravity's pull is recomputed from the positions every step - stateless by design, so nothing beyond the six accumulators should need carrying",
+    "Mutual Gravity's pull is recomputed from the positions every step: stateless by design, so nothing beyond the six accumulators should need carrying",
     function () {
       var scene = {
         mutualGravity: true,
@@ -5174,8 +5257,8 @@
   // ---- Shared links (share-url.js) ----
   //
   // The address bar carries the whole scene, and on the map the view of it.
-  // Everything a link gets wrong is wrong silently - it opens, on something
-  // else - so what is pinned here is that a link says exactly what it was
+  // Everything a link gets wrong is wrong silently, it opens, on something
+  // else, so what is pinned here is that a link says exactly what it was
   // written from, and that the ways one arrives damaged are survived.
 
   // Key order is the writer's business, not part of what a scene says.
@@ -5218,7 +5301,7 @@
 
   addTest(
     "A shared link says exactly the scene it was written from, and says it again unchanged",
-    "share-url.js - the scene is the address bar now, so anything the link drops or rounds differently from serializeScene is a scene that silently changes when it is shared. Re-encoding what was decoded must give the same text, or the address would rewrite itself under a page that had only just loaded it",
+    "share-url.js: the scene is the address bar now, so anything the link drops or rounds differently from serializeScene is a scene that silently changes when it is shared. Re-encoding what was decoded must give the same text, or the address would rewrite itself under a page that had only just loaded it",
     function () {
       var scene = everythingScene();
       var fragment = ShareUrl.encode({ page: "bldr", scene: scene });
@@ -5240,7 +5323,7 @@
 
   addTest(
     "An absent field means the FORMAT's default, not whatever the editor starts a scene with today",
-    "share-url.js's wire defaults - a field at its default is left out of a link, so what 'left out' means is fixed by every link already shared. decode() fills each one in explicitly so that nothing downstream can substitute a newer default of its own",
+    "share-url.js's wire defaults: a field at its default is left out of a link, so what 'left out' means is fixed by every link already shared. decode() fills each one in explicitly so that nothing downstream can substitute a newer default of its own",
     function () {
       var decoded = ShareUrl.decode("#bldr/body:ci:0:0:0:30,frmw:900,frmh:600").scene;
       var want = { mutualGravity: false, collisionsEnabled: true, simulationSteps: 1000, edgeMode: "sticky", maxSimulationBodies: 20 };
@@ -5259,7 +5342,7 @@
     "A link's view center keeps every digit the zoom can use, from 1x to 1e26x",
     "share-url.js's formatDD/parseDD - the map holds its center as a double-double because one float64 cannot tell neighbouring pixels apart past ~1e13x, and a link that carried only the float64 would reopen a deep view somewhere else entirely. The center travels as one decimal with zoom-dependent places; this checks it lands within a millionth of a pixel at every depth, by exact integer arithmetic rather than by the floating point under test",
     function () {
-      if (typeof BigInt !== "function") return { pass: true, detail: "no BigInt in this browser - centers keep float64 precision, which is as deep as it can render" };
+      if (typeof BigInt !== "function") return { pass: true, detail: "no BigInt in this browser: centers keep float64 precision, which is as deep as it can render" };
       function exact(x) { // x === m * 2^e
         var view = new DataView(new ArrayBuffer(8));
         view.setFloat64(0, x);
@@ -5301,7 +5384,7 @@
 
   addTest(
     "A map link carries its view, and nothing at all for a view left at its defaults",
-    "share-url.js's view fields - zoom, display mode (Color Zoom counted as one), precision, speed, volume and the three kinds of inspection, each written only when it differs from its default so an untouched map's link is just its scene",
+    "share-url.js's view fields: zoom, display mode (Color Zoom counted as one), precision, speed, volume and the three kinds of inspection, each written only when it differs from its default so an untouched map's link is just its scene",
     function () {
       var scene = everythingScene();
       var center = PhysicsDF.twoSum64(213.41826094537, 3.1e-15);
@@ -5374,7 +5457,7 @@
 
   addTest(
     "A movie's camera lands exactly on every keyframe, however far it pans while it zooms",
-    "movie-path.js's path() - the textbook form of van Wijk & Nuij's zoom-and-pan path gives the position as a FRACTION of the whole pan, good to one part in 1e16, and subtracts two numbers that grow with the zoom ratio to get it. Both are harmless across a UI transition's 10x and ruinous across this map's 1e12x: on the move below the textbook form ends thousands of views from its keyframe. Each half of the path is measured from its own end instead, so both ends are exact and the halves have to meet in the middle",
+    "movie-path.js's path(): the textbook form of van Wijk & Nuij's zoom-and-pan path gives the position as a FRACTION of the whole pan, good to one part in 1e16, and subtracts two numbers that grow with the zoom ratio to get it. Both are harmless across a UI transition's 10x and ruinous across this map's 1e12x: on the move below the textbook form ends thousands of views from its keyframe. Each half of the path is measured from its own end instead, so both ends are exact and the halves have to meet in the middle",
     function () {
       var cases = [
         ["gentle", movieKeyframe(0, 0, 1000), movieKeyframe(900, -400, 300)],
@@ -5517,14 +5600,14 @@
   // ---- Springs ----
   //
   // A spring is a force with a lever arm, which makes it the first thing in
-  // the engine to produce a torque - and it exists three times over (the JS
+  // the engine to produce a torque, and it exists three times over (the JS
   // engine, the float32 GLSL and the multi-float GLSL), with a fourth and
   // fifth copy of how its anchors follow a resized body (physics-hinge-
   // geometry.js and physics-grid-codegen.js). Everything below is one of
   // those pairs being held to the other, or the engine being held to physics.
 
   // Kinetic + spring + (uniform) gravitational energy. `dt` because the
-  // stiffness actually in force can depend on it - see
+  // stiffness actually in force can depend on it: see
   // PhysicsEngine.springEffectiveStiffness.
   function springSceneEnergy(scene, dt) {
     var e = PhysicsEngine.springPotentialEnergy(scene, dt);
@@ -5536,7 +5619,7 @@
   }
 
   // A ball on a spring from the background, a second ball on a spring from
-  // the first - both springs attached OFF-center, so every term of the force,
+  // the first: both springs attached OFF-center, so every term of the force,
   // the torque and the angular integration is exercised.
   function buildSpringChain() {
     var a = PhysicsEngine.createCircle(300, 300, 30, false), b = PhysicsEngine.createCircle(520, 340, 20, false);
@@ -5644,7 +5727,7 @@
   );
 
   addTest(
-    "A spring too stiff for a small body is limited, not unstable - in JS and on the GPU alike",
+    "A spring too stiff for a small body is limited, not unstable: in JS and on the GPU alike",
     "the step is fixed, so past (omega*dt)^2 = 4 an oscillation's energy grows without limit, and ANGULAR speed has no cap to run into. Two things guard it, and the GLSL has to apply both identically from per-pixel masses: springEffectiveStiffness limits the stiffness to what the two ends can take, and springSpin integrates the spin implicitly once a body's swing about its own center - driven by the spring's TENSION, which no stiffness limit bounds - is too fast for the step. Unguarded, this exact scene spun its circle to 7,000 rad/s and multiplied its energy by 580",
     function () {
       // The smallest circle, the stiffest spring, attached off-center, and stretched far enough
@@ -5673,7 +5756,7 @@
       // JS engine alone is 0.2px by step 112), so a longer run would be
       // measuring that, not whether the two engines apply the same guard.
       // Energy is allowed the wobble a step this coarse for the spring gives
-      // (omega*dt is 0.53 here) - what it must not do is CLIMB.
+      // (omega*dt is 0.53 here), what it must not do is CLIMB.
       var js = PhysicsEngine.runTrajectory(build(), 60, DT);
       var gap = worstTrajectoryGap(js, PhysicsGPU.runSceneOnGPU(build(), 60, "df"), 60, 1);
       return {
@@ -5700,7 +5783,7 @@
 
   addTest(
     "A spring whose ends pass through each other no longer puts ridges in the map",
-    "a Hookean spring with a rest length pushes hardest at zero length, and as its ends pass through each other that push reverses in no distance at all - so each pass landed one 1/60s sample just before the flip or just after it, and starts a hair apart got a whole step of k*rest/m in opposite directions. Measured before the fix on this scene: neighbours 0.005px apart came out up to 261px apart, 124 such jumps in 2px of travel, and a gap that would not close under refinement (71px at 0.0005px). Inside an eighth of its rest length the law is now a smooth polynomial (PhysicsEngine.springForceFactor) meeting Hooke in value, slope and curvature",
+    "a Hookean spring with a rest length pushes hardest at zero length, and as its ends pass through each other that push reverses in no distance at all, so each pass landed one 1/60s sample just before the flip or just after it, and starts a hair apart got a whole step of k*rest/m in opposite directions. Measured before the fix on this scene: neighbours 0.005px apart came out up to 261px apart, 124 such jumps in 2px of travel, and a gap that would not close under refinement (71px at 0.0005px). Inside an eighth of its rest length the law is now a smooth polynomial (PhysicsEngine.springForceFactor) meeting Hooke in value, slope and curvature",
     function () {
       function finalY(t, sub) {
         var scene = buildPassThroughScene(t), dt = DT / sub;
@@ -5767,7 +5850,7 @@
 
   addTest(
     "Springs at the frame's edges: a tethered group never wraps, a free one wraps as one (JS and GPU)",
-    "wrapping one end of a spring alone stretches it by a whole frame in a single step. PhysicsEngine.springGroups is the rule that prevents it - a group tied to the background never wraps, any other wraps together when its leader does - and generateStepOnceGLSL runs the same rule at codegen time. A member that merely follows must also stay OFF Sticky Edges' watch list, or findWrapStopStep solves for a crossing that never happened",
+    "wrapping one end of a spring alone stretches it by a whole frame in a single step. PhysicsEngine.springGroups is the rule that prevents it, a group tied to the background never wraps, any other wraps together when its leader does, and generateStepOnceGLSL runs the same rule at codegen time. A member that merely follows must also stay OFF Sticky Edges' watch list, or findWrapStopStep solves for a crossing that never happened",
     function () {
       var W = 600, H = 400;
       function tethered() {
@@ -5845,7 +5928,7 @@
 
   addTest(
     "Springs survive every copy of a scene: clone, delete-and-reindex, authored JSON, and a share link",
-    "a field one of these forgets is wiped silently - physics-ui.js clones the scene on Play and back on Reset, deleteBody renumbers everything after the deleted body, and a link or an exported file is the only copy of a scene someone else ever sees. A scene WITHOUT springs must also come through unchanged, so nothing written before they existed reads differently now",
+    "a field one of these forgets is wiped silently: physics-ui.js clones the scene on Play and back on Reset, deleteBody renumbers everything after the deleted body, and a link or an exported file is the only copy of a scene someone else ever sees. A scene WITHOUT springs must also come through unchanged, so nothing written before they existed reads differently now",
     function () {
       var scene = buildSpringLockstepScene();
       var cloned = JSON.stringify(PhysicsEngine.cloneScene(scene).springs) === JSON.stringify(scene.springs);
@@ -5882,7 +5965,7 @@
 
   addTest(
     "A scene with no springs compiles to exactly the shader it always did",
-    "every existing scene, sample and shared link has no springs. The spring codegen is written to emit nothing at all for them - no accumulator, no parameter, no angular term in either leg - so their shaders (and with them every picture already made) are untouched. An empty `springs` list and no list at all must both produce that same source",
+    "every existing scene, sample and shared link has no springs. The spring codegen is written to emit nothing at all for them, no accumulator, no parameter, no angular term in either leg, so their shaders (and with them every picture already made) are untouched. An empty `springs` list and no list at all must both produce that same source",
     function () {
       function build(withField) {
         var scene = {
@@ -5936,7 +6019,7 @@
   }
 
   // `only`, when given, runs just the tests whose name contains it (case
-  // ignored) - physics-tests.html?only=spring. The whole suite takes minutes,
+  // ignored): physics-tests.html?only=spring. The whole suite takes minutes,
   // which is the wrong loop to be in while working on one corner of it; the
   // summary says how many were left out, so a filtered pass can't be
   // mistaken for a clean bill.

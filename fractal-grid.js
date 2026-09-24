@@ -1,15 +1,15 @@
 // This file is part of Chaos Accelerator, licensed under the Common Public
-// Attribution License, Version 1.0 (CPAL-1.0) - see LICENSE in the project
+// Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in the project
 // root, or https://chaosaccelerator.com/license for a hosted copy.
 
 // Renders every pixel's offset scene run forward a fixed number of steps,
 // colored by the Output property's value at the END of that run. The scene
 // is handed over by the app shell (from #editor-view's "Send to Fractal
-// Grid" button, or from a shared link - see transition.js) and compiled into
-// WebGL2 shaders - there's no live editing here, unlike the physics simulator.
+// Grid" button, or from a shared link, see transition.js) and compiled into
+// WebGL2 shaders, there's no live editing here, unlike the physics simulator.
 // Each render (on load, pan, zoom, or resize) redoes the full offset +
 // simulation for every pixel from scratch, for however many steps the
-// timeline currently shows - which is the Settings panel's Simulation
+// timeline currently shows, which is the Settings panel's Simulation
 // Duration unless the timeline has been moved. Playing that timeline is the
 // one thing that can't afford to start from scratch, and doesn't: see the
 // Playback section near the end.
@@ -27,7 +27,7 @@
   // Started ONCE and then kept alive, rather than torn down and rebooted
   // per visit. Every window-level listener it binds is already guarded by
   // its own state (a drag that isn't happening, a tip that isn't showing),
-  // so a hidden grid's listeners are inert - whereas unbinding 37 of them
+  // so a hidden grid's listeners are inert, whereas unbinding 37 of them
   // and reliably dropping a WebGL context would be a lot of machinery to
   // get exactly right for no visible difference. Re-entering with a
   // different scene goes through setScene() instead (see the end of boot).
@@ -51,17 +51,17 @@
   //
   // Both pages have a Settings panel, and they are the same panel: there is
   // exactly one set of controls in the document (#shared-settings-body) and
-  // it is MOVED into whichever page is on screen - the builder's panel or the
-  // map's card - by placeSettings, which the app shell calls as it switches
+  // it is MOVED into whichever page is on screen, the builder's panel or the
+  // map's card, by placeSettings, which the app shell calls as it switches
   // pages (see showOnly in transition.js). Nothing is copied, so nothing can
   // fall out of step.
   //
   // Most of those controls steer the map's renderer, which does not exist
   // until the first Fractal-ize (see "Started on demand", above). Until then
   // the controls themselves are the record of what was chosen: the little
-  // below keeps them coherent with each other - the preset slider sets the
+  // below keeps them coherent with each other, the preset slider sets the
   // others and follows them, the two resolution handles don't cross, the
-  // readouts read - and boot() takes its starting values from them
+  // readouts read, and boot() takes its starting values from them
   // (readPerf, readPrecision) instead of from constants. Once the map has
   // started, its own wiring of these same elements takes over and everything
   // here stands down (`started`).
@@ -188,7 +188,7 @@
       el.resetTips.textContent = "Tips reset";
       setTimeout(function () { el.resetTips.textContent = original; }, 1500);
     });
-    // "Deletes all cookies for the page" per the user's ask - this app keeps
+    // "Deletes all cookies for the page" per the user's ask: this app keeps
     // its state in localStorage, not cookies, so that (plus any cookies this
     // origin might still pick up some day) is what actually needs clearing.
     // A hard reload after wiping is the simplest way to put every module back
@@ -203,7 +203,7 @@
         });
       } catch (err) { /* same */ }
       // The scene is in the address bar too (see share-url.js), and a plain
-      // reload would load it straight back in - so the address is cleared
+      // reload would load it straight back in, so the address is cleared
       // first, which is what makes this the reset it says it is.
       try { global.history.replaceState(null, "", global.location.pathname + global.location.search); } catch (err) { /* reloads where it is */ }
       global.location.reload();
@@ -233,14 +233,14 @@
   function boot(bootScene) {
 
   var DEFAULT_CENTER = { x: 0, y: 0 };
-  // How much world the view spans across its reference height on load -
+  // How much world the view spans across its reference height on load,
   // and, because the readout reports DEFAULT_SCALE / view.scale, also
   // whatever the readout calls 1.00x. The two are the same number on
   // purpose: the framing you land on IS the origin of the zoom scale.
   //
-  // Was 200. The starting framing is now the one that used to read 0.17x -
+  // Was 200. The starting framing is now the one that used to read 0.17x,
   // wider, showing the whole structure on load instead of opening part-way
-  // into it - and raising this rebases the readout in the same move, so
+  // into it, and raising this rebases the readout in the same move, so
   // that framing reads 1.00x rather than 0.17x. Written as the derivation
   // rather than the product (1176.47) so the relationship to the old
   // framing stays legible.
@@ -249,8 +249,8 @@
   // scale that happens to produce it (~1.18e-23).
   //
   // Deliberately PAST the last precision's limit, not at it. Each
-  // multi-float precision (physics-df.js) buys about seven more digits -
-  // ~14 at two words, ~21 at three, ~28 at four - and the last of them has
+  // multi-float precision (physics-df.js) buys about seven more digits,
+  // ~14 at two words, ~21 at three, ~28 at four, and the last of them has
   // its full margin (64 of its own smallest steps per pixel, the same
   // margin every switch on the way down is made at) until about 1e24x. By
   // 1e26x a pixel is down to a step or less, so neighbouring pixels start
@@ -266,12 +266,12 @@
   // How far each pixel's own simulation is run before its Output value is
   // read. Settings > Simulation Duration. Seeded from the sent scene's own
   // simulationSteps (the same slider, authored on #editor-view) so a scene
-  // arrives showing what it was authored to show - but it's still freely
+  // arrives showing what it was authored to show, but it's still freely
   // adjustable from here afterward, purely for this page's own session, the
   // same way pan/zoom is: exploring a different depth doesn't rewrite what
   // was sent, since there's no path back to #editor-view's saved copy.
   //
-  // It's a plain uniform rather than something baked into the shader -
+  // It's a plain uniform rather than something baked into the shader:
   // GLSL ES 3.00 dropped ES 1.00's constant-loop-bound rule, so the step
   // loop can just read it. That keeps the slider instant (no recompile of
   // four programs per notch) and, measured, the dynamic bound is if
@@ -354,7 +354,7 @@
   // to be. U+23F8 has an emoji form, and a phone with no plain-text glyph
   // for it draws that: an orange tile in a row of white icons. A path looks
   // the same everywhere. (Same two in physics-ui.js, for the editor's
-  // transport.) Skipped when the button already shows the right one - the
+  // transport.) Skipped when the button already shows the right one: the
   // timeline's is refreshed every frame of playback.
   var PLAY_ICON_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72a.6.6 0 0 0 .92.5l10.55-6.86a.6.6 0 0 0 0-1L8.92 4.64a.6.6 0 0 0-.92.5z"></path></svg>';
   var PAUSE_ICON_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg>';
@@ -368,7 +368,7 @@
   // ---- Performance settings: the values ----
   //
   // Every knob that trades the picture's quality, or the page's smoothness,
-  // against how soon the picture is finished - gathered under Settings >
+  // against how soon the picture is finished: gathered under Settings >
   // Performance Settings, where a three-stop slider sets them all at once.
   // (The controls and the slider are wired near the end of boot, under
   // "Performance settings: the controls"; this is only the state, up here
@@ -376,7 +376,7 @@
   //
   // Two presets. HIGH is this page as it was tuned on a desktop, every value
   // what it used to be as a constant. LOW is everything known to help a GPU
-  // that cannot keep up - a phone first of all, but just as much an old
+  // that cannot keep up: a phone first of all, but just as much an old
   // laptop, which is why none of this asks what kind of device it is on: the
   // device only decides which preset the page STARTS at.
   //
@@ -386,7 +386,7 @@
   // to matter, and it sits just above this section in the card.)
   //
   //   endStride   - where refinement stops: 1 is a simulation per canvas
-  //                 pixel, 2 is one per 2x2 block - a quarter of the work,
+  //                 pixel, 2 is one per 2x2 block, a quarter of the work,
   //                 and on a phone's pixel pitch still a sharp picture.
   //   antialias   - three more full-resolution passes after the picture is
   //                 complete. Four times the work of not doing it.
@@ -401,14 +401,14 @@
   //                 refresh). See frameBaseMs.
   //   drawMs      - how long ONE draw may run. See sliceTargetMs.
   //   playbackMB  - Map Evolution's state budget. See playbackStateMaxBytes.
-  //   gestureFirst - while the map is being dragged or pinched, render
+  //   gestureFirst, while the map is being dragged or pinched, render
   //                 NOTHING: only move the picture already on screen. See
   //                 "Gestures first". Off on a GPU quick enough to redraw the
   //                 map under the finger, which looks better than moving an
   //                 old picture does; on where it is not, because there the
   //                 redraw is what makes the finger feel ignored.
   // (PERF_PRESETS itself, and which one a device starts at, are declared
-  // outside boot - see "One settings body" - because the Settings controls
+  // outside boot, see "One settings body", because the Settings controls
   // exist, and can be worked, before the map has ever been started.)
   //
   // The settings that are nothing BUT a number live here; reuse and the
@@ -420,9 +420,9 @@
   var perf = sharedSettings.readPerf();
 
   // What the performance readout reports (see "The performance readout",
-  // near the end of boot). Kept whether or not the readout is showing - each
+  // near the end of boot). Kept whether or not the readout is showing, each
   // of these is an assignment or an addition on a path that was already
-  // running - so switching it on shows the run in progress, not a blank.
+  // running, so switching it on shows the run in progress, not a blank.
   var perfStats = {
     gpuMs: 0,              // last GPU-timed frame, where there are timer queries
     workFrameMs: 0,        // smoothed interval between frames that did work
@@ -439,7 +439,7 @@
   // How many of the canvas's own pixels there are to a CSS pixel: the
   // display's ratio, up to the Canvas pixel density setting (perf.maxDpr).
   // Everything that sizes the backing store, or reasons about how fine "one
-  // pixel" is, asks this rather than window.devicePixelRatio - capped, the
+  // pixel" is, asks this rather than window.devicePixelRatio: capped, the
   // two differ, and the backing store is the one the simulations are counted
   // in.
   function gridDpr() {
@@ -449,12 +449,12 @@
 
   // ---- Reusable tip popover ----
   //
-  // One shared instance, repointed and reworded per call - not specific to
+  // One shared instance, repointed and reworded per call, not specific to
   // Color Zoom. To add another tip anywhere else in the app, just call
   // showTip(id, anchorEl, text) from wherever its condition is detected; id
   // is only ever used as the "don't tell me again" localStorage key, so
   // pick a short, stable, unique one for each distinct tip.
-  // Shared (not view-specific) - #editor-view's Settings panel Reset Tool
+  // Shared (not view-specific): #editor-view's Settings panel Reset Tool
   // Tips button clears this exact key too, so it works for tips shown on
   // either view from one place.
   var TIP_DISMISSED_KEY = "physicsAppDismissedTips";
@@ -478,7 +478,7 @@
     try {
       localStorage.setItem(TIP_DISMISSED_KEY, JSON.stringify(dismissed));
     } catch (err) {
-      // Full/unavailable storage just means it may show again later - the
+      // Full/unavailable storage just means it may show again later: the
       // tip itself still gets dismissed for now either way.
     }
   }
@@ -486,7 +486,7 @@
   var activeTipAnchor = null;
   var activeTipNoArrowAbove = false;
   // What OK does for the tip currently showing, when "just close it" isn't
-  // the whole story - see showTip's own comment.
+  // the whole story: see showTip's own comment.
   var activeTipOnOk = null;
 
   function hideTip() {
@@ -503,7 +503,7 @@
   // element ever firing an event of its own about it).
   // Whether a tip's anchor is actually on screen to be pointed at. Every
   // anchor now lives inside the menu column, where it can be in a collapsed
-  // card (no box at all) or scrolled out of the stack - and a popover
+  // card (no box at all) or scrolled out of the stack, and a popover
   // pointing at either is a popover parked in a corner, explaining
   // something the user cannot see.
   function tipAnchorVisible(anchorEl) {
@@ -519,11 +519,11 @@
     var height = tipPopover.offsetHeight;
     var left = clamp(rect.left, 12, window.innerWidth - width - 12);
     // Below the anchor, unless that would run off the bottom of the window
-    // and there is room above it instead - which is every anchor in the
+    // and there is room above it instead, which is every anchor in the
     // small-window layout's dock, since the dock IS the bottom of the window.
     // Clamped to the window only tucks the popover over the very control it
     // is about, with its arrow pointing away from it. (.tip-above moves the
-    // arrow to the popover's bottom edge - see mobile.css.)
+    // arrow to the popover's bottom edge: see mobile.css.)
     var above = rect.bottom + 10 + height > window.innerHeight - 12 && rect.top - 10 - height >= 12;
     tipPopover.classList.toggle("tip-above", above);
     // See showTip's opts.noArrowAbove.
@@ -537,7 +537,7 @@
     // Aim the arrow at the middle of the anchor rather than leaving it at a
     // fixed spot on the popover: the clamp above can push the body far from
     // the control it's about (most visibly for the Settings gear, which sits
-    // at the right edge - the body lands to its left, so a left-side arrow
+    // at the right edge, the body lands to its left, so a left-side arrow
     // pointed at nothing). ARROW_SIZE/2 centers the rotated square on the
     // anchor; the clamp keeps it clear of the rounded corners at either end.
     var ARROW_SIZE = 10, CORNER_INSET = 10;
@@ -552,11 +552,11 @@
   //
   // opts.onOk (optional): what the OK button does, for a tip that walks the
   // user somewhere instead of only telling them something. It takes over
-  // completely - closing the tip afterwards (hideTip) is its own job.
+  // completely, closing the tip afterwards (hideTip) is its own job.
   // Without it, OK just closes.
   function showTip(id, anchorEl, text, opts) {
     if (isTipDismissed(id) || activeTipId === id) return false;
-    // Nothing to point at - don't burn the tip's one showing on a card the
+    // Nothing to point at: don't burn the tip's one showing on a card the
     // user has collapsed. It offers itself again next time the view
     // settles, by which point the card may well be open.
     if (!bringTipAnchorIntoView(anchorEl)) return false;
@@ -564,7 +564,7 @@
     activeTipAnchor = anchorEl;
     activeTipOnOk = (opts && opts.onOk) || null;
     // opts.noArrowAbove: drop the arrow when the popover has had to go ABOVE
-    // its anchor - which is the dock, where the anchor is a tab at the very
+    // its anchor, which is the dock, where the anchor is a tab at the very
     // bottom of the screen. For a tip about a control that arrow is the
     // point; for one that explains the PICTURE it points down, away from the
     // picture, at a tab the tip is not about.
@@ -583,7 +583,7 @@
 
   // Scrolls an anchor back into the menu column if it has drifted out of
   // it, and reports whether it is pointable-at afterwards. Only called when
-  // a tip first appears - NOT from repositionActiveTip,
+  // a tip first appears, NOT from repositionActiveTip,
   // which runs on every panel resize and would otherwise yank the column's
   // scroll out from under the user while they read.
   function bringTipAnchorIntoView(anchorEl) {
@@ -598,7 +598,7 @@
   }
 
   // Called from anything that can move an anchor without the anchor itself
-  // knowing it moved - the panel resizer drag, and a window resize.
+  // knowing it moved: the panel resizer drag, and a window resize.
   function repositionActiveTip() {
     if (activeTipAnchor) positionTip(activeTipAnchor);
   }
@@ -620,14 +620,14 @@
   //
   // Inspect, Analysis and Display Mode in the column upper left, Settings
   // and Map Evolution in the column upper right, and the rendering-progress
-  // gauge lower left (grouped with the left column - see its own comment at
-  // the renderProgressMenu call below) - each a square icon button until it
+  // gauge lower left (grouped with the left column, see its own comment at
+  // the renderProgressMenu call below), each a square icon button until it
   // is opened, at which point the button leaves the layout and its card
   // takes the space. One accordion per side, not one across the whole
   // screen: opening a left-side menu closes whichever OTHER left-side menu
   // was open, and likewise for the right side, but a left and a right menu
   // (e.g. Inspect and Settings) can be open together (see menuGroups
-  // below). Zero open on a side is still fine - closing the last one there
+  // below). Zero open on a side is still fine, closing the last one there
   // just leaves the collapsed buttons.
   //
   // The open/shut state lives HERE rather than being read back off a class,
@@ -640,7 +640,7 @@
   // inspectMenu/statsMenu are still being built when the first of them runs
   // this).
   // "movie" is a group of one: the Movie card stays open alongside Map
-  // Evolution, whose frame its keyframes are taken at - and which puts the
+  // Evolution, whose frame its keyframes are taken at, and which puts the
   // map back to its last frame the moment it is closed (see playbackMenu).
   var menuGroups = { left: [], right: [], movie: [] };
   // Set by the dock (see "The dock", at the end of boot) once it exists:
@@ -684,7 +684,7 @@
       item.classList.toggle("is-open", open);
       card.hidden = !open;
       toggle.setAttribute("aria-expanded", open ? "true" : "false");
-      // Nothing to drag when every menu is shut - see #panel-resizer.
+      // Nothing to drag when every menu is shut: see #panel-resizer.
       menuColumn.classList.toggle("has-open-menu",
         !!document.querySelector("#grid-menu-stack .menu-item.is-open"));
       if (onDockedMenuChange) onDockedMenuChange(api);
@@ -695,10 +695,10 @@
     }
     // A toggle, not only "open": in the desktop layout the button leaves the
     // layout the moment its card opens, so it can only ever be clicked shut
-    // and the two are the same thing - but in the dock the button stays put
+    // and the two are the same thing, but in the dock the button stays put
     // as a tab, and pressing the tab of an open card is how it is put away.
     toggle.addEventListener("click", function () { set(!open); });
-    // The whole header line collapses the card, not just the caret button -
+    // The whole header line collapses the card, not just the caret button:
     // the button (.menu-collapse) is still its own focusable element inside
     // the header, so Tab/Enter/Space keep working, and the click it
     // produces just bubbles up to this same listener.
@@ -707,7 +707,7 @@
       isOpen: function () { return open; },
       set: set,
       // Whichever of the button and the card is actually on screen, for a
-      // tip to point at - the other one has display: none and a rect of
+      // tip to point at: the other one has display: none and a rect of
       // zeros, which would park the popover in the corner.
       anchor: function () { return open ? card : toggle; },
       // The three elements themselves, for the dock: it moves the button and
@@ -725,7 +725,7 @@
   var settingsMenu = makeMenu("menu-settings", "grid-btn-settings", "right");
 
   // Inspect holds the hover preview, its transport, the view controls and
-  // the locked-point list - the workspace for reading the fractal rather
+  // the locked-point list: the workspace for reading the fractal rather
   // than for configuring it, which is why it is the one that starts open
   // (see the setInspectOpen call at the end of this file).
   //
@@ -737,16 +737,16 @@
   //
   // The locked points themselves are a different story: collapsing the card
   // hides their on-grid markers/mesh (updateInspectMarkers reads
-  // inspectMenu.isOpen() itself - see its own comment) but never touches
+  // inspectMenu.isOpen() itself, see its own comment) but never touches
   // inspectedGroups, so reopening brings back exactly what was there before.
-  // disarmInspect matters here too - without it, Line/Grid left armed when
+  // disarmInspect matters here too, without it, Line/Grid left armed when
   // the card closes would still turn the next click or drag on the grid
   // into a new inspection, which is exactly what a collapsed Inspect card
   // is supposed to mean "not right now" to.
   var inspectMenu = makeMenu("menu-inspect", "grid-btn-inspect", "left",
     function (open) {
       if (open) {
-        // Pick up whatever should be on screen now - the locked points if
+        // Pick up whatever should be on screen now: the locked points if
         // there are any, the placeholder otherwise. Not the last hovered
         // cell: the cursor has been elsewhere since.
         if (inspectedGroups.length > 0) beginInspectOnlySession();
@@ -771,8 +771,8 @@
       setStatsPanelOpen(open);
     });
 
-  // Display has nothing to start or stop when it opens - the rows are
-  // built once and the mode itself lives on whether the card is up or not -
+  // Display has nothing to start or stop when it opens, the rows are
+  // built once and the mode itself lives on whether the card is up or not,
   // so unlike Inspect and Analysis it needs no onChange at all. Kept (unlike the
   // old discarded return value) because checkColorSpreadAndMaybeSuggestColorZoom
   // needs to open this card itself before pointing the Color Zoom tip at the
@@ -780,7 +780,7 @@
   var displayMenu = makeMenu("menu-display", "grid-btn-display", "left");
 
   // The map's own transport plus the Simulation Duration slider that sets
-  // where its timeline ends - see updateTimelineUI.
+  // where its timeline ends: see updateTimelineUI.
   //
   // This card being OPEN is the whole of what used to be Inspect's "Play
   // back in map" checkbox: while it is up, the map plays whatever step the
@@ -792,7 +792,7 @@
     function (open) {
       if (open) {
         // Opening it changes nothing on screen: the map stays exactly where
-        // it was - at the end, scrubber parked on the last frame - and
+        // it was, at the end, scrubber parked on the last frame, and
         // stays there, hovering included, until the user works one of the
         // transport controls (see mapLinked).
         pauseTimeline();
@@ -803,7 +803,7 @@
     });
 
   // The rendering-progress gauge (see updateRenderProgressRing further
-  // down) doubles as another accordion menu - registering it here is the
+  // down) doubles as another accordion menu, registering it here is the
   // whole of what that takes, since makeMenu only needs the two elements'
   // ids and doesn't care that this one lives in the lower left instead of
   // a column. It joins the LEFT group since that's the corner it actually
@@ -814,7 +814,7 @@
   // span across the full rainbow rather than guessing at one: a non-anchored
   // body's x/y is already wrapped into exactly [0, frameWidth)/[0,
   // frameHeight) (see PhysicsEngine.step's frame wrap), so those bounds ARE
-  // the true range, not an estimate - no need to pad a guess around the
+  // the true range, not an estimate, no need to pad a guess around the
   // authored layout and hope a pixel's actual range falls inside it (that
   // guess is what previously left most scenes showing only a narrow sliver
   // of hue, since real values rarely approached the padding). angle has no
@@ -827,13 +827,13 @@
     if (property === "x") return sceneForRange.frameWidth;
     if (property === "y") return sceneForRange.frameHeight;
     // The furthest two bodies can get. On a wrapped world that is the
-    // antipode - half a frame on each axis, not a whole one - and it is a
+    // antipode, half a frame on each axis, not a whole one, and it is a
     // value the pair can legitimately sit at, so it clamps rather than
     // mod()-ing (see buildFragmentShader's own t computation).
     if (property === "distance") return PhysicsEngine.outputDistanceMax(sceneForRange);
     // "Scene lifespan" isn't circular like x/y/angle (mod()-wrapping a value
     // that can legitimately equal its own max, "ran the full simulation,"
-    // onto 0 would make that look identical to "crossed immediately") - see
+    // onto 0 would make that look identical to "crossed immediately"): see
     // buildFragmentShader's own t computation, which clamps instead of
     // mod()-ing for this property specifically.
     if (property === "lifespan") return simulationSteps;
@@ -846,7 +846,7 @@
     if (message) emptyState.querySelector("p").textContent = message;
   }
 
-  // bootScene is what the app shell handed over - through JSON, so this
+  // bootScene is what the app shell handed over: through JSON, so this
   // page holds a copy of its own rather than an object the editor might
   // still be holding too.
   var raw = bootScene ? JSON.stringify(bootScene) : null;
@@ -856,7 +856,7 @@
       scene = JSON.parse(raw);
       if (!scene || typeof scene !== "object") throw new Error("not an object");
       if (!Array.isArray(scene.bodies) || !Array.isArray(scene.hinges)) throw new Error("missing bodies/hinges");
-      // Every shape this page knows how to compile, in one check - see
+      // Every shape this page knows how to compile, in one check: see
       // PhysicsEngine.outputMappingError. It names what is actually wrong
       // rather than reporting every malformed mapping as a missing one,
       // which is all the old test could say about a mapping that named no
@@ -878,7 +878,7 @@
     return;
   }
 
-  // Adopt the sent scene's own duration - always one of the editor slider's
+  // Adopt the sent scene's own duration: always one of the editor slider's
   // notches, which this page's identical slider can show as it is.
   // Named rather than an inline IIFE so setScene() can re-run it for a
   // scene arriving after boot.
@@ -903,7 +903,7 @@
   // the simulation (collisions, both solvers, gravity) and the Output read
   // at the end. See physics-df.js and physics-gpu-df.js for the df
   // libraries; see pickPrecision() below for when each one is used.
-  // variant is "standard" or "derived" - see the bottom of
+  // variant is "standard" or "derived": see the bottom of
   // compileScenePieces for what each holds.
   function buildFragmentShader(sceneToCompile, precision, variant) {
     var pieces = compileScenePieces(sceneToCompile, precision);
@@ -917,7 +917,7 @@
   // Output reading and color ramp the grid itself runs.
   function compileScenePieces(sceneToCompile, precision) {
     // "df" here, as everywhere in the code generators, means "any of the
-    // multi-float precisions" - double-, triple- or quad-float. They are
+    // multi-float precisions": double-, triple- or quad-float. They are
     // spelled identically (see PhysicsDF); only the word count differs.
     var df = PhysicsDF.isExtended(precision);
     var B = PhysicsGridCodegen.backendFor(precision);
@@ -925,17 +925,17 @@
     var outProp = sceneToCompile.output.property; // "x" | "y" | "angle" | "distance" | "lifespan" | "bounces"
     var isLifespan = outProp === "lifespan";
     var isDistance = outProp === "distance";
-    // One or two authored bodies - see PhysicsEngine.outputBodyIndices.
+    // One or two authored bodies: see PhysicsEngine.outputBodyIndices.
     var outputBodies = PhysicsEngine.outputBodyIndices(sceneToCompile.output);
     var isBounces = outProp === "bounces";
-    // Neither of these two reads a body-state field at the end of the run -
+    // Neither of these two reads a body-state field at the end of the run:
     // both are whole-run tallies the step loop itself accumulates, as a plain
     // float in both precisions (a step count and a bounce count are small
     // integers; there is nothing for df to preserve). So they share a path
     // here that skips OUTPUT_BODY, OUTPUT_RANGE_MAX and the per-body output
     // read entirely.
     var isRunTally = isLifespan || isBounces;
-    // A position with nothing to bound it - see the t computation below.
+    // A position with nothing to bound it: see the t computation below.
     // Distance joins x/y here: with no edges there is nothing bounding how
     // far apart two bodies can drift, so it takes the same squash rather
     // than a range it can run off the end of.
@@ -946,21 +946,21 @@
     // rather than freezing the sim there) uses the full 360° so hue 0°/360°
     // reads as the same color at the wrap point (see colorMap's own
     // comment on why). Anything that's really a capped, non-wrapping range
-    // instead - lifespan always, or x/y under Sticky Edges (frozen at an
-    // whatever edge they reached instead of letting them cross it - stops
+    // instead, lifespan always, or x/y under Sticky Edges (frozen at an
+    // whatever edge they reached instead of letting them cross it, stops
     // short of 360° so its two ends don't visually read as the same color.
     var isCircularOutput = outProp === "angle" || ((outProp === "x" || outProp === "y") && sceneToCompile.edgeMode === "wrap");
     var hueRangeMax = isCircularOutput ? 360 : 300;
-    // Read from the canonical bodyN struct, not initial.bodyState[i] - the
+    // Read from the canonical bodyN struct, not initial.bodyState[i]: the
     // step loop below mutates bodyN in place, so bodyState's expressions
     // (the state BEFORE any step ran) no longer describe the current value
     // once the step loop has run. Scene lifespan has no body of
-    // its own - its value is lifespanValue, set by the step loop below.
+    // its own: its value is lifespanValue, set by the step loop below.
     // The output is read at the pass's own precision and only collapsed
-    // after the mod() below - an angle output can be tens of thousands of
+    // after the mod() below: an angle output can be tens of thousands of
     // radians after 500 steps, and folding that to one turn in float32
     // throws away everything the df path just spent its budget preserving.
-    // One authored body's Output value, at the pass's own precision - its
+    // One authored body's Output value, at the pass's own precision: its
     // lineage average when the scene has a splitter (a ball that has split
     // into four still counts ONCE, so a pair mean stays a mean of two
     // bodies), and a plain read otherwise. GLSL twin of
@@ -995,7 +995,7 @@
       // colour ramp itself needs nothing like this many digits, but the
       // derived display modes DIFFERENCE this value between neighbouring
       // pixels, and at a deep zoom those differ by far less than one
-      // float32 ULP of a distance of order 100 - so a float32 length() here
+      // float32 ULP of a distance of order 100, so a float32 length() here
       // handed them quantization steps to take the gradient of.
       outputLines = [];
       emitBodyValue("outAx", outputBodies[0], "x").forEach(function (l) { outputLines.push(l); });
@@ -1034,9 +1034,9 @@
 
     // "Stop on wrap": every pixel is its own independent simulation, so
     // there's no single moment "the sim stopped" the way there is on
-    // #editor-view's Play button - each pixel just freezes the instant ITS
+    // #editor-view's Play button, each pixel just freezes the instant ITS
     // OWN copy would first see ANY watched body cross a frame edge
-    // (PhysicsHingeGeometry.wrapWatchedBodyIndices - every non-static,
+    // (PhysicsHingeGeometry.wrapWatchedBodyIndices, every non-static,
     // non-hinge-child body, not just Output's own), regardless of what any
     // other pixel is doing. Since OUTPUT_BODY (when Output isn't Scene
     // Lifespan) is a compile-time constant here (unlike the single-scene/
@@ -1053,7 +1053,7 @@
     // in GLSL instead of post-hoc over a JS array.
     //
     // Freezing at frozenX/Y/Angle outright (this step's own comment used to
-    // stop there) is only a discrete, once-per-step sample - WHICH step
+    // stop there) is only a discrete, once-per-step sample, WHICH step
     // first notices the crossing is an integer that jumps by 1 exactly when
     // a pixel's starting conditions sweep past a step boundary, producing a
     // real, large, spurious discontinuity even with no collision involved
@@ -1062,14 +1062,14 @@
     // matching that same distance). The fix mirrors collideCircleCircle's
     // own CCD: solve for the exact sub-step instant the crossing axis
     // reaches the boundary using its OWN velocity (already exactly what
-    // stepOnce() used to move position this step - nothing after
+    // stepOnce() used to move position this step, nothing after
     // position-integration inside stepOnce() touches velocity), then
     // extrapolate EVERY property back one whole step-duration from that
     // continuous instant using ITS OWN velocity, reconstructed from the two
     // preceding frozen samples. One step before the crossing (not AT the
     // crossing) because "at" is trivially always exactly the boundary for
-    // whichever property is doing the wrapping - collapsing to a constant
-    // for the common case of Output being that same property - while "one
+    // whichever property is doing the wrapping, collapsing to a constant
+    // for the common case of Output being that same property, while "one
     // step before" keeps this feature's actual intent (a snapshot of where
     // things were, right before they would've wrapped) as a genuinely
     // continuous function of the starting conditions instead. Scene
@@ -1079,14 +1079,14 @@
     // snapshot look pre-wrap, which doesn't apply to a duration.
     var watchedIndices = PhysicsHingeGeometry.wrapWatchedBodyIndices(sceneToCompile);
     // Bounce Count needs its body only to read that body's contact flag each
-    // step - never for the wrap-stop position extrapolation below, which is
+    // step, never for the wrap-stop position extrapolation below, which is
     // about a positional Output's final value, so it stays out of
     // outputBodyIdx/trackedIndices.
-    // Every authored body the Output reads - one, or both halves of a pair.
+    // Every authored body the Output reads: one, or both halves of a pair.
     // All of them need the wrap-stop reconstruction below, or a pixel that
     // stops early would average one continuous value with one discrete one.
     var outputIndices = isRunTally ? [] : outputBodies;
-    // "Started touching something this step, having not been last step" - one
+    // "Started touching something this step, having not been last step": one
     // bounce. See PhysicsGPU.generateStepOnceGLSL's g_contactN globals for
     // where the flag comes from, and PhysicsEngine.runBounceCounts (the JS
     // twin used by the hover panel) for why it's the false->true edge and not
@@ -1108,7 +1108,7 @@
     // state it read back (see buildPlaybackStepShader). The loop is the same
     // either way; `loop` names the three spellings that differ:
     //   bound     - how many steps THIS draw runs
-    //   stepIndex - iteration i's step number counted from the start of the
+    //   stepIndex, iteration i's step number counted from the start of the
     //               whole run, not of this draw: a wrap-stop's lifespan is
     //               recorded against it
     //   budget    - the lifespan of a pixel that never stops, i.e. the total
@@ -1139,7 +1139,7 @@
         declarations.push("  bool hasPrevFrozen = false;");
         declarations.push("  bool wrapStopped = false;");
         // Default: never crosses within the budget, so it "lasts" the whole
-        // thing - matches outputRangeMax's own ceiling, which is this same
+        // thing, matches outputRangeMax's own ceiling, which is this same
         // step budget.
         declarations.push("  float lifespanValue = " + loop.budget + ";");
         bounceInitLines.forEach(function (l) { declarations.push(l); });
@@ -1155,7 +1155,7 @@
         // float32 shadow (bestTFrac) for the two places that only ever
         // needed one: picking the earliest crossing, and the lifespan. The
         // extrapolated OUTPUT is tFrac times a velocity of order 1e2-1e3, so
-        // a float32 tFrac put a ~1e-6px quantization on it - nothing the
+        // a float32 tFrac put a ~1e-6px quantization on it, nothing the
         // colour ramp can see, and exactly what the derived display modes
         // difference between neighbouring pixels at a deep zoom.
         lines.push("    float bestTFrac = DT + 1.0;");
@@ -1163,7 +1163,7 @@
         watchedIndices.forEach(function (idx) {
           lines.push("    {");
           // The crossing TEST is coarse by nature (did this step move most of
-          // a frame width?), so it collapses to float32 - but the numerator
+          // a frame width?), so it collapses to float32, but the numerator
           // of tFrac below does not: it is a distance-to-the-edge of order
           // one step's travel, and it sets where the extrapolated output
           // lands.
@@ -1223,7 +1223,7 @@
         lines.push("  }");
         return { declarations: declarations, loop: lines };
       }
-      // No watched bodies at all (every body is static or a hinge child) -
+      // No watched bodies at all (every body is static or a hinge child):
       // Sticky Edges has nothing to trigger on, so lifespan is trivially
       // always the full run length.
       declarations.push("  float lifespanValue = " + loop.budget + ";");
@@ -1244,23 +1244,23 @@
     // is simply however many steps have run.
     //
     // Only the half that cannot be had any other way, though, because every
-    // float carried is paid for twice over: in bandwidth, and - past the 32
-    // floats one draw can write - in whole extra draws, each re-running the
+    // float carried is paid for twice over: in bandwidth, and, past the 32
+    // floats one draw can write, in whole extra draws, each re-running the
     // same steps to keep a different slice of the result (see
     // advanceSliceJob). The df double pendulum carried 55 floats, so every
     // slice of it was simulated twice; it needs 31. What is NOT carried:
-    //   frozenX/Y/Angle - between two steps of a pixel still running they
+    //   frozenX/Y/Angle, between two steps of a pixel still running they
     //     are simply the body's own x, y and angle (the loop's last act
     //     each step is to copy them), and a pixel that has stopped never
     //     reads them again. Re-derived on load.
     //   prevFrozen* for a body, or a field of one, that the Output does not
     //     read: they exist only to extrapolate the Output's body to the
     //     stopping instant, and the extrapolated value of a field nothing
-    //     reads is dead. (Output reads fields as plain "body.field" text -
-    //     see emitBodyValue - which is what is searched for.)
-    //   hasPrevFrozen - true from the first step on for a pixel still
+    //     reads is dead. (Output reads fields as plain "body.field" text,
+    //     see emitBodyValue, which is what is searched for.)
+    //   hasPrevFrozen: true from the first step on for a pixel still
     //     running, i.e. u_baseStep > 0, and unread once it has stopped.
-    //   lifespanValue - unless it IS the Output.
+    //   lifespanValue, unless it IS the Output.
     // loopStateRestoreLines puts the re-derived ones back after a load.
     var loopStateVariables = [];
     var loopStateRestoreLines = [];
@@ -1292,7 +1292,7 @@
     // Standard mode paints the field itself. The other three paint a
     // DERIVATIVE of it, computed by re-running the whole per-pixel
     // simulation at a small stencil of neighbouring starting points and
-    // differencing the results - which is why the per-pixel body below is
+    // differencing the results, which is why the per-pixel body below is
     // a function (sampleOutput) rather than inlined straight into main()
     // the way it used to be.
     //
@@ -1300,20 +1300,20 @@
     // rendered image: the ladder's accumulators hold 8-bit color that has
     // already been through a hue ramp, so differencing them would report a
     // false edge at every one of the ramp's RGB breakpoints and go blind
-    // wherever the field steps a whole hue wrap - the same reason Global
+    // wherever the field steps a whole hue wrap, the same reason Global
     // Stats re-renders into a float target instead of reading the canvas
     // back (see its own comment). Differencing the values directly costs
     // more simulations and gets the right answer.
     // The Output value's own arithmetic. Identical to B except for the two
     // run tallies, which are plain floats in BOTH passes (a step count and
-    // a bounce count are small integers - there is nothing for df to
+    // a bounce count are small integers: there is nothing for df to
     // preserve), so differencing them uses plain float operators whatever
     // precision the rest of the pass is running at.
     var OB = isRunTally ? PhysicsGridCodegen.backendFor("f32") : B;
     var outScalar = OB.scalar;
     var outZero = OB.zero;
     // Turns a RAW output difference into a t-space one. Deliberately the
-    // field's own LINEAR range in every case - including Infinite Space,
+    // field's own LINEAR range in every case, including Infinite Space,
     // whose t goes through frameSigmoid: that squash is a display transform
     // for an unbounded quantity, not a property of the field, and
     // differencing through it would report the sigmoid's own flattening
@@ -1325,7 +1325,7 @@
     // not give it that: deltaT reports the field's own linear rate of change
     // (see its comment), which for every output but one IS t's, because t is
     // a linear function of the value. Infinite Space position is the
-    // exception - its t goes through frameSigmoid - so there the two differ
+    // exception, its t goes through frameSigmoid, so there the two differ
     // by that sigmoid's derivative, and contourColor has to put it back.
     //
     // Leaving it out is not a rounding error, it is the difference between a
@@ -1334,7 +1334,7 @@
     // other mixes units. Far out in the sigmoid's tails t saturates to
     // exactly 0.0 or 1.0 while the value underneath is still a healthy
     // linear ramp, so the numerator goes to exactly zero against a
-    // perfectly ordinary denominator - and every pixel out there reports
+    // perfectly ordinary denominator, and every pixel out there reports
     // itself as sitting dead on a level set, painting the whole region solid.
     //
     // d/dv sigmoid(v) = k * t * (1 - t) for this sigmoid, which is why this
@@ -1346,12 +1346,12 @@
     // ---- Raw Output value -> the t the color ramp reads ----
     var tLine =
     // OUTPUT_RANGE_MAX is the Output property's own exact range (see
-    // outputRangeMax) - a wrapped x/y is already guaranteed inside it, and
+    // outputRangeMax), a wrapped x/y is already guaranteed inside it, and
     // mod() folds an angle's however-many-full-turns value down to just
-    // "which way is it facing right now" - so this reaches the full [0,1)
+    // "which way is it facing right now", so this reaches the full [0,1)
     // color range using the property's real bounds, not a padded guess,
     // and never depends on the current pan/zoom. Lifespan isn't circular
-    // like those, though - it can legitimately equal its own max (ran the
+    // like those, though: it can legitimately equal its own max (ran the
     // whole simulation), and mod()-ing that back to 0 would make it look
     // identical to "crossed immediately," so it clamps instead.
     // The mod() happens at the pass's precision and only then collapses:
@@ -1365,14 +1365,14 @@
     // from a coarse sample (see findBounceMax), so a pixel between samples
     // can legitimately come out slightly over 1, and the readback path
     // below reads this same expression with u_bounceMax = 1 to recover the
-    // raw count - clamping would flatten every count above 1 to 1 there.
+    // raw count, clamping would flatten every count above 1 to 1 there.
     // Infinite Space has no wrap to fold a coordinate back into the frame,
-    // so there is no range to divide it into - mod() would report a body
+    // so there is no range to divide it into: mod() would report a body
     // two frames out as if it were barely off-center, and dividing without
     // one would run t past 1 and off the end of the color range. The
     // sigmoid squashes the whole infinite line into [0,1] instead: dead
     // center is 0.5, the frame's own edges 0.076 and 0.924, two frames out
-    // 0.9995 - arbitrarily distant still lands inside the range, just ever
+    // 0.9995, arbitrarily distant still lands inside the range, just ever
     // closer to its end. Only x/y take it; angle is genuinely circular
     // whatever the edges do, and the two run tallies aren't positions.
     isBounces
@@ -1390,7 +1390,7 @@
             : "  float t = " + B.toFloat(B.div(B.mod("outputValue", "OUTPUT_RANGE_MAX"), B.fromFloat("OUTPUT_RANGE_MAX"))) + ";";
 
     // A pixel's starting state from its world X/Y, and the locals stepOnce()
-    // is threaded through - the same three blocks in every program that
+    // is threaded through: the same three blocks in every program that
     // simulates.
     var physicsDeclarationLines = [
       initial.declarationLines.map(function (l) { return "  " + l; }).join("\n"),
@@ -1406,13 +1406,13 @@
       // gives the index of the full-res pixel it stands for, and the final
       // + 0.5 puts it back at that pixel's center. At stride 1, origin 0
       // this collapses to (x - 0.5) + 0.5, which is exact for every pixel
-      // index a canvas can hold - so the full-res pass computes precisely
+      // index a canvas can hold, so the full-res pass computes precisely
       // the coordinates it always did, to the bit.
       "  vec2 fullCoord = (gl_FragCoord.xy - 0.5) * u_gridStride + u_gridOrigin + 0.5;",
       "  vec2 uv = (fullCoord - 0.5 * u_resolution) / u_resolution.y;",
       // uv * u_scale stays a plain float32 product on purpose. Its relative
       // error is ~1e-7 of a quantity that is itself at most u_scale, i.e.
-      // ~1e-4 of ONE PIXEL's worth of world distance - far below anything
+      // ~1e-4 of ONE PIXEL's worth of world distance: far below anything
       // visible. The catastrophic step is the ADD onto the center, and
       // that is the one done in df.
       df ? "  MF worldX = dfAddFloat(" + PhysicsDF.wordUniformValue("u_center", "x", precision) + ", uv.x * u_scale);" : "  float worldX = u_centerHi.x + uv.x * u_scale;",
@@ -1420,10 +1420,10 @@
     ];
 
     // The same mapping for the two STATE-CARRYING programs (playback's step
-    // pass, which is also what draws the grid itself at df and above - see
+    // pass, which is also what draws the grid itself at df and above: see
     // "Sliced rendering"). Two things the grid program's own version has no
     // need of:
-    //   u_tileOrigin - the state texture holds one TILE of a lattice, so
+    //   u_tileOrigin, the state texture holds one TILE of a lattice, so
     //                  texel (0, 0) is lattice pixel u_tileOrigin.
     //   u_stencil    - 1, or 5 for the derived display modes: each lattice
     //                  pixel then owns five neighbouring texels, its own
@@ -1449,13 +1449,13 @@
     var gridHeaderLines = [
       "#version 300 es",
       "precision highp float;",
-      // The FULL-resolution canvas dimensions - deliberately not the
+      // The FULL-resolution canvas dimensions: deliberately not the
       // dimensions of whatever target is currently being drawn into. The
       // progressive renderer (see the "Progressive refinement" section) is
       // always shading some sub-lattice of the final full-res pixel grid,
       // into a target far smaller than that grid, and every world
       // coordinate has to come out identical to what a single full-res
-      // render would have produced for that same pixel - otherwise the
+      // render would have produced for that same pixel, otherwise the
       // coarse levels wouldn't be honest previews of the fine one, and the
       // sub-lattices that get interleaved together at the end would
       // disagree along their shared edges.
@@ -1463,13 +1463,13 @@
       // Which sub-lattice of that full-res grid this draw covers:
       // rendered pixel (i, j) stands for full-res pixel
       // (i * u_gridStride + u_gridOrigin.x, j * u_gridStride + u_gridOrigin.y).
-      // Stride 1 / origin (0,0) is the identity - and is EXACTLY
+      // Stride 1 / origin (0,0) is the identity, and is EXACTLY
       // bit-identical to the pre-progressive formula, which is what makes
       // the finished image unchanged by any of this.
       "uniform float u_gridStride;",
       "uniform vec2 u_gridOrigin;",
       // The view center arrives pre-split into float32 WORDS, one uniform
-      // per word (u_centerHi, u_centerLo, u_centerLo2, u_centerLo3 - see
+      // per word (u_centerHi, u_centerLo, u_centerLo2, u_centerLo3: see
       // PhysicsDF.wordUniformDecls). The page holds the center to ~106 bits
       // (see view.center); uploading it as a single float32 uniform was
       // throwing all but 24 of them away at the door, which no amount of
@@ -1481,10 +1481,10 @@
       "uniform bool u_colorZoom;",
       // How many steps each pixel runs. A uniform rather than a baked
       // constant so the Settings slider doesn't recompile four programs per
-      // notch - GLSL ES 3.00 allows a non-constant loop bound (ES 1.00
+      // notch: GLSL ES 3.00 allows a non-constant loop bound (ES 1.00
       // didn't), and measured, the dynamic bound costs nothing.
       "uniform int u_maxSteps;",
-      // The Simulation Duration, i.e. the far end of the playback timeline -
+      // The Simulation Duration, i.e. the far end of the playback timeline,
       // which is what Scene Lifespan is measured against, including while
       // u_maxSteps above is showing some step short of it. Measuring against
       // the step shown instead would recolor every pixel that stopped long
@@ -1495,13 +1495,13 @@
       // Bounce Count only: the largest bounce count currently in view, which
       // is what a pixel's own count is scaled against (see findBounceMax).
       // A uniform, not a baked constant, because it's a property of where
-      // you're looking rather than of the scene - it's re-measured on every
+      // you're looking rather than of the scene: it's re-measured on every
       // render, so panning into a busier region rescales the whole picture
       // instead of saturating.
       "uniform float u_bounceMax;",
       // Which picture to paint: the field, or one of the three derivatives
       // of it (see DISPLAY_MODES on the JS side). A uniform rather than
-      // four more compiled programs - the switch is a dropdown the user
+      // four more compiled programs: the switch is a dropdown the user
       // flicks back and forth, and recompiling a scene's physics to answer
       // it would stall the page every time. Every pixel in a draw reads the
       // same value, so the branches below never diverge within a warp.
@@ -1512,7 +1512,7 @@
       "",
     ]);
 
-    // Everything that turns a t - or a derivative of one - into a color.
+    // Everything that turns a t, or a derivative of one, into a color.
     // Playback's color pass includes this same block, so a value can't look
     // different depending on which of the two drew it.
     var colorLibraryLines = [
@@ -1534,7 +1534,7 @@
       // returns a result in [0, RANGE_MAX) for the positive RANGE_MAX this
       // project always uses). HUE_RANGE_MAX is 360° when outputValue is a
       // genuinely wrapped, circular quantity (a frame-wrapped x/y, or an
-      // angle folded to one turn) - t=0 and t=1 are then the same
+      // angle folded to one turn): t=0 and t=1 are then the same
       // underlying point, just before/after the wrap, so the full 360° runs
       // between them: hue 0°/360° are the same rendered color, reading as
       // one continuous loop instead of jumping across whatever gap a
@@ -1542,7 +1542,7 @@
       // outputValue is really a capped, non-wrapping range (Scene lifespan
       // always; x/y once "Stop when any object reaches the frame edge"
       // freezes them at whatever edge they reached instead of letting them
-      // wrap) - t=0 and t=1 are different values there, not the same
+      // wrap): t=0 and t=1 are different values there, not the same
       // point, so stopping short of 360° keeps them visually distinct
       // instead of also reading as a seamless loop (see buildFragmentShader
       // for exactly which cases this applies to).
@@ -1552,12 +1552,12 @@
       // whole range needs to be seen at once but where one single rainbow
       // sweep isn't enough resolution to tell nearby values apart. Since
       // hue alone would then look identical across all 10 repeats,
-      // saturation also ramps 40%-100% across the FULL (non-repeating) t -
+      // saturation also ramps 40%-100% across the FULL (non-repeating) t,
       // low saturation (paler, closer to gray) near t=0, full saturation
-      // near t=1 - so which of the 10 repeats a color belongs to is still
+      // near t=1, so which of the 10 repeats a color belongs to is still
       // visible.
       "const float HUE_RANGE_MAX = " + PhysicsGPU.fnum(hueRangeMax) + ";",
-      // The GLSL twin of PhysicsEngine.frameSigmoid - same constant, so the
+      // The GLSL twin of PhysicsEngine.frameSigmoid: same constant, so the
       // grid and the hover panel beside it agree on the color.
       "float frameSigmoid(float v) {",
       "  return 1.0 / (1.0 + exp(" + PhysicsGPU.fnum(-PhysicsEngine.OUTPUT_SIGMOID_STEEPNESS) + " * (v - 0.5)));",
@@ -1579,7 +1579,7 @@
       "",
       // Standard mode's ramp, and the ONLY place u_colorZoom is read. Color
       // Zoom exists to tell nearby values apart in one sweep of the plain
-      // rainbow, which is a question only Standard's filled picture poses -
+      // rainbow, which is a question only Standard's filled picture poses:
       // Contours already separates its values into discrete lines, and the
       // other two modes are not coloring the value at all. Toggling it
       // also switches the display back to Standard (see its change handler)
@@ -1606,13 +1606,13 @@
       // folded difference cannot exceed 0.5 (half the color range is as
       // far apart as two values on a circular output can get), a chaotic
       // filament runs close to that ceiling, and a broad smooth wash is a
-      // few thousandths. Which decade dominates depends on the zoom, too -
+      // few thousandths. Which decade dominates depends on the zoom, too:
       // deep in, a chaotic field is locally smooth and everything is small;
       // far out, everything is sharp.
       //
       // So this is a log ramp, not a linear one with a gain. A linear ramp
       // shows one decade and paints everything below it black, and the gain
-      // that picks the right decade is different for every view - there is
+      // that picks the right decade is different for every view: there is
       // no constant that works. A log ramp shows about four decades at
       // once, which is enough that ONE constant covers the whole zoom
       // range. DERIVED_FLOOR is where the ramp bottoms out, i.e. the
@@ -1627,7 +1627,7 @@
       "  return clamp(lifted, 0.0, 1.0);",
       "}",
       "",
-      // Direction is circular and so is hue - the one place in this project
+      // Direction is circular and so is hue: the one place in this project
       // where the two match exactly, so the full wheel carries it with no
       // seam and no need for HUE_RANGE_MAX's 300-degree compromise.
       // Magnitude rides lightness instead of saturation: a smooth region
@@ -1635,7 +1635,7 @@
       // as a pale color of its own.
       "vec3 gradientColor(vec2 g) {",
       // atan(0, 0) is undefined in GLSL, and a NaN hue would come out of
-      // hsl2rgb as a NaN color rather than as the black this should be -
+      // hsl2rgb as a NaN color rather than as the black this should be:
       // an exactly flat neighbourhood is common on the two integer-valued
       // outputs (a step count is the same on both sides of a pixel almost
       // everywhere), so this is the ordinary case, not a corner one.
@@ -1660,7 +1660,7 @@
       // field is painted in its own Standard color ON its level sets, and
       // everything between them is black. So this shows the same picture
       // Standard does, but sampled down to a set of curves instead of
-      // filling the plane - and each line carries the value it is a level
+      // filling the plane, and each line carries the value it is a level
       // of, which is what makes a line's own color readable as its height.
       //
       // Each line is a constant width on SCREEN rather than a constant
@@ -1675,7 +1675,7 @@
       //
       // Too steep (the upper fade): past about half a level per pixel there
       // is more than one contour inside every pixel and no amount of care
-      // draws them - the Nyquist limit for this lattice, not a judgement
+      // draws them, the Nyquist limit for this lattice, not a judgement
       // call. On black this reads as the chaotic regions going dark rather
       // than (as it did when the lines were drawn dark OVER the field) as
       // the plain field showing through.
@@ -1683,7 +1683,7 @@
       // Too flat (the lower fade): where t is CONSTANT there is no crossing
       // to draw, but distInLevels alone cannot say so. A saturated sigmoid
       // pins t at exactly 1.0 or exactly 0.0, both of which are integer
-      // multiples of a level, so distInLevels is exactly zero - and with
+      // multiples of a level, so distInLevels is exactly zero, and with
       // contourSlopeGain also driving slope to zero there, distInPixels is
       // a 0/0 that max()'s epsilon resolves to 0, i.e. to FULL coverage.
       // Requiring a minimum slope is what rejects that degenerate case and
@@ -1726,7 +1726,7 @@
     ];
 
     // Everything from here to gridTailLines belongs to the DERIVED program
-    // only - see the variants at the bottom of this function.
+    // only: see the variants at the bottom of this function.
     var sampleOutputLines = [
       // ---- One pixel's whole simulation ----
       //
@@ -1744,7 +1744,7 @@
       // Called through a single call site (see shadeDerived's loop) rather
       // than once per stencil point on purpose: the generated step function
       // is large, and letting the compiler inline a copy of it per point
-      // would multiply the whole shader by the stencil size - slow to
+      // would multiply the whole shader by the stencil size, slow to
       // compile on a big scene, and on an unlucky driver enough to hit a
       // program-size limit.
       outScalar + " sampleOutput(" + B.scalar + " worldX, " + B.scalar + " worldY) {",
@@ -1810,13 +1810,13 @@
       // rendered pixel of the current sub-lattice: the whole progressive
       // design rests on a coarse level being an honest preview of the
       // finished image, and a stencil that widened with the stride would
-      // make each level the derivative of a different picture - the image
+      // make each level the derivative of a different picture, the image
       // would visibly change character as refinement ran, not just sharpen.
       // At stride 1 the two are the same thing anyway.
       "  float eps = u_scale / u_resolution.y;",
       // Every neighbour as a wrapped difference FROM THE CENTRE, which is
       // what keeps both of the stencils below seam-free on a circular
-      // output - the same arrangement fractal-stats.js uses for its own
+      // output: the same arrangement fractal-stats.js uses for its own
       // Laplacian sum, and for the same reason.
       "  float d[4];",
       "  for (int k = 0; k < 4; k++) {",
@@ -1840,7 +1840,7 @@
       "  vec2 g = vec2(d[0] - d[1], d[2] - d[3]) * 0.5;",
       "  if (u_displayMode == MODE_CONTOURS) return contourColor(t, g);",
       // Gradient is the last mode, so it is the fall-through rather than a
-      // test of its own - there is nothing left for an unrecognised
+      // test of its own: there is nothing left for an unrecognised
       // u_displayMode to mean.
       "  return gradientColor(g);",
       "}",
@@ -1850,7 +1850,7 @@
 
     var gridMainLines = [
       // Standard mode's whole path, inline and character-for-character what
-      // it was before the derived modes existed - NOT a call to
+      // it was before the derived modes existed, NOT a call to
       // sampleOutput(), even though that function holds an identical copy of
       // it and calling it would halve the size of this shader.
       //
@@ -1858,7 +1858,7 @@
       // function changed 3.5% of the pixels of a colliding scene. The
       // generated GLSL is identical either way, so the cause is the driver,
       // which is free to contract and schedule float arithmetic differently
-      // across a function boundary than it does inline - worth about one ULP
+      // across a function boundary than it does inline: worth about one ULP
       // on the starting coordinate. One ULP is nothing anywhere else, and
       // everything here: a pixel whose ball lands a ULP nearer the edge of a
       // bumper leaves on a visibly different trajectory, which is the entire
@@ -1884,12 +1884,12 @@
     // superlatives, Global Stats) reads the very program that drew the
     // picture rather than a second compile of it.
     //
-    // DERIVED adds sampleOutput() - a second copy of the whole simulation -
+    // DERIVED adds sampleOutput(), a second copy of the whole simulation,
     // plus the stencil and the three derived color formulas. It is built only
     // when a derived display mode is first picked.
     //
-    // They used to be one program, which meant every compile - and in df
-    // every multi-second pipeline build on the first draw - paid for two
+    // They used to be one program, which meant every compile, and in df
+    // every multi-second pipeline build on the first draw, paid for two
     // copies of the step function to serve a mode most views never enter,
     // and the sampler paid for them a second time over.
     var standardTailLines = [
@@ -1917,7 +1917,7 @@
       outZero: outZero,
       outputLines: outputLines,
       tLine: tLine,
-      // Output bodies the color pass reads - carried in playback's state
+      // Output bodies the color pass reads: carried in playback's state
       // even when anchored, since that pass has no starting state of its own.
       outputBodyIndices: outputIndices,
       stepOnceSource: stepOnceSource,
@@ -1939,7 +1939,7 @@
   // antialias:false is load-bearing, not a micro-optimization. The
   // progressive renderer finishes each frame by blitting its accumulator
   // straight onto the canvas, and blitFramebuffer into a MULTISAMPLED draw
-  // framebuffer is an INVALID_OPERATION in ES 3.0 - which is exactly what
+  // framebuffer is an INVALID_OPERATION in ES 3.0, which is exactly what
   // the default (antialias:true) would give us. Nothing here wants MSAA
   // anyway: the only geometry ever drawn is a fullscreen quad, so there are
   // no polygon edges to smooth, and every pixel is a point sample of a
@@ -1965,18 +1965,18 @@
   // A df program is expensive to build twice over. The GLSL compile and link
   // are the small part; on ANGLE's Metal backend the real cost lands on the
   // program's FIRST DRAW, when the pipeline is finally compiled for the
-  // target it is drawing into - measured at 0.5 to 11 seconds for a df
+  // target it is drawing into: measured at 0.5 to 11 seconds for a df
   // physics shader, against ~0.1s for the link. Done the obvious way (link,
   // check the status, draw) both halves block the page outright, which is
   // the freeze that used to greet the first zoom past the float32 wall.
   //
   // So a build is a small state machine that is only ever POLLED:
-  //   linking - compile + link issued, status not asked for. With
+  //   linking, compile + link issued, status not asked for. With
   //             KHR_parallel_shader_compile the driver works on it in the
   //             background and COMPLETION_STATUS_KHR says when it is done
   //             without waiting for it. (Without the extension the first
   //             poll blocks for the link, which is the old behaviour.)
-  //   warming - linked. A 1x1 draw per target format has been queued to
+  //   warming: linked. A 1x1 draw per target format has been queued to
   //             force the pipeline build, with a fence behind it. Draws are
   //             asynchronous to the page, so the GPU process chews on that
   //             while the page carries on; the fence says when it is through.
@@ -2007,7 +2007,7 @@
   // pipeline for each is built now rather than on the first real frame.
   // Every uniform is still at its default, so the step loop runs zero steps:
   // the draw itself is free, only the compile behind it is not. Leaves the
-  // framebuffer, viewport, scissor and 2D texture binding as it found them -
+  // framebuffer, viewport, scissor and 2D texture binding as it found them:
   // the bound program is the caller's to restore (see useCurrentPass).
   function warmUpProgram(program, formats) {
     if (gl.isContextLost()) return;
@@ -2021,7 +2021,7 @@
     gl.viewport(0, 0, 1, 1);
     formats.forEach(function (entry) {
       // A bare format is one attachment; { format, count } is a program that
-      // writes `count` outputs at once (playback's state pass) - the number
+      // writes `count` outputs at once (playback's state pass): the number
       // of attachments is part of the pipeline, so it has to match too.
       var format = entry.format || entry, count = entry.count || 1;
       // Blending is part of the pipeline too: antialiasing averages its
@@ -2041,7 +2041,7 @@
       gl.drawBuffers(attachments);
       // Deliberately no checkFramebufferStatus: it is a round trip to the GPU
       // process, which by the second format is busy with the first one's
-      // pipeline build - so it would block the page for exactly the stall
+      // pipeline build, so it would block the page for exactly the stall
       // this whole arrangement exists to avoid. Both formats are ones this
       // context is known to render to (RGBA8 always; RGBA32F only when the
       // caller has checked for EXT_color_buffer_float), and a draw into an
@@ -2058,7 +2058,7 @@
     if (hadScissor) gl.enable(gl.SCISSOR_TEST);
   }
 
-  // Moves a build one stage along if it can, without ever waiting - unless
+  // Moves a build one stage along if it can, without ever waiting, unless
   // `wait` is set, which is for the programs the page cannot draw anything
   // without (the float32 ones): those block for the link exactly as they
   // always did and skip the warm-up, since there is nothing to show meanwhile.
@@ -2108,7 +2108,7 @@
 
   // ---- The grid's programs ----
   //
-  // One per (precision, variant): "f32"/"df" by "standard"/"derived" - see
+  // One per (precision, variant): "f32"/"df" by "standard"/"derived", see
   // the bottom of compileScenePieces for the two variants. Which one is
   // bound is a function of the zoom (pickPrecision) and the display mode
   // (wantedVariant), and nothing else in the page has to know.
@@ -2118,7 +2118,7 @@
   // build in the background (see above) while the float32 one of the same
   // variant keeps drawing; when one comes ready the view is simply redrawn
   // with it. Because both precisions are the same physics, at any zoom just
-  // ABOVE the float32 wall the two must render identically - which is the
+  // ABOVE the float32 wall the two must render identically, which is the
   // cheapest correctness check this code has, and what makes showing
   // float32 for the moment it takes df to build an honest stand-in.
   var passes = {};
@@ -2169,7 +2169,7 @@
     }
   }
 
-  // The pass if it is ready, otherwise null - having made sure a build for
+  // The pass if it is ready, otherwise null, having made sure a build for
   // it is under way. `wait` blocks until that build finishes.
   function requestPass(precision, variant, wait) {
     var key = passKey(precision, variant);
@@ -2199,7 +2199,7 @@
 
   function onPassReady(pass) {
     // The very first program is built before the page has an active pass, a
-    // view or a precision mode - there is nothing yet to update or redraw.
+    // view or a precision mode: there is nothing yet to update or redraw.
     if (!activePass) return;
     updatePrecisionReadout();
     // If this is the program the current view has been waiting for, draw the
@@ -2207,7 +2207,7 @@
     if (pass.precision === pickPrecision() && pass.variant === wantedVariant() && pass !== activePass) markDirty();
   }
 
-  // Every frame, from the render loop - the step + color programs' twin of
+  // Every frame, from the render loop: the step + color programs' twin of
   // pumpPassBuilds. When a set the view has been waiting for comes ready, the
   // view is redrawn with it.
   function pumpPlaybackBuilds() {
@@ -2224,7 +2224,7 @@
 
   // The status line while something the view is waiting on is still
   // building, and "Ready" again once nothing is. Every frame, from the render
-  // loop - which is what makes it correct however the wait ends: the program
+  // loop, which is what makes it correct however the wait ends: the program
   // arriving, the view zooming back out to where it is no longer wanted, or
   // Play being paused.
   var buildStatusShowing = false;
@@ -2263,18 +2263,18 @@
   // hover panel's own copy of the color formula.
   var isInfinitePositionOutput = scene.edgeMode === "infinite" &&
     (scene.output.property === "x" || scene.output.property === "y");
-  // The divisor every pixel's bounce count is scaled by - the largest count
+  // The divisor every pixel's bounce count is scaled by: the largest count
   // currently in view, re-measured by findBounceMax on every render. 1 until
   // the first measurement (and for every other Output, where it's unused), so
   // a pixel's t is never divided by zero.
   var bounceMaxValue = 1;
-  // Same fixed range the shader bakes in as OUTPUT_RANGE_MAX - kept here too
+  // Same fixed range the shader bakes in as OUTPUT_RANGE_MAX: kept here too
   // so the hover-replay panel (further below) can color its own frames with
   // the exact same formula the grid itself uses for that pixel.
   // Recomputed on read rather than cached: "Scene lifespan"'s range is the
   // step budget, which the Settings slider can change at any time.
   function currentOutputRangeMax() { return outputRangeMax(scene, scene.output.property); }
-  // Same condition as buildFragmentShader's own isCircularOutput - see its
+  // Same condition as buildFragmentShader's own isCircularOutput: see its
   // comment for exactly which cases this covers. Reused below both for
   // hueRangeMaxValue (the hover panel's own color formula) and for
   // superlative-finding's neighbor-distance metric (a genuinely circular
@@ -2290,7 +2290,7 @@
   quadBuffer = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
-  // Re-pointed whenever the bound pass changes - the attribute index is
+  // Re-pointed whenever the bound pass changes: the attribute index is
   // per-program, so it can't be set once and left alone the way it could
   // when there was only ever one program.
   function bindQuad(posLoc) {
@@ -2300,7 +2300,7 @@
   }
   bindQuad(activePass.posLoc);
 
-  // The view center's float32 words - four per axis, from the double-double
+  // The view center's float32 words: four per axis, from the double-double
   // the page holds it as (see view.center). This is where precision that a
   // single float32 uniform would throw away at upload is actually handed
   // over. A program that carries fewer words never declared the uniforms
@@ -2315,13 +2315,13 @@
 
   // ---- Measuring the field: the standard program, in sample mode ----
   //
-  // Everything that reads the picture back as numbers - the Color Zoom
-  // suggestion, the bounce-count divisor, the superlatives, Global Stats -
+  // Everything that reads the picture back as numbers, the Color Zoom
+  // suggestion, the bounce-count divisor, the superlatives, Global Stats,
   // draws the STANDARD program into an RGBA32F target with u_sampleField set,
   // which makes it write the raw pre-color t into the red channel instead of
   // a color (see compileScenePieces). Reading t needs no reverse color math
   // and none of the 8-bit quantization noise that would introduce near hue
-  // boundaries - and because it is the very program that draws the grid,
+  // boundaries, and because it is the very program that draws the grid,
   // there is no second compile of the scene's physics to wait for, and no
   // way for the measurement to disagree with the picture.
   //
@@ -2333,15 +2333,15 @@
   var hasFloatColorBuffer = !!gl.getExtension("EXT_color_buffer_float");
   // Null when there is nothing to measure with right now: no float render
   // targets on this device, or the grid is showing a df picture whose
-  // standard program is still building. Never falls back across precisions -
+  // standard program is still building. Never falls back across precisions:
   // a sampler reading the f32 shader while the grid displays the df one
   // would answer questions about a picture nobody is looking at. Every
   // caller already treats null as "no measurement this time".
   function currentSampler() {
-    if (!hasFloatColorBuffer) return null; // heuristic only - skip quietly if this GPU/browser can't render float textures
+    if (!hasFloatColorBuffer) return null; // heuristic only, skip quietly if this GPU/browser can't render float textures
     // Above float32 the field is measured by the sliced renderer's own
     // programs instead (see drawSampleBandSliced), so this is only ever the
-    // float32 grid program - and only while float32 is what is on screen.
+    // float32 grid program, and only while float32 is what is on screen.
     if (effectivePrecision() !== "f32" || f32NeedsSlicing()) return null;
     return requestPass("f32", "standard", true);
   }
@@ -2356,14 +2356,14 @@
   // center.x/.y are the view centre as they always were. xLo/yLo are the
   // rest of it: past about 1e-13 a float64 can no longer tell one pixel's
   // world coordinate from the next, so the centre is held as a
-  // DOUBLE-DOUBLE - x + xLo, ~106 bits - which is more than the deepest
+  // DOUBLE-DOUBLE, x + xLo, ~106 bits, which is more than the deepest
   // precision the shaders have (four float32 words, ~96 bits) can use.
   // Everything that only needs to know roughly where the view is (the
   // readouts, the float64 hover preview) goes on reading .x/.y; everything
   // that has to land on the right PIXEL goes through the helpers below.
   var view = { center: { x: DEFAULT_CENTER.x, y: DEFAULT_CENTER.y, xLo: 0, yLo: 0 }, scale: DEFAULT_SCALE };
 
-  // (hi + lo) + delta, renormalized - one axis of a pan. delta is a float64
+  // (hi + lo) + delta, renormalized: one axis of a pan. delta is a float64
   // and small, which is the easy case for a double-double: twoSum keeps
   // exactly what adding it to `hi` alone would have rounded away.
   function ddAddNumber(hi, lo, delta) {
@@ -2377,7 +2377,7 @@
     view.center.y = ny[0]; view.center.yLo = ny[1];
   }
   // The same, by the exact products ax*bx and ay*by. For a shift that has to
-  // be right to far more digits than a float64 product keeps - see
+  // be right to far more digits than a float64 product keeps: see
   // zoomAtClientPoint.
   function shiftViewCenterByProducts(ax, bx, ay, by) {
     var px = PhysicsDF.twoProd64(ax, bx), py = PhysicsDF.twoProd64(ay, by);
@@ -2390,14 +2390,14 @@
   }
   // Every digit of the centre, for the keys that decide whether saved state
   // still belongs to the view on screen. With only .x/.y in them, a pan at a
-  // deep zoom - which moves nothing but the low halves - looked like no
+  // deep zoom, which moves nothing but the low halves, looked like no
   // move at all.
   function viewCenterKey() {
     return [view.center.x, view.center.xLo, view.center.y, view.center.yLo].join(" ");
   }
   // The world point `uvx, uvy` view-heights from the centre, as a
   // double-double: { x, y, xLo, yLo }. A plain { x, y } is still a valid
-  // world point everywhere one is accepted - its low halves read as zero.
+  // world point everywhere one is accepted: its low halves read as zero.
   function worldPointAtUV(uvx, uvy) {
     var px = ddAddNumber(view.center.x, view.center.xLo, uvx * view.scale);
     var py = ddAddNumber(view.center.y, view.center.yLo, uvy * view.scale);
@@ -2405,7 +2405,7 @@
   }
   // The inverse: how many view-heights from the centre a world point is,
   // as [u, v]. The high and low differences are taken separately and only
-  // then added - subtracting two nearly equal 1e3-sized numbers first would
+  // then added, subtracting two nearly equal 1e3-sized numbers first would
   // leave nothing of a difference that lives entirely in the low halves.
   function worldPointToUV(point) {
     return [
@@ -2455,7 +2455,7 @@
   // has got. `complete` means there is nothing left to refine.
   var progressive = {
     stride: 0,          // 0 = nothing started yet; set on the first step after a reset
-    sublattice: 1,      // 1..3 - which of the level's three new sub-lattices is next
+    sublattice: 1,      // 1..3, which of the level's three new sub-lattices is next
     band: 0,            // next un-drawn row of the current sub-lattice's target
     complete: false,
     accumStride: 0,     // spacing of the data currently sitting in the accumulator
@@ -2480,19 +2480,19 @@
   // it already shows. So, with the setting on, a full-resolution copy of the
   // best picture so far is kept (`source`, with the view it is a picture
   // OF), and each new run works out how it maps onto the view being
-  // rendered (`run` - see reusePlanRun). That buys two different things:
+  // rendered (`run`: see reusePlanRun). That buys two different things:
   //
   //   A PREVIEW, for any view change. Until the ladder has a finished level
   //   at least as fine as the old picture looks from here, the screen shows
   //   the old picture moved and magnified into place (presentWithSource),
-  //   and the ladder's output where the old picture has nothing - a pan's
+  //   and the ladder's output where the old picture has nothing: a pan's
   //   newly exposed edge, the border of a zoom out. Zoom in 2x and the
   //   screen is at half resolution at once, where the ladder alone would
   //   have been at a 32nd. Nothing is saved: every pixel is still rendered.
   //
   //   EXACT reuse, for a pan. Pans are snapped to whole device pixels while
   //   the setting is on (panByClientDelta), so a panned view's pixels are
-  //   the old view's pixels, moved - the same world points, to within the
+  //   the old view's pixels, moved: the same world points, to within the
   //   ~1e-4 of a pixel that any two renders differ by. Those are copied into
   //   each level (reuseFillCovered) instead of being simulated, and only the
   //   strips the pan exposed are drawn (levelSimRegion). This one IS a
@@ -2500,7 +2500,7 @@
   //   rather than the whole screen again.
   //
   // What is reused is COLORS, so the source is only used for a run that
-  // would color the same world point the same way - reuseLookKey is
+  // would color the same world point the same way: reuseLookKey is
   // everything that goes into that besides the view. The derived display
   // modes difference neighbouring pixels, which makes their colors depend on
   // the zoom too, so they get the pan reuse and not the zoom preview.
@@ -2522,7 +2522,7 @@
     look: "",            // ...and the look and precision it was rendered with
     precision: "",
     // What the accumulator currently holds a picture OF, noted as each run
-    // starts - by the time a run is abandoned the view has already moved
+    // starts: by the time a run is abandoned the view has already moved
     // on. null when it is not the ladder's picture (playback painted it).
     image: null,
     // How the source maps onto the run in progress; null when it doesn't.
@@ -2535,7 +2535,7 @@
   // Below this much of the screen, a source the ladder has not yet bettered
   // is dropped for the ladder's own picture anyway: it is mostly off screen.
   var REUSE_KEEP_COVERAGE = 0.15;
-  // What a level with nothing to simulate reports as its cost - not 0, which
+  // What a level with nothing to simulate reports as its cost, not 0, which
   // the budget loop reads as "nothing left to draw".
   var REUSE_FREE_COST = 1e-6;
 
@@ -2549,7 +2549,7 @@
   // of the picture simulates to it (see renderedSteps), and Settings'
   // Simulation Duration is where the timeline ends. It rests AT that end,
   // which is all the grid ever showed before it had a timeline. The other
-  // fields are the Playback section's own bookkeeping - see there.
+  // fields are the Playback section's own bookkeeping: see there.
   var timeline = {
     step: simulationSteps,
     playing: false,
@@ -2562,7 +2562,7 @@
     stateStep: 0,
     // A write into the OTHER state texture that is still in flight, or null.
     pass: null,
-    // The last view seen, and when it changed - playback waits for the
+    // The last view seen, and when it changed: playback waits for the
     // view to hold still before rebuilding state for it.
     seenKey: null,
     seenAt: 0,
@@ -2571,14 +2571,14 @@
     // to refine.
     presentedKey: null,
     // Whether playback drew the most recent frame (rather than handing it to
-    // the ladder), and if so what it was doing - read by the progress ring
+    // the ladder), and if so what it was doing: read by the progress ring
     // and the timeline readout.
     drawing: false,
     catchingUp: false,
     catchUpFraction: 0,
     stride: 1,
     // While `following`, the step comes from the Inspect preview's clock
-    // rather than this timeline's own - see followInspection, and the Map
+    // rather than this timeline's own: see followInspection, and the Map
     // Evolution card whose being open turns that on. followTarget is the
     // step that clock is showing, followPlaying whether it is advancing.
     following: false,
@@ -2595,7 +2595,7 @@
   // would composite two different pictures together.
   // statsOnViewChanged is the third thing that means: a view change
   // invalidates the rendered image, every partially-accumulated refinement
-  // level, and every Global Stats number - all three are measurements of
+  // level, and every Global Stats number, all three are measurements of
   // the OLD view.
   function markDirty() { dirty = true; resetProgressive(); scheduleColorSpreadCheck(); statsOnViewChanged(); }
 
@@ -2605,9 +2605,9 @@
   // of world distance drops below the ULP of the coordinates that pixel's
   // starting scene is built from. Those coordinates are the view center
   // plus the scene's own authored positions, so the largest magnitude among
-  // them is what sets the ULP - pan somewhere with bigger numbers and the
+  // them is what sets the ULP: pan somewhere with bigger numbers and the
   // wall arrives sooner.
-  // Named for the same reason adoptSceneDuration is - setScene() recomputes
+  // Named for the same reason adoptSceneDuration is: setScene() recomputes
   // it, since a different scene has a different largest coordinate and so a
   // different float32 wall.
   function computeSceneCoordinateSpan() {
@@ -2621,9 +2621,9 @@
   // Switch to df once one pixel's world distance is under this many
   // float32 ULPs. Measured on the samples, float32 is still clean at ~3
   // ULPs per pixel (0.4% of neighbouring pixel pairs identical) and gone by
-  // ~0.3 (77%), so the wall really is at about 1 - this leaves a 20x
+  // ~0.3 (77%), so the wall really is at about 1: this leaves a 20x
   // margin. Not larger: a df pixel costs 5x to 25x a float32 one (measured
-  // per scene - hinges at the low end, swept collisions and gravity at the
+  // per scene, hinges at the low end, swept collisions and gravity at the
   // high end), which is paid for in how far down the refinement ladder a
   // view gets before the user moves again, so switching hundreds of times
   // earlier than necessary is not free. Not smaller: the
@@ -2649,18 +2649,18 @@
   var sliceSteps = {};
   var sliceCalibrated = {};
   var sliceTooHeavy = {};
-  // "auto" or one of PRECISION_LADDER - the latter being the Settings
+  // "auto" or one of PRECISION_LADDER: the latter being the Settings
   // panel's manual override, for comparing two passes at the same view.
   //
   // Starts at Auto, and (being page state, never persisted) is back at
-  // Auto every time this page is opened - including on the way back from
+  // Auto every time this page is opened, including on the way back from
   // the physics editor. Auto only reaches for the costlier df/tf/qf passes
   // once the zoom is deep enough that float32 visibly falls apart (see
   // precisionForSpacing), so a shallow session pays nothing for it; the
   // Force rungs remain for comparing two passes at the same view. The
   // deep-zoom tip below offers Auto to whoever has forced float32 and then
   // zoomed past where it holds up.
-  // ...unless it was changed on the builder page first - it is the same
+  // ...unless it was changed on the builder page first: it is the same
   // dropdown there (see "One settings body"), which was put at Auto when
   // the page loaded.
   var precisionMode = sharedSettings.readPrecision(PRECISION_LADDER);
@@ -2668,7 +2668,7 @@
   function float32UlpAt(magnitude) {
     return Math.pow(2, Math.ceil(Math.log2(Math.max(magnitude, 1e-30))) - 24);
   }
-  // The full-resolution device height - which, now that the backing store
+  // The full-resolution device height, which, now that the backing store
   // is always full resolution, is simply the canvas's own height; the
   // Math.max is left in place only to keep this honest while canvasArea is
   // hidden and reports 0. It is deliberately the FINEST spacing the view
@@ -2683,7 +2683,7 @@
   function worldPixelSpacing() { return view.scale / referenceHeightPx(); }
   // The smallest step a coordinate of this size can take at `precision`:
   // each float32 word carries 24 bits, and a multi-float number's words do
-  // not overlap, so N words is 24N bits. (Measured rather than assumed - the
+  // not overlap, so N words is 24N bits. (Measured rather than assumed: the
   // arithmetic's worst relative error is 1.8e-22 at three words and 6.6e-30
   // at four, within a bit or two of 2^-72 and 2^-96; see the multi-float
   // arithmetic test.)
@@ -2691,7 +2691,7 @@
     return float32UlpAt(magnitude) * Math.pow(2, -24 * (PhysicsDF.wordsFor(precision) - 1));
   }
   // The coarsest rung that still has DF_SWITCH_MARGIN_ULPS of its own ULPs
-  // per `spacing` - the same margin at every rung, for the same reason it
+  // per `spacing`: the same margin at every rung, for the same reason it
   // is the margin at the first. Past the last rung there is nothing finer
   // to switch to, and the last rung it is.
   function precisionForSpacing(spacing) {
@@ -2735,13 +2735,13 @@
     });
   }
 
-  // Picture reuse (see `reuse`). Page state like the precision above - and,
+  // Picture reuse (see `reuse`). Page state like the precision above, and,
   // since it became part of both performance presets, ON on every arrival
   // (it used to start off, as something that changes what the screen shows
   // while a render is under way and so ought to be asked for; in use it
   // turned out to be what anyone would ask for). It is switched on at the end
-  // of boot rather than here, by the preset the page starts at - see
-  // applyPerfValues - because the machinery it switches on is further down.
+  // of boot rather than here, by the preset the page starts at, see
+  // applyPerfValues, because the machinery it switches on is further down.
   // Shared by the checkbox and the performance presets (see applyPerfValues).
   function setReuseEnabled(on) {
     on = !!on;
@@ -2751,7 +2751,7 @@
     reuse.panCarryX = reuse.panCarryY = 0;
     if (reuseEnabled) {
       // The picture on screen is of this view, if a run has got anywhere
-      // with it - so the very next pan or zoom has something to reuse.
+      // with it, so the very next pan or zoom has something to reuse.
       if (!dirty && progressive.stride > 0) reuseNoteImage();
       return;
     }
@@ -2764,7 +2764,7 @@
   if (reusePictureCheckbox) {
     // (The checkbox is NOT put at reuseEnabled here: it may have been set
     // from the builder page before the map existed, and the end of boot
-    // takes reuseEnabled from IT - see "Performance settings: the controls".)
+    // takes reuseEnabled from IT, see "Performance settings: the controls".)
     reusePictureCheckbox.addEventListener("change", function () {
       setReuseEnabled(reusePictureCheckbox.checked);
       syncPerfPresetUI();
@@ -2779,7 +2779,7 @@
   // PhysicsEngine.speedCapFor, and a clamp keeps a vector's DIRECTION while
   // discarding its length. So outside a disc of radius = the cap, every
   // pixel's simulation starts from the same speed and differs only in which
-  // way it was pointed - that whole region collapses onto one angular
+  // way it was pointed: that whole region collapses onto one angular
   // coordinate, and a function of angle alone drawn in a plane is a fan of
   // rays. Zooming out is what brings the region past the cap into frame.
   //
@@ -2788,7 +2788,7 @@
   // that makes this plane a velocity plane and the artifact radial. Split
   // the two components across different bodies and each gets clamped against
   // its own (authored, constant) other component instead, which puts a
-  // straight edge in the picture rather than a fan - a different artifact,
+  // straight edge in the picture rather than a fan: a different artifact,
   // and not the one this sentence explains.
   var VELOCITY_CAP_TIP_ID = "velocity-speed-cap";
   var VELOCITY_CAP_TIP_MAX_ZOOM = 0.1;
@@ -2804,7 +2804,7 @@
     // the user sees: 0.1x means a tenth the default width across the frame.
     if (DEFAULT_SCALE / view.scale > VELOCITY_CAP_TIP_MAX_ZOOM) return false;
     // The zoom readout is what the trigger is about, so point at it when the
-    // Display card is open. Shut, that readout has no box at all - and this
+    // Display card is open. Shut, that readout has no box at all, and this
     // tip is purely an explanation, with nothing in the card to go and
     // click, so it points at the collapsed menu button rather than prising
     // the card open the way the Color Zoom suggestion legitimately does for
@@ -2822,7 +2822,7 @@
 
   // Is the machinery that draws the grid at `precision` built and ready?
   // Above float32 that is the sliced renderer's step + color programs (see
-  // "Sliced rendering") - or, on a device with no float render targets to
+  // "Sliced rendering"), or, on a device with no float render targets to
   // carry state in, the single-draw grid program at that precision, which is
   // the only way left to draw it. Asking also STARTS the build if there is
   // none, so this doubles as the way to request one.
@@ -2832,7 +2832,7 @@
     if (hasFloatColorBuffer) return !!playbackProgramsFor(precision);
     return !!requestPass(precision, wantedVariant(), false);
   }
-  // The same question WITHOUT starting anything - for the rungs below the
+  // The same question WITHOUT starting anything: for the rungs below the
   // one the view wants, which are worth using if the user has already been
   // through them and not worth a seconds-long build just to stand in.
   function precisionBuilt(precision) {
@@ -2854,9 +2854,9 @@
 
   // The precision the grid is ACTUALLY drawing with right now: what the zoom
   // calls for, unless that is still building (or couldn't be built), in
-  // which case the finest rung below it that is already built stands in -
+  // which case the finest rung below it that is already built stands in,
   // float32 if there is none. Everything that has to agree with the picture
-  // - the hover replay, playback, the samplers - asks this rather than
+  // - the hover replay, playback, the samplers: asks this rather than
   // pickPrecision().
   function effectivePrecision() {
     var wanted = pickPrecision();
@@ -2869,7 +2869,7 @@
 
   // How much earlier than a switch to START building the next rung's
   // programs, as a multiple of DF_SWITCH_MARGIN_ULPS. A wheel notch zooms by
-  // well under 2x, so 16x is several notches of warning - usually enough for
+  // well under 2x, so 16x is several notches of warning: usually enough for
   // them to be ready by the time the view actually needs them.
   var DF_PREWARM_FACTOR = 16;
   function prewarmPasses() {
@@ -2900,7 +2900,7 @@
     return pass;
   }
 
-  // A view-only rendering preference, same footing as the resolution slider -
+  // A view-only rendering preference, same footing as the resolution slider,
   // not part of the scene, never saved/serialized, just a uniform flipped and
   // redrawn, not something that needs the shader itself recompiled.
   var colorZoomEnabled = false;
@@ -2909,7 +2909,7 @@
   //
   // Standard paints the Output field itself. The other three paint a
   // derivative of that same field, computed per pixel by re-running the
-  // simulation at a stencil of neighbouring starting points - so switching
+  // simulation at a stencil of neighbouring starting points, so switching
   // mode changes nothing about the physics, the Output mapping, or the
   // view, only what is drawn from them. See buildFragmentShader's own
   // "Derived display modes" section for the shader side.
@@ -2930,7 +2930,7 @@
   // more air. Rows therefore stay the same height as each other whatever
   // the blurbs do, and they need not match each other in length. What they
   // must not do is run LONGER than the thumbnail is tall, which at the
-  // card's default width means keeping under about five wrapped lines -
+  // card's default width means keeping under about five wrapped lines:
   // past that the text starts driving the row height instead.
   //
   // The ids are the GLSL MODE_* constants and must stay in step with them.
@@ -2956,19 +2956,19 @@
   // reads its raw t values back (see setUpColorSpreadSampler for why t, not
   // color, and why this is safe to treat as read-only measurement). Used
   // both by the periodic Color Zoom suggestion check below (always a fixed
-  // SAMPLE_SIZE×SAMPLE_SIZE - cheap enough to run after every view change)
+  // SAMPLE_SIZE×SAMPLE_SIZE: cheap enough to run after every view change)
   // and by the superlative-finding buttons further down (sized to roughly
   // match the current view's aspect ratio instead, for better precision on
   // that one-off, user-triggered scan). Creating and tearing down the
   // texture/FBO on every call (rather than keeping one around) is simplest
-  // and is cheap at these sizes - this never runs on a hot per-frame path.
+  // and is cheap at these sizes: this never runs on a hot per-frame path.
   // Temporarily takes over the viewport and framebuffer binding, so it
   // restores both before returning: render() doesn't set either itself
   // per-call, only resizeCanvas does, so leaving them changed would misdraw
   // the next real frame.
   // rawBounces: only meaningful when Output is Bounce Count. The sampled t is
   // then count/u_bounceMax, so passing 1 for that divisor makes the readback
-  // the raw bounce count itself - which is exactly what findBounceMax needs
+  // the raw bounce count itself, which is exactly what findBounceMax needs
   // to work out what the divisor should be. Every other caller wants the
   // normalized t the grid is actually showing, so it leaves this off.
   function createSampleTarget(w, h) {
@@ -2989,13 +2989,13 @@
   // returns how many it drew. `target` only has to be as tall as one band.
   //
   // Split out of sampleValueGrid so Global Stats can cover a block far
-  // larger than the screen across several idle slices - the same reason the
+  // larger than the screen across several idle slices: the same reason the
   // refinement ladder bands its own draws: one draw covering millions of
   // full simulations is exactly the kind of long single dispatch that janks
   // a frame, and on an unlucky machine trips the GPU watchdog.
   //
-  // The band is selected with u_gridOrigin - the very same uniform the
-  // ladder uses to place its sub-lattices - rather than by scissoring a
+  // The band is selected with u_gridOrigin, the very same uniform the
+  // ladder uses to place its sub-lattices, rather than by scissoring a
   // block-sized target, so a full-resolution block never has to EXIST as a
   // texture. At one sample per rendered pixel that texture would be several
   // million pixels of RGBA32F, which is a lot of video memory to hold only
@@ -3012,7 +3012,7 @@
     if (rowCount <= 0) return 0;
     // Every gl.getParameter returns null once the context is lost, and this
     // is the one call site reached from a timer rather than from the render
-    // loop - so without this a lost context surfaces as an uncaught
+    // loop, so without this a lost context surfaces as an uncaught
     // TypeError on prevViewport[0] rather than as the caller's own "nothing
     // sampled" path. Nothing here attempts to RECOVER a lost context (the
     // page has never had a handler for that); it just declines to be the
@@ -3034,7 +3034,7 @@
     gl.scissor(0, 0, blockWidth, rowCount);
     gl.useProgram(sampler.program);
     gl.uniform1i(sampler.uniforms.sampleField, 1);
-    // The FULL block, not the band - this is what the shader divides by to
+    // The FULL block, not the band: this is what the shader divides by to
     // get uv, so it has to describe the grid being sampled rather than the
     // slice of it being drawn (exactly as u_resolution is always the
     // full-res canvas for the ladder's own sub-lattice draws).
@@ -3043,7 +3043,7 @@
     gl.uniform2f(sampler.uniforms.gridOrigin, 0, rowStart);
     setCenterUniforms(sampler.uniforms);
     gl.uniform1f(sampler.uniforms.scale, view.scale);
-    // What's on screen - the timeline's step - for every measurement of the
+    // What's on screen, the timeline's step, for every measurement of the
     // picture. The one exception is the bounce-count divisor (rawBounces,
     // see findBounceMax), which is taken over the whole Simulation Duration
     // so that colors stay put while the timeline plays toward it.
@@ -3089,7 +3089,7 @@
     var target = createSampleTarget(w, h);
     // A refused draw would leave the target untouched, and reading it back
     // would hand every caller a grid of zeros as though it were a
-    // measurement - so it takes the same "no sampler here" path they all
+    // measurement, so it takes the same "no sampler here" path they all
     // already handle.
     if (drawSampleBand(target, w, h, 0, h, rawBounces) === 0) {
       freeSampleTarget(target);
@@ -3103,12 +3103,12 @@
 
   // ---- Superlatives: find the largest/smallest/rarest/sharpest-edge point
   // (or point pair) in the currently visible view, and lock it as an
-  // Inspect point - see the panel's own buttons further down. ----
+  // Inspect point, see the panel's own buttons further down. ----
   //
   // All four work off one sampleValueGrid call at a resolution matching the
   // current view's aspect ratio (so the sampled rectangle in world-space
   // actually matches what's on screen, rather than being stretched/
-  // squashed by a mismatched aspect ratio) - bigger than the Color Zoom
+  // squashed by a mismatched aspect ratio): bigger than the Color Zoom
   // suggestion's SAMPLE_SIZE since this is a one-off, user-triggered scan
   // rather than something re-run after every pan/zoom tick.
   var SUPERLATIVE_SAMPLE_LONG_SIDE = 200;
@@ -3118,8 +3118,8 @@
   }
 
   // A genuinely circular output (see isCircularOutput above) needs a
-  // wraparound-aware distance - t=0.99 and t=0.02 are actually close
-  // together there, not far apart - while a capped, non-wrapping one
+  // wraparound-aware distance, t=0.99 and t=0.02 are actually close
+  // together there, not far apart, while a capped, non-wrapping one
   // (Scene lifespan; x/y under Sticky Edges or Infinite Space) uses a
   // plain difference, since its two ends are genuinely different values,
   // not the same wrapped point.
@@ -3128,18 +3128,18 @@
     return isCircularOutput ? Math.min(d, 1 - d) : d;
   }
 
-  // Only meaningful for a genuinely circular output - t=0 and t=1 are the
+  // Only meaningful for a genuinely circular output: t=0 and t=1 are the
   // same physical point there (the Pac-Man wrap), so a value sitting right
   // at either end is an inherently ambiguous representation of it: which
   // side it reads as can flip on essentially no real difference in the
   // underlying position. Sharpest Pair and Rarest both skip any comparison
   // straddling that seam (one point near t=0, the other near t=1) rather
   // than trusting valueDistance's own wraparound math to always
-  // de-prioritize it - the check is only ever "opposite sides," never
+  // de-prioritize it: the check is only ever "opposite sides," never
   // "close to either end" on its own, so it doesn't bias for or against
   // border-adjacent pixels in general, just rules out comparing a boundary
   // point against itself. 0.15 (not a much tighter 0.01) because the
-  // sample grid is coarse - two ADJACENT samples straddling a real wrap
+  // sample grid is coarse: two ADJACENT samples straddling a real wrap
   // point can easily land well away from the literal t=0/1 edge (e.g.
   // t=0.05 and t=0.95) while still being the same wrap artifact, not two
   // genuinely different values that happen to be near opposite ends.
@@ -3157,7 +3157,7 @@
 
   // Mirrors buildFragmentShader's own uv/world formula exactly (gl_FragCoord
   // has a bottom-left origin with Y increasing upward, matching WebGL's own
-  // readPixels row order - so no Y-flip is needed here, unlike
+  // readPixels row order, so no Y-flip is needed here, unlike
   // worldToCanvasAreaPixel's CSS-pixel conversion elsewhere, which does need
   // one for the DOM's top-left origin).
   function sampleCoordToWorld(grid, col, row) {
@@ -3166,16 +3166,16 @@
     return worldPointAtUV(uvx, uvy);
   }
 
-  // A SEPARATE wrap seam from valueDistance/pairCrossesWrapBorder's - that
+  // A SEPARATE wrap seam from valueDistance/pairCrossesWrapBorder's: that
   // one is about the OUTPUT value wrapping; this one is about the INPUT:
   // whatever body property X/Y Input is linked to gets its STARTING
   // position settled back into the frame (see generateGridInitialStateGLSL)
   // before the simulation even runs. As world-X/Y sweeps continuously, that
-  // settling is a sawtooth - two adjacent samples straddling one of its
+  // settling is a sawtooth: two adjacent samples straddling one of its
   // reset points get initial conditions roughly a full frame-dimension
   // apart, even though they're neighboring pixels representing nearly the
   // same offset. For a chaotic scene that can produce a wildly different
-  // outcome that has nothing to do with any real local structure - exactly
+  // outcome that has nothing to do with any real local structure: exactly
   // the false "sharpest pair"/"rarest" this was reported against, and it
   // affects every output property (Scene Lifespan included), not just
   // circular ones, since it changes which physical starting scenario is
@@ -3209,7 +3209,7 @@
   }
 
   // A genuine difference between two ADJACENT samples' starting positions
-  // is bounded by how much world-X/Y actually changes between them - tiny
+  // is bounded by how much world-X/Y actually changes between them: tiny
   // at any reasonable zoom. A jump anywhere near a full frame dimension can
   // only be the initial-state settle-into-frame wrap resetting where a
   // body starts, never two genuinely different nearby scenarios.
@@ -3242,7 +3242,7 @@
   // "Rarest" = least like its own neighborhood: the average distance (see
   // valueDistance) to all 8 surrounding samples, maximized. A neighbor on
   // the opposite side of the wrap border (see pairCrossesWrapBorder) is
-  // skipped entirely - not just down-weighted - same as Sharpest Pair:
+  // skipped entirely, not just down-weighted, same as Sharpest Pair:
   // comparing across that seam isn't a meaningful "this neighborhood is
   // different" signal, it's an artifact of where mod() happened to cut the
   // circle, so a pixel's rarity is judged only against the neighbors
@@ -3273,7 +3273,7 @@
   }
 
   // The single most different ADJACENT pair anywhere in the grid (as
-  // opposed to "rarest," which averages over a whole neighborhood) - only
+  // opposed to "rarest," which averages over a whole neighborhood), only
   // checking each pixel's right and down neighbor visits every edge in the
   // grid exactly once.
   function findSharpestEdge(grid, states) {
@@ -3305,7 +3305,7 @@
     var w = aspect >= 1 ? SUPERLATIVE_SAMPLE_LONG_SIDE : Math.max(1, Math.round(SUPERLATIVE_SAMPLE_LONG_SIDE * aspect));
     var h = aspect >= 1 ? Math.max(1, Math.round(SUPERLATIVE_SAMPLE_LONG_SIDE / aspect)) : SUPERLATIVE_SAMPLE_LONG_SIDE;
     var grid = sampleValueGrid(w, h);
-    if (!grid) return; // heuristic-only sampler unavailable (see setUpColorSpreadSampler) - nothing to do
+    if (!grid) return; // heuristic-only sampler unavailable (see setUpColorSpreadSampler), nothing to do
     if (kind === "largest") {
       var largest = findExtremeT(grid, true);
       lockPointAt(sampleCoordToWorld(grid, largest.col, largest.row));
@@ -3324,7 +3324,7 @@
 
   // The smallest arc (as a fraction of the full circle) that contains every
   // sampled t. t=0 and t=1 are the same point on the color wheel (see
-  // colorMap's own comment on why), so this can't just take max-min - the
+  // colorMap's own comment on why), so this can't just take max-min: the
   // values could straddle the wrap point (e.g. mostly 0.97-0.02) and still
   // occupy a tiny arc that a naive max-min would report as nearly the whole
   // range. The smallest arc is the full circle minus its single largest gap.
@@ -3339,26 +3339,26 @@
   }
 
   var COLOR_SPREAD_SUGGEST_THRESHOLD = 0.2; // 20% of the full output range
-  var COLOR_SPREAD_CHECK_DELAY_MS = 500; // debounced off markDirty - only check once the view settles, not on every drag tick
+  var COLOR_SPREAD_CHECK_DELAY_MS = 500; // debounced off markDirty, only check once the view settles, not on every drag tick
   var colorSpreadCheckTimer = null;
 
   function checkColorSpreadAndMaybeSuggestColorZoom() {
-    if (colorZoomEnabled) return; // nothing to suggest - it's already on
+    if (colorZoomEnabled) return; // nothing to suggest: it's already on
     // Only about the finished picture. Partway along the timeline a narrow
-    // spread is often just early - step 0 of a Scene Lifespan scene is one
-    // flat color by definition - and Color Zoom is no answer to that.
+    // spread is often just early, step 0 of a Scene Lifespan scene is one
+    // flat color by definition, and Color Zoom is no answer to that.
     if (timeline.playing || renderedSteps() < simulationSteps) return;
     var grid = sampleValueGrid(SAMPLE_SIZE, SAMPLE_SIZE);
     if (!grid) return;
     var values = [];
     for (var i = 0; i < grid.values.length; i += 4) values.push(grid.values[i]);
-    // Once dismissed, showTip below would no-op anyway - but only after
+    // Once dismissed, showTip below would no-op anyway, but only after
     // already forcing the Display card open, which is the bug: a dismissed
     // tip should stop touching the UI at all, not just stop being visible.
     if (isTipDismissed("color-zoom")) return;
     if (circularSpread(values) <= COLOR_SPREAD_SUGGEST_THRESHOLD) {
       // Color Zoom now lives inside the Display card's Standard row (see
-      // the DISPLAY_MODES loop below) - opening the card is what makes the
+      // the DISPLAY_MODES loop below), opening the card is what makes the
       // toggle an actual, non-zero-size anchor for showTip to point at.
       displayMenu.set(true);
       showTip("color-zoom", colorZoomCheckbox, "Try Color Zoom to highlight subtle color differences");
@@ -3397,18 +3397,18 @@
   // It used to run on every render() and that was survivable when a render
   // was the whole image; under progressive refinement it would be
   // catastrophic in two separate ways. It ends in a gl.readPixels, which is
-  // a hard CPU-waits-for-GPU sync - running it per level would put a
+  // a hard CPU-waits-for-GPU sync, running it per level would put a
   // pipeline stall between every one of a dozen-odd draws per frame. And
   // it's a measurement of the CURRENT view sampled on a fixed 32x32 grid,
   // so re-running it mid-refinement can return a slightly different max,
-  // which is the divisor every pixel's color is scaled by - the whole image
+  // which is the divisor every pixel's color is scaled by: the whole image
   // would shift hue partway through sharpening. Pinning it for the lifetime
   // of one refinement run is what makes the coarse levels honest previews
   // of the fine one rather than differently-colored pictures of it.
   var BOUNCE_MAX_SAMPLE_SIZE = 32;
 
   // ASYNCHRONOUS, unlike every other measurement here. This one runs on every
-  // view change - every frame of a drag - and a gl.readPixels is a hard
+  // view change, every frame of a drag, and a gl.readPixels is a hard
   // CPU-waits-for-GPU sync: in float32 the 1024 samples behind it cost
   // nothing worth noticing, but at df prices that sync was a fixed stall
   // stapled to the front of every frame of every gesture.
@@ -3417,7 +3417,7 @@
   // does not wait), and a fence says when that buffer can be mapped without
   // waiting either. Until then the picture keeps the divisor it had. When the
   // measurement lands and the divisor really has changed, the view is redrawn
-  // with it - one restart, a frame or two after the view stopped moving,
+  // with it: one restart, a frame or two after the view stopped moving,
   // instead of a stall on every frame while it moved. The pinning described
   // above still holds: the divisor only ever changes BETWEEN refinement runs.
   var bounceMaxProbe = { target: null, pbo: null, sync: null, key: null, measuredKey: null,
@@ -3431,7 +3431,7 @@
     var key = bounceMaxViewKey();
     // Already measured, or already being measured, for exactly this view.
     if (key === bounceMaxProbe.measuredKey || (bounceMaxProbe.sync && key === bounceMaxProbe.key)) return;
-    if (!canSampleField()) return; // no float targets to measure into - keep what we had
+    if (!canSampleField()) return; // no float targets to measure into: keep what we had
     var n = BOUNCE_MAX_SAMPLE_SIZE;
     if (!bounceMaxProbe.target) bounceMaxProbe.target = createSampleTarget(n, n);
     if (drawSampleBand(bounceMaxProbe.target, n, n, 0, n, true) === 0) return;
@@ -3481,7 +3481,7 @@
   // without it (see its call site). Same samples, same answer.
   function findBounceMax() {
     var grid = sampleValueGrid(BOUNCE_MAX_SAMPLE_SIZE, BOUNCE_MAX_SAMPLE_SIZE, true);
-    if (!grid) return bounceMaxValue; // no float-texture support - keep whatever we had
+    if (!grid) return bounceMaxValue; // no float-texture support: keep whatever we had
     var max = 0;
     for (var i = 0; i < grid.values.length; i += 4) max = Math.max(max, grid.values[i]);
     return Math.max(1, max);
@@ -3494,7 +3494,7 @@
   // sets the uniforms the physics pass itself reads and issues the draw.
   //
   // u_resolution is always the FULL-res canvas size, never the size of the
-  // target being drawn into - see the shader's own comment on why.
+  // target being drawn into: see the shader's own comment on why.
   function drawSublattice(stride, originX, originY, steps) {
     var pass = useCurrentPass();
     if (!pass) return;
@@ -3518,22 +3518,22 @@
   // Three kinds of entry, all stored the same shape (a "group" holding one
   // or more point-entries) so add/remove/clear/draw never has to
   // special-case "how many points is this really":
-  //   "point" - one point-entry: a plain click/tap (see endDrag), or one of
+  //   "point", one point-entry: a plain click/tap (see endDrag), or one of
   //             the superlative buttons below.
   //   "line"  - inspectLineSampleCount point-entries evenly spaced along a
-  //             dragged segment (Inspect (Line) armed - see
+  //             dragged segment (Inspect (Line) armed: see
   //             lockLineOfPoints), each still drawn as its own full set of
   //             bodies, hue-cycled the same way a "point" is.
   //   "grid"  - a Grid Settings-sized (see computeGridLayout) set of
   //             point-entries evenly spaced over a dragged rectangle
-  //             (Inspect (Grid) armed - see lockGridOfPoints). Drawn
+  //             (Inspect (Grid) armed: see lockGridOfPoints). Drawn
   //             completely differently from the other two: not as bodies at
   //             all, but as a connected mesh of lines through each point's
-  //             own Output position - see drawInspectedAtStep and
+  //             own Output position, see drawInspectedAtStep and
   //             updateInspectMarkers.
   // A point-entry itself is always { worldPoint, trajectory, effectiveMaxStep,
-  // wrapOverride, lifespanValue, color: {fill, stroke} } - exactly what
-  // computeTrajectoryEntry returns, plus a color - regardless of which kind
+  // wrapOverride, lifespanValue, color: {fill, stroke} }, exactly what
+  // computeTrajectoryEntry returns, plus a color, regardless of which kind
   // of group it ends up in.
   // The largest a single grid can ask for is Grid Size 8 with Two Part Line
   // on: computeGridLayout gives denseSize = 2*8-1 = 15, and a 15x15 grid
@@ -3542,7 +3542,7 @@
   // just a bump, or the biggest grid the settings allow would silently
   // refuse to ever complete.
   var MAX_INSPECT_POINTS = 300;
-  // Grid Settings (the Settings card in the menu column) - how many lines
+  // Grid Settings (the Settings card in the menu column): how many lines
   // Inspect (Grid) draws per axis, and whether each one gets a midpoint to
   // kink at. Read fresh by lockGridOfPoints on every drag (see
   // computeGridLayout); their own change listeners live down by the rest of
@@ -3556,11 +3556,11 @@
     return total;
   }
 
-  // Which drag gesture the next one commits to - set by clicking Inspect
+  // Which drag gesture the next one commits to: set by clicking Inspect
   // (Line) or Inspect (Grid), cleared once that drag actually produces a
   // group (see lockLineOfPoints/lockGridOfPoints) or Clear All is pressed.
   // A plain click/tap needs neither: with neither armed it always locks a
-  // single point (see endDrag), and WITH one armed it's not a drag at all -
+  // single point (see endDrag), and WITH one armed it's not a drag at all,
   // just a reminder (see showInspectToast) to drag instead, since only a
   // real drag can mean something other than panning.
   //
@@ -3568,7 +3568,7 @@
   // a finger's tap locks a point only once it has been armed, because a
   // finger has no hover to preview with and its taps share the map with
   // one-finger pans and pinches. Unlike the other two it never takes the
-  // drag away from panning - a tap and a drag are already different
+  // drag away from panning: a tap and a drag are already different
   // gestures, so an armed Point leaves the map as movable as it was.
   var inspectArmMode = null; // null | "point" | "line" | "grid"
   function inspectArmTakesDrag() {
@@ -3581,11 +3581,11 @@
     btnInspectGrid.classList.remove("inspect-armed");
   }
 
-  // colorIndex is assigned once, at lock time, and never reassigned - so
+  // colorIndex is assigned once, at lock time, and never reassigned, so
   // removing one locked point doesn't shift the colors of the others (per
   // the user's ask: "the others DON'T get new colors, they just continue the
   // pattern"). It only resets to 0 once every group is gone, so a fresh
-  // inspection always starts back at red. Only "point" groups consume this -
+  // inspection always starts back at red. Only "point" groups consume this:
   // a dragged line (see lockLineOfPoints) uses its own fixed hue split
   // instead, and a dragged grid (see lockGridOfPoints) its own x/y-position
   // scheme, independent of this sequence.
@@ -3600,22 +3600,22 @@
   }
 
   // Dragging while Inspect (Line) is armed locks this many points at once,
-  // evenly spaced along the dragged segment - one at each end, the rest
-  // spaced in between - colored as an even split across
+  // evenly spaced along the dragged segment, one at each end, the rest
+  // spaced in between, colored as an even split across
   // [0, INSPECT_LINE_MAX_HUE] rather than continuing the golden-angle
   // sequence above, so a dragged line reads as its own connected group.
-  // Settings-controlled (Inspection Line Sample Count, 5-60) - see its own
+  // Settings-controlled (Inspection Line Sample Count, 5-60): see its own
   // wiring down by the rest of the Settings controls. The preview/locked-dot
   // pool below is still built once at INSPECT_LINE_SAMPLE_MAX, the slider's
-  // own ceiling, so changing this never has to grow or shrink that pool -
+  // own ceiling, so changing this never has to grow or shrink that pool,
   // only how many of it are shown.
   var INSPECT_LINE_SAMPLE_MAX = 60;
   var inspectLineSampleCount = Number(document.getElementById("inspect-line-sample-count-slider").value) || 30;
   // Stops short of 360 (== 0 on the hue wheel) so the last point never ends
-  // up looking near-identical to the first - the interval is [0, 324], not
+  // up looking near-identical to the first: the interval is [0, 324], not
   // [0, 360), regardless of inspectLineSampleCount.
   var INSPECT_LINE_MAX_HUE = 324;
-  // `count` is the line's own sample count - the panel's current setting
+  // `count` is the line's own sample count: the panel's current setting
   // for one being dragged out now, but a line restored from a link brings
   // the count it was made with (see restoreInspectGroups).
   function inspectLinePointColor(i, count) {
@@ -3634,11 +3634,11 @@
 
   // Dragging while Inspect (Grid) is armed locks a cols×rows grid of points
   // evenly spaced over the axis-aligned box the drag spans (corner1/corner2
-  // in either order - sorted into min/max here), row-major so a later
+  // in either order: sorted into min/max here), row-major so a later
   // filter/lookup (see below) can still find points by (row,col). Each
   // point keeps its own col/row for inspectGridPointColor.
   function evenlySpacedGrid(corner1, corner2, cols, rows) {
-    // Which corner is the low one per axis - decided on the double-double
+    // Which corner is the low one per axis: decided on the double-double
     // difference, since at a deep zoom the two corners' .x can be the very
     // same float64.
     var xFirst = worldPointDelta(corner1, corner2, "x") >= 0;
@@ -3657,22 +3657,22 @@
     }
     return points;
   }
-  // Turns the Grid Settings (grid size N, two-part line on/off - see their
+  // Turns the Grid Settings (grid size N, two-part line on/off: see their
   // own DOM lookups and change listeners below) into the actual dense
   // dot-grid a drag builds. N is "how many lines the user sees per axis";
   // it needs at least 2 to read as a grid at all (a single line can't form
-  // one), so anything below that is silently clamped up to 2 - the size-1
+  // one), so anything below that is silently clamped up to 2: the size-1
   // and size-2 settings end up drawing the same thing, a plain bounding
   // rectangle, and that's intentional, not a bug.
   //
-  // Without a two-part line, an N-line axis needs exactly N dots - one per
+  // Without a two-part line, an N-line axis needs exactly N dots: one per
   // line, evenly spread including both edges (N=2 is just the two edges,
-  // e.g. a plain box) - so `size` is simply nEff and every axis position is
+  // e.g. a plain box), so `size` is simply nEff and every axis position is
   // "on" a line already; there's nothing left over to exclude.
   //
   // With a two-part line, every one of the (nEff-1) gaps between adjacent
   // lines gets one extra dot in the middle, so each line can bend there
-  // instead of running arrow-straight - nEff lines plus (nEff-1) midpoints
+  // instead of running arrow-straight: nEff lines plus (nEff-1) midpoints
   // is `2*nEff - 1` dots per axis. Those extra midpoints ARE genuine grid
   // rows/columns of their own now (not just points sitting on a line), so
   // lockGridOfPoints' own off-axis filter (any point whose row AND column
@@ -3689,12 +3689,12 @@
   }
   function isAxisIn(list, i) { return list.indexOf(i) !== -1; }
   // color(x,y) = RGB(x,y,0.5) in each point's own (col,row), normalized to
-  // [0,1] against THIS grid's own denseSize (fixed at creation time - see
-  // lockGridOfPoints - so a later Grid Settings change can't repaint a
-  // grid that already exists) - fixed and position-only (not hue-cycled
+  // [0,1] against THIS grid's own denseSize (fixed at creation time, see
+  // lockGridOfPoints, so a later Grid Settings change can't repaint a
+  // grid that already exists): fixed and position-only (not hue-cycled
   // like point/line colors), so a grid's coloring stays legible entirely on
   // its own: one corner reads blue, the opposite red-ish, the other two
-  // green and yellow, fading between - independent of anything the
+  // green and yellow, fading between, independent of anything the
   // underlying scene does. Which grid axis is x vs. y doesn't matter, so
   // col is simply x (R) and row is y (G) here. Keeps the raw 0-255
   // components alongside the ready CSS string so averageRgbFill below has
@@ -3709,9 +3709,9 @@
     return "rgb(" + Math.round((colorA.r + colorB.r) / 2) + "," + Math.round((colorA.g + colorB.g) / 2) + "," + Math.round((colorA.b + colorB.b) / 2) + ")";
   }
   // Connects each drawn row and drawn column (lineAxes, from
-  // computeGridLayout - fixed per grid at creation time, same reasoning as
+  // computeGridLayout, fixed per grid at creation time, same reasoning as
   // inspectGridPointColor's own denseSize) into its own point-per-axis-slot
-  // chain - a sparse "hash mark" rather than the dense "every adjacent
+  // chain, a sparse "hash mark" rather than the dense "every adjacent
   // pair" adjacency a full grid mesh would use, since only lineAxes' own
   // rows/columns are ever drawn (see lockGridOfPoints' own filter, which
   // already dropped every other point before this runs). Each line still
@@ -3743,7 +3743,7 @@
     return segments;
   }
 
-  // Which body's x/y a grid point plots as its own position - every Output
+  // Which body's x/y a grid point plots as its own position: every Output
   // property but Scene Lifespan already names one (scene.output.body);
   // Lifespan has none (see physics-ui.js: `{ body: null, ... }`), so this
   // falls back to the lowest-indexed non-anchored body instead, per the
@@ -3764,7 +3764,7 @@
   // a bottom-left origin (Y increases upward); CSS/DOM coordinates have a
   // top-left origin, hence the height-flip on fy below.
   // worldXLo/worldYLo are the low halves of a double-double point (see
-  // worldPointAtUV) - optional, zero for a plain float64 one.
+  // worldPointAtUV): optional, zero for a plain float64 one.
   function worldToCanvasAreaPixel(worldX, worldY, worldXLo, worldYLo) {
     var uv = worldPointToUV({ x: worldX, y: worldY, xLo: worldXLo, yLo: worldYLo });
     var fx = uv[0] * canvas.height + 0.5 * canvas.width;
@@ -3778,13 +3778,13 @@
 
   // One .inspect-marker div per "point"/"line" point, pooled and reused
   // across updates rather than torn down and rebuilt. "grid" groups draw no
-  // dots at all here - their permanent mesh lines (group.meshLineEls,
+  // dots at all here: their permanent mesh lines (group.meshLineEls,
   // created once in lockGridOfPoints) just get repositioned below, same
   // "recompute screen position on every pan/zoom" need as the dots, for a
   // fixed set of line endpoints instead of a fixed set of points.
   //
-  // Clicking a marker removes its WHOLE group - the same thing the list's
-  // own × button does (see updateInspectList/removeInspectedGroup) - rather
+  // Clicking a marker removes its WHOLE group, the same thing the list's
+  // own × button does (see updateInspectList/removeInspectedGroup), rather
   // than trying to pull just that one point out of a locked line, which
   // nothing else in this file (colors, hue spacing, segment indices) is
   // built to do. inspectMarkerGroupIndex is the parallel array a marker's
@@ -3796,7 +3796,7 @@
   var inspectMarkerGroupIndex = [];
   function updateInspectMarkers() {
     // Collapsing Inspect stops the work (see its own makeMenu comment) but
-    // never touches inspectedGroups - so a still-open card's worth of
+    // never touches inspectedGroups, so a still-open card's worth of
     // points is sitting right there, just not drawn, ready to reappear
     // exactly as it was the moment the card reopens.
     var visible = inspectMenu.isOpen();
@@ -3819,7 +3819,7 @@
         removeInspectedGroup(inspectMarkerGroupIndex[slot]);
       });
       // The dot sits on top of the canvas, so the canvas's own wheel
-      // listener never sees a scroll made while hovering it - zoom from
+      // listener never sees a scroll made while hovering it: zoom from
       // here too, or a marker under the cursor blocks zooming entirely.
       el.addEventListener("wheel", onWheelZoom, { passive: false });
       canvasArea.appendChild(el);
@@ -3833,7 +3833,7 @@
       var el = inspectMarkerEls[i];
       el.style.left = p.x + "px";
       el.style.top = p.y + "px";
-      // A custom property, not el.style.background directly - background
+      // A custom property, not el.style.background directly: background
       // itself is set in CSS from var(--marker-color), which is what lets
       // .inspect-marker:hover's own plain background rule (see
       // fractal-grid.css) win on hover without an !important fight against
@@ -3857,16 +3857,16 @@
   }
 
   // The dashed connecting line plus up to INSPECT_LINE_SAMPLE_MAX dots shown
-  // while dragging Inspect (Line) - built once here, at the slider's own
+  // while dragging Inspect (Line): built once here, at the slider's own
   // ceiling, and just repositioned on every update rather than recreated,
   // same pooling idea as inspectMarkerEls. Only the first
   // inspectLineSampleCount of the pool are ever shown at once (see
-  // updateInspectLinePreview) - that is what lets the Settings slider change
+  // updateInspectLinePreview): that is what lets the Settings slider change
   // the count without growing or shrinking this pool. Colored with
   // inspectLinePointColor so the preview matches exactly what
   // lockLineOfPoints will actually place. Hidden/shown on its own (not via
-  // #inspect-preview's own hidden attribute, which - now that the same SVG
-  // also permanently hosts completed grids' mesh lines - must stay unhidden
+  // #inspect-preview's own hidden attribute, which, now that the same SVG
+  // also permanently hosts completed grids' mesh lines, must stay unhidden
   // regardless of whether a preview is active).
   var SVG_NS = "http://www.w3.org/2000/svg";
   var inspectLinePreviewLine = document.createElementNS(SVG_NS, "line");
@@ -3900,7 +3900,7 @@
       inspectLinePreviewDots[i].setAttribute("cy", px.y);
       inspectLinePreviewDots[i].setAttribute("fill", inspectLinePointColor(i).fill);
     });
-    // Not `.hidden = false` - the hidden IDL property is reliably defined on
+    // Not `.hidden = false`: the hidden IDL property is reliably defined on
     // HTMLElement but not consistently on SVGElement, so setting it can
     // silently no-op instead of touching the actual attribute. The
     // attribute methods work identically regardless of element/namespace.
@@ -3915,7 +3915,7 @@
     inspectLinePreviewDots.forEach(function (d) { d.setAttribute("hidden", ""); });
   }
 
-  // The dashed rectangle outline shown while dragging Inspect (Grid) -
+  // The dashed rectangle outline shown while dragging Inspect (Grid):
   // corners are simply wherever the drag currently starts/is, the same
   // min/max sorting evenlySpacedGrid itself does, so the preview always
   // matches the grid that would actually be locked if released right now.
@@ -3944,14 +3944,14 @@
     hideInspectGridPreview();
   }
 
-  // "Drag to inspect a line/grid" - shown when Inspect (Line)/(Grid) is
+  // "Drag to inspect a line/grid": shown when Inspect (Line)/(Grid) is
   // armed and the grid gets a plain click instead of the drag it's waiting
   // for (see endDrag). Restarting the timer on every call (rather than
   // leaving an earlier one to fire) means a second click while it's still
   // showing just holds it up instead of letting it flicker hidden-then-
   // shown again a moment later.
   //
-  // Never [hidden] (display:none) - same reasoning as .settings-panel's own
+  // Never [hidden] (display:none), same reasoning as .settings-panel's own
   // "Always in the DOM" comment: a display change and an opacity transition
   // can't reliably combine in the same frame (removing display:none leaves
   // nothing for the transition to animate FROM), so the resting state is
@@ -3970,7 +3970,7 @@
   }
 
   // "line"/"grid" rows lead with this instead of the small .inspect-dot a
-  // "point" row uses - large enough to stand as its own column beside the
+  // "point" row uses: large enough to stand as its own column beside the
   // two-line start/end coordinates, and shaped like what it represents (a
   // dashed line for "line", a grid square for "grid") so that shape is
   // what says "this is a line/grid entry" now, freeing the two coordinate
@@ -4022,14 +4022,14 @@
   }
 
   // Restarts whatever the hover preview panel is currently showing, from
-  // scratch. Used whenever the inspected set changes (add/remove/clear -
+  // scratch. Used whenever the inspected set changes (add/remove/clear,
   // see updateInspectUI): a point added from a slow batch (a big dragged
   // line or grid can take a real, visible moment to GPU-compile all of
   // them) must never join a replay that's already mid-progress by the time
-  // it's ready - restarting is what guarantees everyone starts at step 0
+  // it's ready, restarting is what guarantees everyone starts at step 0
   // together, "fully loaded" by construction rather than by timing it.
   function restartCurrentPreview() {
-    // inspectedGroups wins over a live hover, not the other way round - once
+    // inspectedGroups wins over a live hover, not the other way round, once
     // at least one point/line/grid is locked, the panel is showing THEM
     // (see the mousemove handler's own comment on why hovering elsewhere no
     // longer swaps in a preview of its own trajectory alongside them), so
@@ -4054,7 +4054,7 @@
     restartCurrentPreview();
   }
 
-  // Computes and caches everything drawing a locked point later needs - the
+  // Computes and caches everything drawing a locked point later needs: the
   // same GPU replay + wrap-stop work runHoverAt does for the hovered point,
   // just run once up front and kept around instead of recomputed every
   // frame. Shared by lockPointAt, lockLineOfPoints and lockGridOfPoints;
@@ -4106,7 +4106,7 @@
     nextColorIndex++;
     inspectedGroups.push({ type: "point", points: [entry] });
     // A superlative button can fire while Line/Grid is armed and waiting
-    // for a drag - this is a different, complete action instead, so cancel
+    // for a drag: this is a different, complete action instead, so cancel
     // that wait rather than leave the button looking armed for a drag that
     // (per endDrag) a plain click like this one no longer starts anyway.
     disarmInspect();
@@ -4114,15 +4114,15 @@
   }
 
   // Dragging while Inspect (Line) is armed calls this instead of
-  // lockPointAt - see evenlySpacedPoints/inspectLinePointColor above. If
+  // lockPointAt: see evenlySpacedPoints/inspectLinePointColor above. If
   // fewer than inspectLineSampleCount slots remain before
   // MAX_INSPECT_POINTS, only the first `available` (start-ward) get added
-  // rather than re-spacing/re-coloring a smaller set - simpler, and the cap
+  // rather than re-spacing/re-coloring a smaller set: simpler, and the cap
   // is high enough (300) that this only bites right at the edge.
   function lockLineOfPoints(startWorld, endWorld, sampleCount) {
     sampleCount = sampleCount || inspectLineSampleCount;
     var available = MAX_INSPECT_POINTS - totalInspectedPointCount();
-    if (available <= 0) return; // stays armed - Clear All (or removing a point) might free up room to retry
+    if (available <= 0) return; // stays armed: Clear All (or removing a point) might free up room to retry
     var worldPoints = evenlySpacedPoints(startWorld, endWorld, sampleCount);
     var count = Math.min(worldPoints.length, available);
     var points = [];
@@ -4142,12 +4142,12 @@
   // missing some of its points would leave gaps in the mesh (see
   // drawInspectedAtStep) that read as broken rather than "a smaller grid,"
   // so this only commits once every point it actually needs both fits under
-  // MAX_INSPECT_POINTS and compiles - and stays armed on either kind of
+  // MAX_INSPECT_POINTS and compiles, and stays armed on either kind of
   // failure, so a rectangle that didn't work can just be redragged without
   // re-clicking the button.
   //
   // The layout (denseSize/lineAxes) is read from the current Grid Settings
-  // ONCE, right here, and then belongs to this grid alone - see
+  // ONCE, right here, and then belongs to this grid alone: see
   // inspectGridSize/inspectGridTwoPart's own comment for why a later
   // settings change must never reach back into an already-made grid.
   //
@@ -4156,9 +4156,9 @@
   // before a single trajectory is even compiled for it.
   //
   // inspectGridSize/inspectGridTwoPart (Grid Settings, in the settings
-  // panel - see their own change listeners far below) are read fresh at the
+  // panel, see their own change listeners far below) are read fresh at the
   // top of every lockGridOfPoints call, never stored on the group itself
-  // except as the already-resolved layout - so changing them only ever
+  // except as the already-resolved layout, so changing them only ever
   // changes what the NEXT drag makes; an existing grid's own points/mesh
   // were already committed and don't move or recolor retroactively.
   function lockGridOfPoints(startWorld, endWorld, gridSize, twoPart) {
@@ -4195,7 +4195,7 @@
       startWorld: startWorld,
       endWorld: endWorld,
       // What it was made with, which the resolved layout above can't be
-      // read back into (5 dots a side is 5 plain lines or 3 two-part ones) -
+      // read back into (5 dots a side is 5 plain lines or 3 two-part ones):
       // kept for the one thing that has to say it again, a shared link.
       gridSize: gridSize,
       twoPart: !!twoPart,
@@ -4209,7 +4209,7 @@
     if (group.type === "grid") group.meshLineEls.forEach(function (el) { el.remove(); });
     inspectedGroups.splice(index, 1);
     if (inspectedGroups.length === 0) {
-      nextColorIndex = 0; // nothing left to continue the sequence from - start over at red
+      nextColorIndex = 0; // nothing left to continue the sequence from: start over at red
       disarmInspect();
     }
     updateInspectUI();
@@ -4227,10 +4227,10 @@
   }
 
   // Clicking the already-armed button cancels it (a plain toggle) rather
-  // than just re-arming a no-op state - otherwise there'd be no way back to
+  // than just re-arming a no-op state, otherwise there'd be no way back to
   // "neither armed" short of dragging one to completion or clearing
   // everything. Grey means "idle, click me"; the blue .inspect-armed look
-  // (see fractal-grid.css) means "now go drag the grid" - the same
+  // (see fractal-grid.css) means "now go drag the grid": the same
   // gray-idle/blue-active convention the first page's own .tool-btn uses,
   // so the color signals which button (if either) is waiting the same way
   // it does everywhere else in the app.
@@ -4263,7 +4263,7 @@
 
   // "Largest Point"/"Smallest Point" fit every output type, but read more
   // naturally with wording (and, for x/y, an order) specific to what's
-  // actually being searched - btn-superlative-largest always finds the max
+  // actually being searched: btn-superlative-largest always finds the max
   // t and -smallest always finds the min t no matter what it's labeled or
   // where it sits, so this only ever changes their text and DOM position,
   // never which button does which search.
@@ -4280,7 +4280,7 @@
       smallestFirst = true;
     } else if (prop === "y") {
       // Larger y is LOWER on screen here (screen/physics convention, not
-      // math convention - see PhysicsGridCodegen's own Y-flip comment), so
+      // math convention: see PhysicsGridCodegen's own Y-flip comment), so
       // the largest-value search is "Lowest," not "Highest."
       largestLabel = "Lowest";
       smallestLabel = "Highest";
@@ -4326,7 +4326,7 @@
   // the GPU, predicted a per-pixel cost, and picked one fixed resolution to
   // render at while panning (plus a second, higher one to swap to once the
   // view went idle). That approach had to GUESS, and could guess wrong in
-  // both directions - too fine and every frame janked, too coarse and the
+  // both directions: too fine and every frame janked, too coarse and the
   // view stayed needlessly blurry with nothing to correct it. Refinement
   // can only ever guess in ONE direction: it starts from the cheapest
   // possible level and stops when it runs out of time, so a slow machine
@@ -4364,7 +4364,7 @@
   // ---- The per-frame work budget ----
   //
   // Purely a feedback loop against wall-clock frame time. There is no way
-  // to ask WebGL how long a draw actually took - the timer-query extension
+  // to ask WebGL how long a draw actually took: the timer-query extension
   // is unavailable in most browsers, and the alternative (a readPixels
   // after each draw, which is what the old calibration code did) is itself
   // a pipeline stall, i.e. exactly the cost being measured. So instead of
@@ -4373,7 +4373,7 @@
   //
   // Reactive rather than predictive: a frame that overshoots has already
   // overshot by the time it's noticed. That is fine here precisely because
-  // the failure mode is bounded - the budget only ever controls how much
+  // the failure mode is bounded: the budget only ever controls how much
   // refinement happens per frame, never whether the image is correct.
   //
   // Crucially, the thresholds are relative to the DISPLAY's own cadence,
@@ -4381,9 +4381,9 @@
   // whole multiples of the refresh period, so the only thing an interval
   // really tells you is how many refreshes a frame's work spilled across:
   // one means it fit, two or more means it didn't. Measuring that against
-  // a fixed 16ms silently assumes a 60Hz display, and anywhere slower -
+  // a fixed 16ms silently assumes a 60Hz display, and anywhere slower,
   // a 30Hz panel, a throttled or backgrounded tab, an embedded webview, a
-  // laptop in a power-saving mode - EVERY frame reads as too slow, the
+  // laptop in a power-saving mode, EVERY frame reads as too slow, the
   // budget shrinks on every single one, and it pins itself to the floor
   // and stays there. The grid would sit at its coarsest level forever with
   // nothing to indicate why.
@@ -4391,7 +4391,7 @@
   // Tracks the shortest interval seen lately: a running minimum with a
   // slow upward leak, so it settles onto the true refresh period but can
   // still climb if the page moves to a slower display. Fed by EVERY frame,
-  // including idle ones - an idle frame is the only clean observation of
+  // including idle ones: an idle frame is the only clean observation of
   // the period there is, since no work is competing with it.
   var DISPLAY_PERIOD_LEAK = 1.01;
   function noteFrameCadence(now) {
@@ -4405,21 +4405,21 @@
   }
   var lastFrameAt = 0;
 
-  // How long a frame of rendering is meant to take - the period everything
+  // How long a frame of rendering is meant to take: the period everything
   // below measures a frame against. One display refresh, unless Settings >
   // Performance Settings > Work per frame asks for longer (perf.frameMs).
   //
   // One refresh is what keeps the page perfectly smooth while it renders, and
   // on a GPU with time to spare it costs nothing. On one without, it costs
   // most of the GPU. Every frame carries a fixed charge that has nothing to
-  // do with how much it simulates - the browser compositing the page, this
-  // page's own present pass, the state a sliced draw loads and stores - and
+  // do with how much it simulates, the browser compositing the page, this
+  // page's own present pass, the state a sliced draw loads and stores, and
   // at 120Hz a frame is 8ms, of which a phone can spend the better part on
   // that charge alone. Worse, the feedback loop below can only tell whether a
   // frame FIT its period: where even a nearly empty work frame takes two
   // refreshes to come back (a busy mobile compositor, a browser that halves
   // its frame rate under GPU load), every frame reads as an overrun, the
-  // budget is cut on every one of them, and it ends up pinned at its floor -
+  // budget is cut on every one of them, and it ends up pinned at its floor,
   // a tile advanced a step or two per frame, a picture that takes minutes.
   // Against a 50ms frame the same charge is a few percent, and a frame that
   // took two refreshes simply fit.
@@ -4465,9 +4465,9 @@
   // phone on the first frame before any feedback exists.
   var INITIAL_PIXEL_BUDGET = 120000;
   // Deliberately far below one frame's worth of work on any machine. This
-  // is a floor on the FEEDBACK, not on throughput - forward progress is
+  // is a floor on the FEEDBACK, not on throughput, forward progress is
   // guaranteed separately, by the "always draw at least one band" rule in
-  // stepProgressive - so setting it near a real frame's cost would peg the
+  // stepProgressive, so setting it near a real frame's cost would peg the
   // loop above its target and it could never regulate back down. A heavy
   // scene on a modest GPU can be as slow as a few thousand simulated
   // pixels per frame, and the budget has to be able to follow it there.
@@ -4485,14 +4485,14 @@
   // float32 render overran its frame on 38% of frames and a df one on
   // 30-40%, with 20ms of GPU work queued into a 16.7ms period as the steady
   // state. That is the page stuttering at 30-40fps for the length of every
-  // render - the sliders and panels with it, since the browser draws them
+  // render: the sliders and panels with it, since the browser draws them
   // on the same GPU.
   //
   // The query says how many ms a frame's pixels took, so the budget can be
   // set straight to the number that takes the time wanted, with no probing
   // and no overshoot. What is wanted depends on who is watching: most of
   // the period while the page is left alone to render, about half of it
-  // while the user is doing something (moving the pointer counts - hovering
+  // while the user is doing something (moving the pointer counts, hovering
   // the grid replays a simulation per move), so that what they are doing
   // stays smooth and the render gives way rather than the reverse.
   var GPU_SHARE_IDLE = 0.85;
@@ -4531,8 +4531,8 @@
     var targetMs = frameBaseMs() * share;
     perfStats.gpuMs = ms;
     // Only a frame that spent most of its budget says what a budget's worth
-    // costs. One cut short - the last band of a level, or a sliced frame
-    // that stopped at its slice-time cap with pixels to spare - is mostly
+    // costs. One cut short, the last band of a level, or a sliced frame
+    // that stopped at its slice-time cap with pixels to spare, is mostly
     // fixed costs, and would read as a GPU many times slower than it is.
     // Unless it ran LONG anyway: then whatever it spent was too much, and
     // that is never to be ignored.
@@ -4541,18 +4541,18 @@
     // Too slow is believed at once; faster is eased into.
     b.gpuPerMs = b.gpuPerMs > 0 && perMs > b.gpuPerMs ? b.gpuPerMs * (1 - BUDGET_SMOOTHING) + perMs * BUDGET_SMOOTHING : perMs;
     b.budget = clamp(b.gpuPerMs * targetMs, b.min, b.max);
-    // What one period holds - the figure other budgets are seeded from.
+    // What one period holds: the figure other budgets are seeded from.
     b.throughput = b.gpuPerMs * frameBaseMs();
   }
 
   // One work budget and the measurements that steer it. There are two: the
   // refinement ladder's (counted in simulated pixels) and playback's
   // (counted in pixel-steps, since a playback draw costs its step count as
-  // well - see the Playback section). Each is only ever compared against
+  // well, see the Playback section). Each is only ever compared against
   // itself, so its unit is simply whatever its owner charges.
   //
   // growMinUse is the share of its budget a frame must actually have spent
-  // before fitting inside one period counts as a reason to grow - see
+  // before fitting inside one period counts as a reason to grow: see
   // noteFrameTiming.
   function makeWorkBudget(initial, min, max, growMinUse) {
     return {
@@ -4563,9 +4563,9 @@
       // How much work fits in one refresh period, as last measured.
       throughput: 0,
       // The same from GPU timer queries, per millisecond; 0 until one has
-      // reported, and for good where there are none - see noteGpuTime.
+      // reported, and for good where there are none: see noteGpuTime.
       gpuPerMs: 0,
-      // Work dispatched during the previous work frame - the other half of
+      // Work dispatched during the previous work frame: the other half of
       // the measurement, since the interval alone says nothing without
       // knowing what was being timed.
       lastSpent: 0,
@@ -4577,7 +4577,7 @@
       lastWorkAt: 0,
     };
   }
-  // One per program the ladder can draw with, keyed like `passes` - so
+  // One per program the ladder can draw with, keyed like `passes`, so
   // switching precision or display mode picks up where that program last
   // left off instead of spending an f32-sized budget on a df frame (or a
   // standard-sized one on a five-simulation derived frame) and then walking
@@ -4586,26 +4586,26 @@
   //
   // A program that has never drawn is seeded from float32-standard's
   // measured throughput and a prior for how much dearer this one is. The
-  // prior is deliberately pessimistic - measured, a df pixel costs 5x to
+  // prior is deliberately pessimistic: measured, a df pixel costs 5x to
   // 60x a float32 one depending on the scene (trig-heavy hinges at the low
   // end, swept collisions at the high end), and this takes the high end.
   // Guessing too dear only means the first few frames refine a little less
   // than they could have while the budget climbs 10% a frame; guessing too
   // cheap queues more GPU work than fits and the canvas visibly hangs for
-  // however many frames that was - 600ms, the first time this was tried
+  // however many frames that was: 600ms, the first time this was tried
   // with a prior of 12.
   var DF_COST_PRIOR = 64;
   // The rungs above df, as multiples of df's prior. Measured on the three
   // samples (512x512 pixels, 8 steps a draw, so the GPU is saturated and no
   // run is long): three words cost 3.4x to 5.0x what two do, and four words
-  // 6.5x to 7.9x - the hinged double pendulum at the high end of both, as
+  // 6.5x to 7.9x, the hinged double pendulum at the high end of both, as
   // it is for df itself. These take the high end for the reason above, and
   // like DF_COST_PRIOR they only seed the first frames: the budget is
   // steered by measured frame times from then on.
   var PRECISION_COST_PRIOR = { df: DF_COST_PRIOR, tf: DF_COST_PRIOR * 5, qf: DF_COST_PRIOR * 8 };
   var DERIVED_COST_PRIOR = 5;
   var ladderBudgets = {};
-  // `key` is precision:variant, as in `passes` - for whatever is about to
+  // `key` is precision:variant, as in `passes`, for whatever is about to
   // draw, which above float32 is the sliced renderer rather than a pass.
   function budgetFor(precision, variant) {
     // Sliced rendering has its own floor and growth rule, and float32 can be
@@ -4632,7 +4632,7 @@
 
   // Returns how many refresh periods the previous work frame took (0 when
   // there was none to time), for the one caller that steers something
-  // besides the budget by it - see adaptSliceSteps.
+  // besides the budget by it: see adaptSliceSteps.
   function noteFrameTiming(b, now) {
     var tookPeriods = 0;
     if (b.lastWorkAt > 0 && b.lastSpent > 0) {
@@ -4640,8 +4640,8 @@
       // Deliberately NOT rounded to whole periods. Under strict vsync an
       // interval really is a whole multiple of the refresh period and
       // rounding is harmless, but plenty of contexts don't present that
-      // cleanly - an embedded webview, a compositor under load, a browser
-      // pane rendering into another surface - and there a frame that ran
+      // cleanly, an embedded webview, a compositor under load, a browser
+      // pane rendering into another surface, and there a frame that ran
       // 1.3 periods long rounds down to "1", i.e. reads as having fit
       // comfortably, and the budget grows on the strength of a frame that
       // actually overran. Left continuous, the same interval is a straight
@@ -4653,7 +4653,7 @@
       perfStats.workFrameMs = perfStats.workFrameMs > 0 ? perfStats.workFrameMs * 0.8 + dt * 0.2 : dt;
       perfStats.workFrameMaxMs = Math.max(perfStats.workFrameMaxMs, dt);
       // Steered by measured GPU time instead (noteGpuTime): a long interval
-      // then is the page's own doing - a compile, a garbage collection -
+      // then is the page's own doing, a compile, a garbage collection,
       // and no reason to touch the budget.
       if (b.gpuPerMs > 0) {
         b.lastWorkAt = now;
@@ -4663,7 +4663,7 @@
         // A real measurement of how much work fits in one period.
         var measured = b.lastSpent / periods;
         // A frame that ran several periods long is not noise to be averaged
-        // away - it is an unambiguous statement that the budget is far too
+        // away: it is an unambiguous statement that the budget is far too
         // big, and smoothing it would spend the next several frames
         // overshooting by less and less while the user watches. This is
         // what the start of a gesture looks like when the previous budget
@@ -4680,7 +4680,7 @@
       } else if (b.lastSpent >= b.budget * b.growMinUse) {
         // Fit inside one period, by an unknowable margin. Creep upward.
         //
-        // The ladder grows on every such frame (growMinUse 0) - it draws
+        // The ladder grows on every such frame (growMinUse 0): it draws
         // until its budget runs out, so a frame that fit really was a full
         // one. Playback at a modest speed spends only what its clock asks
         // for, though, and a frame that used a tenth of its budget says
@@ -4698,7 +4698,7 @@
   // ---- Where the user's two resolution handles land on the ladder ----
   //
   // The Resolution Bounds control is no longer a pair of clamps on an
-  // automatic choice - there is no automatic choice left to clamp. The two
+  // automatic choice: there is no automatic choice left to clamp. The two
   // handles now name the two ENDS of the refinement ladder directly: the
   // left one is where refinement starts (0% = a single sample for the whole
   // screen), the right one is where it stops (100% = one simulation per
@@ -4707,12 +4707,12 @@
   // of viewing wants and is why those are the defaults.
   //
   // Both map onto the same power-of-two ladder the refinement itself walks,
-  // so a handle can only ever select a level that actually exists - there
+  // so a handle can only ever select a level that actually exists: there
   // is no rounding between what the slider says and what gets drawn.
   function strideLadderLength() {
     // Number of halvings from COARSEST_STRIDE down to 1, capped so the
     // coarsest level is never coarser than "one sample for the whole
-    // canvas" - past that point extra levels would all render the same 1x1
+    // canvas": past that point extra levels would all render the same 1x1
     // image and just cost draw calls.
     var longest = Math.max(canvas.width, canvas.height, 1);
     var coarsest = Math.min(COARSEST_STRIDE, Math.pow(2, Math.ceil(Math.log2(longest))));
@@ -4726,19 +4726,19 @@
   }
   function startStride() {
     // A still being rendered for a movie (see renderStill) has no use for
-    // the coarse levels - they exist to put SOMETHING on screen quickly, and
-    // each costs a whole run's latency - so its ladder is its last rung.
+    // the coarse levels, they exist to put SOMETHING on screen quickly, and
+    // each costs a whole run's latency, so its ladder is its last rung.
     if (stillJob) return endStride();
     return Math.max(sliderValueToStride(Number(resolutionMinSlider.value)), endStride());
   }
   function endStride() {
     // A movie's frames are finished pictures at the movie's own quality (see
-    // renderStill), whatever this page's Resolution Limits - which in the
-    // player's frame are simply the device's default preset - happen to say.
+    // renderStill), whatever this page's Resolution Limits, which in the
+    // player's frame are simply the device's default preset, happen to say.
     if (stillJob) return 1;
     return sliderValueToStride(Number(resolutionMaxSlider.value));
   }
-  // Settings > Performance Settings > Antialiasing - except for a movie's
+  // Settings > Performance Settings > Antialiasing, except for a movie's
   // frame, which says for itself whether it is antialiased.
   function antialiasWanted() { return stillJob ? stillJob.antialias : perf.antialias; }
 
@@ -4748,7 +4748,7 @@
   // previous state while writing the next one) and three half-res
   // sub-lattice targets. Everything is allocated at the largest size it
   // will ever need and then used at whatever sub-rectangle a given level
-  // calls for - texelFetch reads explicit integer coordinates, so an
+  // calls for: texelFetch reads explicit integer coordinates, so an
   // over-large texture costs memory and nothing else, and reallocating per
   // level would mean a dozen texture reallocations on every single pan.
   var accum = [null, null];   // {tex, fbo}
@@ -4794,7 +4794,7 @@
   // Running at the new level's resolution rather than at full resolution is
   // the difference between this being free and this dominating everything.
   // A full-res composite costs a whole screen of texels no matter how
-  // coarse the level being composited is - and a single panning frame walks
+  // coarse the level being composited is, and a single panning frame walks
   // a dozen levels, so it would pay that whole-screen cost a dozen times
   // over to produce a few thousand actual simulated samples. Sized to the
   // level instead, the composites across an entire run from 1 pixel to full
@@ -4811,7 +4811,7 @@
     "#version 300 es",
     "precision highp float;",
     // The previous, coarser level. Its sample (i, j) is the new level's
-    // sample (2i, 2j) - the one position of each new quadruple that does
+    // sample (2i, 2j): the one position of each new quadruple that does
     // not have to be simulated again.
     "uniform sampler2D u_accum;",
     "uniform sampler2D u_subA;",
@@ -4860,7 +4860,7 @@
   // the caller to leave the canvas alone rather than draw a broken frame.
   //
   // Everything is allocated at the largest size it will ever need and used
-  // at whatever sub-rectangle a given level calls for - texelFetch reads
+  // at whatever sub-rectangle a given level calls for: texelFetch reads
   // explicit integer coordinates, so an over-large texture costs memory and
   // nothing else, and reallocating per level would mean a dozen texture
   // reallocations on every single pan.
@@ -4906,12 +4906,12 @@
   // the control.
   //
   // Everything above stops at one simulation per pixel, which is one point
-  // sample of a continuous field per pixel - so hard edges come out as
+  // sample of a continuous field per pixel, so hard edges come out as
   // stair-steps, and they shimmer when the view moves, because a one-pixel
   // pan re-rolls which side of the edge each sample lands on. This keeps
   // going past that: extra whole-screen passes, each offset by a fraction
   // of a pixel, averaged together. That is an estimate of each pixel's true
-  // area average rather than a guess at what lies between samples - no
+  // area average rather than a guess at what lies between samples: no
   // interpolation is involved and nothing is invented, which matters here
   // because interpolating a chaotic field would produce colors belonging
   // to no simulation at all.
@@ -4929,7 +4929,7 @@
   //    averaging happens, averaging opposing hues in RGB tends toward gray,
   //    and those regions visibly calm down. That is the truthful rendering
   //    - it says "there is nothing resolvable here", the same thing the
-  //    precision readout says in words - rather than a bug to be tuned out.
+  //    precision readout says in words, rather than a bug to be tuned out.
   //
   // Two things keep this from ever costing the user anything. It runs only
   // once the ladder has fully settled, so it never competes with panning;
@@ -4937,7 +4937,7 @@
   // already produced, so it starts from the finished render and adds to it
   // rather than restarting anything.
   var MAX_AA_SAMPLES = 4;
-  var aaAccum = null;       // RGBA16F, full res - the running average
+  var aaAccum = null;       // RGBA16F, full res: the running average
   var presentProgram = null;
 
   // Whether antialiasing can run at all. It needs a float render target for
@@ -4947,7 +4947,7 @@
   // render each.
   function antialiasSupported() { return hasFloatColorBuffer; }
 
-  // The R2 low-discrepancy sequence - the 2D generalisation of the golden
+  // The R2 low-discrepancy sequence: the 2D generalisation of the golden
   // ratio. Successive points spread themselves evenly over the pixel
   // without the clumping a random jitter gives or the axis-alignment a
   // regular grid gives (a regular grid is the worst case for exactly the
@@ -4999,7 +4999,7 @@
   }
 
   // Allocated lazily, the first time antialiasing actually reaches its
-  // phase - a session that never switches the checkbox on never pays the
+  // phase: a session that never switches the checkbox on never pays the
   // memory, which at full resolution is not small.
   function ensureAaTarget() {
     if (aaAccum) return true;
@@ -5015,8 +5015,8 @@
     }
   }
 
-  // Seeds the running average with the finished ladder render - sample 0,
-  // the pixel center - and hands the AA phase something to build on.
+  // Seeds the running average with the finished ladder render, sample 0,
+  // the pixel center, and hands the AA phase something to build on.
   function beginAntialias() {
     if (!ensureAaTarget()) return false;
     gl.bindFramebuffer(gl.FRAMEBUFFER, aaAccum.fbo);
@@ -5037,7 +5037,7 @@
   // two, and costs no extra pass.
   function drawAaBand(pixelsAvailable) {
     // The whole screen, unless a pan reused pixels that had ALREADY been
-    // antialiased - those arrived with the accumulator this average was
+    // antialiased: those arrived with the accumulator this average was
     // seeded from, and are left as they are. (A sample's sub-pixel offset
     // doesn't move it to another pixel, so the region is the pixel's own.)
     var region = levelSimRegion(1, 0, 0, true);
@@ -5081,12 +5081,12 @@
   // Two stacked circle outlines in the lower right (#render-progress-ring in
   // chaos.html/fractal-grid.css) tracking this same progressive state,
   // translated into a continuous 0..1 fraction rather than the coarse,
-  // per-level jumps the text readout above uses - so the ring visibly creeps
+  // per-level jumps the text readout above uses, so the ring visibly creeps
   // forward band by band instead of snapping in a handful of big steps.
   //
   // The gray ring's checkpoints are pinned to specific strides (32px down to
   // 1 sim/px, one fifth of the ring per halving) rather than to wherever the
-  // resolution sliders currently sit - everything coarser than 32px reads as
+  // resolution sliders currently sit, everything coarser than 32px reads as
   // 0%, since on a standard scene that phase is a handful of cheap levels
   // over almost instantly, and the ring has nothing worth showing yet. A run
   // that stops before reaching full resolution (the max slider pulled in)
@@ -5096,7 +5096,7 @@
   var RENDER_RING_CIRCUMFERENCE = 2 * Math.PI * 17; // matches the r=17 circles in chaos.html
 
   // Fraction (0..1) through whichever sub-lattice/band is currently being
-  // drawn at progressive.stride - the finest-grained unit of progress this
+  // drawn at progressive.stride: the finest-grained unit of progress this
   // state machine exposes, whether that's one of the three refining
   // sub-lattices or (only for the very first, coarsest level of a run) the
   // single base draw.
@@ -5128,7 +5128,7 @@
   }
 
   // The same numbers the ring draws, spelled out for the open menu's own
-  // one-line readout - "1 sim per Npx" while the ladder is running, then
+  // one-line readout: "1 sim per Npx" while the ladder is running, then
   // antialiasing's own count once that phase starts (see finishRun for why
   // aaSample is already MAX_AA_SAMPLES, not one short of it, by the time
   // the run is complete).
@@ -5141,17 +5141,17 @@
     return "Rendering Progress: " + (stride <= 1 ? "1 sim/px" : "1 sim per " + stride + "px");
   }
 
-  // Called from presentFrame - every path that can change what's on screen,
+  // Called from presentFrame, every path that can change what's on screen,
   // which includes both ends of a run (resetProgressive right below, and
-  // finishRun further down, which calls presentFrame itself) - so the ring
+  // finishRun further down, which calls presentFrame itself), so the ring
   // is never more than one frame stale. Updates both copies of the ring
   // (the collapsed toggle's and the open menu's own) unconditionally rather
-  // than checking which is actually visible - four style writes a frame is
+  // than checking which is actually visible: four style writes a frame is
   // free, and it's one less thing to keep in sync with is-open.
   //
   // While playback is drawing the frames (see stepPlayback), the ring
   // reports playback instead: how far a catch-up has got, or otherwise the
-  // ladder level playback's lattice sits at - which is also the level a
+  // ladder level playback's lattice sits at, which is also the level a
   // pause will refine on from.
   function playbackRingFraction() {
     if (timeline.catchingUp) return timeline.catchUpFraction;
@@ -5199,7 +5199,7 @@
     updateRenderProgressRing();
   }
 
-  // Starts a refinement run for the current view. Only sets up state - the
+  // Starts a refinement run for the current view. Only sets up state: the
   // coarsest level is drawn through the same banded path as every other
   // level, because "coarsest" is whatever the left-hand slider says and the
   // user is entitled to drag it all the way to the right, which would
@@ -5208,7 +5208,7 @@
   // avoid.
   //
   // This is also the one place per view change where the view-dependent
-  // bounce-count divisor is measured - see findBounceMax for why it must
+  // bounce-count divisor is measured: see findBounceMax for why it must
   // not happen again until the next view change.
   function beginProgressive() {
     if (reuseEnabled) { reuseNoteImage(); reusePlanRun(); }
@@ -5240,7 +5240,7 @@
   // width and usually a little past it; blitting to the canvas size instead
   // would scale by canvas.width/w, which equals `stride` only when the
   // canvas divides evenly, and everywhere else would stretch each sample
-  // across slightly less than its own block - leaving the picture subtly
+  // across slightly less than its own block, leaving the picture subtly
   // squashed, by a differing amount at each level, so the image would creep
   // sideways as it sharpened. GL clips the overhanging part of the
   // destination rect for free, which keeps the magnification exact.
@@ -5271,7 +5271,7 @@
   }
 
   // Called as a run starts: the accumulator is about to become a picture of
-  // THIS view. Not while the timeline is moving - a run drawn across several
+  // THIS view. Not while the timeline is moving: a run drawn across several
   // steps is a picture of no one step.
   function reuseNoteImage() {
     if (timeline.playing || timeline.following) { reuse.image = null; return; }
@@ -5281,7 +5281,7 @@
     };
   }
 
-  // to - from along one axis of two double-double centres, keeping the
+  // to: from along one axis of two double-double centres, keeping the
   // digits a plain (hi - hi) + (lo - lo) rounds away: at the zoom limit a
   // whole pan lives in the low halves, and whether it was a whole number of
   // pixels is exactly what is being asked.
@@ -5315,11 +5315,11 @@
     if (a === 1 && bx === 0 && by === 0 && !samePrecision) return;
     // Exact when every sample this run will want is one the source HAS: the
     // source holds a true sample at every reuse.stride-th pixel (its blocks
-    // are that sample, magnified - see reuseCapture), this run samples pixels
+    // are that sample, magnified, see reuseCapture), this run samples pixels
     // that are multiples of its own last stride, and the pan between them is
     // a whole number of source samples. At one simulation per pixel that is
     // "a pan by whole pixels", which is all this used to allow; stopping the
-    // ladder at 2px (the Low preset) it is a pan by whole 2x2 blocks - and
+    // ladder at 2px (the Low preset) it is a pan by whole 2x2 blocks, and
     // without it that preset, the one that can least afford to, re-simulated
     // the entire screen after every pan.
     var sourceStride = reuse.stride;
@@ -5332,7 +5332,7 @@
     var y0 = clamp(Math.ceil(-by / a - 0.5), 0, H), y1 = clamp(Math.ceil((H - by) / a - 0.5), 0, H);
     if (x1 <= x0 || y1 <= y0) return;
     // Of those, the ones whose source texel (p + b, for an exact run) had
-    // been antialiased - see levelSimRegion.
+    // been antialiased: see levelSimRegion.
     var aa = null, r = reuse.aaRect;
     if (exact && r) {
       aa = { x0: Math.max(x0, r.x0 - bx), y0: Math.max(y0, r.y0 - by), x1: Math.min(x1, r.x1 - bx), y1: Math.min(y1, r.y1 - by) };
@@ -5350,8 +5350,8 @@
 
   // Whether the ladder's own picture should be on screen rather than the
   // source: once it has a finished level at least as fine as the source
-  // looks from here. Ties go to the ladder - its samples sit exactly on this
-  // view's pixels, where the source's were resampled - and so does reaching
+  // looks from here. Ties go to the ladder, its samples sit exactly on this
+  // view's pixels, where the source's were resampled, and so does reaching
   // the end of the ladder, which is as good as this view gets.
   function reuseLadderWins() {
     var run = reuse.run;
@@ -5387,7 +5387,7 @@
     gl.disable(gl.SCISSOR_TEST);
     if (fromAa) {
       // The finished average. A float target, so not something a blit can
-      // read - the same reason presentFrame draws it rather than blits it.
+      // read: the same reason presentFrame draws it rather than blits it.
       gl.bindFramebuffer(gl.FRAMEBUFFER, reuse.source.fbo);
       drawPresent(aaAccum.tex, W, H);
     } else {
@@ -5410,7 +5410,7 @@
     reuse.stride = stride;
     // Finished everywhere if the run was (either the average is in, or this
     // run had none to do). Otherwise only where this run's own pixels were
-    // copies of finished ones - which, the picture being this run's view,
+    // copies of finished ones, which, the picture being this run's view,
     // is just the rectangle it skipped.
     reuse.aaRect = progressive.complete ? { x0: 0, y0: 0, x1: W, y1: H }
       : (stride === 1 && run && run.exact ? run.aa : null);
@@ -5463,14 +5463,14 @@
   }
 
   // Where sub-lattice k of a step from `stride` to stride/2 sits: the new
-  // sample positions the coarser grid didn't already cover - offset by half
+  // sample positions the coarser grid didn't already cover, offset by half
   // a cell across, down, or both. (0 is the base level, at no offset.)
   function sublatticeOrigin(k, stride) {
     var half = stride / 2;
     return { x: (k === 0 || k === 2) ? 0 : half, y: (k === 0 || k === 1) ? 0 : half };
   }
 
-  // How many rows the pass in progress has to draw - what progressive.band
+  // How many rows the pass in progress has to draw, what progressive.band
   // is counting towards.
   function currentPassRows() {
     if (progressive.aaSample > 0) return levelSimRegion(1, 0, 0, true).rows;
@@ -5511,7 +5511,7 @@
     "  } else if (u_ladderStride > 0) {",
     "    fragColor = vec4(texelFetch(u_ladder, ivec2(gl_FragCoord.xy) / u_ladderStride, 0).rgb, 1.0);",
     "  } else {",
-    // Neither picture has this pixel yet - the strip a drag has just pulled
+    // Neither picture has this pixel yet: the strip a drag has just pulled
     // into view, before anything has been rendered for it. The source's
     // nearest edge, well dimmed: plainly a placeholder, but one that belongs
     // to the picture beside it, where solid black read as the map tearing.
@@ -5582,7 +5582,7 @@
   }
 
   // Draws about `pixelsAvailable` simulated pixels' worth more of whatever
-  // is currently in progress - either the base level (sub-lattice 0,
+  // is currently in progress, either the base level (sub-lattice 0,
   // straight into the accumulator) or one of the three sub-lattices that
   // refine it. Returns what it actually cost, in those same pixels, so the
   // budget loop can charge itself the real figure rather than what it asked
@@ -5597,7 +5597,7 @@
     var h = levelHeight(progressive.stride);
     var target = k === 0 ? accum[accumIndex] : sublattices[k - 1];
     var origin = sublatticeOrigin(k, progressive.stride), originX = origin.x, originY = origin.y;
-    // The whole level, unless a pan is reusing the last picture's pixels -
+    // The whole level, unless a pan is reusing the last picture's pixels,
     // then only what it exposed, the rest being copied in as the pass starts.
     var region = levelSimRegion(progressive.stride, originX, originY, false);
     if (progressive.band === 0 && progressive.tileX === 0 && !progressive.tile) {
@@ -5607,7 +5607,7 @@
     var at = locateBand(region, progressive.band);
     if (!at) return 0;
     // Above float32: a slice of a tile rather than a band of whole
-    // simulations - see "Sliced rendering".
+    // simulations, see "Sliced rendering".
     var slicedPrograms = slicedProgramsForGrid();
     if (slicedPrograms) {
       return drawSlicedTile(slicedPrograms, { target: target, w: w, h: h, stride: progressive.stride,
@@ -5663,7 +5663,7 @@
   // every blit to the canvas writes a full screen of pixels regardless of
   // how coarse the level behind it was. Blitting each intermediate level
   // would cost a dozen screen-sized writes to show twelve pictures in
-  // 16ms, of which the user can see exactly one - the last.
+  // 16ms, of which the user can see exactly one: the last.
   function presentFrame() {
     updateRenderProgressRing();
     if (progressive.aaSample > 0 && aaAccum) {
@@ -5691,12 +5691,12 @@
     if (!ensureTargets()) return;
     if (progressive.stride === 0) beginProgressive();
     if (progressive.complete) {
-      // Genuinely idle - nothing left to refine until the view changes.
+      // Genuinely idle, nothing left to refine until the view changes.
       // Forgetting the timestamp here (rather than in finishRun) is what
       // keeps the budget honest during a drag: every frame of a drag
       // restarts AND completes a whole run, so clearing it on completion
       // meant noteFrameTiming saw no previous work frame on any of them
-      // and the budget got no feedback for the entire gesture - it kept
+      // and the budget got no feedback for the entire gesture, it kept
       // whatever value the last settled refinement had left it at, which
       // is a frame's worth of work for a run that RESUMES, and several
       // frames' worth for one that starts over from the coarsest level.
@@ -5705,9 +5705,9 @@
       return;
     }
 
-    // Each (precision, display mode) has its own measured throughput - a df
+    // Each (precision, display mode) has its own measured throughput, a df
     // pixel costs many times a float32 one, and a derived mode five times a
-    // standard one - so each keeps its own budget rather than inheriting one
+    // standard one, so each keeps its own budget rather than inheriting one
     // tuned to something else and spending its first frames finding out.
     var drawingWith = budgetFor(effectivePrecision(), wantedVariant());
     if (drawingWith !== ladderBudget) {
@@ -5741,7 +5741,7 @@
     var spent = 0;
 
     // Antialiasing runs on the same budget, banding and present path as
-    // everything else - a whole-screen sample is as expensive as the entire
+    // everything else: a whole-screen sample is as expensive as the entire
     // ladder that preceded it, so it emphatically cannot be one draw.
     if (progressive.aaSample > 0) {
       while (spent < pixelBudget || spent === 0) {
@@ -5809,12 +5809,12 @@
   // recorded here too, not just on the ordinary path: during a drag EVERY
   // frame both restarts and finishes a run, so if the finishing path
   // forgot its pixel count the budget would be handed an interval with
-  // nothing to attribute it to and would never adapt during a gesture -
+  // nothing to attribute it to and would never adapt during a gesture,
   // exactly the case where adapting matters most.
   function finishRun(spent) {
     ladderBudget.lastSpent = spent || 0;
     // The ladder is done. If antialiasing is on, this isn't the end of the
-    // work, just the end of the first sample - and only when the ladder
+    // work, just the end of the first sample, and only when the ladder
     // actually reached one simulation per pixel, since averaging offset
     // samples of a deliberately coarse render would just blur the blocks.
     if (progressive.aaSample === 0 && endStride() <= 1 && antialiasWanted() &&
@@ -5832,7 +5832,7 @@
   }
 
   // The canvas backing store is now always the full device-pixel
-  // resolution - the refinement ladder, not the canvas size, is what
+  // resolution: the refinement ladder, not the canvas size, is what
   // adapts to how much the machine can afford. A resize throws away every
   // target (they are all sized to the old canvas) and restarts refinement.
   //
@@ -5846,7 +5846,7 @@
   // What the VIEW does about a resize depends on what resized it. view.scale
   // is the world the canvas spans top to bottom, so left alone it keeps the
   // same world in a canvas of any height: drag a window taller and the
-  // picture grows with it, centre held. Right for a window - and wrong for
+  // picture grows with it, centre held. Right for a window, and wrong for
   // the small-window layout's dock, which opens a sheet over the bottom half
   // of the screen: the half of the map still showing would shrink to half
   // size and slide up. For that one case (pinViewCornerOnResize, set by the
@@ -5882,9 +5882,15 @@
       canvas.width = w;
       canvas.height = h;
       gl.viewport(0, 0, w, h);
+      // A resize is the one view change Topography's pinned line survives:
+      // it is anchored in world coordinates, so it is simply redrawn where
+      // the world now lands on the resized canvas (see statsOnViewChanged).
+      statsResizing = true;
       markDirty();
+      statsResizing = false;
+      if (featureOverlayCanvas) drawFeatureOverlay();
       // The Analysis card's charts size themselves to the card, and the
-      // sampling readout in Settings is a fraction of THIS size - so both
+      // sampling readout in Settings is a fraction of THIS size, so both
       // are told, whether or not anyone is looking at them. (The
       // measurement itself reads the canvas when it runs and is never
       // stale; it is only the readout that would be.)
@@ -5916,7 +5922,7 @@
   }
 
   // Rescales the view so whatever world point currently sits under
-  // (clientX, clientY) still sits there afterward - "zoom toward the
+  // (clientX, clientY) still sits there afterward: "zoom toward the
   // pointer," the same anchor math a trackpad/mouse wheel zoom and a touch
   // pinch both need. Shared by the wheel handler below and the pinch-zoom
   // touch handler further down, rather than kept as two copies of the same
@@ -5926,17 +5932,17 @@
     var oldScale = view.scale;
     view.scale = clamp(view.scale * factor, MIN_SCALE, MAX_SCALE);
     // The anchored point is center + uv*oldScale before and center' +
-    // uv*newScale after, so center' = center + uv*(oldScale - newScale) -
+    // uv*newScale after, so center' = center + uv*(oldScale - newScale):
     // written as that SHIFT rather than by forming the world point and
     // subtracting again, which would round the point to a float64.
     //
     // And the shift is formed EXACTLY, not as a float64 product. A rounded
     // product is off by ~1e-16 of itself, which is nothing at the zoom where
-    // it happens (1e-13 of a pixel) - but it is a permanent error in where
+    // it happens (1e-13 of a pixel), but it is a permanent error in where
     // the centre is, and every later notch magnifies it. Measured with the
     // cursor held still: the point under it had slid half a pixel after
-    // zooming in by 2e13, and two million pixels after 1e20 - exactly the
-    // range the precisions above double-float exist for. (oldScale -
+    // zooming in by 2e13, and two million pixels after 1e20, exactly the
+    // range the precisions above double-float exist for. (oldScale:
     // newScale is itself exact: the two are within a factor of two.)
     shiftViewCenterByProducts(uv.uvx, oldScale - view.scale, uv.uvy, oldScale - view.scale);
   }
@@ -5945,22 +5951,22 @@
   //
   // There is no such thing as priority on a GPU a page can reach. WebGL has
   // one queue: draws run in the order they were issued, each to completion,
-  // and nothing - not a newer draw, not the browser's own compositor - gets
+  // and nothing, not a newer draw, not the browser's own compositor, gets
   // in ahead of one that is already there. "Prioritise the pan over the
   // render" can therefore only mean one thing: while a pan is happening,
   // don't ISSUE the render. Whatever is in the queue when a finger moves is
   // what the finger waits behind.
   //
   // That wait is what a drag felt like on a phone. Every frame of a drag
-  // restarted the ladder and spent a frame's budget on it - 25ms of
+  // restarted the ladder and spent a frame's budget on it, 25ms of
   // simulation by design, several times that when the budget had been set by
-  // settled rendering - and the browser lets a page run two or three frames
+  // settled rendering, and the browser lets a page run two or three frames
   // ahead of the screen. The picture followed the finger by the sum.
   //
   // So, with Settings > Performance Settings > Prioritize panning and zooming
   // on, a frame in the middle of a gesture simulates nothing. It draws the
   // last picture moved and scaled to where the view is NOW
-  // (presentWithSource - one textured quad, a fraction of a millisecond), and
+  // (presentWithSource: one textured quad, a fraction of a millisecond), and
   // that is the whole frame. The ladder starts again the moment the gesture
   // stops: the finger lifting, or holding still for GESTURE_SETTLE_MS. What a
   // drag pulls into view shows the source's dimmed edge until then (see
@@ -6018,7 +6024,7 @@
   // The other half of the same problem. With Work per frame set long, a frame
   // of rendering is 50ms of GPU time by design, and a browser that lets the
   // page get two or three of those ahead has put a sixth of a second between
-  // anything the user does and the screen - before the first frame of a
+  // anything the user does and the screen, before the first frame of a
   // gesture can even be presented. So in that mode a frame of work is only
   // issued once the GPU has FINISHED the last one: a fence goes in behind
   // each frame's draws, and until it signals, animation frames simply pass.
@@ -6051,7 +6057,7 @@
   // twice: here on the canvas, and on every .inspect-marker dot as it is
   // created (see updateInspectMarkers). The dots are siblings of the canvas
   // stacked on top of it, so a wheel over one never reaches this listener
-  // through the canvas - without their own registration, hovering a marker
+  // through the canvas, without their own registration, hovering a marker
   // silently blocked zooming.
   function onWheelZoom(e) {
     e.preventDefault();
@@ -6062,7 +6068,7 @@
   }
   canvas.addEventListener("wheel", onWheelZoom, { passive: false });
 
-  // Pans the view by a raw pixel delta in CLIENT (CSS) pixels - "drag the
+  // Pans the view by a raw pixel delta in CLIENT (CSS) pixels: "drag the
   // content by this many screen pixels." Shared by the mouse-drag pan below
   // and both touch gestures further down (a one-finger drag, and a
   // two-finger pinch's own midpoint motion), instead of three copies of the
@@ -6097,14 +6103,14 @@
 
   var dragging = false, lastClientX = 0, lastClientY = 0, dragDistance = 0;
   // Below this many total pixels of movement between mousedown and mouseup,
-  // treat it as a click (lock a single Inspect point, or - with Line/Grid
-  // armed - just show the "drag instead" toast) rather than a pan or an
-  // Inspect drag - a real drag easily exceeds it within the first couple of
+  // treat it as a click (lock a single Inspect point, or, with Line/Grid
+  // armed, just show the "drag instead" toast) rather than a pan or an
+  // Inspect drag: a real drag easily exceeds it within the first couple of
   // mousemoves.
   var CLICK_DRAG_THRESHOLD = 4;
   // A finger is not a mouse: it rolls a few pixels on the glass during a tap
   // that was never meant to move anything, and here every one of those
-  // pixels is a pan - which throws away the picture and starts the
+  // pixels is a pan, which throws away the picture and starts the
   // refinement ladder again. So a touch moves nothing at all until it has
   // travelled this far from where it landed, and one that never does is a
   // tap. Measured as distance from the press point, not as the path length
@@ -6114,12 +6120,12 @@
   var dragIsTouch = false, dragStartClientX = 0, dragStartClientY = 0;
   // False only for a touch that has not yet left its slop radius.
   var dragPastSlop = true;
-  // The world point an Inspect-armed drag started at - see beginDrag below.
+  // The world point an Inspect-armed drag started at: see beginDrag below.
   // Only meaningful while inspectArmTakesDrag() && dragging.
   var inspectDragStartWorld = null;
 
   // Snapped to the same grid-cell resolution the hover preview itself
-  // samples at (see handleDragMove below) - a locked point then corresponds
+  // samples at (see handleDragMove below): a locked point then corresponds
   // to an actual rendered cell, not an arbitrary sub-pixel float. Takes a
   // plain {clientX, clientY} rather than a real event, since a Touch object
   // carries exactly those same two fields and needs no adapting.
@@ -6142,7 +6148,7 @@
     dragDistance = 0;
     dragPastSlop = !dragIsTouch;
     if (inspectArmTakesDrag()) {
-      // Don't pan while armed - see handleDragMove below. Recorded now (not
+      // Don't pan while armed: see handleDragMove below. Recorded now (not
       // just at the end of the drag) so the line/rectangle preview starts
       // from the actual press point.
       inspectDragStartWorld = snappedWorldPointFromEvent({ clientX: clientX, clientY: clientY });
@@ -6167,7 +6173,7 @@
     lastClientX = clientX;
     lastClientY = clientY;
     if (inspectArmTakesDrag()) {
-      // A click/tap doesn't start a line or grid at all (see endDrag) -
+      // A click/tap doesn't start a line or grid at all (see endDrag),
       // only once the drag is unambiguous does it commit to previewing one,
       // so a slightly-shaky press doesn't flash the preview for a moment.
       if (dragDistance >= CLICK_DRAG_THRESHOLD) {
@@ -6186,7 +6192,7 @@
       var current = snappedWorldPointFromEvent({ clientX: clientX, clientY: clientY });
       // Hidden BEFORE lockLineOfPoints/lockGridOfPoints, not after: each one
       // synchronously compiles and runs a GPU trajectory per point (up to 21
-      // of them for a grid), which is not instant - leaving the dashed
+      // of them for a grid), which is not instant, leaving the dashed
       // preview up until they return would freeze it on screen for that
       // entire stretch, reading as stuck/buggy rather than as "still
       // working." Releasing the drag should always retire the preview
@@ -6195,17 +6201,24 @@
       var wasTap = dragIsTouch ? !dragPastSlop : dragDistance < CLICK_DRAG_THRESHOLD;
       if (wasTap) {
         // A plain CLICK with nothing armed always locks a single Inspect
-        // point - no button needed for this. With Line or Grid armed, a
+        // point: no button needed for this. With Line or Grid armed, a
         // plain click isn't enough to mean "make one of those" (a real drag
         // still has to default to panning, so that meaning needs an
         // unambiguous drag, not just a click), so it just reminds instead of
         // silently doing nothing, and leaves the mode armed for the drag
         // it's actually waiting for.
-        if (inspectArmMode === "line") showInspectToast("Drag to inspect a line");
+        //
+        // First of all, though: a click on Topography's pinned line lets it
+        // go, and does nothing else, it is the line that was clicked, not
+        // the map under it.
+        if (featurePinned && featurePinnedHit(clientX, clientY)) {
+          if (statsPanel) statsPanel.unpin(); else setPinnedOverlay(null);
+        }
+        else if (inspectArmMode === "line") showInspectToast("Drag to inspect a line");
         else if (inspectArmMode === "grid") showInspectToast("Drag to inspect a grid");
         // Neither arms without the Inspect card open (their buttons live
         // inside it), so a collapsed card always reaches this branch with
-        // nothing armed - exactly where a plain click otherwise locks a new
+        // nothing armed: exactly where a plain click otherwise locks a new
         // point. Collapsed means "not right now" (see makeMenu's own
         // comment), so this is the one thing that has to check for it
         // explicitly rather than relying on disarmInspect leaving nothing
@@ -6214,7 +6227,7 @@
           // A finger's TAP is the exception to "no button needed": it only
           // locks a point once Inspect (Point) has been armed (see
           // inspectArmMode's own comment). Unarmed it does nothing, and says
-          // nothing - the card's own empty preview already says how, and a
+          // nothing: the card's own empty preview already says how, and a
           // toast for every stray touch of a map that is touched all the
           // time was more noise than help.
           if (inspectArmMode === "point" || !dragIsTouch) lockPointAt(current);
@@ -6238,7 +6251,7 @@
   // the mouse), two fingers pinch-zoom-and-pan at once ----
   //
   // #grid-canvas has touch-action:none (see fractal-grid.css) so the browser
-  // never starts its own page-level scroll/pinch-zoom on these touches -
+  // never starts its own page-level scroll/pinch-zoom on these touches,
   // without that, the two would fight over the same gesture, which is
   // exactly "the whole UI moving around" instead of just the grid. Every
   // listener here is {passive:false} and calls preventDefault() so that
@@ -6247,13 +6260,13 @@
   // explicitly).
   //
   // A pinch is tracked by its two fingers' MIDPOINT and DISTANCE only, not
-  // a full two-point affine fit - simpler, and indistinguishable in
+  // a full two-point affine fit: simpler, and indistinguishable in
   // practice from the full version for how a real pinch gesture moves.
   // Each frame does two composed steps against the CURRENT (already
   // touch-action:none-protected) view: panByClientDelta moves the view by
   // however far the midpoint itself travelled (a two-finger drag, e.g.
-  // panning while pinching), then zoomAtClientPoint - anchored at the NEW
-  // midpoint - applies whatever the pinch distance's change implies. Doing
+  // panning while pinching), then zoomAtClientPoint, anchored at the NEW
+  // midpoint, applies whatever the pinch distance's change implies. Doing
   // the pan first and anchoring the zoom on the post-pan midpoint is what
   // keeps the pinch feeling anchored under the fingers even while they're
   // also translating.
@@ -6273,7 +6286,7 @@
       beginDrag(e.touches[0].clientX, e.touches[0].clientY, true);
     } else if (e.touches.length === 2) {
       // A second finger landing mid-drag supersedes whatever the first one
-      // was doing (a pan, or an Inspect line/grid preview) - a pinch is never
+      // was doing (a pan, or an Inspect line/grid preview): a pinch is never
       // an Inspect gesture.
       dragging = false;
       canvas.classList.remove("dragging");
@@ -6293,8 +6306,8 @@
       panByClientDelta(mid.x - pinchMidX, mid.y - pinchMidY);
       // Inverted (old/new, not new/old): view.scale is world units per
       // screen pixel, so spreading fingers apart (dist increases) needs
-      // view.scale to DECREASE - zooming in, the same direction as the
-      // wheel handler's factor<1 branch - not increase. Two fingers reported
+      // view.scale to DECREASE, zooming in, the same direction as the
+      // wheel handler's factor<1 branch, not increase. Two fingers reported
       // at one spot (it happens, as one of them lifts) have no ratio to
       // offer, and dividing by their zero would send the view to its limit.
       if (pinchDistance > 0 && dist > 0) zoomAtClientPoint(mid.x, mid.y, pinchDistance / dist);
@@ -6322,7 +6335,7 @@
         return;
       }
       // changedTouches, not the now-empty e.touches, has the lifted
-      // finger's last known position - needed either to commit a one-finger
+      // finger's last known position: needed either to commit a one-finger
       // drag's Inspect tap/line/grid (endDrag) or, if this touch just ended a
       // pinch instead (dragging is already false then), to harmlessly reset
       // the "dragging" CSS class.
@@ -6339,7 +6352,7 @@
     } else if (e.touches.length === 1) {
       // Two fingers down to one: let the remaining finger keep panning
       // without needing to lift and re-touch, matching how a real map app
-      // feels. Skipped entirely while Inspect (Line)/(Grid) is armed - this
+      // feels. Skipped entirely while Inspect (Line)/(Grid) is armed: this
       // finger was never the one whose touchstart armed that gesture
       // (inspectDragStartWorld was cleared when the pinch began), so
       // resuming as a plain pan here would go on to preview/commit an
@@ -6354,7 +6367,7 @@
         lastClientY = e.touches[0].clientY;
         // Already a drag, and never a tap: the two fingers of a pinch never
         // lift in the same instant, so EVERY pinch ends as one finger resting
-        // on the glass for a moment - and read as a tap, that moment locked
+        // on the glass for a moment, and read as a tap, that moment locked
         // an Inspect point under it at the end of every zoom.
         dragPastSlop = true;
         dragDistance = CLICK_DRAG_THRESHOLD;
@@ -6384,7 +6397,7 @@
   //
   // Also reports live progress while a refinement run is in flight, since
   // the whole point of the control is now the journey rather than a
-  // clamp - "8px → 1 sim/px · at 4px" says more about what is happening
+  // clamp: "8px → 1 sim/px · at 4px" says more about what is happening
   // than any static pair of numbers could.
   function describeStride(stride) {
     return stride <= 1 ? "1 sim/px" : stride + "px";
@@ -6397,7 +6410,7 @@
     var text = describeStride(startStride()) + " → " + describeStride(endStride());
     if (progressive.aaSample > 0) {
       // Averaging is the finished state once it stops, not a stalled
-      // progress bar - so say what the picture IS, not what it was doing.
+      // progress bar, so say what the picture IS, not what it was doing.
       text += progressive.complete
         ? " · " + progressive.aaSample + " samples/px"
         : " · averaging " + progressive.aaSample + "/" + MAX_AA_SAMPLES;
@@ -6409,7 +6422,7 @@
   updateResolutionBoundsUI();
 
   // Moving either handle restarts refinement from the (possibly new)
-  // starting level - markDirty is the whole of what that takes now. It can
+  // starting level: markDirty is the whole of what that takes now. It can
   // fire on every "input" tick while dragging without piling anything up,
   // because a reset is just a few fields and the rAF loop still only does
   // one frame's work per frame. The two handles are only ever allowed to
@@ -6437,11 +6450,11 @@
   // shader per point). Releasing applies it.
   function stepsFromSlider() { return Number(stepsSlider.value) * SIMULATION_STEPS_PER_NOTCH; }
   // Slider position, readout and hint, all from whatever simulationSteps
-  // currently is - so there is one way to put this control back in step with
+  // currently is, so there is one way to put this control back in step with
   // the value behind it, used both at boot and on every scene adoption.
   //
   // The number beside the slider can be typed, to any whole frame the slider
-  // could reach - so the duration is not always a notch, and the slider just
+  // could reach, so the duration is not always a notch, and the slider just
   // rests on the nearest one.
   function syncStepsUI() {
     stepsSlider.value = String(clamp(Math.round(simulationSteps / SIMULATION_STEPS_PER_NOTCH), Number(stepsSlider.min), Number(stepsSlider.max)));
@@ -6456,7 +6469,7 @@
   // simply removed if its one point fails to recompile (mirrors the old
   // flat-array behavior); a "line"/"grid" group's point instead just keeps
   // its stale trajectory on failure, since splicing it away would shift a
-  // line's start/end or break a grid's fixed segment indices - losing a
+  // line's start/end or break a grid's fixed segment indices, losing a
   // hand-placed inspection to a settings change would be worse than one
   // point briefly disagreeing with the others. updateInspectUI() ends in
   // restartCurrentPreview(), so this is also what gets the hover panel going
@@ -6483,7 +6496,7 @@
   syncStepsUI();
   stepsSlider.addEventListener("input", function () { updateStepsUI(stepsFromSlider()); });
   stepsSlider.addEventListener("change", function () { applySimulationSteps(stepsFromSlider()); });
-  // Typed: on commit (Enter, or leaving the field), never per keystroke -
+  // Typed: on commit (Enter, or leaving the field), never per keystroke,
   // every intermediate number would be a full re-render. Anything unusable
   // puts the current value back.
   stepsReadout.addEventListener("change", function () {
@@ -6530,11 +6543,11 @@
 
   colorZoomCheckbox.addEventListener("change", function () {
     colorZoomEnabled = colorZoomCheckbox.checked;
-    if (colorZoomEnabled && activeTipId === "color-zoom") hideTip(); // they took the suggestion (or just found the checkbox themselves) - either way it's moot now
+    if (colorZoomEnabled && activeTipId === "color-zoom") hideTip(); // they took the suggestion (or just found the checkbox themselves), either way it's moot now
     // Color Zoom only changes Standard's ramp (see colorMap vs rainbow in
     // the shader), so flipping it from any other mode would be a control
     // with no visible effect. Switching to Standard is what makes the
-    // toggle mean something wherever the user reaches it from - and it is
+    // toggle mean something wherever the user reaches it from, and it is
     // in Standard's own row in the Display menu, so landing on Standard is
     // also what the row it lives in implies.
     //
@@ -6553,14 +6566,14 @@
   //
   // Each row is a button in a radiogroup: a thumbnail of what that mode
   // actually looks like, then the sentence and the sample cost. The picture
-  // is doing most of the work - the difference between these four is
+  // is doing most of the work: the difference between these four is
   // entirely visual, and a name on its own ("Laplacian") tells you nothing
   // about what you are about to see.
   var displayModeRows = [];
   DISPLAY_MODES.forEach(function (mode) {
     // Standard's row hosts the Color Zoom toggle in place of its own blurb
     // sentence (see colorZoomField below), and a checkbox is interactive
-    // content that <button> isn't allowed to contain - a <div> plus the
+    // content that <button> isn't allowed to contain: a <div> plus the
     // role/tabIndex/click wiring every row already gets below reproduces a
     // button's behavior without the invalid nesting.
     var isStandard = mode.value === "standard";
@@ -6591,7 +6604,7 @@
     text.appendChild(name);
     // Color Zoom only ever repeats/re-saturates the same plain rainbow ramp
     // Standard paints (see colorMap's u_colorZoom branch), so it reads as
-    // this row's own control rather than a separate settings-panel toggle -
+    // this row's own control rather than a separate settings-panel toggle:
     // colorZoomField is the exact <input id="color-zoom-checkbox"> element
     // from chaos.html, moved here (not cloned), so every existing
     // change-event/tip listener on it keeps working untouched.
@@ -6615,7 +6628,7 @@
       var on = entry.mode === displayMode;
       entry.row.setAttribute("aria-checked", on ? "true" : "false");
       // Only the selected row is a tab stop, which is how a radiogroup is
-      // meant to behave - five rows of Tab to get past this card is not.
+      // meant to behave: five rows of Tab to get past this card is not.
       entry.row.tabIndex = on ? 0 : -1;
     });
   }
@@ -6630,7 +6643,7 @@
     markDirty();
   }
 
-  // Left/Right/Up/Down move between rows, per the radiogroup pattern - and
+  // Left/Right/Up/Down move between rows, per the radiogroup pattern, and
   // because the whole point of this card is comparing the four, which is
   // much easier when they can be stepped through than clicked one at a time.
   displayModePanelBody.addEventListener("keydown", function (event) {
@@ -6651,7 +6664,7 @@
   // ---- Inspection Line Sample Count ----
   //
   // Just updates the plain state evenlySpacedPoints reads on the NEXT
-  // Inspect (Line) drag - same "settings change, nothing already on screen
+  // Inspect (Line) drag: same "settings change, nothing already on screen
   // is touched" rule as Grid Settings just below.
   inspectLineSampleCountSlider.value = String(inspectLineSampleCount);
   inspectLineSampleCountReadout.textContent = String(inspectLineSampleCount);
@@ -6663,7 +6676,7 @@
   // ---- Grid Settings (Grid Size, Two Part Line) ----
   //
   // Both just update the plain state lockGridOfPoints reads on the NEXT
-  // drag (see computeGridLayout) - no recompute of anything already on
+  // drag (see computeGridLayout): no recompute of anything already on
   // screen, since an existing grid is never affected by a later settings
   // change (per the user's own ask). The Inspect (Grid) button's own
   // tooltip is kept in sync too, so it never quotes a stale size.
@@ -6685,16 +6698,16 @@
 
   // ---- Sound volume (mute button + settings slider) ----
   //
-  // PhysicsSound's volume is shared, module-level state - the physics
+  // PhysicsSound's volume is shared, module-level state, the physics
   // editor's identical controls (see physics-ui.js's own copy of this
   // exact pattern) read and write the very same value, so the one
   // onVolumeChange listener below is what keeps every location (this
   // page's mute button AND its settings slider, whether it was one of
   // THEM or the editor page's own pair that actually changed it) in sync,
-  // continuously - not just at some particular moment like panel-open.
+  // continuously, not just at some particular moment like panel-open.
   function setVolumeIconState(container, volume) {
     var muted = volume <= 0;
-    // Explicit "inline"/"none" on both sides, not "" for the visible case -
+    // Explicit "inline"/"none" on both sides, not "" for the visible case:
     // .vol-mute-x's own CSS default (see app-shell.css) IS display:none, so
     // clearing back to "just use the stylesheet" would leave it hidden
     // instead of showing it.
@@ -6726,16 +6739,16 @@
   // qualifying mousemove. Only once the cursor has sat on that same cell for
   // HOVER_UPGRADE_DELAY_MS do we pay for the real thing: re-running the
   // grid's WebGL code WITH LOGGING for that exact pixel
-  // (PhysicsGridCodegen.compileHoverTrajectoryGLSL - the same offset+cascade
+  // (PhysicsGridCodegen.compileHoverTrajectoryGLSL, the same offset+cascade
   // math as the grid shader and the instant preview, but combined with the
   // single-scene player's trajectory-logging convention instead of "just
   // the final step"), then replaying the resulting trajectory here: actual
-  // shapes moving, background recoloring by Output - the same idea as
+  // shapes moving, background recoloring by Output, the same idea as
   // #editor-view's own Play button, just fed by a freshly-logged trajectory
   // for one point instead of the live editor's own scene. The instant
   // preview's frame and the replay's first frame are both "this pixel's
   // offset scene" one physics step apart (the preview is t=0, the replay's
-  // first logged row is t=1-step) - a natural, expected handoff, not a bug.
+  // first logged row is t=1-step): a natural, expected handoff, not a bug.
 
   var HOVER_UPGRADE_DELAY_MS = 500; // cursor dwell time before the cheap preview is upgraded to the real WebGL replay
   // How long each simulation step is held on screen during a replay. A flat
@@ -6745,7 +6758,7 @@
   //
   // This used to be a speed (a multiple of real time) with a ceiling on the
   // TOTAL duration, which meant any run past about 720 steps was sped up to
-  // fit the same 8 seconds - so every long replay took exactly as long as
+  // fit the same 8 seconds, so every long replay took exactly as long as
   // every other one and the step count stopped being visible in the
   // playback at all. 11ms is about what the old speed worked out to per
   // step (1.5x real time), so the familiar 500-step replay is close to
@@ -6777,21 +6790,21 @@
   var hoverRafId = null;
   // How long a finished replay (playbackTick, whether driving a hovered
   // point, Inspect, or both together) holds on its final frame before
-  // looping back to the start - applies uniformly to every animation this
+  // looping back to the start: applies uniformly to every animation this
   // panel ever plays, Inspect or not.
   var REPLAY_LOOP_DELAY_MS = 1500;
   var hoverLoopTimer = null;
   var hoverUpgradeTimer = null;
-  var hoverKey = null; // last (snapped) world point currently shown (instant preview or replay) - skips redundant work while the cursor sits still or jitters within one cell
-  var hoverWorldPoint = null; // the actual {x,y} behind hoverKey - kept alongside it so restartCurrentPreview can re-run runHoverAt without needing the cursor to still be there
-  var isHoveringGrid = false; // true between the canvas's own mousemove and mouseleave - lets a locked-point edit made from the sidebar (while the cursor is over it, not the grid) refresh beginInspectOnlySession instead of leaving it showing a stale frame
+  var hoverKey = null; // last (snapped) world point currently shown (instant preview or replay): skips redundant work while the cursor sits still or jitters within one cell
+  var hoverWorldPoint = null; // the actual {x,y} behind hoverKey: kept alongside it so restartCurrentPreview can re-run runHoverAt without needing the cursor to still be there
+  var isHoveringGrid = false; // true between the canvas's own mousemove and mouseleave: lets a locked-point edit made from the sidebar (while the cursor is over it, not the grid) refresh beginInspectOnlySession instead of leaving it showing a stale frame
 
   // ---- Playback controls (Play/Pause, Progress, Reset) ----
   //
   // One player drives whatever this panel is currently showing: a hovered
   // point's own replay, that replay plus inspected points animating
   // alongside it, or (mouse off the grid, at least one point inspected)
-  // inspected points on their own - see renderPlaybackFrame. playbackStep is
+  // inspected points on their own, see renderPlaybackFrame. playbackStep is
   // the single shared clock everything on screen reads from, each entry
   // clamped to its own effectiveMaxStep exactly as before this control
   // existed (a point that stopped early just holds its final frame while
@@ -6799,27 +6812,27 @@
   //
   // activeReplay is the hovered point's own data (trajectory + everything
   // runHoverAt worked out about it), or null while there's no hovered
-  // point to show - either the true empty state or Inspect-only preview,
+  // point to show, either the true empty state or Inspect-only preview,
   // told apart by inspectedGroups.length (see renderPlaybackFrame).
   var activeReplay = null;
-  // 0-indexed step currently shown - a float while auto-advancing (see
+  // 0-indexed step currently shown: a float while auto-advancing (see
   // playbackTick), floored wherever it's actually used as an index. May sit
   // past any one entry's own effectiveMaxStep when dragged there by hand.
   var playbackStep = 0;
   var playbackPlaying = false;
   var playbackLastTickTime = 0;
   // hoverStepCount() at the moment the CURRENT session began (see
-  // beginPlaybackSession) - deliberately fixed for that session's whole
+  // beginPlaybackSession): deliberately fixed for that session's whole
   // lifetime rather than read live, and deliberately NOT
   // playbackClockCeiling() (which a sticky-edge stop can make smaller): the
   // slider's own length is meant to always read as "the configured
   // Simulation Duration," so a run that stopped early is visible as a
   // thumb resting short of the far end, not a shorter bar.
   var playbackConfiguredMax = 1;
-  // False only in the true empty state (nothing hovered, nothing locked) -
+  // False only in the true empty state (nothing hovered, nothing locked):
   // disables all three controls, since there's nothing for them to act on.
   var playbackHasSession = false;
-  // Stamped whenever code - not the user's own click - transitions playback
+  // Stamped whenever code, not the user's own click, transitions playback
   // into the playing state: the dwell-then-autoplay upgrade, entering
   // Inspect-only preview, or the end-of-run loop restarting from 0. A Pause
   // click landing within PLAY_PAUSE_GRACE_MS of that moment is dropped
@@ -6838,7 +6851,7 @@
   // ---- Playback speed ----
   //
   // A multiplier on hoverStepsPerSecond()'s own base rate, read fresh every
-  // tick - see playbackTick - so dragging the slider takes effect
+  // tick, see playbackTick, so dragging the slider takes effect
   // immediately on whatever's already animating rather than only on the
   // next hover. Not part of setPlaybackControlsEnabled below: it's a
   // standing preference (like the Simulation Duration setting beside the
@@ -6847,14 +6860,14 @@
   // same real-time default physics-ui.js's own copy of this control uses.
   //
   // ONE speed, two buttons. Inspect's preview transport and the Map
-  // Evolution timeline both ask the same question - how fast should
-  // playback run - so the value lives here and each button is only a view
+  // Evolution timeline both ask the same question, how fast should
+  // playback run, so the value lives here and each button is only a view
   // of it, exactly as this page's two sound controls are two views of
   // PhysicsSound's one volume (see updateVolumeUI). Setting 4x in the
   // preview and finding the map still at 1x was the whole complaint: two
   // controls that look identical and read the same word have to mean the
   // same thing. The two popups stay separate elements (each is positioned
-  // against its own button - see position() below); it's the value behind
+  // against its own button: see position() below); it's the value behind
   // them that is shared.
   //
   // The multiplier means different absolute rates in the two places, and
@@ -6862,14 +6875,14 @@
   // preview and twice PLAYBACK_STEPS_PER_SECOND on the timeline. "Twice as
   // fast as normal" is what the user set, in both.
   var SPEED_MIN = 0.5, SPEED_MAX = 16;
-  // The slider itself moves in log2(speed) space, not speed - see
+  // The slider itself moves in log2(speed) space, not speed: see
   // sliderValueToSpeed/speedToSliderValue. A linear 0.5-16 slider spends
   // almost no travel on 0.5-2 (where a small change is a huge relative
   // speed difference) and most of it on 8-16 (where it barely matters);
   // log space instead gives 0.5->1, 1->2, 2->4, 4->8 and 8->16 each the
   // same amount of the slider's length, since each is the same ×2 step.
   // step="1" in this same space is what actually restricts the control to
-  // just those six whole-power-of-two speeds - an integer log2(speed) is
+  // just those six whole-power-of-two speeds: an integer log2(speed) is
   // exactly a power of two, so there's nothing extra to round here.
   var SPEED_LOG_MIN = Math.log2(SPEED_MIN), SPEED_LOG_MAX = Math.log2(SPEED_MAX);
   function sliderValueToSpeed(v) { return Math.pow(2, v); }
@@ -6884,11 +6897,11 @@
 
   // The one value both controls show and both playback loops read. Read
   // fresh by whoever uses it, never cached, which is what lets a drag take
-  // effect mid-run - on the preview and the timeline at once.
+  // effect mid-run: on the preview and the timeline at once.
   var playbackSpeed = 1;
   // Every makeSpeedControl instance registers its own render function
   // here, so setPlaybackSpeed can repaint all of them without knowing how
-  // many there are or which one the user actually dragged - the same shape
+  // many there are or which one the user actually dragged: the same shape
   // as PhysicsSound.onVolumeChange driving updateVolumeUI above.
   var speedRenderers = [];
   function updateSpeedUI() {
@@ -6900,10 +6913,10 @@
   }
 
   // A speed button, the popup slider it opens, and the readout under that
-  // slider - a view of playbackSpeed, not a value of its own.
+  // slider: a view of playbackSpeed, not a value of its own.
   function makeSpeedControl(button, popup, slider, valueEl) {
     // The HTML hardcodes matching min/max/step (see #hover-speed-slider's own
-    // comment) for a flash-free first paint before this runs - set from the
+    // comment) for a flash-free first paint before this runs: set from the
     // same constants here so the two can never quietly drift apart.
     slider.min = String(SPEED_LOG_MIN);
     slider.max = String(SPEED_LOG_MAX);
@@ -6921,7 +6934,7 @@
     // file's own tip popover: measured against the button's live position
     // rather than laid out declaratively, since nothing here is a
     // normal-flow descendant of it. Centered above the button, clamped so a
-    // button near either edge doesn't push the popup off-screen - and below
+    // button near either edge doesn't push the popup off-screen, and below
     // it instead if there is no room above, which a button near the top of
     // the window would otherwise push off the top edge.
     function position() {
@@ -6950,7 +6963,7 @@
       if (popup.hidden) open(); else close();
     });
     slider.addEventListener("input", function () {
-      // Not control.update() - setPlaybackSpeed repaints the OTHER button
+      // Not control.update(): setPlaybackSpeed repaints the OTHER button
       // too, so a drag here shows up there immediately rather than the
       // next time that card happens to be rebuilt.
       setPlaybackSpeed(sliderValueToSpeed(Number(slider.value)));
@@ -6980,12 +6993,12 @@
     hoverProgressSlider.value = String(Math.floor(playbackStep));
   }
 
-  // The clock's own ceiling for auto-advance - the latest final frame among
+  // The clock's own ceiling for auto-advance: the latest final frame among
   // everything currently on screen (the hovered replay, if any, and every
   // inspected point, including each point inside a line/grid group).
   // Recomputed on every call rather than cached, since inspected points can
   // change out from under an animating session (added or removed from the
-  // sidebar) - see restartCurrentPreview's own comment on why that already
+  // sidebar): see restartCurrentPreview's own comment on why that already
   // has to re-enter from scratch rather than patch state.
   function playbackClockCeiling() {
     var ceiling = activeReplay ? activeReplay.effectiveMaxStep : 0;
@@ -7000,21 +7013,21 @@
 
   // Mirrors buildFragmentShader's colorMap exactly (kept as a separate JS
   // copy rather than shared code, matching how this project already
-  // duplicates this exact formula per page) - hueRangeMaxValue is 360° for
+  // duplicates this exact formula per page), hueRangeMaxValue is 360° for
   // a genuinely wrapping/circular output (the wrap point's t=0/t=1 are the
   // same underlying position, so the same hue there reads as one
   // continuous loop instead of a seam) and 300° for a capped, non-wrapping
   // one (Scene lifespan always; x/y under Sticky Edges, frozen at an
-  // edge) so its two different ends don't also read as identical - see
+  // edge) so its two different ends don't also read as identical, see
   // buildFragmentShader's own comment for exactly which cases get which.
   // OKLCH, not HSL, for this animated hover-replay window (unlike the main
   // grid's static per-pixel image, colorMap below, which stays HSL since
-  // nothing there changes over time) - HSL's lightness isn't perceptually
+  // nothing there changes over time): HSL's lightness isn't perceptually
   // uniform, so a value changing quickly reads as flashing light/dark as
   // the hue sweeps. Fixed lightness/chroma keeps every hue the same
   // apparent brightness; only the hue carries the value, same as before.
-  // Mirrors colorMap's u_colorZoom branch for hue, but - per that branch's
-  // own comment on why HSL adds a saturation ramp there - deliberately
+  // Mirrors colorMap's u_colorZoom branch for hue, but, per that branch's
+  // own comment on why HSL adds a saturation ramp there, deliberately
   // skips any equivalent here: chroma/lightness stay fixed either way, so
   // OKLCH never needs to get "darker" to tell the 10 repeats apart.
   function hoverOutputColor(t) {
@@ -7023,7 +7036,7 @@
   }
 
   // The exact color this pixel renders as on the grid itself (colorMap's
-  // own HSL formula, not the OKLCH toned-down version above) - used only
+  // own HSL formula, not the OKLCH toned-down version above): used only
   // for the replay's FINAL, frozen frame: once it's holding still instead
   // of animating, there's no more flashing to avoid, and showing the real
   // full-brightness color lets this preview double as "exactly what this
@@ -7031,7 +7044,7 @@
   //
   // In Standard mode, that is. A derived display mode paints a DERIVATIVE
   // of the field, so no single pixel's own Output value determines its
-  // color there and this swatch cannot match the grid whatever it does -
+  // color there and this swatch cannot match the grid whatever it does:
   // it deliberately keeps showing the Output value's own color, since that
   // is what the panel around it is about (the value, its trajectory, its
   // place in the range) rather than the derivative on screen.
@@ -7050,25 +7063,25 @@
   // always-positive mod (the shared JS/GLSL wrap rule this whole project
   // already uses) instead of JS's own %, which can return negative.
   function outputColorT(v) {
-    // Lifespan isn't circular like x/y/angle - it can legitimately equal
+    // Lifespan isn't circular like x/y/angle, it can legitimately equal
     // its own max (ran the whole simulation), and wrapping that back to 0
-    // would make it look identical to "crossed immediately" - see
+    // would make it look identical to "crossed immediately", see
     // buildFragmentShader's matching clamp-instead-of-mod comment.
     // Bounce Count scales against the busiest pixel in view, not against any
-    // fixed range - the same u_bounceMax the grid itself is currently drawn
+    // fixed range: the same u_bounceMax the grid itself is currently drawn
     // with, so a hovered pixel's replay ends on the color that pixel has.
     if (isBouncesOutput) return Math.min(1, Math.max(0, v / bounceMaxValue));
     var rangeMax = currentOutputRangeMax();
     if (scene.output.property === "lifespan") return Math.min(1, Math.max(0, v / rangeMax));
     // Under Infinite Space a coordinate is unbounded, so it gets squashed
-    // rather than wrapped - the same curve the shader uses, so this panel
+    // rather than wrapped: the same curve the shader uses, so this panel
     // and the pixel behind it end on the same color.
     if (isInfinitePositionOutput) return PhysicsEngine.frameSigmoid(v / rangeMax);
     return PhysicsHingeGeometry.wrapIntoRange(v, rangeMax) / rangeMax;
   }
 
   // Stops any active animation without otherwise touching what's being
-  // shown - a prelude to something else immediately taking over (a fresh
+  // shown: a prelude to something else immediately taking over (a fresh
   // session in beginPlaybackSession, or the empty/instant-preview states
   // below setting their own paused/disabled look), never a state on its
   // own.
@@ -7100,7 +7113,7 @@
     hoverEmptyState.textContent = message || (global.LayoutMode && !global.LayoutMode.canHover()
       ? "Press Inspect (Point), then tap the map to see that spot\u2019s simulation"
       : "Hover the grid to preview a pixel");
-    // A placeholder, not blank - leaving this empty let the whole line
+    // A placeholder, not blank, leaving this empty let the whole line
     // collapse and reflow everything below it every time hovering starts
     // or stops.
     hoverReadout.textContent = "X: 0, Y: 0";
@@ -7110,7 +7123,7 @@
   }
 
   // Fixed once from the scene exactly as authored (not per-hover-point, and
-  // not re-fit to wherever a given replay's bodies happen to swing to) -
+  // not re-fit to wherever a given replay's bodies happen to swing to):
   // the same "camera" for every point, so different hover points are
   // visually comparable and a big swing just moves off-canvas rather than
   // the whole view zooming out to chase it. Bounding box is padded by each
@@ -7119,7 +7132,7 @@
     var minX, maxX, minY, maxY;
     if (scene.frameWidth && scene.frameHeight) {
       // A locked frame defines a real boundary bodies wrap at (see
-      // PhysicsEngine.step) - fit that exactly, not just wherever the
+      // PhysicsEngine.step): fit that exactly, not just wherever the
       // authored bodies happen to sit, so a wrap is visible on-canvas as a
       // body reappearing on the opposite edge, instead of just vanishing.
       minX = 0; maxX = scene.frameWidth;
@@ -7146,11 +7159,11 @@
   // can), so those always come straight from the authored scene; x/y/angle
   // and the actual rendered half-size (which CAN change, for a resize-linked
   // body) come from this step's logged trajectory row. colorOverride (when
-  // given) replaces the normal isAnchored-based fill/stroke entirely - used to
+  // given) replaces the normal isAnchored-based fill/stroke entirely: used to
   // draw an inspected point's bodies in one fixed, distinct color
   // regardless of static/dynamic, so they read as "the other scene" at a
   // glance instead of blending into the hovered scene's own bodies.
-  // Matches physics-ui.js's MIN_PLAYBACK_DISPLAY_RADIUS - the same floor on
+  // Matches physics-ui.js's MIN_PLAYBACK_DISPLAY_RADIUS: the same floor on
   // the same kind of view, kept as a separate copy the way this project
   // already keeps each page's own drawing code. Everything drawn in this
   // panel is a replay, so unlike the editor there is no authoring case here
@@ -7162,7 +7175,7 @@
   var MIN_DISPLAY_RADIUS = 15;
 
   // Arrows for X/Y Input and Output bodies that have left the frame, pointing
-  // at where they went. The twin of physics-ui.js's - same shared geometry
+  // at where they went. The twin of physics-ui.js's: same shared geometry
   // (PhysicsHingeGeometry.offscreenPointer) and the same
   // fraction-of-the-frame sizing, so it reads the same in this small panel as
   // it does at full size in the editor. Earns its keep most under Infinite
@@ -7195,7 +7208,7 @@
 
   function drawHoverOffscreenArrow(pointer, color, outline) {
     // Line widths are in SCENE units here because the panel's transform
-    // scales everything down - dividing by that scale keeps the arrow the
+    // scales everything down, dividing by that scale keeps the arrow the
     // same apparent weight as the rest of the panel's furniture.
     var s = 1 / hoverFit.scale;
     var dirX = pointer.dirX, dirY = pointer.dirY, length = pointer.length;
@@ -7220,7 +7233,7 @@
 
     hoverCtx.save();
     hoverCtx.lineCap = "round";
-    // An inspected point's own outline, drawn underneath and wider - the same
+    // An inspected point's own outline, drawn underneath and wider: the same
     // "colored body, dark outline" treatment drawHoverBody gives that
     // point's bodies, so the arrow belongs to the same playback visually.
     if (outline) {
@@ -7244,7 +7257,7 @@
   }
 
   // A splitter scene's trajectory rows are always MAX_SIMULATION_BODIES
-  // wide - see PhysicsGPU.padSceneForSplitting - so a row can carry slots
+  // wide, see PhysicsGPU.padSceneForSplitting, so a row can carry slots
   // the authored scene has no entry for. A slot past the authored bodies is
   // always a ball some split woke up, and reports half = 0 until it has
   // been: that's the flag for "there is nothing here yet", and the one for
@@ -7259,7 +7272,7 @@
   function isTrapezoidType(type) { return type === "funnel" || type === "splitter"; }
 
   // The four corners of a funnel/splitter, in outline order, from the same
-  // geometry the engine collides against - reconstructed from the row's own
+  // geometry the engine collides against: reconstructed from the row's own
   // (x, y, angle) and `half`, since `half` for a trapezoid IS size/2.
   function traceTrapezoid(row) {
     var e = PhysicsEngine.getFunnelEdges({ x: row.x, y: row.y, angle: row.angle, size: row.half * 2 });
@@ -7273,12 +7286,12 @@
   // ---- Solid for the Output's body, an outline for everything else ----
   //
   // The panel's background is the Output's color, so the body it is read
-  // from is the one to follow - and two identical balls passing through each
+  // from is the one to follow, and two identical balls passing through each
   // other are otherwise impossible to tell apart: did they swap sides, or
   // bounce? Drawn solid, the tracked one answers that at a glance.
   //
   // Which body slots are "the Output's": its one or two authored bodies, or
-  // with a splitter every slot in their lineage (see outputLineageSlotsAt) -
+  // with a splitter every slot in their lineage (see outputLineageSlotsAt),
   // the same set the background color is averaged over. Null when the Output
   // names no body at all (Scene Lifespan), and then nothing is hollowed:
   // with nothing singled out there is nothing to tell apart from.
@@ -7301,7 +7314,7 @@
 
   // A thick stroked shape (a line, a trapezoid's walls) as an outline: the
   // stroke itself, then its inside taken back out. What shows through is the
-  // canvas's own CSS background - the Output color - which is exactly what a
+  // canvas's own CSS background, the Output color, which is exactly what a
   // hollow body should be filled with; the cost is that it also clears
   // anything already drawn underneath, which for bodies crossing is a few
   // pixels of another outline.
@@ -7328,7 +7341,7 @@
     var stroke = colorOverride ? colorOverride.stroke : (spec.type === "circle" ? (spec.isAnchored ? "#7a8199" : "#7ea0ff") : (spec.isAnchored ? "#5a6178" : "#3a63d1"));
     hoverCtx.fillStyle = fill;
     if (hollow) {
-      // In the body's own identifying color - an inspected point's hue, not
+      // In the body's own identifying color: an inspected point's hue, not
       // the black it outlines its solid bodies with.
       var outline = colorOverride ? colorOverride.fill : stroke;
       hoverCtx.lineCap = "round";
@@ -7358,7 +7371,7 @@
       hoverCtx.strokeStyle = stroke;
       hoverCtx.lineWidth = 2;
       hoverCtx.beginPath();
-      // Display floor only - the simulation behind this ran on the real
+      // Display floor only: the simulation behind this ran on the real
       // radius. See MIN_DISPLAY_RADIUS above; a line's `half` is its
       // half-LENGTH, a different quantity, so it is left alone.
       hoverCtx.arc(row.x, row.y, Math.max(row.half, MIN_DISPLAY_RADIUS), 0, Math.PI * 2);
@@ -7366,8 +7379,8 @@
       hoverCtx.stroke();
     } else if (isTrapezoidType(spec.type)) {
       // Deliberately one flat color for the whole outline. #editor-view
-      // colors each of the four edges by its ROLE - which side teleports,
-      // which side splits, which are plain walls - because that is the view
+      // colors each of the four edges by its ROLE, which side teleports,
+      // which side splits, which are plain walls, because that is the view
       // where you build the thing. This panel is a thumbnail of one pixel's
       // starting state; the edge roles aren't what you're reading it for,
       // and four colors at this size is just noise.
@@ -7375,7 +7388,7 @@
       hoverCtx.lineJoin = "round";
       if (colorOverride) {
         // Same two-pass outline a line gets under an inspected color, and for
-        // the same reason - see the line branch below.
+        // the same reason: see the line branch below.
         hoverCtx.strokeStyle = colorOverride.stroke;
         hoverCtx.lineWidth = PhysicsEngine.LINE_THICKNESS + 2;
         traceTrapezoid(row);
@@ -7393,7 +7406,7 @@
       hoverCtx.lineCap = "round";
       if (colorOverride) {
         // A stroked line has no separate fill to carry the hue the way a
-        // circle's does - echo the same "colored body, black outline" look
+        // circle's does: echo the same "colored body, black outline" look
         // by stroking it twice: a wider black pass underneath, then the
         // actual hue on top and slightly thinner, so it reads as outlined
         // rather than just recoloring the whole line solid black.
@@ -7422,7 +7435,7 @@
 
   // The scene's springs, over a set of bodies this panel has just drawn.
   // `rows` is indexed by AUTHORED body ({ x, y, angle, half }, as a
-  // trajectory row is), which is all a spring ever refers to - a ball that
+  // trajectory row is), which is all a spring ever refers to: a ball that
   // splits keeps its spring on the half that kept its slot.
   //
   // An end's place on its body is not always what was authored: X/Y Input
@@ -7449,13 +7462,13 @@
 
   // Draws every inspected point's bodies at `step` (each capped to its own
   // effectiveMaxStep, independently of however far the hovered scene's own
-  // replay has gotten) - called from both the instant preview (step 0) and
+  // replay has gotten): called from both the instant preview (step 0) and
   // the animated replay tick, so an inspected point is visible in either
   // mode, "playing back on top of" whatever's currently hovered. Each point
   // draws in its own entry.color (see the Inspect section above), not a
   // single shared color, so points stay distinguishable from each other.
   //
-  // "grid" groups are deliberately excluded from this pass - per the user's
+  // "grid" groups are deliberately excluded from this pass: per the user's
   // own requirement, a grid never renders its output bodies at all (only
   // their implied position matters), and its mesh must sit on top of every
   // other group regardless of draw order among groups. See the mesh pass
@@ -7491,8 +7504,8 @@
     });
 
     // The grid mesh pass: for each "grid" group, plot its points at the
-    // OUTPUT body's own (x, y) at this step - never the output body itself,
-    // just its implied position, per the user's explicit ask - then connect
+    // OUTPUT body's own (x, y) at this step, never the output body itself,
+    // just its implied position, per the user's explicit ask, then connect
     // them along each drawn row/column with buildGridMeshSegments' pairs. A
     // separate pass (not interleaved into the loop above) so every grid's
     // mesh always paints over every other group's bodies, "regardless of
@@ -7531,7 +7544,7 @@
 
   // Draws the wrap boundary itself (see PhysicsEngine.step) so a body
   // crossing it and reappearing on the opposite side reads as "wrapped",
-  // not as a glitch - a no-op for a scene with no locked frame, since
+  // not as a glitch: a no-op for a scene with no locked frame, since
   // there's no fixed edge to draw.
   function drawFrameBoundary() {
     if (!scene.frameWidth || !scene.frameHeight) return;
@@ -7545,14 +7558,14 @@
   // but without touching WebGL. Fires synchronously on every qualifying
   // mousemove, so it has to stay fast. Colors with the exact same fixed
   // baseline+scale formula the grid and the full replay use (not a
-  // per-trajectory min/max - there's no trajectory yet, just this one
-  // frame) - meaningful and stable the instant it appears, since t=0 of
+  // per-trajectory min/max, there's no trajectory yet, just this one
+  // frame), meaningful and stable the instant it appears, since t=0 of
   // this offset scene is exactly what the eventual replay's first frame
   // will show too.
   // Where an Input is a body's starting VELOCITY, moving across the map
   // changes nothing the instant preview could otherwise show: every pixel's
   // scene starts in the same place, and only how hard the body is thrown
-  // differs. So the instant preview - and only it - draws that throw, as the
+  // differs. So the instant preview, and only it, draws that throw, as the
   // editor's own velocity arrow (same color, same one-pixel-per-unit length,
   // same head), on each body an Input's vx or vy lands on. It follows the
   // hover because the instant preview is redrawn for every hovered pixel; and
@@ -7606,7 +7619,7 @@
       showHoverEmpty("Couldn't preview this point: " + (err.message || err));
       return;
     }
-    // No real trajectory exists yet at this instant - just this one JS frame
+    // No real trajectory exists yet at this instant, just this one JS frame
     // - so the controls show paused-at-the-start and stay disabled until
     // the upgrade below lands and beginPlaybackSession takes over. The
     // slider's range is set here anyway (even disabled, so it isn't stale
@@ -7637,7 +7650,7 @@
         // asking the one function for it is what keeps the instant preview
         // and the GPU replay that replaces it drawing the same sizes. The
         // local version got it wrong for a trapezoid, which has no `length`
-        // at all - undefined/2 is NaN, and a NaN coordinate draws nothing,
+        // at all: undefined/2 is NaN, and a NaN coordinate draws nothing,
         // which is why a funnel or splitter was invisible until the replay
         // loaded and supplied a real number.
         half: PhysicsGPU.shapeHalf([body], 0),
@@ -7647,20 +7660,20 @@
       return { x: body.x, y: body.y, angle: body.angle, half: PhysicsGPU.shapeHalf([body], 0) };
     }));
     drawHoverInputVelocityArrows(offsetScene);
-    // The inspected point's own t=0 state - "both play on top of each other"
+    // The inspected point's own t=0 state: "both play on top of each other"
     // starts here, before either has even upgraded to a real replay.
     drawInspectedAtStep(0);
     if (inspectedGroups.length > 0) {
       // Reconciling multiple scenes' Output values into one background
-      // color isn't attempted - see drawInspectedAtStep's own comment
+      // color isn't attempted: see drawInspectedAtStep's own comment
       // for how each scene is told apart instead (its own color, not
       // background).
       hoverCanvas.style.backgroundColor = "";
     } else {
       // Scene Lifespan has no meaningful value before the real replay has
-      // even run - show it as "hasn't crossed yet" (the same value a run
+      // even run: show it as "hasn't crossed yet" (the same value a run
       // that never crosses settles on) until the upgrade below corrects it.
-      // Bounce Count is 0 here by definition - this is the scene's starting
+      // Bounce Count is 0 here by definition: this is the scene's starting
       // state, before any step has run, so nothing has bounced yet.
       var v0 = scene.output.property === "lifespan" ? simulationSteps
         : isBouncesOutput ? 0
@@ -7671,10 +7684,10 @@
   }
 
   // Steps per real second the replay plays back at. Derived from the
-  // per-frame duration and NOTHING else - in particular not from how many
+  // per-frame duration and NOTHING else, in particular not from how many
   // steps the run has, which is what makes a replay's length proportional to
-  // its step count - scaled by the user's own playbackSpeed (shared with the
-  // Map Evolution timeline - see the Playback speed section) on top of that
+  // its step count, scaled by the user's own playbackSpeed (shared with the
+  // Map Evolution timeline: see the Playback speed section) on top of that
   // fixed base rate. Expressed as a rate rather than "steps per
   // callback" because the tick is driven by wall-clock elapsed time (see
   // playbackTick for why that distinction matters).
@@ -7682,14 +7695,14 @@
     return (1000 / HOVER_MS_PER_FRAME) * playbackSpeed;
   }
 
-  // One frame of whatever is currently showing, at `playbackStep` - the
+  // One frame of whatever is currently showing, at `playbackStep`: the
   // shared body between auto-play's rAF loop and a manual slider drag, so
   // scrubbing while paused draws exactly the frame playing would have
   // shown at that point. activeReplay's own effectiveMaxStep (or, in
   // Inspect-only mode, each inspected point's) mirrors physics-ui.js's
   // effectiveMaxSteps: when Sticky Edges found the Output body wrapping
   // partway through a trajectory (see runHoverAt/computeTrajectoryEntry),
-  // that entry freezes there instead of continuing through the teleport -
+  // that entry freezes there instead of continuing through the teleport,
   // the readout keeps showing the FULL trajectory.length as "/ N" (the run
   // really was only ever logged that far) rather than silently changing
   // the denominator, while everything else on screen keeps going until ITS
@@ -7710,7 +7723,7 @@
       var effectiveRow = [], shownRows = [], replayTracked = trackedBodySlots(activeReplay.lineageSlots);
       for (var i = 0; i < row.length; i++) {
         // wrapOverride has no `half` (a resize-link's rendered size is
-        // unaffected by this x/y/angle correction) - keep this step's own.
+        // unaffected by this x/y/angle correction): keep this step's own.
         var bodyRow = (isFinalFrame && activeReplay.wrapOverride && i === activeReplay.wrapOverride.bodyIndex)
           ? { x: activeReplay.wrapOverride.x, y: activeReplay.wrapOverride.y, angle: activeReplay.wrapOverride.angle, half: row[i].half }
           : row[i];
@@ -7719,27 +7732,27 @@
         shownRows[i] = bodyRow;
         drawHoverBody(hoverBodySpec(i), bodyRow, undefined, isHollow(replayTracked, i));
       }
-      // Indexed by body, and from where each was drawn - see drawInspectedAtStep.
+      // Indexed by body, and from where each was drawn: see drawInspectedAtStep.
       drawHoverSprings(shownRows);
       // The corrected row, not the raw one, so an arrow points at where its
       // body was actually drawn on a wrap-stopped final frame.
       drawOffscreenMappingArrows(effectiveRow);
     }
 
-    // step (not activeReplay's own capped hoveredStep) drives this - an
+    // step (not activeReplay's own capped hoveredStep) drives this: an
     // inspected point keeps playing even after the hovered scene above has
     // frozen.
     drawInspectedAtStep(step);
 
     if (inspectedGroups.length > 0) {
       // Reconciling multiple scenes' Output values into one background
-      // color isn't attempted - see drawInspectedAtStep's own comment
+      // color isn't attempted: see drawInspectedAtStep's own comment
       // for how each scene is told apart instead (its own color, not
       // background).
       hoverCanvas.style.backgroundColor = "";
     } else if (activeReplay) {
       // Lifespan is a single fact about the whole run (when did some body
-      // first cross an edge), not a per-step positional readout - it's
+      // first cross an edge), not a per-step positional readout: it's
       // already fully known once runHoverAt's own findWrapStopStep call
       // ran, so it just holds at lifespanValue for every frame instead of
       // varying as the animation plays.
@@ -7749,7 +7762,7 @@
       // Every frame but the last uses the toned-down OKLCH color (see
       // hoverOutputColor) since it's still animating; the last one holds
       // still from here on, so it switches to the grid's own real HSL
-      // color instead - the flashing concern doesn't apply to something
+      // color instead: the flashing concern doesn't apply to something
       // that's no longer changing, and this way the frozen frame shows
       // exactly what this pixel looks like on the grid itself.
       hoverCanvas.style.backgroundColor = isFinalFrame ? hoverOutputColorFinal(outputColorT(v)) : hoverOutputColor(outputColorT(v));
@@ -7765,7 +7778,7 @@
         " - step " + (Math.min(overallMaxStep - 1, step) + 1) + " / " + overallMaxStep;
     }
     updateProgressSliderPosition();
-    // Every frame the preview shows - playing, scrubbed, reset or looped -
+    // Every frame the preview shows, playing, scrubbed, reset or looped,
     // passes through here, so this one call is the whole of what keeps the
     // map in lockstep with it. Unconditional: with Map Evolution shut,
     // followInspection is itself a no-op, so there is nothing here for a
@@ -7774,10 +7787,10 @@
   }
 
   // Every trajectory-bearing thing currently on screen, in the exact order
-  // its own bounce/edge sound should be pitched - the hovered scene first
+  // its own bounce/edge sound should be pitched, the hovered scene first
   // (if any), then each Inspect point/line/grid point in the same order
   // they're listed (#inspect-list), and within a line/grid group, in that
-  // group's own point order (a line along its length, a grid row-major) -
+  // group's own point order (a line along its length, a grid row-major),
   // since inspectedGroups already stores groups and points in exactly those
   // orders, flattening it in place preserves them for free.
   function activeVoiceEntries() {
@@ -7787,17 +7800,17 @@
   }
 
   // Bounce/edge sounds for whatever advanced between the last frame and
-  // this one - called only from playbackTick's own auto-advance, never from
+  // this one: called only from playbackTick's own auto-advance, never from
   // scrubbing the progress slider or Reset, which jump the shared clock
   // without it having actually "played" anything in between. fromStep was
   // already shown (by the previous call, or the session's own initial
   // synchronous render), toStep is about to be; a step index e therefore
-  // counts as newly reached exactly when fromStep < e <= toStep - an
+  // counts as newly reached exactly when fromStep < e <= toStep: an
   // INCLUSIVE upper bound, not e < toStep, because playbackTick's own clock
   // caps at ceiling-1 (see playbackClockCeiling), never ceiling itself. An
   // entry whose own effectiveMaxStep-1 equals that shared ceiling-1 would
   // otherwise never satisfy a strict "<", since toStep can never exceed the
-  // very value being compared against - silently dropping every edge sound
+  // very value being compared against: silently dropping every edge sound
   // (always exactly at that boundary) and any bounce unlucky enough to land
   // on an entry's own last reachable step.
   function checkPlaybackSounds(fromStep, toStep) {
@@ -7807,7 +7820,7 @@
     entries.forEach(function (entry, i) {
       // bounceEvents was computed over the point's full configured step
       // count, independent of whether THIS entry stopped early on a sticky
-      // edge - so it can hold events past this entry's own effectiveMaxStep
+      // edge, so it can hold events past this entry's own effectiveMaxStep
       // that its display (frozen at effectiveMaxStep-1, see
       // renderPlaybackFrame's own clamp) never actually reaches, even while
       // the shared clock keeps advancing for other, longer-lived entries.
@@ -7815,12 +7828,12 @@
       var bounced = false;
       for (var e = 0; e < entry.bounceEvents.length; e++) {
         var ev = entry.bounceEvents[e];
-        if (ev > lastVisibleStep) break; // sorted ascending - nothing further is reachable either
+        if (ev > lastVisibleStep) break; // sorted ascending, nothing further is reachable either
         if (ev > fromStep && ev <= toStep) { bounced = true; break; }
       }
       if (bounced) PhysicsSound.playBounce(freqs[i]);
       // The sticky-edge stop is a single terminal event, the same one that
-      // already freezes this entry's own display at effectiveMaxStep - only
+      // already freezes this entry's own display at effectiveMaxStep, only
       // fires the instant playback first reaches it, and only when it's a
       // genuine edge stop (wrapOverride set), not just this entry's own
       // trajectory running out.
@@ -7832,7 +7845,7 @@
   }
 
   // Driven by elapsed wall-clock time, not "advance N steps per callback":
-  // requestAnimationFrame fires whenever the browser is ready to paint -
+  // requestAnimationFrame fires whenever the browser is ready to paint,
   // nominally the display's refresh interval, but not a fixed timer, so it
   // stretches under system load or background-tab throttling. Always
   // advancing by the same amount per callback would let the whole replay
@@ -7842,12 +7855,12 @@
   // hoverStepsPerSecond() regardless of how often callbacks actually land.
   // Unlike the old wall-clock-since-start version this replaced, that
   // accumulator (playbackStep) can be paused (stop adding to it), seeked
-  // (set it directly), and resumed (keep adding from wherever it is) - see
+  // (set it directly), and resumed (keep adding from wherever it is): see
   // pausePlayback/resumePlayback and the control listeners below.
   function playbackTick() {
     // An inspected point can be cleared out from under an already-running
     // Inspect-only preview (see removeInspectedGroup/clearInspected, which
-    // both route through restartCurrentPreview) - bail to the real empty
+    // both route through restartCurrentPreview): bail to the real empty
     // state rather than animate nothing. In practice this never actually
     // fires (that same call chain already stops this loop first), but it's
     // the same insurance the old per-mode tick had.
@@ -7863,7 +7876,7 @@
     if (playbackStep >= ceiling - 1) {
       hoverRafId = null;
       // With Map Evolution open this clock is the MAP's clock too, and a
-      // map run ends at its last frame rather than starting over - so it
+      // map run ends at its last frame rather than starting over, so it
       // stops here, frozen on the final frame, and Play from there begins
       // again at 0 (see resumePlayback). Inspect on its own still loops.
       if (playbackMenu.isOpen()) {
@@ -7872,14 +7885,14 @@
         syncMapToInspection();
         return;
       }
-      // Everything on screen has reached its final logged frame - hold
+      // Everything on screen has reached its final logged frame: hold
       // there for a beat, then play the whole thing again from the start
       // unless the user paused during the hold.
       hoverLoopTimer = setTimeout(function () {
         hoverLoopTimer = null;
         if (!playbackPlaying) return;
         // Opening Map Evolution during the hold turns this run into a map
-        // run, which doesn't start over - the same rule as above, applied
+        // run, which doesn't start over: the same rule as above, applied
         // to a loop that was already queued when the card came up.
         if (playbackMenu.isOpen()) { playbackPlaying = false; updatePlayPauseButtonUI(); syncMapToInspection(); return; }
         playbackStep = 0;
@@ -7923,9 +7936,9 @@
   // The one entry point for "start showing something new": a fresh hover
   // point (runHoverAt) or Inspect-only preview (beginInspectOnlySession).
   // Always starts at step 0 and, unless autoplay is explicitly suppressed,
-  // auto-plays - restarting from 0 is what guarantees a newly-added
+  // auto-plays, restarting from 0 is what guarantees a newly-added
   // inspected point starts in sync with everything already on screen (see
-  // restartCurrentPreview) - and always stops whatever was animating
+  // restartCurrentPreview), and always stops whatever was animating
   // before it, so a slow point that finishes compiling after the cursor
   // has moved on can't draw over a session that has since moved on to
   // something else.
@@ -7950,7 +7963,7 @@
   hoverPlayPauseBtn.addEventListener("click", function () {
     if (!playbackHasSession) return;
     if (playbackPlaying) {
-      // See PLAY_PAUSE_GRACE_MS above - a click landing this soon after
+      // See PLAY_PAUSE_GRACE_MS above: a click landing this soon after
       // playback started on its own almost certainly meant to start it,
       // which already happened.
       if (performance.now() - playbackAutoStartedAt < PLAY_PAUSE_GRACE_MS) return;
@@ -7995,11 +8008,11 @@
   }
 
   // The bounce sound effect's own event source for one point (see
-  // PhysicsEngine.runBounceEvents and checkPlaybackSounds below) - another
+  // PhysicsEngine.runBounceEvents and checkPlaybackSounds below): another
   // JS re-simulation of the same offset scene, same reasoning as
   // bounceCountsAt just above: a GPU trajectory logs positions only,
   // nothing about contact. Failure here never costs the point/line/grid
-  // entry it's attached to - an empty event list (that one point just never
+  // entry it's attached to: an empty event list (that one point just never
   // plays a bounce sound) is a far smaller loss than dropping it outright.
   function bounceEventsAt(worldPoint, steps) {
     try {
@@ -8010,18 +8023,18 @@
     }
   }
 
-  // Which body slots end up in the Output's lineage for one point - null for
+  // Which body slots end up in the Output's lineage for one point: null for
   // any scene without a splitter, where the answer is always just the Output
   // body itself and nothing needs averaging.
   //
   // The grid shader colors a splitter scene's pixel by the AVERAGE over the
   // lineage (see buildFragmentShader), so the replay has to as well or the
-  // panel's background stops being the color of the pixel it is replaying -
+  // panel's background stops being the color of the pixel it is replaying:
   // the one property this feature exists to have. A GPU trajectory has no
   // spare channel to carry a lineage tag in (x, y and angle fill RGB, the
   // rendered half fills alpha), so it comes from the JS engine running the
   // same offset scene, exactly like bounceCountsAt above: the two agree on
-  // WHICH slot a split wakes, which is all that's read here - the values
+  // WHICH slot a split wakes, which is all that's read here, the values
   // averaged are still the GPU's own, so the color stays derived from the
   // positions actually being drawn.
   function outputLineageSlotsAt(worldPoint, steps) {
@@ -8032,7 +8045,7 @@
       var rows = PhysicsEngine.runTrajectory(offsetScene, steps, PhysicsGPU.FIXED_DT);
       var last = rows[rows.length - 1];
       // Grouped BY HEAD, not flattened: a pair Output is the mean of two
-      // bodies, each of which is its own lineage average - flattening would
+      // bodies, each of which is its own lineage average, flattening would
       // weight the half that happened to split more times.
       var groups = heads.map(function (head) {
         var slots = [];
@@ -8048,18 +8061,18 @@
   // The Output value for one replay frame. Without a lineage (every scene
   // that has no splitter) this is the single read it always was. With one,
   // it is the mean over whichever members have actually been woken by this
-  // step - a slot reports half = 0 until a split fills it, so the average
+  // step: a slot reports half = 0 until a split fills it, so the average
   // grows from one ball to two to four exactly as the shader's does.
   function hoverOutputValue(row, lineageGroups, wrapOverride, isFinalFrame, extraWrapOverrides) {
     var prop = scene.output.property;
     var heads = PhysicsEngine.outputBodyIndices(scene.output);
     // Every reconstruction available for this stopping frame, keyed by the
-    // body it describes - the primary one plus a pair's second half.
+    // body it describes: the primary one plus a pair's second half.
     var overrides = {};
     if (isFinalFrame && wrapOverride) overrides[wrapOverride.bodyIndex] = wrapOverride;
     (extraWrapOverrides || []).forEach(function (o) { if (isFinalFrame && o) overrides[o.bodyIndex] = o; });
     // One value per authored head: its lineage average when the scene
-    // splits, its own reading otherwise - and on a wrap-stopped final frame,
+    // splits, its own reading otherwise, and on a wrap-stopped final frame,
     // the continuous reconstruction instead of the discrete sample.
     function valueFor(headPos, axis) {
       var slots = lineageGroups ? lineageGroups[headPos] : [heads[headPos]];
@@ -8102,12 +8115,12 @@
     var extraWrapOverrides = [];
     if (scene.edgeMode === "sticky") {
       // The exact same JS-numeric initial state showHoverInstant already
-      // uses for this point - needed here only as findWrapStopStep's
+      // uses for this point: needed here only as findWrapStopStep's
       // pre-simulation baseline (see its own comment on why traj[0] alone
       // isn't enough).
       var initialAtPoint = PhysicsGridCodegen.computeOffsetSceneNumeric(scene, worldPoint.x, worldPoint.y);
       var watchedIndices = PhysicsHingeGeometry.wrapWatchedBodyIndices(scene);
-      // Bounce Count, like Scene Lifespan, isn't a position - there's no
+      // Bounce Count, like Scene Lifespan, isn't a position: there's no
       // output body whose final coordinates need reconstructing, so
       // findWrapStopStep picks the body that actually crossed instead.
       var heads = (isLifespan || isBouncesOutput) ? [] : PhysicsEngine.outputBodyIndices(scene.output);
@@ -8118,7 +8131,7 @@
         wrapOverride = wrapStop;
         lifespanValue = wrapStop.step + wrapStop.tFrac / PhysicsGPU.FIXED_DT;
         // A pair Output needs BOTH halves reconstructed on the stopping
-        // frame - the shader does both (see outputIndices in
+        // frame: the shader does both (see outputIndices in
         // buildFragmentShader), so averaging one continuous value with one
         // discrete sample here would make the panel disagree with the very
         // pixel it is replaying. Same scan, different target: the stopping
@@ -8140,7 +8153,7 @@
       extraWrapOverrides: extraWrapOverrides,
       bounceEvents: bounceEventsAt(worldPoint, steps),
       // Open Map Evolution means the map is playing this same clock, and
-      // a map run is something the user starts - so a hover lands on the
+      // a map run is something the user starts, so a hover lands on the
       // replay's first frame (which IS this point's starting state, the
       // same picture the instant preview just drew) and waits there.
     }, /* autoplay */ !playbackMenu.isOpen());
@@ -8148,10 +8161,10 @@
 
   // Shown instead of the ordinary "hover the grid to preview a pixel" empty
   // state whenever the cursor leaves the grid while one or more points are
-  // inspected - there's already something worth looking at, so it keeps
+  // inspected: there's already something worth looking at, so it keeps
   // playing back every inspected point together (no extra hovered scene,
   // same as while actively inspecting) rather than going blank. Just
-  // beginPlaybackSession with no hovered replay of its own - renderPlaybackFrame
+  // beginPlaybackSession with no hovered replay of its own: renderPlaybackFrame
   // and playbackTick already read inspectedGroups fresh every frame, so
   // removing a point (or clearing all) while this is showing is picked up
   // immediately, including falling back to the real empty state if that
@@ -8162,15 +8175,15 @@
 
   canvas.addEventListener("mousemove", function (e) {
     isHoveringGrid = true;
-    if (dragging) return; // don't fight panning - only preview while not dragging the view
-    // Nowhere to draw a preview, and nobody to hear its bounce tones - see
+    if (dragging) return; // don't fight panning, only preview while not dragging the view
+    // Nowhere to draw a preview, and nobody to hear its bounce tones, see
     // the Inspect menu's own comment on why a shut card stops the work
     // instead of hiding it.
     if (!inspectMenu.isOpen()) return;
     var uv = pixelToUV(e.clientX, e.clientY);
     // Snap to the nearest backing-store pixel's world size so tiny cursor
     // jitter within the same rendered grid cell doesn't trigger redundant
-    // work - matches the actual resolution the main view is sampling at, so
+    // work: matches the actual resolution the main view is sampling at, so
     // "the cell under the cursor" is well-defined.
     var world = snappedWorldPointAtUV(uv.uvx, uv.uvy);
     // Which CELL of which view, not the point's own digits: past float64's
@@ -8179,24 +8192,24 @@
     if (key === hoverKey) return; // already showing (or about to show) this exact cell
     hoverKey = key;
     hoverWorldPoint = world;
-    // Kept updating above regardless - so that removing the last inspected
+    // Kept updating above regardless, so that removing the last inspected
     // point (which itself calls restartCurrentPreview) can fall straight
     // back to previewing whatever cell the cursor is already sitting over,
-    // no extra move needed - but once at least one point/line/grid is
+    // no extra move needed, but once at least one point/line/grid is
     // locked, the panel belongs to THEM: it no longer swaps in a preview of
     // the currently-hovered cell's own trajectory alongside whatever is
     // already playing back.
     if (inspectedGroups.length > 0) return;
-    stopHoverReplay(); // a previous cell's replay may still be animating - don't let it keep drawing over the new cell's preview
+    stopHoverReplay(); // a previous cell's replay may still be animating: don't let it keep drawing over the new cell's preview
     if (hoverUpgradeTimer) clearTimeout(hoverUpgradeTimer);
     showHoverInstant(world);
     hoverUpgradeTimer = setTimeout(function () {
-      if (key !== hoverKey) return; // cursor moved on before the dwell delay elapsed - superseded
+      if (key !== hoverKey) return; // cursor moved on before the dwell delay elapsed: superseded
       runHoverAt(world);
     }, HOVER_UPGRADE_DELAY_MS);
   });
   canvas.addEventListener("mouseleave", function (e) {
-    // The playback controls sit in the floating panel, not on the canvas -
+    // The playback controls sit in the floating panel, not on the canvas,
     // reaching them to pause, scrub, reset, or adjust speed necessarily
     // crosses OUT of the canvas first, which would otherwise fire this same
     // handler and blow away the very session the click was meant to
@@ -8210,11 +8223,11 @@
     if (e.relatedTarget && (hoverPlaybackControlsEl.contains(e.relatedTarget) || hoverSpeedPopup.contains(e.relatedTarget))) return;
     isHoveringGrid = false;
     // Moving onto the Inspect bar itself (the sidebar list of locked
-    // points, its buttons, etc.) isn't "done looking at this" either - if a
+    // points, its buttons, etc.) isn't "done looking at this" either, if a
     // locked-group session is already playing, leave it running right where
     // it is instead of restarting it from step 0.
     // (The card is asked as well as the menu it belongs to: while the dock
-    // holds it, the card is not inside #menu-inspect - see "The dock".)
+    // holds it, the card is not inside #menu-inspect, see "The dock".)
     if (e.relatedTarget && (inspectMenuEl.contains(e.relatedTarget) || inspectMenu.card.contains(e.relatedTarget)) && inspectedGroups.length > 0 && playbackHasSession) return;
     if (inspectedGroups.length > 0) { beginInspectOnlySession(); } else { showHoverEmpty(); }
   });
@@ -8230,10 +8243,10 @@
   // Three rules, all of them the user's own: nothing is measured unless the
   // card is open; only the one section that is open on it is measured; and
   // the measuring starts as soon as the view stops moving, without waiting
-  // for the refinement ladder to finish - the card should fill in while the
+  // for the refinement ladder to finish, the card should fill in while the
   // picture is still sharpening, not after. It still never runs on the
   // render path: a short settle after the last view change, then the work
-  // goes through requestIdleCallback slices - the GPU sampling banded
+  // goes through requestIdleCallback slices, the GPU sampling banded
   // against the same adaptive pixel budget the ladder uses, and the
   // arithmetic split into steps by fractal-stats.js. Any view change at all
   // abandons whatever is in flight, mid-slice, and the card dims to say the
@@ -8270,7 +8283,7 @@
 
   // The block the current stop asks for, in samples: the canvas scaled by
   // the fraction, so the sampled rectangle is the one on screen rather than
-  // a stretched version of it - which matters here far more than it does
+  // a stretched version of it, which matters here far more than it does
   // for the superlative buttons, since the Rose Plot is about direction.
   // Never past one sample per rendered pixel (two samples would run the
   // same simulation the grid ran once) and never past what one texture can
@@ -8289,20 +8302,21 @@
   // a pan which pauses briefly and resumes never triggers a run at all.
   var STATS_SETTLE_DELAY_MS = 400;
   // requestIdleCallback's own deadline. Reached, it fires anyway on a busy
-  // page - which is handled by doing a single step in that case (see
+  // page, which is handled by doing a single step in that case (see
   // runStatsSlice) rather than a whole slice, so progress continues without
   // competing with whatever is keeping the page busy.
   var STATS_IDLE_TIMEOUT_MS = 2000;
-  // One degree per bin, as asked - the rose smooths for display but the
+  // One degree per bin, as asked: the rose smooths for display but the
   // reported peak direction comes from these.
   var STATS_ORIENTATION_BINS = 180;
   var STATS_HISTOGRAM_BUCKETS = 96;
-  // Ceiling on one band's readback buffer, in samples - four floats each,
+  // Ceiling on one band's readback buffer, in samples: four floats each,
   // so this is a 4MB Float32Array however far the resolution slider is
   // pushed.
   var STATS_MAX_BAND_SAMPLES = 262144;
 
   var statsPanel = null;        // the FractalStatsPanel instance, once built
+  var statsResizing = false;    // true only while resizeCanvas's own markDirty runs
   var statsSampleSlider = document.getElementById("stats-sample-slider");
   var statsSampleReadout = document.getElementById("stats-sample-readout");
   // "Full (1920 × 1080)": the stop's name and the block it comes to on this
@@ -8316,7 +8330,7 @@
   var statsOpen = false;
   var statsRun = null;          // the measurement in flight, if any
   // Bumped by every view change. A slice belonging to an older generation
-  // is measuring a view that no longer exists and stops immediately - which
+  // is measuring a view that no longer exists and stops immediately, which
   // is what makes abandoning a run mid-slice safe without any other state.
   var statsGeneration = 0;
   var statsSliceHandle = null;
@@ -8363,14 +8377,14 @@
   // How many Output units one whole unit of t is worth. Exact for every
   // property whose t is a plain division; for Infinite Space (where t comes
   // out of a sigmoid) it is the frame dimension, which is the right scale
-  // but not a constant ratio - the one place this is used says so.
+  // but not a constant ratio: the one place this is used says so.
   function statsValueSpan() {
     return isBouncesOutput ? bounceMaxValue : currentOutputRangeMax();
   }
 
   // Every number this page REPORTS is in the coordinate system the scene is
-  // authored and read in - origin at the frame's center, +y up, and so
-  // +rotation counter-clockwise (see physics-coords.js) - while everything
+  // authored and read in, origin at the frame's center, +y up, and so
+  // +rotation counter-clockwise (see physics-coords.js), while everything
   // upstream of here, the shader included, is still engine space. This is
   // the single step between the two, so the colours and the labels stay two
   // views of one measurement rather than two measurements.
@@ -8392,7 +8406,7 @@
   // Note that this is not monotonic in t for every Output any more: with +y
   // up, t = 0 is the TOP of the frame and so the largest Center Y. Callers
   // that want a span or an ordered pair out of two of these have to say so
-  // themselves rather than assume t's own order carries over - see the
+  // themselves rather than assume t's own order carries over: see the
   // Range and percentile rows in fractal-stats-panel.js.
   function statsValueForT(t) {
     if (isBouncesOutput) return authoredOutputValue(t * bounceMaxValue);
@@ -8426,7 +8440,7 @@
   // See inputStateCrossesSeam: whatever body property X/Y Input is linked
   // to gets settled back into the frame before the simulation starts, and
   // that settle is a sawtooth in world coordinates. Its reset points are
-  // false edges - perfectly straight ones - which would otherwise put a
+  // false edges, perfectly straight ones, which would otherwise put a
   // spurious spike into the orientation rose at exactly 0 and 90 degrees.
   //
   // The superlative buttons handle this by computing the starting scene for
@@ -8437,12 +8451,12 @@
   // one row and one column therefore finds all of them, for W + H starting
   // scenes instead of W * H.
   // A seam is a line at a fixed world X or Y. It does not get finer when
-  // the samples do - so the scan runs at a FIXED number of probes per axis
+  // the samples do, so the scan runs at a FIXED number of probes per axis
   // however far the resolution slider is pushed, and its cost (which is the
   // expensive JS part of a measurement, a whole starting scene per probe)
   // stays flat. A seam is then located to within one probe spacing rather
   // than to one exact column, and that whole spacing's worth of columns is
-  // excluded - a handful out of thousands at the resolutions where the
+  // excluded: a handful out of thousands at the resolutions where the
   // spacing is bigger than one.
   var STATS_SEAM_PROBES = 512;
 
@@ -8509,6 +8523,20 @@
     return statsOpen && statsPanel !== null;
   }
 
+  // The t of the Output's STARTING value, what the scene reads before a
+  // single step, as authored, for Topography's Return Line. null for an
+  // Output that has no starting value (a lifespan, a bounce count). When
+  // an Input is linked to the very property the Output reads, the start
+  // differs from pixel to pixel and the authored one is only one of them;
+  // the row's own note says "as the scene is authored" for that reason.
+  function statsReturnT() {
+    var prop = scene.output.property;
+    if (prop === "lifespan" || isBouncesOutput) return null;
+    var v = PhysicsEngine.computeOutputValue(scene, scene.output);
+    if (typeof v !== "number" || !isFinite(v)) return null;
+    return outputColorT(v);
+  }
+
   // Whether the measurement currently in flight will produce the section
   // that is open right now.
   function statsRunCoversEnabled() {
@@ -8528,15 +8556,18 @@
   }
 
   // Called from markDirty, i.e. from every pan tick, every zoom, every
-  // resize and every settings change that invalidates the picture - so it
+  // resize and every settings change that invalidates the picture, so it
   // stays cheap and does nothing at all while the card is closed.
   function statsOnViewChanged() {
     if (!statsPanel) return;
-    // The overlay is drawn in the coordinates of the block that was
-    // measured, so the moment the view moves it is pointing at the wrong
-    // place - and a stale annotation on the map is worse than none. Off it
-    // goes, switch and all, before anything else here can return early.
-    statsPanel.featureOverlayOff();
+    // The hover drawings are in the coordinates of the block that was
+    // measured, so the moment the view moves they point at the wrong place
+    // - and a stale annotation on the map is worse than none. Off they go,
+    // before anything else here can return early. The pinned line goes too
+    // on a pan or zoom; a resize keeps it, since it is anchored to the world
+    // and the world hasn't moved.
+    if (statsResizing) statsPanel.hoverOverlaysOff();
+    else statsPanel.featureOverlayOff();
     statsGeneration++;
     statsResultIsCurrent = false;
     abandonStatsRun();
@@ -8550,12 +8581,12 @@
 
   // Starts a measurement once the view has held still for the settle
   // delay. Called from every view change, and from every change on the
-  // card itself that needs a fresh run - it does not wait for the ladder:
+  // card itself that needs a fresh run: it does not wait for the ladder:
   // the sampler re-renders the view into its own target, so the picture
   // being mid-refinement on screen makes no difference to what is measured.
   function scheduleStatsRun() {
     if (!statsWantsWork() || statsRun) return;
-    statsPanel.setStatus("Measuring the view on screen…", "loading");
+    statsPanel.setStatus("Measuring…", "loading");
     if (statsSettleTimer) clearTimeout(statsSettleTimer);
     statsSettleTimer = setTimeout(function () {
       statsSettleTimer = null;
@@ -8572,7 +8603,7 @@
     var block = statsSampleBlock();
     var w = block.width, h = block.height;
     // How tall one band is. Half the refinement ladder's own adaptive pixel
-    // budget - which is already a measurement of how many simulated pixels
+    // budget, which is already a measurement of how many simulated pixels
     // this machine fits in one refresh period, so half of it is comfortably
     // inside one idle slice. STATS_MAX_BAND_SAMPLES is a second, flat
     // ceiling on the readback buffer, so the memory this holds does not
@@ -8600,8 +8631,19 @@
       seam: null,
       job: null,
     };
-    statsPanel.setStatus("Measuring the view on screen…", "working");
+    statsPanel.setStatus("Measuring 0%", "working");
     scheduleStatsSlice();
+  }
+
+  // One percentage for the whole run, rather than three that each start
+  // again from zero: the three phases (GPU sampling, the input-seam scan,
+  // the analysis) are given fixed shares of it, which is only roughly how
+  // long each takes but keeps the number moving one way.
+  var STATS_PHASE_STARTS = [0, 0.4, 0.5, 1];
+  function statsProgressText(phase, fraction) {
+    var from = STATS_PHASE_STARTS[phase], to = STATS_PHASE_STARTS[phase + 1];
+    var f = Math.min(1, Math.max(0, fraction));
+    return "Measuring " + Math.round(100 * (from + (to - from) * f)) + "%";
   }
 
   function scheduleStatsSlice() {
@@ -8620,7 +8662,7 @@
     // the last markDirty was already accounted for.
     if (run.generation !== statsGeneration || dirty) { abandonStatsRun(); return; }
 
-    // A timed-out idle callback means the page is NOT idle - the browser
+    // A timed-out idle callback means the page is NOT idle: the browser
     // fired this only because the deadline elapsed. Do the smallest useful
     // amount and come back rather than taking a full slice out of whatever
     // is keeping it busy.
@@ -8635,7 +8677,7 @@
     if (run.phase === "sample") {
       // Each band is drawn, read back, and its red channel copied into the
       // block. Reading back per band rather than once at the end is what
-      // caps the memory a full-resolution measurement needs - and, since
+      // caps the memory a full-resolution measurement needs, and, since
       // readSampleBand blocks on the GPU, what makes hasTimeLeft() below a
       // real measurement of how much of this slice the GPU has eaten rather
       // than of how fast the draw calls were queued.
@@ -8644,11 +8686,11 @@
         // Nothing drawn on the very first band means the sampler went away
         // between beginStatsRun's check and here (a precision switch
         // dropping its program, say). Reading the target back now would
-        // analyze an untouched texture - all zeros - and present that as a
+        // analyze an untouched texture, all zeros, and present that as a
         // measurement.
         if (drawn === 0) {
           abandonStatsRun();
-          statsPanel.setStatus("Couldn't sample the view - nothing measured.", "stale");
+          statsPanel.setStatus("Couldn't sample the view, nothing measured.", "stale");
           return;
         }
         readSampleBand(run.target, drawn, run.bandBuffer);
@@ -8659,8 +8701,7 @@
         }
         run.row += drawn;
         if (run.row < run.height && !hasTimeLeft()) {
-          statsPanel.setStatus("Measuring the view on screen… sampling " +
-            Math.round(100 * run.row / run.height) + "%", "working");
+          statsPanel.setStatus(statsProgressText(0, run.row / run.height), "working");
           scheduleStatsSlice();
           return;
         }
@@ -8674,12 +8715,11 @@
 
     if (run.phase === "seams") {
       // Each starting scene is a full cloneScene plus the hinge-preserving
-      // edits, so this is the one genuinely CPU-heavy stretch - hence a
+      // edits, so this is the one genuinely CPU-heavy stretch, hence a
       // handful at a time against the real deadline.
       while (!run.seam.step(pressed ? 1 : 8) && hasTimeLeft()) { /* keep going while the slice lasts */ }
       if (run.seam.axis !== 2) {
-        statsPanel.setStatus("Measuring the view on screen… mapping input seams " +
-          Math.round(100 * run.seam.done / run.seam.total) + "%", "working");
+        statsPanel.setStatus(statsProgressText(1, run.seam.done / run.seam.total), "working");
         scheduleStatsSlice();
         return;
       }
@@ -8693,6 +8733,7 @@
         rowSeam: run.seam.needed ? run.seam.rows : null,
         histogramBuckets: STATS_HISTOGRAM_BUCKETS,
         orientationBins: STATS_ORIENTATION_BINS,
+        returnT: statsReturnT(),
       });
       run.phase = "analyze";
     }
@@ -8701,8 +8742,7 @@
       var more = true;
       do { more = run.job.step(); } while (more && hasTimeLeft());
       if (more) {
-        statsPanel.setStatus("Measuring the view on screen… analysing " +
-          Math.round(100 * run.job.doneSteps / run.job.totalSteps) + "%", "working");
+        statsPanel.setStatus(statsProgressText(2, run.job.doneSteps / run.job.totalSteps), "working");
         scheduleStatsSlice();
         return;
       }
@@ -8742,18 +8782,18 @@
     statsResultIsCurrent = true;
     statsPanel.markFresh();
     statsPanel.showResult(result, info, run.merge);
-    // Just the seam warning, if there is one - the sample size and Output
+    // Just the seam warning, if there is one: the sample size and Output
     // are already right there in the Sampling resolution slider and the
     // scene's own X/Y Input mapping, so restating them here was pure
     // repetition.
     statsLastStatus = info.seamsFound > 0
       ? info.seamsFound + " input-seam line" + (info.seamsFound === 1 ? "" : "s") +
-        " excluded (see the X/Y Input mapping - those are where a starting position wraps back into the frame, not real edges)."
+        " excluded (see the X/Y Input mapping: those are where a starting position wraps back into the frame, not real edges)."
       : "";
     statsPanel.setStatus(statsLastStatus);
   }
 
-  // How many seam LINES, not how many excluded columns - at a coarse probe
+  // How many seam LINES, not how many excluded columns: at a coarse probe
   // spacing one seam marks a whole span of them (see createSeamScan), and
   // the status line is telling the user how many real lines were found.
   function countSeams(mask) {
@@ -8764,19 +8804,28 @@
 
   // ---- The longest ridge / longest valley overlay ----
   //
-  // Hovering either of Topography's two "longest" rows draws that path
-  // straight onto the map, which is the only way to tell "the longest
-  // valley is 0.8 screens" from a number that happens to be 0.8. Its own
-  // canvas over the grid rather than anything in the WebGL pipeline: this
-  // is an annotation that comes and goes with the pointer, and rebuilding
-  // the render for it would tie a piece of UI to the thing the whole page
-  // is otherwise built to keep fast.
+  // Hovering one of Topography's "Longest" rows draws that path straight
+  // onto the map, which is the only way to tell "the longest valley is 80%
+  // screen length" from a number that happens to be 80; clicking the row
+  // pins it there. Its own canvas over the grid rather than anything in
+  // the WebGL pipeline: this is an annotation that comes and goes with the
+  // pointer, and rebuilding the render for it would tie a piece of UI to
+  // the thing the whole page is otherwise built to keep fast.
   //
   // Row 0 is the BOTTOM row of the sample block (see fractal-stats.js's own
-  // header), so the y mapping below flips - and the block is proportioned
+  // header), so the y mapping below flips, and the block is proportioned
   // to this same canvas area, which is what lets a sample index map to a
   // CSS pixel by simple ratio without going through world coordinates.
-  var featureOverlay = null;      // { width, height, path } or null - the hovered longest ridge or valley
+  var featureOverlay = null;      // { width, height, path } or null: the hovered "Longest" row's line
+  // The same, PINNED by a click on its row: kept until the row or the line
+  // itself is clicked, or the view pans or zooms. Drawn whenever nothing is
+  // being hovered. Held as WORLD coordinates (four doubles a point, the
+  // low halves included so a line pinned at a deep zoom stays put), so a
+  // resize, which changes what part of the world each sample of the
+  // measured block stood for, redraws it in the right place rather than
+  // dropping it.
+  var featurePinned = null;         // { world: Float64Array [x, y, xLo, yLo, ...] } or null
+  var featurePinnedCss = null;      // the same projected to CSS pixels at the last draw, for hit-testing
   // Every sample of one of Topography's four classes, lit up while its
   // slice of the pie or its legend line is hovered: { width, height, mask,
   // cls } or null. Same canvas, same coordinates, same reason it goes away
@@ -8806,17 +8855,35 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cw, ch);
     if (featureHighlight) drawFeatureHighlight(ctx, cw, ch);
-    if (!featureOverlay) return;
-    var W = featureOverlay.width, H = featureOverlay.height;
-    if (!(W > 0 && H > 0)) return;
+    // The hovered line is in the measured block's own coordinates, which
+    // are a fixed fraction of the canvas; the pinned one is projected from
+    // the world each time.
+    var css = null;
+    if (featureOverlay && featureOverlay.path && featureOverlay.path.length >= 4) {
+      var W = featureOverlay.width, H = featureOverlay.height, path = featureOverlay.path;
+      if (W > 0 && H > 0) {
+        css = new Float64Array(path.length);
+        for (var k = 0; k < path.length; k += 2) {
+          css[k] = (path[k] + 0.5) / W * cw;
+          css[k + 1] = (1 - (path[k + 1] + 0.5) / H) * ch;
+        }
+      }
+    } else if (featurePinned) {
+      var world = featurePinned.world;
+      css = new Float64Array(world.length / 2);
+      for (var m = 0, n = 0; m < world.length; m += 4, n += 2) {
+        var pt = worldToCanvasAreaPixel(world[m], world[m + 1], world[m + 2], world[m + 3]);
+        css[n] = pt.x; css[n + 1] = pt.y;
+      }
+      featurePinnedCss = css;
+    }
+    if (!css) return;
 
-    function stroke(path, color, casing) {
-      if (!path || path.length < 4) return;
+    function stroke(points, color, casing) {
+      if (!points || points.length < 4) return;
       ctx.beginPath();
-      for (var i = 0; i < path.length; i += 2) {
-        var x = (path[i] + 0.5) / W * cw;
-        var y = (1 - (path[i + 1] + 0.5) / H) * ch;
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      for (var i = 0; i < points.length; i += 2) {
+        if (i === 0) ctx.moveTo(points[i], points[i + 1]); else ctx.lineTo(points[i], points[i + 1]);
       }
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
@@ -8834,10 +8901,10 @@
       ctx.lineWidth = 6;
       ctx.stroke();
     }
-    // Only one is ever shown at a time (whichever row is hovered), so the
-    // two need no telling apart: black cased in white, the pair of colours
-    // no hue ramp contains.
-    stroke(featureOverlay.path, "#000000", "#ffffff");
+    // Only one is ever shown at a time (whichever row is hovered, else the
+    // pinned one), so they need no telling apart: black cased in white, the
+    // pair of colours no hue ramp contains.
+    stroke(css, "#000000", "#ffffff");
   }
 
   // White at half strength over every sample of the hovered class. The
@@ -8868,15 +8935,16 @@
     ctx.drawImage(featureHighlightImage.canvas, 0, 0, cw, ch);
   }
 
-  // Both layers share the one canvas, which exists only while either has
-  // something to show.
+  // All the layers share the one canvas, which exists only while one of
+  // them has something to show.
   function syncFeatureOverlayCanvas() {
-    if (!featureOverlay && !featureHighlight) {
+    if (!featureOverlay && !featurePinned && !featureHighlight) {
       if (featureOverlayCanvas) {
         featureOverlayCanvas.parentNode.removeChild(featureOverlayCanvas);
         featureOverlayCanvas = null;
       }
       featureHighlightImage = null;
+      featurePinnedCss = null;
       return;
     }
     ensureFeatureOverlayCanvas();
@@ -8893,13 +8961,53 @@
     syncFeatureOverlayCanvas();
   }
 
+  // Pins a path given in the measured block's coordinates ({ width,
+  // height, path }), converting it to world coordinates once, here: the
+  // block's own mapping is only right for the canvas it was measured on.
+  function setPinnedOverlay(data) {
+    featurePinned = null;
+    featurePinnedCss = null;
+    if (data && data.path && data.path.length >= 4 && data.width > 0 && data.height > 0) {
+      var grid = { width: data.width, height: data.height }, path = data.path;
+      var world = new Float64Array(path.length * 2);
+      for (var i = 0, j = 0; i < path.length; i += 2, j += 4) {
+        var w = sampleCoordToWorld(grid, path[i], path[i + 1]);
+        world[j] = w.x; world[j + 1] = w.y; world[j + 2] = w.xLo || 0; world[j + 3] = w.yLo || 0;
+      }
+      featurePinned = { world: world };
+    }
+    syncFeatureOverlayCanvas();
+  }
+
+  // Is a click at this screen point on the pinned line? Within half the
+  // cased line's width of any of its segments, in CSS pixels, against the
+  // points it was last drawn at.
+  var PINNED_HIT_PX = 10;
+  function featurePinnedHit(clientX, clientY) {
+    var pts = featurePinnedCss;
+    if (!featurePinned || !pts || pts.length < 4) return false;
+    var rect = canvasArea.getBoundingClientRect();
+    var x = clientX - rect.left, y = clientY - rect.top;
+    var limit = PINNED_HIT_PX * PINNED_HIT_PX;
+    var px = pts[0], py = pts[1];
+    for (var i = 2; i < pts.length; i += 2) {
+      var qx = pts[i], qy = pts[i + 1];
+      var dx = qx - px, dy = qy - py, len2 = dx * dx + dy * dy;
+      var u = len2 > 0 ? Math.max(0, Math.min(1, ((x - px) * dx + (y - py) * dy) / len2)) : 0;
+      var ex = px + u * dx - x, ey = py + u * dy - y;
+      if (ex * ex + ey * ey <= limit) return true;
+      px = qx; py = qy;
+    }
+    return false;
+  }
+
   if (statsPanelBodyEl && statsSampleSlider && global.FractalStatsPanel && global.FractalStats) {
     statsPanel = FractalStatsPanel.create({
       body: statsPanelBodyEl,
       host: {
         valueForT: statsValueForT,
         formatValue: statsFormatValue,
-        // The grid's own color for this value - hoverOutputColorFinal is
+        // The grid's own color for this value: hoverOutputColorFinal is
         // already an exact JS copy of the shader's colorMap, Color Zoom
         // included, so a swatch here is the color on screen and not an
         // approximation of it. Bounce Count's t can exceed 1 (the divisor
@@ -8912,11 +9020,12 @@
         },
         setFeatureOverlay: setFeatureOverlay,
         setFeatureHighlight: setFeatureHighlight,
+        setPinnedOverlay: setPinnedOverlay,
       },
       onSectionChange: function () {
         if (!statsWantsWork()) return;
         // Opening a section the last result already covers (the view
-        // hasn't moved since it was measured) needs no new run - the panel
+        // hasn't moved since it was measured) needs no new run: the panel
         // has just drawn it from what it holds.
         if (statsResultIsCurrent && !statsPanel.needsMeasurement()) {
           if (!statsRun) statsPanel.setStatus(statsLastStatus);
@@ -8950,7 +9059,7 @@
       updateStatsSampleReadout();
       // A different block size makes every number on the card a
       // measurement of something else, so this invalidates a finished run
-      // exactly as a pan does - and abandons one in flight, which is
+      // exactly as a pan does, and abandons one in flight, which is
       // measuring at the old resolution.
       statsResultIsCurrent = false;
       abandonStatsRun();
@@ -8959,7 +9068,7 @@
     });
 
     // A chart sizes itself to the card's width, which only exists once the
-    // card is laid out - and changes when a portrait window is resized.
+    // card is laid out, and changes when a portrait window is resized.
     var statsRelayoutTimer = null;
     window.addEventListener("resize", function () {
       if (!statsOpen) return;
@@ -8972,7 +9081,7 @@
   }
 
   // The Analysis card opening and closing, as far as MEASURING is
-  // concerned - wired to the menu's own state change below.
+  // concerned: wired to the menu's own state change below.
   function setStatsPanelOpen(open) {
     if (!statsPanel) return;
     statsOpen = open;
@@ -8987,7 +9096,7 @@
 
   // Drag #panel-resizer to resize the menu column's open cards. #canvas-area's own
   // ResizeObserver (below) picks up the resulting width change and re-renders
-  // the grid at the new size - no separate hook needed here.
+  // the grid at the new size: no separate hook needed here.
   var PANEL_MIN_WIDTH = 220;
   var PANEL_MAX_WIDTH_FRACTION = 0.75;
   (function setUpPanelResize() {
@@ -8998,7 +9107,7 @@
       var maxWidth = window.innerWidth * PANEL_MAX_WIDTH_FRACTION;
       var width = clamp(dragStartWidth + (e.clientX - dragStartX), PANEL_MIN_WIDTH, maxWidth);
       document.documentElement.style.setProperty("--panel-width", width + "px");
-      repositionActiveTip(); // a tip pointing at a sidebar element (e.g. Color Zoom) needs to follow it here - the anchor itself doesn't fire an event when the panel resizes around it
+      repositionActiveTip(); // a tip pointing at a sidebar element (e.g. Color Zoom) needs to follow it here: the anchor itself doesn't fire an event when the panel resizes around it
     }
     function onUp() {
       panelResizer.classList.remove("dragging");
@@ -9025,13 +9134,13 @@
   // ---- Playback: the grid's own timeline ----
   //
   // Plays the fractal forward in time. The grid always shows every pixel's
-  // simulation run to one step (timeline.step - see renderedSteps); Play
+  // simulation run to one step (timeline.step: see renderedSteps); Play
   // walks that step up toward the Simulation Duration while the picture
   // keeps up with it.
   //
   // Not by re-rendering each frame from step 0: frame N would cost N steps
   // per pixel, so a run's total cost would grow with the SQUARE of its
-  // length - measured on the samples, minutes of GPU time to play one
+  // length, measured on the samples, minutes of GPU time to play one
   // full-resolution view out to step 1000. Instead every pixel's simulation
   // lives in float textures between frames (see
   // PhysicsGridCodegen.playbackStateVariables for exactly what that is), and
@@ -9042,7 +9151,7 @@
   // What that costs, and what takes over where it can't reach:
   //  - Resolution. Two full copies of the state is a lot of video memory,
   //    and every step costs every pixel it covers, so playback runs on one
-  //    sub-lattice of the full-res grid (see playbackStride) - at most one
+  //    sub-lattice of the full-res grid (see playbackStride): at most one
   //    sample per CSS pixel. It is the ladder's own lattice, so pausing hands
   //    the image to the ladder as an already-finished level (see
   //    seedLadderFromPlayback) and refinement carries on from there to full
@@ -9073,27 +9182,27 @@
   // already holds several full-resolution targets of its own (the
   // accumulators, antialiasing's float average), all of it shares one GPU
   // process with every other tab, and running that process out of memory
-  // takes the browser down with it - it was 640MB at first, and Chrome
+  // takes the browser down with it, it was 640MB at first, and Chrome
   // crashed. A typical scene on a Retina laptop needs about half of this at
   // one sample per CSS pixel; bigger states just run coarser.
   //
   //
   // That is the High preset's 256MB. Low gets well under half of it (see
-  // PERF_PRESETS): a phone's GPU has no memory of its own - this comes out of
-  // the same few gigabytes as everything else on the device - and the penalty
+  // PERF_PRESETS): a phone's GPU has no memory of its own, this comes out of
+  // the same few gigabytes as everything else on the device, and the penalty
   // for overreaching is not a slow frame but the browser discarding the page
   // (see "Losing the WebGL context"). Playback only runs coarser for it,
   // which on that GPU it would be doing anyway.
   function playbackStateMaxBytes() { return perf.playbackMB * 1024 * 1024; }
   var BYTES_PER_STATE_TEXEL = 16; // RGBA32F, one layer
-  // The most wall-clock time the clock will owe steps for. A hitch - a
-  // shader compile, a GC pause, a backgrounded tab - should cost that much
+  // The most wall-clock time the clock will owe steps for. A hitch, a
+  // shader compile, a GC pause, a backgrounded tab, should cost that much
   // playback, not come back as a burst of catch-up steps afterward.
   var PLAYBACK_MAX_CARRY_SECONDS = 0.25;
   // Counted in pixel-steps. The ladder's budget can't be shared: a playback
   // draw's cost is its step count times its pixels, a ladder draw's is its
   // pixels at the whole run length. Starts modest (a handful of steps over a
-  // CSS-pixel lattice) and only grows on frames that used it - see
+  // CSS-pixel lattice) and only grows on frames that used it: see
   // makeWorkBudget's growMinUse.
   var playbackBudget = makeWorkBudget(8000000, 20000, 4000000000, 0.5);
   var MAX_STATE_ATTACHMENTS = Math.min(gl.getParameter(gl.MAX_DRAW_BUFFERS), gl.getParameter(gl.MAX_COLOR_ATTACHMENTS));
@@ -9110,7 +9219,7 @@
     width: 0,
     height: 0,
     layers: 0,
-    // The view the textures were allocated for - see
+    // The view the textures were allocated for: see
     // releasePlaybackIfViewMoved.
     viewKey: null,
   };
@@ -9134,7 +9243,7 @@
       "precision highp float;",
       "precision highp sampler2DArray;",
       // The grid program's own pixel -> world point uniforms, with the same
-      // meanings - see its header.
+      // meanings: see its header.
       "uniform vec2 u_resolution;",
       "uniform float u_gridStride;",
       "uniform vec2 u_gridOrigin;",
@@ -9147,7 +9256,7 @@
       "uniform int u_steps;",
       "uniform int u_group;",
       // Which tile of the lattice the state texture holds, and how many
-      // stencil points each lattice pixel owns - see stateWorldCoordLines.
+      // stencil points each lattice pixel owns: see stateWorldCoordLines.
       // Playback proper always runs with (0, 0) and 1.
       "uniform vec2 u_tileOrigin;",
       "uniform int u_stencil;",
@@ -9162,7 +9271,7 @@
       loop.declarations,
       ["  if (!u_init) {"],
       indentLines(PhysicsGridCodegen.generatePlaybackStateLoadGLSL(vars, "u_state", "ivec2(gl_FragCoord.xy)"), "    "),
-      // What the state deliberately leaves out - see loopStateVariables.
+      // What the state deliberately leaves out: see loopStateVariables.
       indentLines(pieces.loopStateRestoreLines, "    "),
       // The saved lifespan of a pixel still running is the step count as of
       // the save; it has lived through the steps this draw adds, too.
@@ -9185,12 +9294,12 @@
       "precision highp sampler2DArray;",
       "uniform sampler2DArray u_state;",
       "uniform ivec2 u_stateSize;",
-      // How many steps the state holds - the lifespan of a pixel still running.
+      // How many steps the state holds: the lifespan of a pixel still running.
       "uniform int u_stateSteps;",
-      // Full-res pixels between two neighbouring texels - see
+      // Full-res pixels between two neighbouring texels: see
       // shadePlaybackDerived.
       "uniform float u_gridStride;",
-      // The grid program's own coloring uniforms - see its header.
+      // The grid program's own coloring uniforms: see its header.
       "uniform bool u_colorZoom;",
       "uniform int u_durationSteps;",
       "uniform float u_bounceMax;",
@@ -9200,7 +9309,7 @@
       // Playback proper always runs with (0, 0) and 1.
       "uniform ivec2 u_targetOrigin;",
       "uniform int u_stencil;",
-      // Write the raw t instead of a colour - the grid program's own
+      // Write the raw t instead of a colour: the grid program's own
       // u_sampleField, for the same readers.
       "uniform bool u_sampleField;",
       "out vec4 fragColor;",
@@ -9223,7 +9332,7 @@
         "const ivec2 PLAYBACK_STENCIL[4] = ivec2[4](ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1));",
         "",
         // The derived modes, from neighbouring TEXELS' saved values rather
-        // than from re-simulating a stencil around each one - the texels are
+        // than from re-simulating a stencil around each one: the texels are
         // already simulated, and five simulations a pixel is exactly the cost
         // playback exists to avoid. The grid's own program can't do this (its
         // accumulators hold hue-ramped color, see shadeDerived), but these
@@ -9247,8 +9356,8 @@
         // The same three pictures from a pixel's OWN five-point stencil,
         // when the state carries one (u_stencil == 5): texel + 1..4 are the
         // neighbours one full-res pixel away, in STENCIL's order, so this is
-        // shadeDerived()'s arithmetic exactly - differences per full-res
-        // pixel, whatever the lattice's stride - rather than playback's
+        // shadeDerived()'s arithmetic exactly, differences per full-res
+        // pixel, whatever the lattice's stride, rather than playback's
         // approximation from whichever texels happen to be adjacent.
         "vec3 shadeStencilDerived(ivec2 texel, " + outScalar + " outputValue, float t) {",
         "  float d[4];",
@@ -9286,7 +9395,7 @@
     return { program: prog, posLoc: gl.getAttribLocation(prog, "a_position"), uniforms: uniforms };
   }
 
-  // Both of playback's programs for one precision, as a build in flight - the
+  // Both of playback's programs for one precision, as a build in flight: the
   // same state machine the grid's own programs use (see startProgramBuild),
   // and for the same reason: the step pass is a whole copy of the scene's
   // physics, and in df compiling it on the spot froze the page for seconds
@@ -9315,7 +9424,7 @@
     if (entry.groups > 1 && lastGroup !== MAX_STATE_ATTACHMENTS) stepFormats.push({ format: gl.RGBA32F, count: lastGroup });
     // The color pass paints the picture (RGBA8), measures it (RGBA32F, see
     // drawSampleBandSliced) and averages antialiasing samples (RGBA16F,
-    // blended) - three pipelines, all built now.
+    // blended): three pipelines, all built now.
     var colorFormats = [gl.RGBA8, gl.RGBA32F];
     if (antialiasSupported()) colorFormats.push({ format: gl.RGBA16F, blend: true });
     var a = pumpProgramBuild(entry.stepBuild, stepFormats, wait);
@@ -9338,7 +9447,7 @@
     }
   }
 
-  // The programs, or null while there are none to use - either because this
+  // The programs, or null while there are none to use, either because this
   // precision's can't be built here (status "failed", with a status line,
   // since unlike the df pass there is nothing else to show in its place) or
   // because they are still building (status "building": ask again next
@@ -9370,7 +9479,7 @@
   // float32 prices that is nothing. At df prices a single step of a hinged
   // scene is ~60 microseconds of strictly sequential work per pixel, so a
   // 1000-step draw cannot finish in under ~60ms however few pixels it
-  // covers - banding by rows, which is all the ladder could do about a slow
+  // covers, banding by rows, which is all the ladder could do about a slow
   // draw, does not touch that floor. Draws that long get worse than slow.
   // Fragment work cannot be preempted in the middle of a tile, and the
   // compositor wants the GPU back every frame, so on an Apple-silicon Mac
@@ -9378,12 +9487,12 @@
   // reported by Metal as a GPU hang and its command buffer discarded.
   // (Measured with a bare Metal program as well as through the browser: a
   // 4x4 target survives a 33ms fragment loop and not a 58ms one, while a
-  // 1024x1024 pass of short fragments runs 326ms untroubled - it is the
+  // 1024x1024 pass of short fragments runs 326ms untroubled, it is the
   // longest single run that counts, not the draw's total. A compute kernel
   // ran 13s. With the display asleep the same fragment draws are allowed
   // seconds, which is why this first looked like "gives out somewhere past
-  // 350 steps".) WebGL is told nothing - no error, no lost context, just
-  // pixels that were never written - and after a few of them the OS ignores
+  // 350 steps".) WebGL is told nothing, no error, no lost context, just
+  // pixels that were never written, and after a few of them the OS ignores
   // everything the GPU process submits until the page is reloaded.
   //
   // Playback already has the cure, for a different reason: a STEP pass that
@@ -9392,15 +9501,15 @@
   // drawn with those same two programs (playbackProgramsFor), a tile at a
   // time: run the tile's steps a slice per draw, then paint it into the
   // level exactly where the grid program would have drawn it. Every
-  // consumer of the grid program has a sliced twin here - the ladder,
-  // antialiasing, and the samplers - so nothing above float32 ever issues a
+  // consumer of the grid program has a sliced twin here, the ladder,
+  // antialiasing, and the samplers, so nothing above float32 ever issues a
   // whole-simulation draw. (The hover replay is the one exception, and the
   // one remaining place a long run can still overstay.)
   //
   // The derived display modes ride along: a tile is simulated with five
   // state texels per pixel, the grid program's own five-point stencil laid
   // side by side (see stateWorldCoordLines / shadeStencilDerived), so the
-  // picture is the same one shadeDerived() paints - not playback's
+  // picture is the same one shadeDerived() paints, not playback's
   // neighbouring-texel approximation of it.
   //
   // Float32 keeps the single-draw grid program, where one draw per band is
@@ -9416,7 +9525,7 @@
   // the scene's state layers, times 16 bytes: ~30MB for a typical scene.
   var SLICE_MAX_TEXELS = 131072;
   // Steps per draw (sliceSteps, per precision) are MEASURED, once per scene
-  // and precision - see calibrateSliceSteps. What one draw's longest run is
+  // and precision: see calibrateSliceSteps. What one draw's longest run is
   // steered towards is several times under the limit above, because the
   // measurement is of a handful of pixels at the start of their runs and a
   // tile shades as slowly as its slowest pixel at its dearest step.
@@ -9426,7 +9535,7 @@
   // Apple's. Other GPUs' watchdogs are measured in seconds, and there a
   // longer draw is simply a cheaper way to do the same work: every slice pays
   // to load and store the whole tile's state, in float textures, through a
-  // phone's memory bus - and a whole run that fits in ONE draw pays none of
+  // phone's memory bus, and a whole run that fits in ONE draw pays none of
   // it (see sliceLimits().f32SingleDrawMs, which moves with this). So the
   // setting is honoured everywhere except on an Apple GPU, where it is held
   // at 5 whatever it says.
@@ -9451,7 +9560,7 @@
   var SLICE_STEPS_BASE_MAX = 256;
   function sliceStepsMax() { return Math.round(SLICE_STEPS_BASE_MAX * sliceTargetMs() / SLICE_TARGET_BASE_MS); }
   // A precision whose SINGLE step measures longer than this cannot be drawn
-  // at all - there is no smaller slice than one step - so the ladder treats
+  // at all, there is no smaller slice than one step, so the ladder treats
   // it as unavailable for the scene rather than hang the GPU finding out.
   // (Three draws' worth, like everything here in proportion to sliceTargetMs.)
   function sliceSingleStepLimitMs() { return 3 * sliceTargetMs(); }
@@ -9459,7 +9568,7 @@
   // stand clear of the ~1ms a timed round trip costs by itself.
   var SLICE_CALIBRATION_STOP_MS = 3;
   // A slice takes at least as long as its steps take ONE pixel, however few
-  // pixels it has - that is what the numbers above are about - so a draw of
+  // pixels it has, that is what the numbers above are about, so a draw of
   // a few thousand pixels costs the GPU what a draw of tens of thousands
   // does, and leaves most of it idle while it runs. Measured with GPU timer
   // queries: a 64x64 tile of the df double pendulum took 0.9ms a step and a
@@ -9468,14 +9577,14 @@
   // at the ~100x100 tiles the budget alone used to ask for. So:
   //
   // Tiles are at least this big wherever the level has that much left to
-  // draw, with the STEPS per slice brought down (never up - the calibrated
+  // draw, with the STEPS per slice brought down (never up: the calibrated
   // count is a ceiling, see drawSlicedTile) to keep a slice of it inside
   // the frame's budget...
   var SLICE_SATURATE_TEXELS = 32768;
   // ...the ladder does not start coarser than a level with this many
   // samples. Every level is at least one pass of slices, and a pass of the
   // whole run costs the same few hundred ms whether it covers one sample or
-  // ten thousand - so the 1x1, 2x1, 3x2... levels each held the first real
+  // ten thousand, so the 1x1, 2x1, 3x2... levels each held the first real
   // picture back by that much (eight levels of three passes each, for the
   // double pendulum: 12s before anything finer than 32px blocks)...
   var SLICE_FIRST_LEVEL_SAMPLES = 4096;
@@ -9484,7 +9593,7 @@
   // counts pixels, by which a slice of a tiny tile is free; the GPU counts
   // time, by which it is not. Frames of a coarse level used to issue
   // thousands of them (3,586 in one, measured: a 5.4s stall).
-  // ("The display period" being the frame's target length - see frameBaseMs -
+  // ("The display period" being the frame's target length, see frameBaseMs,
   // so a longer frame has room for proportionally more of them.)
   var SLICE_FRAME_SHARE = 0.75;
   var sliceFrameMs = 0;
@@ -9496,8 +9605,8 @@
   // ---- Float32, when its whole run is too long for one draw ----
   //
   // The limit at the top of this section is not about precision. A scene
-  // with many body slots is dear at float32 too - a splitter's 20 cost
-  // ~0.4ms a step - and the grid program runs a pixel's WHOLE simulation in
+  // with many body slots is dear at float32 too, a splitter's 20 cost
+  // ~0.4ms a step, and the grid program runs a pixel's WHOLE simulation in
   // one draw, so a few hundred steps of such a scene is a fragment that runs
   // for 100ms and more: the GPU is reset under it, the canvas goes blank,
   // and after a few of those the OS ignores the page's GPU work until it is
@@ -9506,7 +9615,7 @@
   //
   // So float32 is timed too, once per scene and display mode: the grid
   // program itself, on a handful of pixels, for 1, 2, 4... steps until a
-  // run is long enough to measure - each at most double one already seen to
+  // run is long enough to measure: each at most double one already seen to
   // be short, as in calibrateSliceSteps, and for the same reason. If the
   // full Simulation Duration at that rate fits comfortably in one draw,
   // nothing changes: float32 keeps its single-draw program, which for an
@@ -9514,7 +9623,7 @@
   // float32 is drawn by the sliced renderer like everything above it.
   //
   // "Comfortably" is 2.4 draws' worth: 12ms at the base draw length, and more
-  // where Longest single GPU draw allows more - which on a slow GPU is what
+  // where Longest single GPU draw allows more, which on a slow GPU is what
   // decides whether an ordinary scene gets the single-draw fast path at all.
   function f32SingleDrawLimitMs() { return 2.4 * sliceTargetMs(); }
   var f32StepMs = {};   // by variant; emptied with the scene (releaseAllSliceStates)
@@ -9541,7 +9650,7 @@
       var next = Math.min(k * 2, simulationSteps);
       before = took;
       took = timed(next);
-      // The slope between the last two, as in calibrateSliceSteps - and never
+      // The slope between the last two, as in calibrateSliceSteps, and never
       // less than an eighth of the plain ratio, against a noisy pair.
       perStep = Math.max((took - before) / (next - k), took / next / 8);
       k = next;
@@ -9551,8 +9660,8 @@
     return perStep;
   }
   function f32NeedsSlicing() {
-    // (Reachable while the page is still starting up - the first budget is
-    // made before the targets exist - when there is nothing to time with.)
+    // (Reachable while the page is still starting up, the first budget is
+    // made before the targets exist, when there is nothing to time with.)
     if (!hasFloatColorBuffer || !accum || !accum[0]) return false;
     var variant = wantedVariant();
     if (f32StepMs[variant] === undefined) {
@@ -9637,8 +9746,8 @@
   //
   // `maxDraws` (default: no limit) lets a slice be spread over several calls.
   // A state too big for one draw's attachments is written a group per draw,
-  // each re-running the slice's steps - seven draws for a 20-slot splitter
-  // scene - and the groups land in different layers of the same target, so
+  // each re-running the slice's steps, seven draws for a 20-slot splitter
+  // scene, and the groups land in different layers of the same target, so
   // nothing stops them being issued a few per frame. A slice left part-way
   // returns 0 and picks up at its next group when called again; the state
   // only changes hands once the last group is in.
@@ -9740,7 +9849,7 @@
   // measure. Every timed slice is at most double one that was already seen
   // to be short, so the measurement cannot itself be the draw that hangs.
   // The time includes the readback's round trip, which makes a step look
-  // dearer than it is - the safe direction.
+  // dearer than it is: the safe direction.
   //
   // This blocks the page while it runs: a few round trips of a few ms, once
   // per scene and precision. Cheap next to the seconds the programs took to
@@ -9765,18 +9874,18 @@
     // Each timing is the better of two. One bad reading used to decide the
     // whole scene: measured over three loads of the df double pendulum, the
     // slices after the first took 2.1, 4.7 and 2.3ms for a single step whose
-    // true cost is 0.1ms - the driver still settling in - and the 4.7 was
+    // true cost is 0.1ms, the driver still settling in, and the 4.7 was
     // read as "one step is all a draw can afford", which left that session
     // drawing one step per slice and rendering at a fraction of the speed.
     //
     // And it is per DRAW: a state too big for one draw's attachments is
     // written in groups, one draw each (see advanceSliceJob), and it is a
-    // single draw's length the limit is about - a 20-slot splitter scene
+    // single draw's length the limit is about, a 20-slot splitter scene
     // takes seven, and timing the seven together allowed it one step a
     // slice where four are safe.
     function timed(k) { return Math.min(timedSlice(k), timedSlice(k)) / programs.groups; }
     // Untimed: builds each pixel's starting state, and absorbs whatever the
-    // driver still had left to do for this program - which takes more than
+    // driver still had left to do for this program, which takes more than
     // one draw.
     timedSlice(1);
     timedSlice(1);
@@ -9794,7 +9903,7 @@
       }
       // A slice costs a fixed amount (the round trip that timed it, the
       // state's load and store) plus so much a step, and only the second
-      // part grows with its length - so the step's cost is the SLOPE between
+      // part grows with its length, so the step's cost is the SLOPE between
       // the last two timings, not the last one divided by its steps, which
       // charged the fixed part to the steps and came out several times too
       // cautious for a scene whose steps are cheap.
@@ -9810,13 +9919,13 @@
 
   // The step + color programs to draw the GRID with, or null when the grid
   // program itself should (float32, or no float render targets to carry
-  // state in, or the programs are still building - see effectivePrecision).
+  // state in, or the programs are still building: see effectivePrecision).
   function slicedProgramsForGrid() {
     var precision = effectivePrecision();
     if (!hasFloatColorBuffer) return null;
     if (precision === "f32") {
       if (!f32NeedsSlicing()) return null;
-      // Built in the background like the precisions above - playback's own
+      // Built in the background like the precisions above: playback's own
       // request for them (playbackProgramsFor) still waits, as it always has.
       if (!playbackGpu.programs.f32) {
         try {
@@ -9838,8 +9947,8 @@
   }
 
   // The ladder's (and antialiasing's) unit of work under sliced rendering:
-  // one more slice of the tile in flight - starting the next tile of
-  // `lattice` first if there is none - and, when that finishes the tile's
+  // one more slice of the tile in flight, starting the next tile of
+  // `lattice` first if there is none, and, when that finishes the tile's
   // run, the color pass that lands it in lattice.target. Returns what the
   // slice cost in the budget's own unit, whole simulated pixels, so a slice
   // of k steps out of n costs k/n of the tile; and never 0, which the
@@ -9857,7 +9966,7 @@
     var job = progressive.tile;
     // A slice is sized to be about a whole frame's budget (see perDraw
     // below), so unlike a band it cannot be trimmed to whatever the frame
-    // has left - and a frame that had spent 99% of its budget on one used to
+    // has left, and a frame that had spent 99% of its budget on one used to
     // see 1% remaining and issue a second, for twice the budget every frame.
     // After the frame's first, the next slice goes ahead only if most of it
     // fits in what is left.
@@ -9868,7 +9977,7 @@
     }
     if (!job) {
       // Which rectangle of the level's region this tile is cut from (the
-      // whole level, unless a pan is reusing pixels - see levelSimRegion).
+      // whole level, unless a pan is reusing pixels: see levelSimRegion).
       // The caller has checked there is one.
       var at = locateBand(lattice.region, progressive.band), rect = at.rect;
       var stencil = displayMode.id !== 0 ? 5 : 1;
@@ -9876,7 +9985,7 @@
       var maxPixels = Math.max(1, Math.floor(SLICE_MAX_TEXELS / stencil));
       var maxCols = Math.max(1, Math.floor(MAX_TEXTURE_SIZE / stencil));
       // See SLICE_SATURATE_TEXELS: what the budget affords at full-length
-      // slices, or enough to keep the GPU busy, whichever is more - but
+      // slices, or enough to keep the GPU busy, whichever is more, but
       // never so many that even a ONE-step slice of them overruns the
       // frame's budget, which for a scene heavy enough is fewer than that.
       var saturate = Math.min(Math.floor(SLICE_SATURATE_TEXELS / stencil), Math.floor(ladderBudget.budget * Math.max(total, 1)));
@@ -9903,7 +10012,7 @@
     // The calibrated count takes about sliceTargetMs() a draw; fewer steps,
     // less. A state written in several groups is that many draws a slice,
     // of which a frame issues only as many as its time cap has room for
-    // (always one) - see advanceSliceJob.
+    // (always one): see advanceSliceJob.
     var sliceK = Math.min(job.perDraw || perDraw, perDraw);
     var drawMs = sliceTargetMs() * Math.max(job.nextGroup > 0 ? job.sliceSteps : sliceK, 1) / perDraw;
     var room = Math.max(1, Math.floor((sliceFrameCapMs() - sliceFrameMs) / drawMs));
@@ -9928,8 +10037,8 @@
   }
 
   // drawSampleBand's twin: the same block of samples into the same target,
-  // simulated in slices. Every draw is only QUEUED here - nothing waits on
-  // the GPU until the caller reads the target back - so however many slices
+  // simulated in slices. Every draw is only QUEUED here, nothing waits on
+  // the GPU until the caller reads the target back, so however many slices
   // it takes, this costs the page no more than the single draw did.
   function drawSampleBandSliced(programs, target, blockWidth, blockHeight, rowStart, rowCount, rawBounces) {
     var total = rawBounces ? simulationSteps : renderedSteps();
@@ -9948,15 +10057,15 @@
 
   // The calibration times a run's first steps, and a step can get dearer
   // later on (a split wakes more bodies). That shows up as a frame that
-  // overruns badly even though the budget is already at its floor - there
+  // overruns badly even though the budget is already at its floor: there
   // are no pixels left to take away, so what is too long is the draw
   // itself. Halve it. It is never raised again: a scene that needed the
   // smaller slice still does.
   //
   // But only down to a quarter of what was measured. An overrun at the floor
-  // is not proof the slice was too long - a frame also runs long for a
+  // is not proof the slice was too long, a frame also runs long for a
   // garbage collection, a program still building, or a tab that was in the
-  // background - and the rungs above df START at the floor, so there every
+  // background, and the rungs above df START at the floor, so there every
   // such hiccup used to count. Unbounded, a few of them ratcheted triple-
   // float down to one step per draw for good (seen: a 10s picture took 50s).
   // A quarter still leaves a real mis-measurement a further 4x of relief, on
@@ -9992,7 +10101,7 @@
     playbackGpu.programs = {};
   }
 
-  // Frees the state - by far the biggest thing playback holds - and forgets
+  // Frees the state, by far the biggest thing playback holds, and forgets
   // everything that described it. Called the moment the state stops being
   // useful: the view moves (see releasePlaybackIfViewMoved), the page is
   // left, or the scene changes. A later Play rebuilds it from step 0, which
@@ -10010,7 +10119,7 @@
     timeline.presentedKey = null;
   }
 
-  // Everything, including the compiled programs - for leaving the page.
+  // Everything, including the compiled programs: for leaving the page.
   function releaseAllPlayback() {
     stopTimelineClock();
     timeline.following = false;
@@ -10019,7 +10128,7 @@
   }
 
   // The world view and canvas the state was built for, without the lattice
-  // or precision - those are only known once programs exist, and this is
+  // or precision: those are only known once programs exist, and this is
   // checked every frame, playing or not.
   function playbackViewKey() {
     return [viewCenterKey(), view.scale, canvas.width, canvas.height].join(" ");
@@ -10044,7 +10153,7 @@
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
       gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA32F, w, h, layers);
       // A float texture isn't filterable, and one whose filter asks for
-      // filtering is incomplete - every texelFetch of it reads zero.
+      // filtering is incomplete: every texelFetch of it reads zero.
       gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
       playbackGpu.textures[i] = tex;
@@ -10087,15 +10196,15 @@
   // the exact view, canvas, lattice and precision.
   //
   // Deliberately allocates no state. That happens in stepPlayback, and only
-  // once the view has held still: allocating here - every frame, before
-  // knowing whether the view was still moving - reallocated both state
+  // once the view has held still: allocating here, every frame, before
+  // knowing whether the view was still moving, reallocated both state
   // textures on every frame of a window resize, hundreds of megabytes a
   // frame, which is enough to crash the browser's GPU process.
   function playbackPlan() {
     if (!hasFloatColorBuffer || !ensureTargets()) return null;
     var precision = effectivePrecision();
     var programs = playbackProgramsFor(precision);
-    // Still building: not "can't", just "not yet" - the caller lets the
+    // Still building: not "can't", just "not yet", the caller lets the
     // ladder keep the frame and asks again on the next one.
     if (!programs) return playbackProgramsPending(precision) ? { pending: true } : null;
     var stride = playbackStride(programs.layers);
@@ -10110,14 +10219,14 @@
   }
 
   // Everything the color pass's picture depends on besides the state
-  // itself - if any of it changes, the same state has to be painted again.
+  // itself, if any of it changes, the same state has to be painted again.
   function playbackLookKey(res) {
     return [res.key, timeline.stateStep, displayMode.id, colorZoomEnabled, simulationSteps, bounceMaxValue].join(" ");
   }
 
   // Rows [band, band + rows) of one step pass, into the texture that isn't
   // current. A state with more layers than one draw can write is written
-  // one group per draw - the same steps, a different slice kept each time.
+  // one group per draw: the same steps, a different slice kept each time.
   function drawPlaybackBand(res, pass, rows) {
     var prog = res.programs.step, u = prog.uniforms;
     var layers = res.programs.layers;
@@ -10127,7 +10236,7 @@
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, playbackGpu.textures[playbackGpu.current]);
     gl.uniform1i(u.state, 0);
-    // The full-res canvas, and this lattice's place in it - so every texel
+    // The full-res canvas, and this lattice's place in it, so every texel
     // lands on the world point the ladder's own pixel there would.
     gl.uniform2f(u.resolution, canvas.width, canvas.height);
     gl.uniform1f(u.gridStride, res.stride);
@@ -10137,7 +10246,7 @@
     gl.uniform1i(u.init, pass.init ? 1 : 0);
     gl.uniform1i(u.baseStep, pass.from);
     gl.uniform1i(u.steps, pass.steps);
-    // The whole lattice, one point per pixel - see "Sliced rendering" for
+    // The whole lattice, one point per pixel: see "Sliced rendering" for
     // the caller that uses these two for something else.
     gl.uniform2f(u.tileOrigin, 0, 0);
     gl.uniform1i(u.stencil, 1);
@@ -10221,7 +10330,7 @@
     }
     var building = timeline.pass && timeline.pass.key === res.key;
     if (res.key !== timeline.stateKey && !building) {
-      // Nothing valid for this view - it moved, or there never was any.
+      // Nothing valid for this view: it moved, or there never was any.
       timeline.pass = null;
       timeline.carry = 0;
       if (now - timeline.seenAt < PLAYBACK_SETTLE_MS) {
@@ -10232,7 +10341,7 @@
       }
     }
     // The view has held still, so this is the first moment the state is
-    // worth its memory - see playbackPlan.
+    // worth its memory: see playbackPlan.
     if (!ensurePlaybackTextures(res.w, res.h, res.programs.layers)) {
       setStatus(false, "Playback unavailable: not enough video memory for its state");
       stopTimelineClock();
@@ -10258,7 +10367,7 @@
     }
 
     var spent = 0, advanced = false;
-    // Always at least one band, however tight the budget - the same
+    // Always at least one band, however tight the budget: the same
     // forward-progress rule as the ladder's.
     while (spent < budget || spent === 0) {
       if (!timeline.pass) {
@@ -10303,7 +10412,7 @@
 
     if (following) {
       // Best effort, never a hold-up: whatever step the state has reached
-      // is shown, even short of Inspect's - a GPU slower than the preview's
+      // is shown, even short of Inspect's, a GPU slower than the preview's
       // clock just trails it a little rather than freezing the map until it
       // catches up. Only a rebuild for a new view shows nothing new.
       catchingUp = timeline.stateKey !== res.key;
@@ -10313,7 +10422,7 @@
       timeline.drawing = true;
       if (!catchingUp && (advanced || timeline.presentedKey !== playbackLookKey(res))) presentPlayback(res);
       updateRenderProgressRing();
-      // Inspect has stopped and the map has reached its step - sharpen it.
+      // Inspect has stopped and the map has reached its step: sharpen it.
       if (!catchingUp && !timeline.followPlaying && timeline.stateStep >= timeline.followTarget) pauseTimeline();
       else updateTimelineUI();
       return true;
@@ -10326,7 +10435,7 @@
     timeline.drawing = true;
     if (!catchingUp && (advanced || timeline.presentedKey !== playbackLookKey(res))) presentPlayback(res);
     updateRenderProgressRing();
-    // Reached the end - the picture stops changing, so let the ladder
+    // Reached the end: the picture stops changing, so let the ladder
     // finish it off at full quality.
     if (!catchingUp && timeline.step >= simulationSteps) pauseTimeline();
     else updateTimelineUI();
@@ -10356,7 +10465,7 @@
     progressive.band = 0;
     progressive.complete = false;
     progressive.aaSample = 0;
-    // What beginProgressive would have done for a run of its own - the
+    // What beginProgressive would have done for a run of its own: the
     // bounce-count divisor excepted, which playback already measured for
     // this same view.
     updateInspectMarkers();
@@ -10377,7 +10486,7 @@
     timeline.playing = false;
     timeline.drawing = false;
     timeline.catchingUp = false;
-    // The texture a pass in flight was writing is simply abandoned - the
+    // The texture a pass in flight was writing is simply abandoned: the
     // current one is still complete.
     timeline.pass = null;
     timeline.carry = 0;
@@ -10407,7 +10516,7 @@
     timeline.playing = true;
     timeline.carry = 0;
     timeline.lastTickAt = 0;
-    // Nothing is moving - no reason to wait for the view to settle.
+    // Nothing is moving: no reason to wait for the view to settle.
     timeline.seenKey = null;
     timeline.seenAt = 0;
     // The picture is about to change every frame: nothing measured of it
@@ -10424,7 +10533,7 @@
     updateTimelineUI();
   }
 
-  // Shows `step` - from a scrub of the timeline, or the restart button.
+  // Shows `step`: from a scrub of the timeline, or the restart button.
   // Pauses first: a user dragging the timeline is choosing the step
   // themselves.
   function seekTimeline(step) {
@@ -10448,28 +10557,28 @@
   // new hover, and the map follows it.
   //
   // The two cards' transports are then two views of that one clock rather
-  // than two clocks - Map Evolution's play/pause, scrubber and reset drive
+  // than two clocks: Map Evolution's play/pause, scrubber and reset drive
   // the PREVIEW (see previewOwnsTimeline and the listeners below), exactly
   // as its own controls do, so whichever the user reaches for they stay in
-  // the same state. With no preview session to share - Inspect shut, or
-  // nothing hovered or locked - those same controls drive the map's own
+  // the same state. With no preview session to share, Inspect shut, or
+  // nothing hovered or locked, those same controls drive the map's own
   // timeline instead, which is Map Evolution working on its own.
   //
   // But NOT until asked. Merely hovering the grid builds a preview session
   // and parks it on its first frame, and following that would drag the
   // whole map off the finished field and back to frame 1 just because the
-  // cursor crossed the picture - so the map ignores the preview entirely
+  // cursor crossed the picture, so the map ignores the preview entirely
   // until the user reaches for a transport control (either card's: they are
   // the same clock). That gesture is the only thing that sets this, and
-  // going back to the finished field - the card opening or closing, Inspect
-  // closing, the preview session ending - is the only thing that clears it,
+  // going back to the finished field, the card opening or closing, Inspect
+  // closing, the preview session ending, is the only thing that clears it,
   // so the map is always either resting at the end or somewhere the user
   // themselves put it.
   var mapLinked = false;
   function linkMapToPreview() { mapLinked = true; }
 
-  // Something new to preview - a different cell under the cursor, a point
-  // locked or removed - is not a request to move the map either. It comes
+  // Something new to preview, a different cell under the cursor, a point
+  // locked or removed, is not a request to move the map either. It comes
   // unlinked and stays exactly where the user last put it, rather than
   // being dragged back to the new replay's own first frame. (A preview that
   // goes away entirely is different: see releaseMapFollow, which returns
@@ -10486,7 +10595,7 @@
     return hasFloatColorBuffer && playbackMenu.isOpen() && inspectMenu.isOpen() && playbackHasSession
       // Already mid-run on its own clock (started here, with nothing
       // hovered at the time): this row goes on controlling THAT rather than
-      // silently switching to a preview the user hasn't linked - otherwise
+      // silently switching to a preview the user hasn't linked, otherwise
       // Pause would leave the map running.
       && (mapLinked || !timeline.playing);
   }
@@ -10510,7 +10619,7 @@
     timeline.followTarget = step;
     timeline.followPlaying = playing;
     if (playing || (!backward && timeline.playing)) {
-      // Advancing - or paused just ahead of where the map has got to, which
+      // Advancing, or paused just ahead of where the map has got to, which
       // it can still reach from its state and then sharpen (stepPlayback).
       // Behind the state is a rebuild from step 0, and a write already in
       // flight belongs to the old run.
@@ -10520,7 +10629,7 @@
       }
       timeline.playing = true;
     } else {
-      // Paused somewhere the state can't reach - most often a scrub of the
+      // Paused somewhere the state can't reach: most often a scrub of the
       // preview's slider, one tick at a time. The ladder renders each step
       // directly, the same as scrubbing the map's own timeline.
       stopTimelineClock();
@@ -10532,21 +10641,21 @@
   }
 
   // The preview's step, in the map's terms. playbackStep is 0-indexed over
-  // logged rows, and row 0 is the state after one step - the preview's own
+  // logged rows, and row 0 is the state after one step: the preview's own
   // readout says "step 1" there, and so does the map.
   function syncMapToInspection() {
     if (!playbackHasSession) return;
     followInspection(Math.floor(playbackStep) + 1, playbackPlaying);
   }
 
-  // The finished field - the step the Simulation Duration names - which is
+  // The finished field, the step the Simulation Duration names, which is
   // what the grid shows whenever Map Evolution is shut, and what it opens
   // on. Panning and zooming are untouched by any of this; only which step
   // every pixel is rendered at.
   function freezeMapAtEnd() {
     stopTimelineClock();
     timeline.following = false;
-    // Back at the end is back to "don't move until asked" - see mapLinked.
+    // Back at the end is back to "don't move until asked": see mapLinked.
     mapLinked = false;
     timeline.step = simulationSteps;
     if (timeline.stateStep > timeline.step) timeline.stateKey = null;
@@ -10554,7 +10663,7 @@
     updateTimelineUI();
   }
 
-  // Back to the map's own timeline, resting at its end - for when the thing
+  // Back to the map's own timeline, resting at its end: for when the thing
   // being followed goes away (the preview session ends, Inspect closes)
   // rather than the card itself. Guarded, so it never stomps a Map
   // Evolution run the user started on its own.
@@ -10564,7 +10673,7 @@
   }
 
   function updateTimelineUI() {
-    // Sharing Inspect's clock, this row reports and controls THAT clock -
+    // Sharing Inspect's clock, this row reports and controls THAT clock,
     // so the button reads from playbackPlaying, not from whether the map's
     // own timeline happens to be mid-catch-up. Nothing is disabled for
     // following any more: these controls drive the shared clock rather than
@@ -10585,7 +10694,7 @@
     var text = "Frame " + renderedSteps().toLocaleString() + " / " + simulationSteps.toLocaleString();
     // Honest about where the MAP has actually got to: following, the value
     // is the step it has rendered, which can trail the preview's by a beat
-    // on a slow GPU. No percentage in that case - a follow rebuild reports
+    // on a slow GPU. No percentage in that case: a follow rebuild reports
     // no fraction (see stepPlayback).
     if (timeline.drawing && timeline.catchingUp) {
       text += timeline.following ? " · catching up"
@@ -10596,8 +10705,8 @@
 
   makeSpeedControl(gridSpeedBtn, gridSpeedPopup, gridSpeedSlider, gridSpeedValueEl);
 
-  // Each of these three drives the shared clock when there is one - the
-  // preview's, the very clock Inspect's own identical row drives - and the
+  // Each of these three drives the shared clock when there is one, the
+  // preview's, the very clock Inspect's own identical row drives, and the
   // map's own timeline otherwise. Same handler either way, so the two cards
   // can never end up in different states: there is only ever one clock
   // being controlled.
@@ -10608,7 +10717,7 @@
   gridPlayPauseBtn.addEventListener("click", function () {
     if (previewOwnsTimeline()) {
       if (playbackPlaying) {
-        // The same grace window Inspect's own button honours - a click
+        // The same grace window Inspect's own button honours: a click
         // landing this soon after playback started on its own meant
         // "start", which already happened.
         if (performance.now() - playbackAutoStartedAt < PLAY_PAUSE_GRACE_MS) return;
@@ -10646,14 +10755,14 @@
 
   // resizeCanvas both matches the backing store to the new CSS size and
   // (via markDirty) restarts refinement, which is the whole of what a
-  // resize needs now. This used to have a second job - retrying a startup
+  // resize needs now. This used to have a second job, retrying a startup
   // calibration that had bailed out because canvasArea was still
-  // display:none when boot() ran - and that job no longer exists, because
+  // display:none when boot() ran, and that job no longer exists, because
   // there is no measurement to get wrong. A hidden canvas simply refines
   // nothing until it has a size.
   new ResizeObserver(resizeCanvas).observe(canvasArea);
 
-  // ResizeObserver only fires on a CSS-size change - dragging the window to
+  // ResizeObserver only fires on a CSS-size change, dragging the window to
   // a display with a different devicePixelRatio (e.g. laptop screen <->
   // external monitor) changes what "matches the screen" means without
   // resizing anything in CSS pixels, so it needs its own listener. A
@@ -10670,7 +10779,7 @@
 
   resizeCanvas();
   updateZoomReadout();
-  updateSpeedUI(); // both speed buttons at once - they share one value
+  updateSpeedUI(); // both speed buttons at once: they share one value
   updateTimelineUI();
   showHoverEmpty(); // sets the X: 0, Y: 0 placeholder before the cursor ever touches the grid
   // Inspect is the one menu open on arrival. The other two configure and
@@ -10679,7 +10788,7 @@
   // colors mean. Deliberately here rather than in the markup, so the
   // opening runs through the same path a click does.
   //
-  // This covers the FIRST arrival only - boot() runs once and every later
+  // This covers the FIRST arrival only: boot() runs once and every later
   // visit re-enters through setScene(), which opens it again for itself.
   setInspectOpen(true);
   scheduleColorSpreadCheck(); // the default view (before any pan/zoom) can already qualify
@@ -10690,16 +10799,16 @@
   // end of the ladder, at which point stepProgressive returns immediately
   // and the loop costs nothing until the next change.
   //
-  // Playback, while it is playing, takes the frame instead - except while
+  // Playback, while it is playing, takes the frame instead, except while
   // the view is moving, when it hands the frame back so the ladder can show
   // the current step (see stepPlayback).
   requestAnimationFrame(function frame(now) {
     // Every GL call on a lost context is a silent no-op that hands back
-    // null, which the code below was never written to be handed - and there
+    // null, which the code below was never written to be handed, and there
     // is nothing to draw to in any case. See "Losing the WebGL context".
     if (contextLost) { requestAnimationFrame(frame); return; }
     updatePerfReadout(now);
-    // Every frame, working or idle - see noteFrameCadence on why the idle
+    // Every frame, working or idle: see noteFrameCadence on why the idle
     // ones are the important ones.
     noteFrameCadence(now);
     pumpPassBuilds();
@@ -10710,9 +10819,9 @@
     pumpPendingInspect();
     if (dirty) { resetProgressive(); dirty = false; }
     releasePlaybackIfViewMoved();
-    // A gesture's frame moves the picture and does nothing else - see
+    // A gesture's frame moves the picture and does nothing else: see
     // "Gestures first". (It declines while the timeline is playing, which
-    // has its own way of giving a moving view the frame - see stepPlayback.)
+    // has its own way of giving a moving view the frame: see stepPlayback.)
     if (!presentGestureFrame(now) && !stepPlayback(now)) stepProgressive(now);
     requestAnimationFrame(frame);
   });
@@ -10734,7 +10843,7 @@
   global.FractalGrid.setScale = function (scale) {
     view.scale = scale;
     // The readout is driven by the user's own zoom handlers, not by
-    // render() - so a programmatic zoom has to say so itself, or the panel
+    // render(), so a programmatic zoom has to say so itself, or the panel
     // reports 1.00x through the whole transition.
     updateZoomReadout();
     markDirty();
@@ -10746,7 +10855,7 @@
     markDirty();
   };
   // Called when leaving the grid for the editor (see transition.js's own
-  // transitionTo) - the hover/Inspect preview's rAF loop and its loop-restart
+  // transitionTo): the hover/Inspect preview's rAF loop and its loop-restart
   // timer keep running otherwise, since nothing about hiding #grid-view stops
   // them on its own. Left running, that meant a bounce/edge sound already
   // looping when the user navigated away just kept firing indefinitely from
@@ -10756,13 +10865,13 @@
   // reason: nothing would stop it simulating a page nobody can see.
   global.FractalGrid.pausePlayback = function () {
     pausePlayback();
-    // Leaving the page, so playback's GPU memory goes with it - state and
+    // Leaving the page, so playback's GPU memory goes with it: state and
     // programs both. Coming back rebuilds whatever is needed on the next Play.
     releaseAllPlayback();
     markDirty();
     updateTimelineUI();
   };
-  // Forces the pending frame out now rather than on the next rAF tick -
+  // Forces the pending frame out now rather than on the next rAF tick:
   // the transition needs the grid's picture to be current for the frame it
   // is compositing against, not one behind it.
   //
@@ -10770,7 +10879,7 @@
   // inside the intro animation's own per-frame work, where the grid's zoom
   // is being driven continuously, so every frame invalidates the last one's
   // refinement anyway. Blocking here until full resolution would stall the
-  // very animation it exists to keep in sync, and to no purpose - the
+  // very animation it exists to keep in sync, and to no purpose: the
   // coarse level it does produce is what that frame of the animation is
   // going to be composited against regardless.
   global.FractalGrid.renderNow = function () {
@@ -10785,7 +10894,7 @@
     // map" is what makes the reload land where this call was headed.
     if (contextLost) { reloadIntoMap(nextScene); return; }
     // The view is about to be put back to its default framing, which is
-    // framed for whatever size the canvas ends up - not pinned to a corner
+    // framed for whatever size the canvas ends up, not pinned to a corner
     // of the size it happens to be before Inspect reopens (see the dock).
     dockSuppressPin = true;
     scene = nextScene;
@@ -10812,7 +10921,7 @@
     hueRangeMaxValue = isCircularOutput ? 360 : 300;
     relabelSuperlativeExtremeButtons();
     sceneCoordinateSpan = computeSceneCoordinateSpan();
-    // Compiled against the OLD scene - dropped, not reused, including any
+    // Compiled against the OLD scene: dropped, not reused, including any
     // build still in flight. requestPass rebuilds each lazily on next use.
     discardAllPasses();
     releaseAllSliceStates();
@@ -10829,7 +10938,7 @@
     setViewCenter(DEFAULT_CENTER.x, DEFAULT_CENTER.y);
     view.scale = DEFAULT_SCALE;
     // Display mode and Color Zoom are this page's own view of the field,
-    // not part of the scene - carrying them over from whatever the last
+    // not part of the scene, carrying them over from whatever the last
     // scene was left on would show the new scene through a lens picked for
     // the old one. Same reset Reset View performs by hand, just automatic
     // on every re-entry.
@@ -10840,13 +10949,13 @@
     // visit (see its comment there). Needed separately here because the
     // menus are an accordion: a user who left the grid with Display or
     // Analysis open left Inspect SHUT, and without this they would come
-    // back to a column of icons and no preview - the state boot() went out
+    // back to a column of icons and no preview, the state boot() went out
     // of its way to avoid, on every arrival but the first.
     setInspectOpen(true);
     canvas.hidden = false;
     emptyState.hidden = true;
     setStatus(true, "Ready");
-    // Measured against the old scene, in the old scene's units - dropped
+    // Measured against the old scene, in the old scene's units: dropped
     // rather than dimmed, unlike an ordinary view change (see markStale).
     if (statsPanel) { statsHasResult = false; statsResultIsCurrent = false; statsPanel.clearResult(); }
     resizeCanvas();
@@ -10858,17 +10967,17 @@
 
   // ---- Movies ----
   //
-  // A movie is a list of KEYFRAMES - a view of the map, and the Map
-  // Evolution frame it was showing - that a camera then travels between
+  // A movie is a list of KEYFRAMES, a view of the map, and the Map
+  // Evolution frame it was showing, that a camera then travels between
   // (movie-path.js is the travelling). The Movie card only collects them;
   // Done hands the list, in a link, to chaosplayback.html, which renders
   // every frame and plays the result. That page has no renderer of its own:
   // it loads this app in a frame and asks it for one finished picture after
-  // another through renderStill, below - so a movie is drawn by exactly the
+  // another through renderStill, below, so a movie is drawn by exactly the
   // code that draws the map, at whatever precision each of its views needs.
 
   var MOVIE_QUALITIES = MoviePath.QUALITIES;
-  // keyframes: [{ center: { x, xLo, y, yLo }, scale, step, seconds }] -
+  // keyframes: [{ center: { x, xLo, y, yLo }, scale, step, seconds }],
   // movie-path.js's own shape, seconds null until the user types one.
   var movie = { keyframes: [], quality: MOVIE_QUALITIES.length - 1, loop: true };
 
@@ -10894,7 +11003,7 @@
   function goToKeyframe(k) {
     // A frame short of the last is only ever on screen with Map Evolution
     // open (closing it is what puts the map back to the end), so showing one
-    // opens it - and takes the map off the Inspect preview's clock, which
+    // opens it, and takes the map off the Inspect preview's clock, which
     // would otherwise carry it straight off again.
     if (k.step < simulationSteps) playbackMenu.set(true);
     unlinkMapWhereItIs();
@@ -11013,7 +11122,7 @@
       // typed, and stepped a power of ten at a time. Changing it here moves
       // the keyframe, not the map.
       what.appendChild(movieField("zoom", "Zoom of keyframe " + (i + 1), {
-        title: "The zoom at this keyframe. Type any notation - 1.4e+25, 1.4\u00d710^25 - or step it a power of ten with the arrows.",
+        title: "The zoom at this keyframe. Type any notation, 1.4e+25, 1.4\u00d710^25, or step it a power of ten with the arrows.",
         stepHint: "a power of ten",
         show: function () { return formatZoom(DEFAULT_SCALE / k.scale); },
         edit: function () { return (DEFAULT_SCALE / k.scale).toExponential(1); },
@@ -11037,7 +11146,7 @@
       }));
 
       // The move that ARRIVES here. The first keyframe has one only in a
-      // movie that returns to it. Left empty, the time is worked out - and
+      // movie that returns to it. Left empty, the time is worked out, and
       // the arrows step from THAT, not from nothing.
       var arriving = i > 0 ? moves[i - 1] : (movie.loop && movie.keyframes.length > 1 ? moves[moves.length - 1] : null);
       if (arriving) {
@@ -11114,7 +11223,7 @@
     var link = "chaosplayback.html#" + ShareUrl.encode({
       page: ShareUrl.PAGE_MOVIE,
       scene: PhysicsCoords.toAuthoredJSON(shared.scene),
-      // A movie has no view of its own - its keyframes are its views.
+      // A movie has no view of its own: its keyframes are its views.
       view: { display: shared.view.display, precision: shared.view.precision, movie: shared.view.movie },
     });
     // The address this page leaves behind has to say what is in the card,
@@ -11130,7 +11239,7 @@
   // show THIS view at THIS simulation frame, render it all the way, and say
   // when it is on the canvas. `onDone` is called in the same task as the
   // draw that finished it, which is the one moment the canvas can be copied
-  // from (it has no preserved drawing buffer - by the next task the browser
+  // from (it has no preserved drawing buffer: by the next task the browser
   // may have cleared it).
   //
   // A picture is only ever handed over at the precision its view calls for.
@@ -11172,7 +11281,7 @@
   // is read and written, and asks here for what it should say).
 
   // Inspections a link asked for that haven't been rebuilt yet, as
-  // { type, a, b, count | size + twoPart } with a/b WORLD points - turned
+  // { type, a, b, count | size + twoPart } with a/b WORLD points: turned
   // into those the moment the link's view was applied, so panning away
   // before they are built doesn't move them.
   var pendingInspect = null;
@@ -11186,7 +11295,7 @@
 
   // One group a frame, and none until the map has had a couple of frames to
   // put something on screen: every inspected point is a shader compiled and
-  // run on the spot, so a link with a full grid in it is seconds of work -
+  // run on the spot, so a link with a full grid in it is seconds of work,
   // which should come after the picture, the way it did for whoever made it.
   //
   // And not until the precision this view calls for is built. A trajectory
@@ -11209,8 +11318,8 @@
 
   // Everything a link to this map has to say: the scene as this page runs
   // it (its own Simulation Duration, which is the one on screen), and the
-  // view. Inspection points go out as view-heights from the centre - see
-  // share-url.js on why - including any still waiting to be rebuilt, so a
+  // view. Inspection points go out as view-heights from the centre, see
+  // share-url.js on why, including any still waiting to be rebuilt, so a
   // link copied in those first seconds doesn't quietly lose them.
   global.FractalGrid.shareState = function () {
     var shared = {};
@@ -11243,12 +11352,12 @@
     };
   };
 
-  // The way back in, for a view ShareUrl.decode produced - so every field is
+  // The way back in, for a view ShareUrl.decode produced, so every field is
   // present and already a number or a known word. Called right after the
   // link's scene has been started (or set), which is what put everything
   // here back to its defaults first.
   global.FractalGrid.applyShareView = function (shared) {
-    // A link's view is its centre and its zoom, and has to arrive as both -
+    // A link's view is its centre and its zoom, and has to arrive as both:
     // see setScene on why that means no corner pinning.
     dockSuppressPin = true;
     scheduleDockLayout(false);
@@ -11264,8 +11373,8 @@
     // the best it does have, where the view needs it.
     precisionMode = (shared.precision === "auto" || PRECISION_LADDER.indexOf(shared.precision) !== -1) ? shared.precision : "auto";
     // Unless the last visit ended in repeated context losses, which the
-    // multi-float programs - many times the size and the memory of the
-    // float32 one - are the likeliest cause of. See "Losing the WebGL context".
+    // multi-float programs, many times the size and the memory of the
+    // float32 one, are the likeliest cause of. See "Losing the WebGL context".
     if (contextLossForcesFloat32()) precisionMode = "f32";
     if (precisionSelect) precisionSelect.value = precisionMode;
 
@@ -11453,8 +11562,8 @@
     applyPerfValues(PERF_PRESETS[name]);
   }
 
-  // The slider. Dragging THROUGH the middle is fine - it is between the two
-  // ends - but it is not somewhere to stop: released there, the slider goes
+  // The slider. Dragging THROUGH the middle is fine, it is between the two
+  // ends, but it is not somewhere to stop: released there, the slider goes
   // back to wherever the controls below actually put it.
   perfPresetSlider.addEventListener("input", function () {
     var stop = Number(perfPresetSlider.value);
@@ -11471,7 +11580,7 @@
     applyPerfPreset(toward);
   });
   // The labels are the stops' names, and the two that can be chosen can be
-  // chosen by pressing them - an easier target than the end of a slider.
+  // chosen by pressing them: an easier target than the end of a slider.
   perfPresetLabels.forEach(function (el) {
     var name = el.getAttribute("data-preset");
     if (name === "custom") return;
@@ -11500,7 +11609,7 @@
   //
   // Settings > Performance Settings > Nerd Performance Stats: what the
   // renderer is doing, as a few lines of text over the map. It exists to be
-  // screenshotted from a device nobody can attach a debugger to - so it
+  // screenshotted from a device nobody can attach a debugger to, so it
   // favours the numbers that say WHY a render is slow over the ones that say
   // that it is: which path is drawing (one draw per band, or slices), how
   // much a frame is allowed and how long frames actually take, whether the
@@ -11553,7 +11662,7 @@
   }
   function perfReadoutText(now) {
     var precision = effectivePrecision();
-    // Read off what has already been measured - NOT f32NeedsSlicing(), which
+    // Read off what has already been measured, NOT f32NeedsSlicing(), which
     // measures (a blocking build and a GPU round trip) when it hasn't been.
     // A readout that changes what it reads out is not one.
     var stepMs = f32StepMs[wantedVariant()];
@@ -11589,7 +11698,7 @@
     var b = ladderBudget;
     lines.push("budget " + perfCount(b.budget) + " px/frame" + (b.budget <= b.min * 1.5 ? " (AT FLOOR " + b.min + ")" : "") +
       " · target " + Math.round(frameTargetMs(now)) + "ms · " + perfStats.drawsLastFrame + " draws/frame");
-    lines.push("input  " + (now - perfStats.presentOnlyAt < 400 ? "GESTURE - moving the picture, rendering nothing" :
+    lines.push("input  " + (now - perfStats.presentOnlyAt < 400 ? "GESTURE, moving the picture, rendering nothing" :
       perf.gestureFirst ? (reuseEnabled ? "gestures first" : "gestures first (needs Reuse Last Picture)") : "renders through gestures") +
       (perf.frameMs > 0 ? " · gpu waits " + perfStats.busyWaits : "") +
       (reuse.run ? (reuse.run.exact ? " · reusing " + Math.round(reuse.run.coverage * 100) + "%" : " · preview only") : ""));
@@ -11637,8 +11746,8 @@
 
   // ---- The dock: where the menus live in the small-window layout ----
   //
-  // On a phone there is no room for cards floating over the map - one open
-  // card IS the screen. So in the small-window layout (LayoutMode.isMobile -
+  // On a phone there is no room for cards floating over the map: one open
+  // card IS the screen. So in the small-window layout (LayoutMode.isMobile:
   // decided by the window's size alone, which makes this just as reachable
   // in a narrow desktop window) the map gets an area of its own, and the
   // menus move into a dock along the bottom edge: every menu's button into a
@@ -11654,8 +11763,8 @@
   // (see makeMenu): a lit tab is the card that is open, pressing it again
   // puts the card away, and with none open the sheet is gone and the map has
   // everything but the tab bar. That does cost the phone the one pairing the
-  // desktop's two columns exist for - Inspect beside Map Evolution, the map
-  // playing in step with the preview - which was tried here as a sheet
+  // desktop's two columns exist for, Inspect beside Map Evolution, the map
+  // playing in step with the preview, which was tried here as a sheet
   // showing every open card, and lost: the second card sat below a fold
   // nobody scrolled to, and a tab bar with two tabs lit read as broken.
   //
@@ -11663,7 +11772,7 @@
   // finished pictures rendered back to back, which is not something to start
   // on a phone, and five tabs is what a phone's width holds comfortably. Its
   // button and card stay where chaos.html put them, in the right-hand column
-  // - which this layout hides (see #grid-right-menu-column in mobile.css) -
+  // - which this layout hides (see #grid-right-menu-column in mobile.css),
   // so the card is simply not reachable here, and is shut on the way in if
   // it was open. Nothing about a movie is lost by that: the keyframes are
   // state, not markup, and are all still there when the window is wide again
@@ -11683,8 +11792,8 @@
   var dockSuppressPin = false;
   var dockLayoutQueued = false, dockLayoutWantsPin = false;
 
-  // The sheet's height is set ONCE per change of which cards are open - to
-  // what they need, up to the cap - and then left alone, scrolling whatever
+  // The sheet's height is set ONCE per change of which cards are open, to
+  // what they need, up to the cap, and then left alone, scrolling whatever
   // outgrows it. Every change of its height is a change of the map's, and
   // every one of those restarts the render from its coarsest level: worth it
   // for a menu opened on purpose, not for a list that grew by one row.
@@ -11731,11 +11840,11 @@
     if (active === dockActive) { scheduleDockLayout(false); return; }
     dockActive = active;
     gridViewEl.classList.toggle("dock-active", active);
-    // Not coming along (see above) - and an open card left behind in a hidden
+    // Not coming along (see above), and an open card left behind in a hidden
     // column would be open with no way to shut it.
     if (active && movieMenu.isOpen()) movieMenu.set(false);
     // One card at a time in here (see makeMenu): coming in with one open on
-    // each side, the left-hand one - Inspect, usually - is the one kept.
+    // each side, the left-hand one, Inspect, usually, is the one kept.
     if (active) {
       var keep = null;
       dockMenus.forEach(function (menu) {
@@ -11758,7 +11867,7 @@
       gridViewEl.classList.remove("dock-sheet-open");
       dockSheetEl.style.height = "";
       // The floating gauge goes back to sharing a corner, and an accordion,
-      // with the left column - which may have a card open that it must not
+      // with the left column, which may have a card open that it must not
       // be open beside.
       if (renderProgressMenu.isOpen() && (inspectMenu.isOpen() || statsMenu.isOpen() || displayMenu.isOpen())) {
         renderProgressMenu.set(false);
@@ -11786,7 +11895,7 @@
 
   if (global.LayoutMode) {
     global.LayoutMode.onChange(function (mode) { setDockActive(mode.isMobile()); });
-    dockSuppressPin = true; // the default framing - see setScene
+    dockSuppressPin = true; // the default framing: see setScene
     setDockActive(global.LayoutMode.isMobile());
   }
 
@@ -11796,9 +11905,9 @@
   // phone it routinely does: the tab sent to the background, the GPU's
   // memory wanted elsewhere, the graphics driver restarting. Every texture,
   // buffer and program made on that context is gone. Rebuilding them in
-  // place would mean auditing every GL object this file ever keeps - across
+  // place would mean auditing every GL object this file ever keeps, across
   // the ladder, reuse, antialiasing, playback, the slice states and the
-  // sampler - for whether it re-makes itself on demand, and then trusting
+  // sampler, for whether it re-makes itself on demand, and then trusting
   // that audit on devices nobody here can test. The address bar already
   // holds the whole state of the page instead (see "The address bar"): so
   // recovery is to make sure it is current and load it again.
@@ -11810,7 +11919,7 @@
   //  - A visible one gives the browser a moment to hand the context back
   //    first ("webglcontextrestored"). Straight after a driver reset, asking
   //    for a new one can fail.
-  //  - While the EDITOR is what is on screen nothing reloads at all - the
+  //  - While the EDITOR is what is on screen nothing reloads at all: the
   //    user is part-way through something that has nothing to do with this
   //    page. The next scene sent over finds the context gone and reloads into
   //    the map then (see setScene, and reloadIntoMap).
@@ -11844,7 +11953,7 @@
     return rec;
   }
   // True on a visit that follows back-to-back context losses. One loss is
-  // weather - a backgrounded tab - and the view comes back exactly as it was,
+  // weather, a backgrounded tab, and the view comes back exactly as it was,
   // precision included. Two in a row says something this page is doing is
   // what the device cannot hold, and the multi-float programs are the
   // likeliest something by a wide margin.

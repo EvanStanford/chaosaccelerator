@@ -1,9 +1,9 @@
 // This file is part of Chaos Accelerator, licensed under the Common Public
-// Attribution License, Version 1.0 (CPAL-1.0) - see LICENSE in the project
+// Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in the project
 // root, or https://chaosaccelerator.com/license for a hosted copy.
 
-// A movie's camera: keyframes in, one view per frame out. Pure arithmetic -
-// no DOM, no GL - so the Movie card (which shows how long a movie will run)
+// A movie's camera: keyframes in, one view per frame out. Pure arithmetic,
+// no DOM, no GL, so the Movie card (which shows how long a movie will run)
 // and the playback page (which renders it) cannot disagree about what the
 // keyframes mean, and so it can be tested where neither exists.
 //
@@ -13,13 +13,13 @@
 //
 // center and scale are fractal-grid.js's own view (a double-double center,
 // and world units per view height); `step` is the simulation frame the map
-// is showing - the Map Evolution timeline - so a movie can run the physics
+// is showing, the Map Evolution timeline, so a movie can run the physics
 // forward, hold it, or wind it back while the camera moves; `seconds` is how
 // long the move that ARRIVES at this keyframe takes, or null to let
 // autoSeconds decide.
 //
 // THE MOVE BETWEEN TWO KEYFRAMES is the path of van Wijk & Nuij, "Smooth and
-// Efficient Zooming and Panning" (2003) - the one d3's interpolateZoom made
+// Efficient Zooming and Panning" (2003): the one d3's interpolateZoom made
 // familiar. Interpolating the center in a straight line while the zoom
 // changes geometrically looks terrible across any real zoom: measured
 // against what is on screen, the pan crawls at the wide end and whips past
@@ -32,15 +32,15 @@
 //
 //  - The textbook position is cosh(r0) * tanh(rho*s + r0) - sinh(r0), a
 //    difference of two numbers that grow like the zoom ratio while the
-//    answer stays near 1 - garbage by a ratio of 1e8. It is the same thing
+//    answer stays near 1: garbage by a ratio of 1e8. It is the same thing
 //    as sinh(rho*s) / cosh(rho*s + r0), which has no subtraction in it.
 //
 //  - The position is a FRACTION of the whole displacement, and a fraction
 //    good to one part in 1e16 is not good enough at the deep end: panning
 //    by a thousand starting-views while zooming in 1e12 leaves an error of
 //    a whole final view. So each half of the path is measured from its own
-//    end - the distance still to go is computed directly, never as one
-//    minus the distance covered - and both ends land exactly on their
+//    end, the distance still to go is computed directly, never as one
+//    minus the distance covered, and both ends land exactly on their
 //    keyframes.
 //
 // EASING is applied to where along that path a moment falls; the simulation
@@ -48,7 +48,7 @@
 // NOT stop at every keyframe in between: a keyframe passed on the way from
 // 1x to 10000x is passed at speed, where one the camera turns round at (in
 // at 1e8x, back out to 1e4x) is where it slows to a halt. Each keyframe is
-// given a velocity - the average of the move arriving and the move leaving,
+// given a velocity: the average of the move arriving and the move leaving,
 // as vectors, so continuing cancels nothing and reversing cancels everything
 // - and each move is a quintic Hermite curve between its two ends' speeds
 // along it, with no acceleration at either end, so nothing ever jerks. With
@@ -59,7 +59,7 @@
   var FPS = 30;
   var RHO = Math.SQRT2; // van Wijk & Nuij's recommended trade-off between zooming and panning
 
-  // What the Movie card's Resolution slider's five stops mean - here rather
+  // What the Movie card's Resolution slider's five stops mean: here rather
   // than in the card, because the player is what acts on them. `divisor` is
   // how much smaller than the player's own stage each frame is rendered;
   // only the top stop antialiases, since averaging several samples of every
@@ -73,9 +73,9 @@
   ];
 
   // How long a move takes when its keyframe doesn't say: long enough for
-  // the camera (SECONDS_PER_PATH_UNIT of path length - about 0.7s per
+  // the camera (SECONDS_PER_PATH_UNIT of path length, about 0.7s per
   // doubling of zoom, 1.7s to pan one view across) and long enough for the
-  // simulation (STEPS_PER_SECOND - twice the speed the physics runs at in
+  // simulation (STEPS_PER_SECOND, twice the speed the physics runs at in
   // real time), and never a flicker.
   var SECONDS_PER_PATH_UNIT = 1.4;
   var STEPS_PER_SECOND = 120;
@@ -102,7 +102,7 @@
   // arriving at m1 (1 is the move's average speed, 0 is at rest), with no
   // acceleration at either end. Quintic Hermite; at rest both ends it is
   // smootherstep, at 1 both ends it is a straight line. Monotone up to
-  // MAX_END_SPEED at both ends - faster is clamped.
+  // MAX_END_SPEED at both ends: faster is clamped.
   var MAX_END_SPEED = 2.5;
   function ease(t, m0, m1) {
     t = clamp(t, 0, 1);
@@ -112,7 +112,7 @@
     return (6 * t5 - 15 * t4 + 10 * t3) + m0 * (t - 6 * t3 + 8 * t4 - 3 * t5) + m1 * (-4 * t3 + 7 * t4 - 3 * t5);
   }
 
-  // The direction a move is going at one end - a unit vector in van Wijk &
+  // The direction a move is going at one end: a unit vector in van Wijk &
   // Nuij's own measure (pans in view heights at that end's zoom, the zoom
   // logarithmically, weighted as their path length weights them), which is
   // what lets the arriving and leaving directions at a keyframe be compared.
@@ -159,7 +159,7 @@
   }
 
   // The move from keyframe a to keyframe b: { length, at(u) } where u in
-  // [0, 1] is how far ALONG THE PATH (not through time - see ease) and at()
+  // [0, 1] is how far ALONG THE PATH (not through time, see ease) and at()
   // returns { center, scale }.
   function path(a, b) {
     // The high and low halves differenced separately: two centers a deep
@@ -170,7 +170,7 @@
     var w0 = a.scale, w1 = b.scale;
 
     // No pan to speak of (under a billionth of the tighter view): a plain
-    // geometric zoom, the limit the general path goes to - and the general
+    // geometric zoom, the limit the general path goes to, and the general
     // formulas divide by d.
     if (d <= 1e-9 * Math.min(w0, w1)) {
       var direction = w1 >= w0 ? 1 : -1;
@@ -223,7 +223,7 @@
   // The moves a list of keyframes makes, in order: [{ from, to, seconds }].
   // `loop` closes the movie with one more move, from the last keyframe back
   // to the first, so that played on repeat it never jumps. Every move's time
-  // is its DESTINATION's - which gives the first keyframe's a meaning in a
+  // is its DESTINATION's, which gives the first keyframe's a meaning in a
   // looping movie (the move that closes it) and none otherwise.
   function moves(keyframes, loop) {
     var list = [];
@@ -241,7 +241,7 @@
   }
 
   // Every frame of the movie: [{ center, scale, step }]. Each move
-  // contributes its start and everything up to - not including - its end,
+  // contributes its start and everything up to, not including, its end,
   // which is the next move's start; a movie that doesn't loop then gets its
   // final keyframe as one last frame, where a looping one has frame 0.
   function frames(keyframes, loop) {

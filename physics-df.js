@@ -1,5 +1,5 @@
 // This file is part of Chaos Accelerator, licensed under the Common Public
-// Attribution License, Version 1.0 (CPAL-1.0) - see LICENSE in the project
+// Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in the project
 // root, or https://chaosaccelerator.com/license for a hosted copy.
 
 // Multi-float arithmetic for WebGL2 / GLSL ES 3.00: double-float ("df", two
@@ -17,8 +17,8 @@
 //
 // A df value is an unevaluated sum of two float32s (hi + lo) with
 // non-overlapping mantissas: ~48 significand bits (~14-15 decimal digits)
-// for ~5-10x the ALU of a plain float. It is not float64 - the exponent
-// range is still float32's - but the mantissa is what this project is
+// for ~5-10x the ALU of a plain float. It is not float64, the exponent
+// range is still float32's, but the mantissa is what this project is
 // short of, not the range.
 //
 // HOW IT WORKS
@@ -41,7 +41,7 @@
 // This is not hypothetical. Measured on ANGLE's Metal backend (Apple
 // silicon, the default for Chrome on macOS): `(a + b) - a` returns `b`,
 // i.e. fast-math reassociation is on, and every unprotected EFT above
-// returns an error term of exactly 0.0 - silently, with no warning, and
+// returns an error term of exactly 0.0: silently, with no warning, and
 // with results that look plausible right up until you zoom in.
 //
 // dfv() is the fix: a bitcast to uint, an XOR against a uniform that
@@ -50,7 +50,7 @@
 // it wraps becomes an opaque symbol that no algebraic rewrite applies to.
 // Costs about one integer op (the bitcasts are register reinterpretation,
 // not work). Every shader including this library must therefore declare
-// `uniform uint u_dfVeil;` - DF_UNIFORM_DECL below - and leave it at its
+// `uniform uint u_dfVeil;` (DF_UNIFORM_DECL below), and leave it at its
 // default of 0. df-probe.html measures all of this directly on whatever
 // machine it is opened on, and physics-tests.js carries the same check as
 // a regression test, because the failure mode is invisible otherwise.
@@ -59,32 +59,32 @@
 // -------------------
 // The same idea carried further: a value is the unevaluated sum of N
 // float32 words, each below the rounding error of the one before it, for
-// ~24 bits of significand per word less a few lost to the algorithms -
+// ~24 bits of significand per word less a few lost to the algorithms,
 // about 14 digits at two words, 21 at three, 28 at four. One library serves
 // all of them. Every function keeps its "df" name whatever N is, and the
 // scalar type is spelled MF, a macro this file defines as vec2, vec3 or
-// vec4 - a shader is only ever built for one precision, so there is nothing
+// vec4: a shader is only ever built for one precision, so there is nothing
 // for the names to collide with, and the physics port and the code
 // generators are written once against MF.
 //
 // Two words is the hand-tuned case and its text is exactly what it was
 // before the others existed. Three and four are GENERATED (see genAdd,
-// genMul and friends): the structure is the same at every N - an error-free
+// genMul and friends): the structure is the same at every N, an error-free
 // sum or product per pair of words, the errors cascaded down one level at a
-// time, a renormalization at the end - so it is written as a loop here and
+// time, a renormalization at the end, so it is written as a loop here and
 // unrolled into the GLSL. The algorithms are the quad-double library's
 // "sloppy" forms (Hida, Li & Bailey), chosen for the same reason the
 // two-word add is: what this project needs is absolute precision at the
 // scale of the scene's coordinates, not a correctly rounded last bit.
 //
 // That far is as far as float32 words go. A fifth word of a coordinate of
-// order 10^3 sits around 10^-33, a sixth around 10^-41 - below float32's
+// order 10^3 sits around 10^-33, a sixth around 10^-41: below float32's
 // smallest normal number, where GPUs are not obliged to keep anything.
 //
 // Constants past two words cannot come from a JS number, which only has 53
 // bits to give: pi and the Taylor coefficients are generated from exact
-// BigInt rationals (rationalWords). A value the scene itself supplies - an
-// authored coordinate - is a float64 and simply has zeros in its low words.
+// BigInt rationals (rationalWords). A value the scene itself supplies, an
+// authored coordinate, is a float64 and simply has zeros in its low words.
 (function (global) {
   "use strict";
 
@@ -99,7 +99,7 @@
   var ORDER = ["f32", "df", "tf", "qf"];
   function wordsFor(precision) { return WORDS[precision] || 1; }
   function isExtended(precision) { return wordsFor(precision) > 1; }
-  // float32 words can carry a value no further than this - see the header.
+  // float32 words can carry a value no further than this: see the header.
   // BigInt is what the constants past two words are generated with.
   function isSupported(precision) {
     return wordsFor(precision) <= 2 || typeof BigInt === "function";
@@ -108,7 +108,7 @@
   // How many words num() writes, and buildLibrary() builds for by default.
   // Code generation for one shader runs start to finish without yielding,
   // so whoever starts one says which precision it is for (usePrecision) and
-  // everything it calls - here and in physics-gpu-df.js - agrees.
+  // everything it calls, here and in physics-gpu-df.js, agrees.
   var currentWords = 2;
   function usePrecision(precision) {
     currentWords = Math.max(2, wordsFor(precision));
@@ -117,7 +117,7 @@
 
   // Split a JS number (already float64) into the two float32s whose sum
   // reproduces it to ~48 bits. This is the ONLY place the extra precision
-  // enters the GPU: JS has had it all along - uploading a single float32
+  // enters the GPU: JS has had it all along, uploading a single float32
   // uniform is what was throwing it away.
   function split(x) {
     var hi = f32(x);
@@ -130,7 +130,7 @@
     return [s, (a - (s - bb)) + (b - bb)];
   }
 
-  // [p, e] with p + e = a * b EXACTLY, p the rounded product - Dekker's
+  // [p, e] with p + e = a * b EXACTLY, p the rounded product: Dekker's
   // split, since JavaScript has no fused multiply-add to get the error term
   // from. (2^27 + 1 splits a float64's 53 bits into halves whose products
   // are exact. Fine for anything within 2^970 or so of overflow, which a
@@ -143,9 +143,9 @@
     return [p, ((ah * bh - p) + ah * bl + al * bh) + al * bl];
   }
 
-  // The same for a DOUBLE-DOUBLE - hi + lo, both float64, ~106 bits, which
+  // The same for a DOUBLE-DOUBLE, hi + lo, both float64, ~106 bits, which
   // is how the grid holds its view centre once a float64 alone can no longer
-  // tell two pixels apart - into `count` float32 words. Each word is the
+  // tell two pixels apart, into `count` float32 words. Each word is the
   // remainder rounded to float32, and `remainder - word` is exact in
   // float64 (the word agrees with the remainder's leading 24 bits), so
   // nothing is lost on the way down.
@@ -250,7 +250,7 @@
 
   // Split `value` into `count` floats summing to it, all but the last
   // trimmed to 12 bits. Four 12-bit pieces plus a 24-bit tail carries
-  // pi/2 to ~72 bits - far past df's own 48.
+  // pi/2 to ~72 bits: far past df's own 48.
   function codyWaitePieces(value, count) {
     var pieces = [], rest = value;
     for (var i = 0; i < count - 1; i++) {
@@ -313,7 +313,7 @@
   // ---- Kernel options ----
   //
   // Three of the two-word kernels below exist in two forms, because which
-  // one is right is a measurement rather than an argument - df-probe.html
+  // one is right is a measurement rather than an argument: df-probe.html
   // and physics-tests.js both render with either and compare. The defaults
   // are what that measurement chose; the alternatives stay buildable so the
   // comparison can be re-run on a new GPU or driver.
@@ -336,7 +336,7 @@
   //              ~2^-23 of the root, so float32's 24 bits place it to ~2^-47.
   //              Measured: no visible difference.
   //
-  //   words      2, 3 or 4 - defaults to whatever usePrecision() last set.
+  //   words      2, 3 or 4: defaults to whatever usePrecision() last set.
   //              The three options above only apply at 2; past that there
   //              is one form of each kernel, the generated one.
   var DEFAULT_OPTIONS = { sloppyAdd: true, fastDiv: true, fastSqrt: true };
@@ -382,7 +382,7 @@
   // pass up (each word absorbs everything below it, shedding an exact
   // error), one pass down (the errors become the low words). dfTwoSum
   // rather than dfQuickTwoSum wherever which operand is larger is not
-  // certain - after a cancellation it isn't - because a quick-sum with its
+  // certain, after a cancellation it isn't, because a quick-sum with its
   // operands the wrong way round returns a wrong error term and says nothing.
   function genRenorm(N) {
     var args = [], lines = [];
@@ -456,7 +456,7 @@
   }
 
   // a*a: the two cross terms a_i*a_j and a_j*a_i are the same number, and
-  // doubling it is exact - so about half the products.
+  // doubling it is exact, so about half the products.
   function genSqr(N) {
     var lines = ["MF dfSqr(MF a) {"], levels = [];
     for (var s = 0; s < N - 1; s++) lines.push("  vec2 as" + s + " = dfSplit(a." + COMP[s] + ");");
@@ -511,8 +511,8 @@
   // A two-word root by the same float32-corrected Newton step fastSqrt
   // uses (~47 bits), then ONE step at full precision, which squares that
   // error to ~2^-94. The step's correction is (a - s*s) / 2s: a residual of
-  // ~2^-47 of the root, of which three words need the leading 24 bits - a
-  // float32 division - and four need 48, hence the second quotient word.
+  // ~2^-47 of the root, of which three words need the leading 24 bits, a
+  // float32 division, and four need 48, hence the second quotient word.
   function genSqrt(N) {
     var lines = [
       "MF dfSqrt(MF a) {",
@@ -562,11 +562,11 @@
 
   function buildLibraryText(N, two, opt) {
     // pi/2 for the range reduction, and the series, at this word count.
-    // From the exact rational wherever there is a BigInt to hold one - at two
+    // From the exact rational wherever there is a BigInt to hold one: at two
     // words as well. The float64 fallback only knows pi/2 to 53 bits, and
     // the reduction multiplies that error by the quarter-turn count: measured
     // at 5e-13 for an angle of 3000 radians, six of df's bits. (Without
-    // BigInt there are no three- or four-word precisions to build at all -
+    // BigInt there are no three- or four-word precisions to build at all:
     // see isSupported.)
     var halfPiPieces = typeof BigInt === "function"
       ? (function () { var pi = piRational(); return codyWaitePiecesExact(pi[0], pi[1] * big(2), Math.max(5, 2 * N + 1)); })()
@@ -586,7 +586,7 @@
     // to the last word: at two words, |delta| <= 2^-6 and terms through
     // delta^5 / delta^6; past that, |delta| <= 2^-10 and through delta^7 /
     // delta^8, whose first dropped terms (delta^9/9!, delta^10/10!) are
-    // under 2^-108 - below a fourth word.
+    // under 2^-108: below a fourth word.
     var nudgeLimit = two ? 0.015625 : 0.0009765625;
     var nudgeSin = two ? [-6, 120] : [-6, 120, -5040];
     var nudgeCos = two ? [-2, 24, -720] : [-2, 24, -720, 40320];
@@ -609,7 +609,7 @@
     "const MF DF_TWO_PI = " + twoPiLiteral + ";",
     "const MF DF_ONE_CONST = " + literal([1].concat(new Array(N - 1).fill(0))) + ";",
     "",
-    "// The optimizer barrier. u_dfVeil is 0, so this is the identity - but",
+    "// The optimizer barrier. u_dfVeil is 0, so this is the identity, but",
     "// that is only knowable at runtime, so no algebraic rewrite can reach",
     "// across it.",
     "float dfv(float x) { return uintBitsToFloat(floatBitsToUint(x) ^ u_dfVeil); }",
@@ -638,7 +638,7 @@
     "",
     "// Split into two 12-significand-bit halves so that every partial",
     "// product in dfTwoProd is exact. Masking off the low 12 mantissa bits",
-    "// does this directly - cheaper than Dekker's 4097*a trick, with no",
+    "// does this directly: cheaper than Dekker's 4097*a trick, with no",
     "// overflow edge case, and inherently opaque to the optimizer since it",
     "// goes through integer bit operations. `a - hi` is then exact (hi has",
     "// a's sign and exponent and a smaller magnitude).",
@@ -656,7 +656,7 @@
     "  return vec2(p, e);",
     "}",
     "",
-    "// The same with the operands already split - the generated multi-word",
+    "// The same with the operands already split: the generated multi-word",
     "// kernels use each operand word in several products.",
     "vec2 dfTwoProdS(float a, vec2 as, float b, vec2 bs) {",
     "  float p = dfv(a * b);",
@@ -666,7 +666,7 @@
     "}",
     "",
     "// a*a exactly. One split instead of two and three partial products",
-    "// instead of four - the two cross terms are the same number, and",
+    "// instead of four: the two cross terms are the same number, and",
     "// doubling it is exact.",
     "vec2 dfTwoSqr(float a) {",
     "  float p = dfv(a * a);",
@@ -732,14 +732,14 @@
     ].join("\n"),
     "",
     "// Scaling by a power of two (2.0, 4.0, 0.5 ...) is exact word by word,",
-    "// so it needs none of dfMulFloat's machinery - and being exact, there",
+    "// so it needs none of dfMulFloat's machinery, and being exact, there",
     "// is nothing in it for an optimizer to get wrong either.",
     "MF dfMulPow2(MF a, float p) { return a * p; }",
     "",
     !two ? genDiv(N) : opt.fastDiv ? [
     "// A float32 quotient, then one correction against the df remainder.",
     "// b*q1 agrees with a to ~24 bits, so the high words cancel EXACTLY and",
-    "// what is left fits a float32 - which is all the second quotient word",
+    "// what is left fits a float32, which is all the second quotient word",
     "// needs. See DEFAULT_OPTIONS in physics-df.js for the third word this",
     "// leaves out.",
     "MF dfDiv(MF a, MF b) {",
@@ -751,7 +751,7 @@
     "}",
     ].join("\n") : [
     "// A float32 quotient, then two correction rounds against the df",
-    "// remainder - the standard Newton-style df division.",
+    "// remainder: the standard Newton-style df division.",
     "MF dfDiv(MF a, MF b) {",
     "  float q1 = a.x / b.x;",
     "  vec2 r = dfSub(a, dfMulFloat(b, q1));",
@@ -785,7 +785,7 @@
     "// ---- Angle reduction, and sin/cos done entirely in df ----",
     "//",
     "// Hardware sin/cos are float32 functions with float32-sized error of",
-    "// their own - measured at ~2.5e-10 relative on Apple silicon, which",
+    "// their own: measured at ~2.5e-10 relative on Apple silicon, which",
     "// throws away five of df's digits no matter how precise the argument",
     "// handed to them is. Correcting only the ARGUMENT (the usual",
     "// cos(hi+lo) = cos(hi) - sin(hi)*lo trick) does not help with that, so",
@@ -795,7 +795,7 @@
     "// By far the most expensive routine here (about forty dfMuls), and it",
     "// IS on the hot path: the whole step runs in df, so every hinge and",
     "// every line rotates about a df angle. The callers hoist it as far out",
-    "// of their loops as the physics allows - see physics-gpu-df.js - and",
+    "// of their loops as the physics allows, see physics-gpu-df.js, and",
     "// dfSinCosNudge below covers the case where an angle only moved a hair.",
     halfPiDecls,
     "const float DF_INV_HALF_PI = " + fnum(f32(2 / Math.PI)) + ";",
@@ -804,7 +804,7 @@
     "// significand bits, so each k*piece is EXACT for |k| < 2^12 (~4000",
     "// quarter turns) and the reduced angle keeps every word. Reducing",
     "// against a single multi-float 2pi instead would leave a k*ulp*2pi",
-    "// residue - 3.5e-11 at 1e4 radians in df, which is the entire reason",
+    "// residue: 3.5e-11 at 1e4 radians in df, which is the entire reason",
     "// this is spelled out.",
     "MF dfReduceQuadrant(MF a, out int quadrant) {",
     "  float k = floor(dfToFloat(a) * DF_INV_HALF_PI + 0.5);",
@@ -843,7 +843,7 @@
     "// the pair it had before: the angle-sum identities, with the delta's own",
     "// sin/cos from a series short enough to be cheap, and with a limit on",
     "// the delta tight enough that the first dropped terms fall below the",
-    "// last word - so this is as exact as dfSinCos itself, for a fraction of",
+    "// last word, so this is as exact as dfSinCos itself, for a fraction of",
     "// the cost. The position solver nudges every hinged body's angle by a",
     "// tiny correction several times a step, which is the case this exists",
     "// for. Returns false (and leaves sn/cs alone) when the delta is too",
@@ -886,7 +886,7 @@
     "// a float32; the correction it yields is at most ~2^-23 of s, which",
     "// float32's 24 bits then place to ~2^-47. The step itself squares the",
     "// seed's ~6e-8 relative error into ~2e-15, about half a df ulp (a df",
-    "// carries 48 bits, 3.6e-15) - so a second step would buy nothing a df",
+    "// carries 48 bits, 3.6e-15), so a second step would buy nothing a df",
     "// can hold.",
     "MF dfSqrt(MF a) {",
     "  if (a.x <= 0.0) return vec2(0.0, 0.0);",
@@ -942,7 +942,7 @@
     "",
     "// Rotation with sin/cos supplied by the caller. Every solver iteration",
     "// rotates an anchor about a body's angle, and a df sin/cos is by far",
-    "// the most expensive thing in the library - so the callers hoist it out",
+    "// the most expensive thing in the library, so the callers hoist it out",
     "// of their loops and pass it in, rather than paying for it per rotate.",
     "DVec2 dv2RotateBy(DVec2 v, MF sn, MF cs) {",
     "  return dv2(dfSub(dfMul(v.x, cs), dfMul(v.y, sn)),",
@@ -972,7 +972,7 @@
     if (n <= 1) return base + "Hi." + axis;
     return "MF(" + WORD_SUFFIXES.slice(0, n).map(function (sfx) { return base + sfx + "." + axis; }).join(", ") + ")";
   }
-  // The four words of each axis, from a double-double pair - [[x words], [y words]].
+  // The four words of each axis, from a double-double pair: [[x words], [y words]].
   function wordUniformValues(xHi, xLo, yHi, yLo) {
     return [splitWords(xHi, xLo || 0, WORD_SUFFIXES.length), splitWords(yHi, yLo || 0, WORD_SUFFIXES.length)];
   }
@@ -996,7 +996,7 @@
     usePrecision: usePrecision,
     PRECISIONS: ORDER,
     UNIFORM_DECL: UNIFORM_DECL,
-    // The library at whatever precision usePrecision() last named - a getter
+    // The library at whatever precision usePrecision() last named: a getter
     // rather than a baked string for exactly that reason. A measurement page
     // can still pin one: assigning to it replaces the getter's answer until
     // it is assigned null again.

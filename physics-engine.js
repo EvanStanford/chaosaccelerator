@@ -1,12 +1,12 @@
 // This file is part of Chaos Accelerator, licensed under the Common Public
-// Attribution License, Version 1.0 (CPAL-1.0) - see LICENSE in the project
+// Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in the project
 // root, or https://chaosaccelerator.com/license for a hosted copy.
 
 // Pure, DOM-free 2D rigid body physics engine: circles and line segments,
 // capsule-style collision, revolute (pin) joints, springs, static anchors.
 //
-// The scene is plain, serializable data - { bodies: [...], hinges: [...],
-// springs: [...] } - and step(scene, dt) mutates it in place. That data-in/data-out shape is
+// The scene is plain, serializable data: { bodies: [...], hinges: [...],
+// springs: [...] }, and step(scene, dt) mutates it in place. That data-in/data-out shape is
 // deliberate: it's what a future per-pixel GPU port (Milestone 2) or a
 // deterministic replay-from-a-starting-state (Milestone 3) both need.
 (function (global) {
@@ -15,17 +15,17 @@
   var DENSITY = 1;
   var LINE_LINEAR_DENSITY = 8; // mass per unit length of a line body
   // Lines are mathematically 1D, but need a real thickness to collide with
-  // and to be clickable/hinge-able - this is a UI/collision detail, not a
+  // and to be clickable/hinge-able: this is a UI/collision detail, not a
   // physical property, so it does NOT factor into mass or inertia.
   var LINE_THICKNESS = 20;
 
-  // ---- Funnel: a trapezoid (throat 1, mouth 3, legs 2 each - all scaled by
+  // ---- Funnel: a trapezoid (throat 1, mouth 3, legs 2 each, all scaled by
   // body.size, which plays the same role for a funnel that radius/length
   // play for a circle/line) that teleports a circle touching its mouth to
   // the center of its throat, velocity unchanged. Local frame: the mouth
   // (wide, length 3*size/2) sits at local -y, the throat (narrow, length
   // size/2) at local +y, so angle=0 reads as a funnel opening upward and
-  // narrowing downward - same convention as ordinary downward gravity
+  // narrowing downward, same convention as ordinary downward gravity
   // feeding something in the top and out the bottom. Only supported so far
   // in Pac-Man edge mode with standard (non-mutual) gravity; see
   // gravitationalMass/halfExtent below and computeAccelerations, which do
@@ -33,7 +33,7 @@
   var FUNNEL_MOUTH_HALF = 0.75;
   var FUNNEL_THROAT_HALF = 0.25;
   var FUNNEL_HALF_HEIGHT = Math.sqrt(3) / 4;
-  // Mass/inertia of the 3 solid edges only (throat + 2 legs) - the mouth is
+  // Mass/inertia of the 3 solid edges only (throat + 2 legs): the mouth is
   // an opening, not a wall, so it carries no mass. Derived once, in closed
   // form, as three thin rods (LINE_LINEAR_DENSITY per unit length) about
   // their own centers, moved to the body's center by the parallel axis
@@ -45,26 +45,26 @@
   var FUNNEL_INERTIA_COEFF = 37 / 48;
 
   // The ceiling on how many bodies a running simulation may reach, however
-  // many splitters it contains - see step()'s splitting section. Authoring
+  // many splitters it contains: see step()'s splitting section. Authoring
   // is capped far lower (PhysicsGPU.MAX_BODIES); this is only about what a
   // run may GROW to.
   //
   // The DEFAULT ceiling, for a scene that doesn't name its own. A scene can
   // (and for anything with a splitter, should) carry its own
-  // `maxSimulationBodies` - see maxSimulationBodiesFor below.
+  // `maxSimulationBodies`: see maxSimulationBodiesFor below.
   //
   // This number IS the compiled shader's size: physics-gpu.js pads a
   // splitter scene out to exactly this many body slots and unrolls every
   // pair among them, so the cost is quadratic in it. 20 is ~190 collision
   // pairs and a ~350KB shader that links in about three quarters of a
-  // second - and every pixel of the fractal grid then runs all of that,
+  // second, and every pixel of the fractal grid then runs all of that,
   // every step. Whatever it is set to, both engines must agree or a splitter
   // scene renders one thing on the grid and plays back another.
   var MAX_SIMULATION_BODIES = 20;
   // What the scene-level override may be set to. The floor is 2 because one
   // ball splitting into two is the smallest thing a splitter can do at all.
   //
-  // The ceiling is NOT where it stops being slow - it is where it stops
+  // The ceiling is NOT where it stops being slow: it is where it stops
   // being expressible. stepOnce() takes 4 parameters per authored body and 6
   // per spawn slot (a slot's shape constants, alive flag and lineage all
   // have to persist across calls), plus 2 per hinge and the shared
@@ -90,7 +90,7 @@
   // stop tunneling: a body crossing an entire LINE_THICKNESS-wide collision
   // band within one step is past a thin line before any contact is detected,
   // and 1000 kept per-step movement (16.7px) under LINE_THICKNESS (20). That
-  // job now belongs to the swept collision tests instead - circle and line
+  // job now belongs to the swept collision tests instead: circle and line
   // contacts both solve for the exact instant of impact along the step's
   // path, so nothing tunnels regardless of this value (verified by firing
   // circles at a thin line at up to 5000px/s with the cap at 10000: all
@@ -102,13 +102,13 @@
   var MAX_SPEED = 2000;
   // Under Mutual Gravity a real orbit does exceed it: a close perihelion
   // passage legitimately runs to ~2000px/s, and clamping that to 1000 threw
-  // the body into a far lower orbit on its first pass - once, and then never
+  // the body into a far lower orbit on its first pass, once, and then never
   // again, because the smaller orbit no longer reached the cap. That is the
   // "it drops, then looks correct forever after" this was reported as.
   var MUTUAL_GRAVITY_MAX_SPEED = 5000;
 
-  // Whichever ceiling this scene runs under. Every copy of this rule - here,
-  // physics-gpu.js's GLSL and physics-gpu-df.js's df GLSL - has to agree, or
+  // Whichever ceiling this scene runs under. Every copy of this rule, here,
+  // physics-gpu.js's GLSL and physics-gpu-df.js's df GLSL, has to agree, or
   // the three implementations quietly simulate different physics; the JS/GPU
   // lockstep tests catch it, loudly (~100px of divergence, or a body landing
   // a whole frame period away).
@@ -116,8 +116,8 @@
     return scene.mutualGravity ? MUTUAL_GRAVITY_MAX_SPEED : MAX_SPEED;
   }
   // The constant downward pull whenever Mutual Gravity is off (under Mutual
-  // Gravity nothing pulls "down" at all - see computeAccelerations). Fixed,
-  // not a scene setting - and so are friction (none) and restitution
+  // Gravity nothing pulls "down" at all: see computeAccelerations). Fixed,
+  // not a scene setting, and so are friction (none) and restitution
   // (perfectly elastic, apart from the resting-contact ramp below).
   var GRAVITY = 800;
   // Below this closing speed, treat restitution as 0. Without this, a body
@@ -154,12 +154,12 @@
   }
 
   // Gravity + speed clamp over an arbitrary sub-step, not just the fixed
-  // step dt - step() calls this once per leg of a CCD-split step (see its
+  // step dt. step() calls this once per leg of a CCD-split step (see its
   // own comment), so it has to be continuous in dt itself: dt=0 must reduce
   // to a clamp of an already-clamped vector, i.e. the identity.
   // Takes the whole acceleration as a vector rather than just a downward
   // scalar, because under Mutual Gravity (see computeAccelerations) every
-  // body pulls in its own direction - uniform gravity is then simply the
+  // body pulls in its own direction: uniform gravity is then simply the
   // special case where every body's acceleration is (0, GRAVITY).
   // ---- Air drag (EXPERIMENTAL - 0 turns it off, exactly) ----
   //
@@ -167,15 +167,15 @@
   // predictable than the integrator's own. Semi-implicit Euler does not hand
   // back exactly the energy an encounter took: measured on two sprung circles
   // passing through each other, a rebound lands 0.05-0.55px higher than it
-  // started, by an amount set by where the step's samples fall - a "friction"
+  // started, by an amount set by where the step's samples fall, a "friction"
   // that is sometimes negative and depends on timing. Right at a pass/no-pass
   // threshold that is enough to decide the NEXT encounter, and because the
   // balls linger there the timing sweeps through many whole steps over a
   // hair's width of starts: a chirped square wave, ~0.5px wide.
   //
   // Drag cannot remove that wobble, but it takes the second encounter's
-  // threshold away from the first's - to starts that cleared the first
-  // comfortably, without lingering - where the timing barely varies across
+  // threshold away from the first's, to starts that cleared the first
+  // comfortably, without lingering, where the timing barely varies across
   // the band and the stripes should open out into (nearly) one edge.
   //
   // Linear drag, a = -AIR_DRAG * v, on every moving body's linear velocity
@@ -207,21 +207,21 @@
   //
   // GRAVITATIONAL mass is deliberately NOT body.mass. computeMass gives an
   // anchored body mass 0 / invMass 0, which is how the solver reads "cannot
-  // be pushed" - but a thing that can't be pushed should still pull, so the
+  // be pushed", but a thing that can't be pushed should still pull, so the
   // attraction below derives mass from the body's shape instead, and gives
   // an anchored one 10x the density (its immovability reads as "much denser
   // stuff", and it makes anchors usable as the suns of a scene).
   var ANCHORED_GRAVITY_DENSITY = 10;
   // The one free parameter, since replacing the Gravity slider left no UI to
   // tune it with. Set so an anchored default-size circle (radius 30) pulls
-  // at roughly GRAVITY from 300px away - near enough
+  // at roughly GRAVITY from 300px away: near enough
   // that scenes built for downward gravity stay in a familiar range when
   // flipped over to Mutual, while two free bodies that far apart pull on
   // each other about ten times more gently, which is the regime where orbits
   // rather than immediate collapse happen.
   var MUTUAL_GRAVITY_CONSTANT = 2500;
 
-  // A trapezoid (funnel/splitter) has no `length` - reading one here is what
+  // A trapezoid (funnel/splitter) has no `length`, reading one here is what
   // used to turn every Mutual Gravity acceleration into NaN the moment a
   // funnel or splitter was in the scene, and NaN does not stay contained:
   // every distance comparison against it is false, so `dist >= rsum` reads as
@@ -232,14 +232,14 @@
     var density = body.isAnchored ? ANCHORED_GRAVITY_DENSITY : 1;
     if (body.type === "circle") return density * DENSITY * Math.PI * body.radius * body.radius;
     if (body.type === "funnel" || body.type === "splitter") {
-      // Its own wall mass - the same closed form computeMass uses, which is
+      // Its own wall mass: the same closed form computeMass uses, which is
       // what "how much stuff is there" means for this shape.
       return density * LINE_LINEAR_DENSITY * FUNNEL_MASS_COEFF * body.size;
     }
     return density * LINE_LINEAR_DENSITY * body.length;
   }
 
-  // How far from its own center a body reaches - the radius of a circle,
+  // How far from its own center a body reaches: the radius of a circle,
   // half the length of a line, and for a trapezoid the distance to its
   // furthest corner (the mouth corners, always). Used below only to decide
   // where the inverse square stops being the right law.
@@ -254,22 +254,22 @@
   //
   // Uniform mode is the trivial case: everything accelerates downward at
   // GRAVITY. Under Mutual Gravity each body instead sums G*m/r^2
-  // toward every OTHER body - including anchored ones, which pull without
+  // toward every OTHER body, including anchored ones, which pull without
   // ever being pulled (they don't move, and advanceVelocity is never called
   // for them, so their own entry is left at zero).
   //
-  // TWO BODIES THAT ARE ACTUALLY TOUCHING EXERT NO MUTUAL GRAVITY - but only
+  // TWO BODIES THAT ARE ACTUALLY TOUCHING EXERT NO MUTUAL GRAVITY, but only
   // when collisions are on. See the smooth interior below for the
   // collisions-off case.
   //
-  // Not an approximation for tidiness - without it the simulation invents
+  // Not an approximation for tidiness, without it the simulation invents
   // energy. Once a body settles against another it sits a fraction of a pixel
   // inside the surface, and the contact solver's positional correction pushes
   // it back out. That correction moves the body WITHOUT touching its
   // velocity, which in a gravitational field is a free lift out of the well:
-  // it is work done from nothing. Right at contact this field is savage -
+  // it is work done from nothing. Right at contact this field is savage,
   // about 19,600 px/s^2 for a default circle resting on an anchored one,
-  // twenty times ordinary gravity - so each nudge hands back a large slug of
+  // twenty times ordinary gravity, so each nudge hands back a large slug of
   // potential energy, gravity converts it straight back to speed, the body
   // drives deeper, and the correction pushes harder still. Measured on the
   // scene this was reported from: energy climbing on 401 of 900 steps, the
@@ -301,7 +301,7 @@
   // worth of it (~32.7 px/s) no matter how close their starting states are.
   // Measured on a reported scene: two starts 4.7e-5 px apart came out 133.9 px
   // apart, and that gap stayed at 133.9 px as the starts were brought 7 decades
-  // closer together - a gap that will not close is a discontinuity, not chaos.
+  // closer together, a gap that will not close is a discontinuity, not chaos.
   //
   // So with collisions off the pull carries on smoothly through the interior
   // instead of falling off a cliff: outside, the usual G*m/r^2; inside,
@@ -311,15 +311,15 @@
   // which is the pull inside a ball whose density fades smoothly to zero at
   // its surface (as (1 - u^2)^2) rather than stopping dead there. At
   // r == contact it matches G*m/r^2 in value, slope AND curvature, and it
-  // reaches 0 at r == 0 - a polynomial in r^2, so it is smooth through the
+  // reaches 0 at r == 0: a polynomial in r^2, so it is smooth through the
   // center too, and there is still no singularity to guard against. (Dropping
-  // the rule entirely instead - plain 1/r^2 all the way down - pins the 5000
+  // the rule entirely instead, plain 1/r^2 all the way down, pins the 5000
   // speed cap and leaves 3e+4 px jumps at practical sampling.)
   //
   // Continuity alone is not enough. This used to be the uniform-density
   // interior G*m*r/contact^3, which meets G*m/r^2 at the shell but turns from
   // rising to falling there, leaving a sharp peak in the pull right at
-  // contact. A step samples the pull once - ~10px apart on a fast pass - so
+  // contact. A step samples the pull once, ~10px apart on a fast pass, so
   // what a pass picks up from that peak depends on where the step grid falls
   // relative to the crossing, and sliding a pixel's start along a line slides
   // that phase until one more step lands inside the shell and the output's
@@ -355,7 +355,7 @@
           if (r2 >= contact * contact) {
             pull = MUTUAL_GRAVITY_CONSTANT * gravitationalMass(bodies[j]) / (r2 * Math.sqrt(r2));
           } else if (collisionsEnabled(scene)) {
-            continue; // touching - the contact force answers for it
+            continue; // touching: the contact force answers for it
           } else {
             // Smooth interior (see above): meets G*m/r^2 at r == contact in
             // value, slope and curvature, and reaches 0 at the center.
@@ -374,29 +374,29 @@
 
   // ---- Springs ----
   //
-  // A spring is a FORCE, like gravity - not a constraint like a hinge, and
+  // A spring is a FORCE, like gravity, not a constraint like a hinge, and
   // not a body. It is massless, collides with nothing, and the two things it
   // joins still collide with each other as if it were not there (a hinged
-  // pair does not - see hingeConnects). It is the same shape a hinge is:
+  // pair does not: see hingeConnects). It is the same shape a hinge is:
   //
   //   { bodyA: index | null, bodyB: index, localAnchorA, localAnchorB,
   //     stiffness, restLength }
   //
   // with bodyA === null meaning the background, in which case localAnchorA is
-  // a fixed WORLD point (exactly the hinge convention - see hingeBodyA). Either
+  // a fixed WORLD point (exactly the hinge convention: see hingeBodyA). Either
   // end may sit anywhere on its body, so a spring pulls on a lever arm and
   // TURNS what it is attached to: it is the only thing in the engine that
   // produces an angular acceleration. Gravity acts through the center of
   // mass and every other change to `w` is an impulse (see step()).
   //
-  // The law is Hooke's, F = k * (r - restLength) along the spring - down to a
+  // The law is Hooke's, F = k * (r - restLength) along the spring: down to a
   // eighth of the rest length. Inside that CORE it is not, and on purpose.
   //
   // Nothing stops a spring's two ends passing through each other: collisions
   // keep two BODIES apart, but a point on the background is not a body, and
   // with collisions off neither is anything else. A Hookean spring with a
   // rest length pushes its ends apart hardest of all at zero length, k *
-  // restLength - and as the ends pass through each other "apart" reverses, so
+  // restLength, and as the ends pass through each other "apart" reverses, so
   // the force flips from full strength one way to full strength the other in
   // no distance at all. A step samples the force once, ~10-30px apart on a
   // pass, so each pass lands one sample either just before that flip or just
@@ -405,12 +405,12 @@
   // scene this was reported from (two free circles, rest 406, stretched to
   // twice that and released): starts 0.005px apart came out up to 261px
   // apart, 124 such jumps within 2px of travel, and bringing two starts 1000x
-  // closer across one left a 71px gap - a gap that will not close is a
+  // closer across one left a 71px gap, a gap that will not close is a
   // discontinuity, not chaos. At 1/240s the same sweep was perfectly smooth:
   // the physics is a plain oscillation, and every ridge was this flip.
   //
   // (This first shipped as that same law with its length softened by one
-  // pixel, sqrt(r^2 + 1) - enough to keep 0/0 out, and twenty times too
+  // pixel, sqrt(r^2 + 1): enough to keep 0/0 out, and twenty times too
   // narrow to be seen by a step. It is the lesson computeAccelerations'
   // smooth interior already records: the rounding has to be BROAD.)
   //
@@ -425,30 +425,30 @@
   // restLength on the way in. It is still a central force of r alone, so it
   // still has a potential (springPotentialEnergy integrates it) and costs
   // nothing in energy conservation. A spring that never shortens below a
-  // eighth of its rest length - nearly all of them - is exactly Hooke's.
+  // eighth of its rest length, nearly all of them, is exactly Hooke's.
   // Scaling the core with the rest length rather than fixing it in pixels
   // lets a short spring's core shrink along with the force at stake in it.
   // With restLength 0 there is no core and no flip: F = k * d, exactly.
   //
   // WHY AN EIGHTH. Any core this broad removes the ridges; what the fraction
-  // sets is how hard the spring still pushes near zero length - its slope
+  // sets is how hard the spring still pushes near zero length: its slope
   // there is (15/(8*SPRING_CORE) - 1) * k, whatever the rest length. At a
   // quarter (where this started) that is 6.5k, and under Mutual Gravity with
   // collisions off it met gravity's own smooth interior almost exactly: for
   // two default circles on a 56,000 spring, 129 px/s^2 per px of push against
   // 143 of pull. Gravity won by a hair, so the middle 25px had next to no net
-  // force at all, with an unstable balance point at 20px each side - and a
+  // force at all, with an unstable balance point at 20px each side, and a
   // pair arriving there with no speed to spare parked for 100+ steps, left by
   // whichever way the step's sampling happened to tip it, and came back as a
   // square wave along a line of starts 6e-5px long. An eighth makes it 14k
   // (277 against that same 143): the spring wins at the center, which is then
   // an ordinary hilltop to cross rather than a plateau to park on. The cost
-  // is a narrower core on a short spring - 5px on a 40px one, under a step's
-  // travel - where the force it rounds off is correspondingly small.
+  // is a narrower core on a short spring, 5px on a 40px one, under a step's
+  // travel, where the force it rounds off is correspondingly small.
   //
   // What is left is real. Where two ends arrive at zero length with no speed
   // to spare they balance there, as a pendulum does upright, and which way
-  // they fall is decided by less and less - a band of genuinely steep, but
+  // they fall is decided by less and less: a band of genuinely steep, but
   // continuous, dependence on the start.
   //
   // No damping, on purpose: the rest of the engine is lossless (no friction,
@@ -469,10 +469,10 @@
   // oscillator while (omega * dt)^2 < 4, and past that its energy grows
   // without limit. Linear speed has a cap to run into (see MAX_SPEED);
   // ANGULAR speed has none, so an unstable spring on a lever arm spins its
-  // body up until `w` overflows - and NaN does not stay contained (see
+  // body up until `w` overflows, and NaN does not stay contained (see
   // gravitationalMass's own story). So the stiffness actually used is limited
   // to what the two ends can take: k * dt^2 * (wA + wB) <= SPRING_STABILITY,
-  // where w is how readily an end gives way - 1/mass, plus 1/inertia times
+  // where w is how readily an end gives way, 1/mass, plus 1/inertia times
   // the lever arm squared (the worst case, a pull square to the arm). 0.5
   // leaves room for several springs on one body before their sum nears 4.
   //
@@ -485,13 +485,13 @@
   // That covers the spring's own stiffness. A spring on a lever arm has a
   // SECOND way to oscillate that it does not: the body swinging about its
   // center like a pendulum under the spring's tension, whose stiffness is not
-  // k at all but tension x arm - and tension grows with stretch, without
+  // k at all but tension x arm, and tension grows with stretch, without
   // limit. Measured before anything guarded it: the smallest circle, attached
   // 3px off-center to the stiffest spring it was allowed, passed
   // (omega*dt)^2 = 4 at about 30px of stretch and was spun up to 7,000 rad/s,
   // its energy multiplied by 580. No constant stiffness can rule that out (an
   // X/Y Input can start a body thousands of pixels from where its spring
-  // relaxes), so the SPIN is integrated implicitly past the same margin - see
+  // relaxes), so the SPIN is integrated implicitly past the same margin: see
   // springSpin. Scaling the torque back instead was tried first and is worse:
   // a torque that no longer matches its force pumps energy in (+160% over
   // 3000 steps on that same circle), where this can only take it out.
@@ -509,7 +509,7 @@
   }
 
   // The stiffest this spring may be between these two bodies at this step
-  // size - Infinity when neither end can move (nothing to destabilize).
+  // size: Infinity when neither end can move (nothing to destabilize).
   function springStableStiffness(spring, bodies, dt) {
     var wSum = springEndWeight(springBodyA(spring, bodies), spring.localAnchorA) +
       springEndWeight(bodies[spring.bodyB], spring.localAnchorB);
@@ -520,7 +520,7 @@
     return Math.min(spring.stiffness, springStableStiffness(spring, bodies, dt));
   }
 
-  // Both ends in world space - what the editor draws a spring between.
+  // Both ends in world space, what the editor draws a spring between.
   function getSpringWorldPoints(spring, bodies) {
     var bodyA = springBodyA(spring, bodies), bodyB = bodies[spring.bodyB];
     var rA = rotateVec(spring.localAnchorA, bodyA.angle);
@@ -529,7 +529,7 @@
   }
 
   // The spring law as the factor f in F = f * d, d being the vector from one
-  // end to the other: Hooke's 1 - restLength/r outside the core, the smooth
+  // end to the other: Hooke's 1, restLength/r outside the core, the smooth
   // polynomial inside it. See the Springs header for both.
   function springForceFactor(length, restLength) {
     if (restLength === 0) return 1;
@@ -544,13 +544,13 @@
   }
 
   // A body's spin after `t` seconds of this step's torque: w + alpha*t, the
-  // explicit update every other quantity in the engine gets - until the swing
+  // explicit update every other quantity in the engine gets, until the swing
   // it is feeding is too fast for the step. `swing` is that swing's frequency
   // squared, (tension x arm) / inertia summed over the springs on this body
   // (see SPRING_STABILITY): while swing * t^2 stays under SPRING_STABILITY the
   // divisor is exactly 1 and this IS the explicit update, which is every
-  // ordinary scene. Past it, the excess goes into the divisor - the
-  // backward-Euler treatment of just that excess - which is stable however
+  // ordinary scene. Past it, the excess goes into the divisor, the
+  // backward-Euler treatment of just that excess, which is stable however
   // large the tension gets (the update's two eigenvalues stay inside the unit
   // circle for any margin up to 2), and dissipative rather than conservative:
   // a swing too fast for the step to follow is damped toward the direction
@@ -565,7 +565,7 @@
   // computeAccelerations returns it) and to `alpha` (its angular one, which
   // nothing else contributes to), and tallies `swing` for springSpin.
   // Evaluated once, from the positions the step starts at, for the same
-  // reason gravity is - see step().
+  // reason gravity is: see step().
   function addSpringAccelerations(scene, acc, alpha, swing, dt) {
     var bodies = scene.bodies, springs = sceneSprings(scene);
     for (var s = 0; s < springs.length; s++) {
@@ -608,7 +608,7 @@
       var k = springEffectiveStiffness(spring, bodies, dt);
       if (L0 === 0 || r >= c) { total += 0.5 * k * (r - L0) * (r - L0); return; }
       // Inside the core: Hooke's energy at its rim, less the work the
-      // polynomial does from there in - G is the integral of f(r) * r.
+      // polynomial does from there in, G is the integral of f(r) * r.
       function G(x) { var u = (x * x) / (c * c); return k * x * x * (0.5 - (L0 / c) * (15 / 16 - 5 / 16 * u + 1 / 16 * u * u)); }
       total += 0.5 * k * (c - L0) * (c - L0) + G(r) - G(c);
     });
@@ -621,21 +621,21 @@
   // helpers below): whatever is pinned to the background never wraps, however
   // far it swings out of frame, and neither does anything hinged to it; bodies
   // hinged only to each other wrap TOGETHER, as one rigid translation. A
-  // spring follows the same rule, for the same reason - wrapping one end of
+  // spring follows the same rule, for the same reason, wrapping one end of
   // it alone would stretch it by a whole frame in a single step.
   //
   // A spring joins things the hinge walk cannot describe, though: that walk
   // follows each hinge from its bodyA down to its bodyB and assumes a body has
   // one parent, which holds for hinges and does not for springs (a ball
-  // between two others has two). So bodies joined by springs - directly, or
-  // through each other's hinges - are gathered into GROUPS, each with:
+  // between two others has two). So bodies joined by springs, directly, or
+  // through each other's hinges, are gathered into GROUPS, each with:
   //
   //   tethered  it holds a spring to the background, or an anchored body.
   //             It never wraps.
   //   leader    otherwise, its lowest-index body that is free to wrap (not
   //             anchored, not hinged onto another body). The group wraps when
-  //             the leader does - by its world-hinge pin if it has one, as a
-  //             hinged root always has - and every member moves with it.
+  //             the leader does, by its world-hinge pin if it has one, as a
+  //             hinged root always has, and every member moves with it.
   //
   // A body in no group keeps the hinge rules exactly as they were, which is
   // every body of every scene without a spring. Returns null for such a scene.
@@ -657,7 +657,7 @@
     });
     var byRoot = {}, groups = [], groupOf = new Array(n);
     for (i = 0; i < n; i++) groupOf[i] = null;
-    // Only components a spring actually touches - a hinged assembly with no
+    // Only components a spring actually touches: a hinged assembly with no
     // spring anywhere in it is not a group, and keeps the hinge rules.
     for (i = 0; i < n; i++) if (sprung[i] && !byRoot[find(i)]) {
       byRoot[find(i)] = { members: [], tethered: false, leader: -1 };
@@ -693,7 +693,7 @@
       body.inertia = body.mass * body.radius * body.radius / 2;
     } else if (body.type === "funnel" || body.type === "splitter") {
       // A splitter is the identical trapezoid (same material, same
-      // formula) - only which edge does what differs. See createSplitter.
+      // formula), only which edge does what differs. See createSplitter.
       body.mass = LINE_LINEAR_DENSITY * FUNNEL_MASS_COEFF * body.size;
       body.inertia = LINE_LINEAR_DENSITY * FUNNEL_INERTIA_COEFF * body.size * body.size * body.size;
     } else {
@@ -723,11 +723,11 @@
     return b;
   }
 
-  // Same trapezoid as a funnel (identical geometry/mass - see
+  // Same trapezoid as a funnel (identical geometry/mass, see
   // getFunnelVertices/getFunnelEdges and computeMass's shared branch above),
   // with the special edge swapped: a circle touching the SHORT side (the
   // funnel's "throat") here splits into two, rather than a circle touching
-  // the long side (the funnel's "mouth") teleporting - see
+  // the long side (the funnel's "mouth") teleporting, see
   // collideSplitterShortSideTHit and step()'s splitting section.
   function createSplitter(x, y, size, angle, isAnchored) {
     var b = { type: "splitter", x: x, y: y, angle: angle || 0, size: size, vx: 0, vy: 0, w: 0, isAnchored: !!isAnchored };
@@ -741,7 +741,7 @@
     return [{ x: line.x - hx, y: line.y - hy }, { x: line.x + hx, y: line.y + hy }];
   }
 
-  // The 4 corners in the funnel's own local frame (unrotated, uncentered) -
+  // The 4 corners in the funnel's own local frame (unrotated, uncentered):
   // used both to place them in the world (getFunnelVertices) and, by
   // physics-hinge-geometry.js, to get an axis-aligned bounding box for an
   // anchored funnel's frame-edge check without duplicating this shape.
@@ -891,17 +891,17 @@
     var dist = Math.sqrt(dx * dx + dy * dy);
     var rsum = a.radius + b.radius;
     if (dist >= rsum) {
-      // Not touching yet at the start of this step - solve for whether
+      // Not touching yet at the start of this step: solve for whether
       // straight-line motion at the current velocities brings them together
       // before this step's own dt elapses. Without this, a fast enough
       // approach only gets caught once some future step's STARTING position
-      // happens to already be past the boundary - which step that ends up
+      // happens to already be past the boundary, which step that ends up
       // being is a discontinuous function of the starting conditions, so
       // the resulting bounce is too (a tiny nudge to a starting position
       // can shift which discrete step first notices contact, and each
       // step's own velocity/penetration state differs). Solving the exact
-      // crossing time instead makes the contact normal - and everything
-      // downstream of it - a continuous function of where things started.
+      // crossing time instead makes the contact normal, and everything
+      // downstream of it, a continuous function of where things started.
       var vrx = b.vx - a.vx, vry = b.vy - a.vy;
       var qa = vrx * vrx + vry * vry;
       var qb = 2 * (dx * vrx + dy * vry);
@@ -915,12 +915,12 @@
       var hnx = hitDist > 1e-9 ? hitDx / hitDist : 0;
       var hny = hitDist > 1e-9 ? hitDy / hitDist : 1;
       // Evaluated at the true contact instant (a's position advanced by t),
-      // not a's stale start-of-step position - otherwise rB below (point
+      // not a's stale start-of-step position, otherwise rB below (point
       // minus b's UNADVANCED center) picks up a spurious component along
       // vRel*t instead of landing exactly on -n*b.radius, injecting phantom
       // spin into a contact that should only ever be linear for two
       // circles. rA and rB are the lever arms themselves, not derived by
-      // subtracting a center from .point at solve time - for a circle the
+      // subtracting a center from .point at solve time: for a circle the
       // lever arm is always exactly ±n*radius by construction, regardless
       // of any sub-step timing.
       var posAx = a.x + a.vx * t, posAy = a.y + a.vy * t;
@@ -946,12 +946,12 @@
   }
 
   // Swept capsule (segment e0-e1, half-thickness halfThickness, moving at
-  // constant velocity segVx/segVy, otherwise rigid - rotation during the
+  // constant velocity segVx/segVy, otherwise rigid: rotation during the
   // step is ignored, matching the capsule's own historical approximation)
   // vs. circle. Shared by collideLineCircle (segment = the line's own body,
   // refX/refY = its center) and collideFunnelCircle (segment = one of the
   // funnel's 3 solid edges, refX/refY = the FUNNEL's center, since rA is a
-  // lever arm on the whole funnel body, not on an implicit sub-body) - same
+  // lever arm on the whole funnel body, not on an implicit sub-body): same
   // three sub-tests (flat side of the capsule plus a cap at each endpoint),
   // earliest valid t wins, exactly as collideLineCircle always worked.
   // Returns null if the capsule and circle never come within halfThickness+
@@ -1019,7 +1019,7 @@
   }
 
   // funnel = A, circle = B. The 3 solid edges (throat + 2 legs) bounce like
-  // a line each; the mouth (see collideFunnelMouthTHit) never appears here -
+  // a line each; the mouth (see collideFunnelMouthTHit) never appears here:
   // it teleports instead of colliding, handled separately in step(). More
   // than one edge can register in the same step (e.g. a ball resting in the
   // throat/leg corner needs both normals to be stable, the same reason
@@ -1040,11 +1040,11 @@
   // in [0, dt]? Uses the same swept capsule test as the solid edges (same
   // halfThickness, so the trigger reads as the same "wall" thickness the
   // mouth is drawn at) but only ever needs tHit and the teleport
-  // destination - normal/point/rA/rB are meaningless for a teleport, since
+  // destination: normal/point/rA/rB are meaningless for a teleport, since
   // no impulse is ever applied. targetX/Y is the funnel's OWN throat center
   // advanced by the funnel's velocity to the same tHit (consistent with how
   // the funnel's translation-during-the-sweep is already handled for the
-  // solid edges), rotated by the funnel's angle at the START of the step -
+  // solid edges), rotated by the funnel's angle at the START of the step:
   // rotation during the step is ignored, the same simplification every
   // capsule test here already makes.
   function collideFunnelMouthTHit(funnel, circle, dt) {
@@ -1062,7 +1062,7 @@
   }
 
   // splitter = A, circle = B. The 3 solid edges (mouth + 2 legs) bounce like
-  // a line each - the short side (see collideSplitterShortSideTHit) never
+  // a line each: the short side (see collideSplitterShortSideTHit) never
   // appears here; it splits the circle in two instead of colliding, handled
   // separately in step(). Mirrors collideFunnelCircle exactly, with the
   // trigger edge swapped (mouth instead of throat).
@@ -1080,21 +1080,21 @@
 
   // Does circle's path touch splitter's short side (the split trigger)
   // sometime in [0, dt]? Same swept capsule test collideFunnelMouthTHit uses
-  // against the mouth, run here against the throat instead - but returns
+  // against the mouth, run here against the throat instead, but returns
   // two DISPLACEMENTS rather than one teleport target (see step()'s
   // splitting section for how they're used: the circle this hit becomes
   // two, each moved by one of them, both keeping its velocity).
   //
   // Offsets, not points on the long side. The rule being implemented is
   // "the contact's distance from a short-side corner is preserved as the
-  // distance from the corresponding long-side corner" - and the map that
+  // distance from the corresponding long-side corner", and the map that
   // does that is a pure translation by the leg vector joining those two
   // corners. offset1 slides the ball down the left leg (throatLeft ->
   // mouthLeft); offset2 slides it down the right leg (throatRight ->
   // mouthRight). Since the two parallel sides share a direction, a
   // translation moves a point at distance d from throatLeft to distance d
   // from mouthLeft exactly, for every d, with no d appearing in the formula
-  // at all - the worked example (0.75/0.25 through a length-1 throat
+  // at all: the worked example (0.75/0.25 through a length-1 throat
   // against a length-3 mouth, landing 2 units apart) falls out of the
   // geometry rather than being solved for.
   //
@@ -1103,22 +1103,22 @@
   // actually got this step, replacing it with a point exactly on the long
   // side. Two pixels whose balls cross at slightly different speeds then
   // produce the same post-split position, and the perpendicular component
-  // of the answer jumps to a constant at the split - a discontinuity in the
+  // of the answer jumps to a constant at the split: a discontinuity in the
   // one variable the fractal grid is a picture OF. Translating instead
   // carries the ball's own sub-step overshoot through untouched, so the
   // post-split state stays a continuous function of the pre-split state.
   //
   // The splitter's own motion drops out for free: at the contact instant
   // both corners have moved by the same splitter velocity, so their
-  // difference - the leg vector - is unchanged by it. An earlier
+  // difference, the leg vector, is unchanged by it. An earlier
   // absolute-target version had to add splitter.v * tHit back in by hand.
   //
   // ...plus one constant clearance, without which the feature doesn't work
   // at all. The trigger fires off a SWEPT capsule test, so it fires while
   // the ball is still (halfThickness + radius) short of the short side's
-  // centerline - it has touched the surface, not crossed the line. A pure
+  // centerline: it has touched the surface, not crossed the line. A pure
   // leg-vector translation preserves that "short by 14px" faithfully, which
-  // on the far side means 14px short of the LONG side's centerline - i.e.
+  // on the far side means 14px short of the LONG side's centerline: i.e.
   // inside its wall, where the ball then bounces back in and is trapped
   // inside the trapezoid forever. (Observed exactly that: both halves stuck
   // at y=444 against a mouth wall spanning 442-462, ping-ponging until the
@@ -1127,7 +1127,7 @@
   // So the two surfaces are matched up instead of the two centerlines: a
   // ball touching the entrance surface comes out touching the exit surface,
   // from the outside. That is one extra step of 2*(halfThickness + radius)
-  // along the throat->mouth normal - a constant for a given ball, so the
+  // along the throat->mouth normal: a constant for a given ball, so the
   // map is still a pure translation and still exactly as continuous as the
   // leg vector alone. Anything arriving faster than that crosses further
   // in and correspondingly further out, which is the continuity this is
@@ -1137,8 +1137,8 @@
     var throatLeft0 = edges.throat[0], throatRight0 = edges.throat[1];
 
     // Only a FRESH crossing splits. A circle that was already inside the
-    // trigger's capsule when the step began - resting against the short
-    // side, or grazing along it - would otherwise re-split on every single
+    // trigger's capsule when the step began, resting against the short
+    // side, or grazing along it, would otherwise re-split on every single
     // step, and since each split adds a body that is exponential growth
     // measured in steps, not an occasional extra ball. Requiring the circle
     // to have been clear at the start of the step makes each pass through
@@ -1168,7 +1168,7 @@
   // A single contact point can't stop a line from spinning around it (real
   // physics: hitting a rod off-center mostly imparts spin, not braking), so
   // two lines lying flat against each other need contact at BOTH ends of
-  // their overlap to actually rest - otherwise a rod dropped flat on the
+  // their overlap to actually rest, otherwise a rod dropped flat on the
   // ground just spins away on first touch instead of settling. This is
   // still just axis-aligned interval overlap, not a general polygon
   // manifold, so it stays simple; it only kicks in for the near-parallel
@@ -1233,10 +1233,10 @@
   }
 
   // A and B are expected to be PROBE bodies here (real position, velocity
-  // advanced by this step's own gravity+clamp - see step()'s comment) so
+  // advanced by this step's own gravity+clamp: see step()'s comment) so
   // the swept tests solve against the same straight-line motion the body
   // is actually about to take in leg 1, not its pre-gravity entering
-  // velocity. tHit (fraction of dt at which contact begins - 0 if already
+  // velocity. tHit (fraction of dt at which contact begins: 0 if already
   // touching at the start of this step, up to dt for a just-barely-caught
   // CCD contact) is set explicitly by every collide function now.
   function collidePair(A, B, dt) {
@@ -1246,7 +1246,7 @@
     else if (A.type === "circle" && B.type === "line") {
       // collideLineCircle(line, circle) always takes (line, circle) in that
       // order, so calling it as (B, A) here returns rA/rB for (line=B,
-      // circle=A) - the opposite of this function's own A/B. Swap them back
+      // circle=A): the opposite of this function's own A/B. Swap them back
       // along with flipping the normal, or the caller (which always passes
       // bodies[contacts[i].a] as bodyA) ends up applying the line's lever
       // arm to the circle and vice versa.
@@ -1282,7 +1282,7 @@
     } else {
       // funnel/splitter <-> line, funnel<->funnel, splitter<->splitter,
       // funnel<->splitter: none of these are modeled (funnel and splitter
-      // are only supported so far interacting with a circle - see this
+      // are only supported so far interacting with a circle, see this
       // file's Funnel header comment). No collision rather than guessing at
       // one, so an incidental line or a second funnel/splitter in the same
       // scene doesn't crash on a field (e.g. .length) it doesn't have.
@@ -1307,7 +1307,7 @@
   function solveContactVelocity(contact, bodyA, bodyB) {
     var n = contact.normal;
     // Lever arms recorded at the contact instant by the narrow phase, NOT
-    // re-derived as (point - center) here - the centers are mid-step and
+    // re-derived as (point - center) here: the centers are mid-step and
     // would contaminate the arms with up to a full step of travel, which
     // changes invMassSum by an amount that depends on tHit.
     var rA = contact.rA, rB = contact.rB;
@@ -1325,7 +1325,7 @@
 
     // Was a hard step at RESTITUTION_THRESHOLD, which doubles j across a
     // zero-width band. Smoothed so it still suppresses jitter at rest
-    // without being a cliff - this is also what keeps a grazing hit
+    // without being a cliff: this is also what keeps a grazing hit
     // continuous with a near miss, since -velAlongNormal -> 0 as the
     // impact goes tangential.
     var e = smoothstep(0.5 * RESTITUTION_THRESHOLD, RESTITUTION_THRESHOLD, -velAlongNormal);
@@ -1351,7 +1351,7 @@
     return hinge.bodyA === null ? WORLD_BODY : bodies[hinge.bodyA];
   }
 
-  // Bodies pinned together by a hinge touch at the joint by design - they
+  // Bodies pinned together by a hinge touch at the joint by design: they
   // must not ALSO be treated as colliding rigid bodies there, or the contact
   // solver fights the joint solver every step (extra, unintended damping).
   function hingeConnects(hinges, i, j) {
@@ -1368,7 +1368,7 @@
     // either body has positive mass, it's guaranteed strictly positive
     // definite (mB*(mB + iB*|rB|^2) > 0, and symmetrically for A), so det
     // can be legitimately tiny for a heavy/large body without ever being
-    // truly singular - the only real degenerate case is both bodies static.
+    // truly singular, the only real degenerate case is both bodies static.
     // An absolute epsilon on det itself breaks for large bodies (det scales
     // with invMass^2, which shrinks fast as mass grows), so check the
     // actual precondition instead.
@@ -1429,13 +1429,13 @@
   // independently: the hinge solver above enforces that its local anchor
   // point coincides with a FIXED world pin, so teleporting only the body by
   // a frame-width tears that joint instantly (the position solver then
-  // "corrects" the sudden, huge error next step, which - since the
-  // correction is linearized around the body's current rotation - can
+  // "corrects" the sudden, huge error next step, which, since the
+  // correction is linearized around the body's current rotation, can
   // impart a large, physically meaningless spin rather than cleanly
   // snapping back). The fix: treat the PIN itself as the thing living in
   // wrapped frame-space. Wrapping the pin and shifting the body (and
   // anything hinged to it, however many hops away) by that exact same
-  // delta is a pure translation of the whole rigid assembly - on a wrapped
+  // delta is a pure translation of the whole rigid assembly: on a wrapped
   // (toroidal) space, shifting everything by one full period changes
   // nothing physically, so every hinge in the assembly stays exactly
   // satisfied. A body hinged to another (non-world) body is never wrapped
@@ -1445,10 +1445,10 @@
   // ---- Edge handling ----
   //
   // What the frame's edges mean for a scene. All three modes share the same
-  // frameWidth/frameHeight - the difference is only what happens on reaching
+  // frameWidth/frameHeight, the difference is only what happens on reaching
   // one:
   //   "sticky"   the simulation is read as ending there (the engine still
-  //              wraps; it is the observer that stops - see
+  //              wraps; it is the observer that stops, see
   //              PhysicsHingeGeometry.findWrapStopStep)
   //   "wrap"     Pac-Man: a body leaving one edge reappears at the opposite
   //   "infinite" no edges at all. Bodies leave and keep going, forever.
@@ -1465,11 +1465,11 @@
   }
 
   // Defaults true when absent (not just when scene.collisionsEnabled ===
-  // true) - this is an opt-OUT, never an opt-in. physics-ui.js's Mutual
+  // true): this is an opt-OUT, never an opt-in. physics-ui.js's Mutual
   // Gravity checkbox flips this to
   // a sensible default (off under Mutual Gravity, on otherwise) as a one-
   // time UX nudge whenever THAT checkbox changes, not as a property of the
-  // engine itself - this function has no opinion about mutualGravity at all.
+  // engine itself: this function has no opinion about mutualGravity at all.
   function collisionsEnabled(scene) {
     return scene.collisionsEnabled !== false;
   }
@@ -1479,7 +1479,7 @@
   // position already divided by the frame dimension, so the frame itself
   // spans 0..1 and everything beyond it is what this has to fit: v=0.5 (dead
   // center) maps to exactly 0.5, the frame's own edges to 0.076 and 0.924,
-  // and a body two frames out to 0.9995 - arbitrarily far still lands inside
+  // and a body two frames out to 0.9995, arbitrarily far still lands inside
   // the color range, just ever closer to its end.
   var OUTPUT_SIGMOID_STEEPNESS = 5;
   function frameSigmoid(v) {
@@ -1493,7 +1493,7 @@
   }
 
   // Self-contained (not physics-hinge-geometry.js's translateBodyAndDescendants)
-  // since that module depends on this file for rotateVec - this file can't
+  // since that module depends on this file for rotateVec: this file can't
   // depend back on it without a cycle. Shifts bodies[bodyIndex] and every
   // body hinged to it, however many hops away, by the same (dx, dy): a
   // pure translation preserves every hinge in the subtree regardless of
@@ -1511,7 +1511,7 @@
 
   // The same pure translation for a spring group (see springGroups), which
   // is a flat list of members rather than a tree to walk: every member moves,
-  // and so does every background pin a member hangs from - a pin left behind
+  // and so does every background pin a member hangs from, a pin left behind
   // would tear its hinge exactly as wrapping a hinge child alone would.
   function translateSpringGroup(scene, group, dx, dy) {
     var isMember = {};
@@ -1527,7 +1527,7 @@
 
   // A body created by a split (see step()'s splitting section) carries an
   // explicit .lineage pointing back at whichever body index Output/Input
-  // mapping actually names - every other body's lineage is implicitly its
+  // mapping actually names: every other body's lineage is implicitly its
   // own index. This is what lets "track body 2's Y" keep meaning something
   // after body 2 has become two (or more) circles: computeOutputLineageAverage
   // below averages over every body CURRENTLY sharing a lineage, not just one
@@ -1542,7 +1542,7 @@
   // An Output is `{ body, bodyB, property }`. bodyB absent/null is the
   // ordinary one-body mapping every scene had before this existed; with it
   // set, an x/y/angle Output becomes the MEAN of the two bodies' values, and
-  // the extra property "distance" becomes available - how far apart they
+  // the extra property "distance" becomes available: how far apart they
   // are, which has no one-body meaning at all.
   //
   // Each half is still its own lineage average first (see
@@ -1564,7 +1564,7 @@
   // There are only three: Scene Lifespan (no body, property "lifespan"),
   // Bounce Count (one body, no pair), and a positional reading of one body
   // or of a pair (with "distance" needing the pair). Anything else is a
-  // mapping some consumer will silently mis-evaluate - which is exactly
+  // mapping some consumer will silently mis-evaluate, which is exactly
   // what happened when an editor state transition left `{ body: null,
   // property: "x" }` behind: a mapping naming no body AND no run tally,
   // which the grid could only report as "missing an Output mapping" even
@@ -1598,7 +1598,7 @@
   // The separation between two points, taking the short way round when the
   // frame wraps. Without this a Pac-Man scene's distance Output would jump
   // from ~0 to ~frameWidth the instant one of the two bodies crossed an
-  // edge - a discontinuity in the exact quantity the grid is a picture of,
+  // edge: a discontinuity in the exact quantity the grid is a picture of,
   // for a pair that never actually moved apart. On a wrapped (toroidal)
   // world the shortest separation IS the distance; the plain difference is
   // only right when there are no edges at all.
@@ -1609,7 +1609,7 @@
   }
 
   // The largest value a distance Output can take, which is what colors it.
-  // On a torus that is the antipode - half a frame away on each axis, not a
+  // On a torus that is the antipode: half a frame away on each axis, not a
   // whole one. With no edges there is no bound, and the caller squashes it
   // through frameSigmoid instead; the diagonal is handed back as that
   // sigmoid's natural scale.
@@ -1661,7 +1661,7 @@
     var i, j;
 
     // Fixed for the whole step, from the positions it starts at, and reused
-    // by all three advanceVelocity calls below - the two legs and the
+    // by all three advanceVelocity calls below: the two legs and the
     // detection sweep have to agree on what acceleration this step applied,
     // or a body would be swept along a different line than the one it then
     // moves down.
@@ -1670,14 +1670,14 @@
     // Springs add to that, and bring the one thing gravity never has: an
     // ANGULAR acceleration, from a pull that lands off-center. Fixed for the
     // whole step like `acc`, and split across the two legs the same way (see
-    // leg 1). All zeros - and every line below that reads it a no-op - for a
+    // leg 1). All zeros, and every line below that reads it a no-op, for a
     // scene with no springs.
     var alpha = new Array(bodies.length).fill(0), swing = new Array(bodies.length).fill(0);
     if (sceneSprings(scene).length) addSpringAccelerations(scene, acc, alpha, swing, dt);
 
     // Entering velocity (u, before any gravity this step) and the whole-step
     // gravity-advanced velocity (vFull) for every non-static body. vFull
-    // drives both detection below AND leg 1's position move - using
+    // drives both detection below AND leg 1's position move, using
     // anything else for one but not the other would let the body travel
     // along a different line than the one it was swept against.
     var u = new Array(bodies.length), vFull = new Array(bodies.length);
@@ -1688,23 +1688,23 @@
     }
 
     // Detect against PROBE bodies (real position, velocity = vFull) rather
-    // than the raw pre-gravity bodies - see collidePair's comment.
+    // than the raw pre-gravity bodies: see collidePair's comment.
     var probes = new Array(bodies.length);
     for (i = 0; i < bodies.length; i++) {
       probes[i] = bodies[i].isAnchored ? bodies[i] : Object.assign({}, bodies[i], { vx: vFull[i].x, vy: vFull[i].y });
     }
 
     // Funnel mouth teleport detection (see this file's Funnel header
-    // comment) - resolved before the normal contacts loop because a
+    // comment): resolved before the normal contacts loop because a
     // teleport, when it wins, replaces leg 1's position update entirely
     // rather than feeding an impulse into the solver like every other
     // contact does. teleportTarget[circleIndex] is the EARLIEST funnel
-    // mouth (by tHit) that circle's swept path crosses this step, if any -
+    // mouth (by tHit) that circle's swept path crosses this step, if any:
     // "earliest" exactly mirrors how bodyTHit below picks the earliest of
     // several ordinary contacts on the same body.
     var teleportTarget = new Array(bodies.length).fill(null);
     // Skipped along with every other detection loop below when collisions
-    // are off - a funnel's mouth is a trigger a circle has to actually
+    // are off: a funnel's mouth is a trigger a circle has to actually
     // TOUCH to fire, and "never check for collisions... objects can pass
     // right through each other" applies here exactly as it does to an
     // ordinary bounce: the funnel is just another body being passed through.
@@ -1724,7 +1724,7 @@
     }
 
     // Splitter short-side detection (see createSplitter /
-    // collideSplitterShortSideTHit) - same "earliest wins per circle" shape
+    // collideSplitterShortSideTHit): same "earliest wins per circle" shape
     // as the funnel teleport above, but APPLIED at the very end of step()
     // rather than woven into leg 1/2's sub-stepping: a split creates a
     // genuinely new body, and leg 1, the contacts list, bodyTHit and the
@@ -1732,12 +1732,12 @@
     //
     // What the end-of-step timing costs: on the single step a circle
     // splits, its position/velocity come from this step's ordinary
-    // (un-split) integration, and only then snap to the two spawn points -
+    // (un-split) integration, and only then snap to the two spawn points,
     // rather than being exact to the sub-step instant the way a funnel
     // teleport is. At 1/60s per step that is invisible, and it keeps the
     // whole mid-step machinery unaware of bodies that don't exist yet.
     var splitHit = new Array(bodies.length).fill(null);
-    // Same reasoning as the funnel loop above - a splitter's short side is
+    // Same reasoning as the funnel loop above: a splitter's short side is
     // also a trigger a circle has to touch to fire.
     if (collisionsEnabled(scene)) {
       for (i = 0; i < bodies.length; i++) {
@@ -1748,7 +1748,7 @@
           // anchored circle is never teleported by a funnel (see leg 1,
           // which skips it outright): it has no position of its own to move.
           // It would also be the one case where the two halves couldn't
-          // inherit the parent's mass - an anchor carries invMass 0, while
+          // inherit the parent's mass: an anchor carries invMass 0, while
           // the ordinary circle a split produces does not.
           if (bodies[j].isAnchored) continue;
           if (hingeConnects(scene.hinges, i, j)) continue;
@@ -1762,12 +1762,12 @@
       }
     }
 
-    // The ordinary solid-body pairs - circle/circle, line/circle, a
+    // The ordinary solid-body pairs: circle/circle, line/circle, a
     // funnel/splitter's own solid edges, etc. Left empty when collisions are
     // off: every consumer below (bodyTHit, contactFlags, the velocity/
     // position solve loops) already handles "nothing
     // detected this step" correctly, since that's the everyday case for any
-    // body that simply isn't near anything - an empty array here is that
+    // body that simply isn't near anything, an empty array here is that
     // same path, just for every body at once.
     var contacts = [];
     if (collisionsEnabled(scene)) {
@@ -1784,7 +1784,7 @@
 
     // Per-body tHit: the earliest contact instant among everything that
     // body touches this step, defaulting to dt (no contact -> the whole
-    // step is "leg 1", leg 2 never runs - see the no-hit-path note below).
+    // step is "leg 1", leg 2 never runs, see the no-hit-path note below).
     var bodyTHit = new Array(bodies.length).fill(dt);
     for (i = 0; i < contacts.length; i++) {
       var c = contacts[i];
@@ -1793,7 +1793,7 @@
     }
 
     // A teleport wins this step over any ordinary contact exactly when it's
-    // the earliest event touching that body - a tie goes to the teleport,
+    // the earliest event touching that body: a tie goes to the teleport,
     // since a circle reaching the mouth at the same instant as some other
     // contact still has nowhere else to go afterward. Winning both moves
     // this body's own bodyTHit up (so leg 1 stops exactly there, same as
@@ -1819,7 +1819,7 @@
         return !(teleportWins[ci] && teleportTarget[ci].funnelIndex === fi);
       });
     }
-    // The same rule for a splitter, and for the same reason - a body going
+    // The same rule for a splitter, and for the same reason: a body going
     // THROUGH a portal must not also bounce off it. A splitter's mouth and
     // legs are solid, and their capsules reach LINE_THICKNESS/2 past the
     // short side's own corners, so a ball entering anywhere but dead center
@@ -1848,7 +1848,7 @@
     }
 
     // "Is this body touching anything at all this step?", per body, for a
-    // caller that passes an array in - the JS-side twin of the g_contactN
+    // caller that passes an array in: the JS-side twin of the g_contactN
     // globals physics-gpu.js publishes, and what Bounce Count is counted from
     // (a false->true flip is one bounce). Opt-in via opts so the common
     // caller pays nothing; rewritten in place each step, never accumulated.
@@ -1862,7 +1862,7 @@
     }
     // The raw pair list itself, for a caller that needs to tell WHICH two
     // bodies touched apart (contactFlags alone can't: with 3+ bodies a
-    // shared true/true doesn't say who is touching whom) - runBounceEvents'
+    // shared true/true doesn't say who is touching whom), runBounceEvents'
     // per-pair "just started touching" detection is the one consumer today.
     // Same opt-in-array convention as contactFlags: cleared and refilled in
     // place each step rather than allocating a fresh array, since this runs
@@ -1873,13 +1873,13 @@
       for (i = 0; i < contacts.length; i++) contactsOut.push({ a: contacts[i].a, b: contacts[i].b });
     }
 
-    // Leg 1: move at vFull for tHit - matching detection exactly - then
+    // Leg 1: move at vFull for tHit, matching detection exactly, then
     // drop velocity to vPre (gravity applied only up to tHit, not the whole
     // step) before the impulse solve runs. Reflection doesn't commute with
     // adding gravity: reflecting v+g*dt (this step's full gravity, as if
     // the contact had waited until the very end to be noticed) differs from
     // reflecting v and then adding g*dt (as if it were noticed at the very
-    // start) by 2*(g.n)*dt along the normal - up to a real, visible amount
+    // start) by 2*(g.n)*dt along the normal, up to a real, visible amount
     // per step. That gap is what made a bounce's outcome depend on which
     // discrete step happened to catch it. Using each contact's own tHit
     // here closes it: the impulse always reflects the velocity the body
@@ -1888,7 +1888,7 @@
     //
     // A body that WON a teleport this step (teleportWins[i]) gets its
     // position OVERRIDDEN to the funnel's throat center instead of moved by
-    // vFull*th - that is the entire teleport, a hard position discontinuity
+    // vFull*th: that is the entire teleport, a hard position discontinuity
     // - while vPre is computed exactly the same way as any other body's:
     // gravity applied up to th, nothing reflected. That is what "keeps the
     // same velocity" (the position teleports, the velocity does not) while
@@ -1921,7 +1921,7 @@
     }
 
     // Leg 2: the remainder of the step, with the remainder of gravity
-    // applied to the POST-impulse velocity - never the whole dt applied
+    // applied to the POST-impulse velocity, never the whole dt applied
     // before the solve, for the same reason as leg 1. A body with no
     // contact this step has tHit=dt, tRest=0: vPost reduces to an
     // already-clamped vFull advanced by 0 (the identity), so this whole
@@ -1933,7 +1933,7 @@
       var tRest = dt - bodyTHit[i];
       var vPost = advanceVelocity(b2.vx, b2.vy, tRest, acc[i].x, acc[i].y, maxSpeed);
       b2.vx = vPost.x; b2.vy = vPost.y;
-      // The rest of the torque onto the post-impulse spin, then turn by it -
+      // The rest of the torque onto the post-impulse spin, then turn by it:
       // the same order as the velocity and position either side.
       b2.w = springSpin(b2.w, alpha[i], swing[i], tRest);
       b2.x += vPost.x * tRest; b2.y += vPost.y * tRest; b2.angle += b2.w * tRest;
@@ -1950,16 +1950,16 @@
     // frame size set these), so a scene with neither field keeps its old
     // unbounded-fall behavior exactly. Last thing step() does, so a wrap
     // this step doesn't feed a teleported position into this same step's
-    // own position-correction iterations above - matches
+    // own position-correction iterations above: matches
     // generateStepOnceGLSL's GLSL port of this same rule.
     //
-    // Only ever decided by a "root" body - one with no hinge to another
-    // body (either completely free, or hinged straight to the world) - see
+    // Only ever decided by a "root" body, one with no hinge to another
+    // body (either completely free, or hinged straight to the world), see
     // the frame-wrap helpers above for why a hinge child must never
     // independently wrap, and why a world-hinged root wraps by its PIN's
     // position, not its own center.
     //
-    // A body joined to anything by a spring answers to its GROUP instead -
+    // A body joined to anything by a spring answers to its GROUP instead:
     // see springGroups: a tethered group never wraps, and any other wraps as
     // one, when its leader does.
     if (wrapsAtEdges(scene)) {
@@ -1993,10 +1993,10 @@
     // each splitting circle is snapped to its spawn point from its fully
     // integrated (leg 1 + solve + leg 2 + position solve + wrap) end-of-step
     // state, and so a body appended here never takes part in the step it was
-    // born in - it starts fresh next step, like any body added between steps.
+    // born in: it starts fresh next step, like any body added between steps.
     //
     // The circle that hit KEEPS ITS OWN SLOT as the first of the two (moved
-    // by offset1, velocity untouched - "each has the same velocity as the
+    // by offset1, velocity untouched: "each has the same velocity as the
     // initial ball"), and the second is appended. Keeping the original slot
     // is what makes lineage work without any bookkeeping for it: an authored
     // body's lineage is implicitly its own index (see lineageOf), so the
@@ -2007,19 +2007,19 @@
       var sh = splitHit[i];
       if (!sh) continue;
       var parent = bodies[i];
-      // Read the child's position off the parent BEFORE the parent moves -
+      // Read the child's position off the parent BEFORE the parent moves:
       // both offsets are displacements of the same pre-split position, not
       // of each other.
       var childX = parent.x + sh.offset2.x, childY = parent.y + sh.offset2.y;
       parent.x += sh.offset1.x;
       parent.y += sh.offset1.y;
       // Splitting is recursive by design (each half can split again), which
-      // is growth measured in generations - a scene that keeps feeding balls
+      // is growth measured in generations: a scene that keeps feeding balls
       // back through a splitter has no natural ceiling at all. At the cap the
       // ball still passes through the splitter, it just doesn't duplicate:
       // the offset above has already been applied, so it emerges on the long
       // side as a single ball rather than either stopping dead or being
-      // silently left behind on the short side. `continue`, not `break` -
+      // silently left behind on the short side. `continue`, not `break`,
       // being at the ceiling is a fact about the scene, not a reason to skip
       // the warp for every later ball that hit a splitter this same step.
       if (bodies.length >= maxSimulationBodiesFor(scene)) continue;
@@ -2042,7 +2042,7 @@
         localAnchorB: h.localAnchorB,
       };
     });
-    // A spring goes with either body it was tied to, like a hinge - it has
+    // A spring goes with either body it was tied to, like a hinge: it has
     // nothing left to pull on. (A scene that never had the field is left
     // without one rather than being handed an empty list.)
     if (scene.springs) scene.springs = scene.springs.filter(function (s) {
@@ -2070,7 +2070,7 @@
     return {
       // Same reasoning as xInput/frameWidth below: physics-ui.js clones the
       // live scene on Play and clones it back on Reset, so anything omitted
-      // here is silently wiped by that round trip - and dropping this one
+      // here is silently wiped by that round trip, and dropping this one
       // would flip the scene back to downward gravity mid-edit.
       mutualGravity: !!scene.mutualGravity,
       collisionsEnabled: collisionsEnabled(scene),
@@ -2102,7 +2102,7 @@
       springs: sceneSprings(scene).map(cloneSpring),
       // Previously omitted here, which silently wiped every mapping on a
       // Play -> Reset cycle (physics-ui.js clones the live scene into
-      // initialScene on Play, then clones initialScene back on Reset) -
+      // initialScene on Play, then clones initialScene back on Reset):
       // frameWidth/frameHeight need the same treatment now for the same
       // reason, or a Reset would un-lock the wrap edges mid-edit.
       xInput: scene.xInput ? { body: scene.xInput.body, property: scene.xInput.property } : null,
@@ -2117,8 +2117,8 @@
   // bounces it had racked up by the end of step i+1 (so counts[steps-1] is the
   // run's total, and the array indexes exactly like a trajectory does).
   //
-  // A bounce is the moment contact STARTS - the false->true edge of
-  // contactFlags - not every step spent touching. Those are very different
+  // A bounce is the moment contact STARTS, the false->true edge of
+  // contactFlags, not every step spent touching. Those are very different
   // numbers here: a body sliding along a surface under gravity stays in
   // contact for hundreds of consecutive steps (the CCD regression scene in
   // physics-tests.js rides one for ~130), which as a per-step tally would read
@@ -2128,20 +2128,20 @@
   // scene it is also playing/rendering without disturbing it.
   // A whole run's trajectory, computed here in JS rather than on the GPU:
   // rows[i] is every body's state after i+1 steps, in the same shape
-  // PhysicsGPU.runSceneOnGPU produces (index-aligned with scene.bodies) -
+  // PhysicsGPU.runSceneOnGPU produces (index-aligned with scene.bodies),
   // plus `radius` and `lineage` per entry, which a GPU trajectory has no
   // spare texture channel for and no need of.
   //
   // This exists for one reason: a scene containing a SPLITTER grows new
   // bodies mid-run (see step()'s splitting section), and a GPU trajectory
-  // can only report the FIXED slot count its shader was compiled with - the
+  // can only report the FIXED slot count its shader was compiled with, the
   // per-pixel grid pre-allocates dormant slots up to MAX_SIMULATION_BODIES
   // and a split wakes one (PhysicsGPU.padSceneForSplitting), which means
   // every row it produces is that full width whether or not anything has
   // split yet. Rows here get LONGER as the run goes on instead, so a caller
   // drawing them can size its body list to exactly what existed at that
   // frame (see physics-ui.js's applyTrajectoryStep). Same physics, same
-  // ceiling, different row shape - the regression suite checks the two
+  // ceiling, different row shape: the regression suite checks the two
   // against each other step for step.
   function runTrajectory(scene, steps, dt) {
     var sim = cloneScene(scene);
@@ -2183,7 +2183,7 @@
   }
 
   // Every pair of bodies currently overlapping by the same yardstick
-  // computeAccelerations already uses for Mutual Gravity -
+  // computeAccelerations already uses for Mutual Gravity:
   // "touching" is geometric (dx²+dy² <= (halfExtent(a)+halfExtent(b))²),
   // nothing to do with whether the collision solver is even running. Skips
   // the exact pairs collision detection skips (both anchored, or hinge-
@@ -2205,11 +2205,11 @@
     return pairs;
   }
 
-  // Hinge-connected pairs of two non-anchored lines - a double pendulum's
+  // Hinge-connected pairs of two non-anchored lines: a double pendulum's
   // own shape (and anything built the same way: rods swinging end to end).
   // A hinge like this pins the two bodies together at a shared point BY
   // DESIGN (see hingeConnects, used by both overlappingPairs above and the
-  // real collision loop in step() below) - they touch there always, so the
+  // real collision loop in step() below): they touch there always, so the
   // ordinary overlap/contact bounce sound correctly never fires for this
   // pair, and stays that way; this is a second, unrelated event for the
   // same pair, not a replacement for that exclusion.
@@ -2227,8 +2227,8 @@
   }
 
   // Which side of the hinge point each line's own center of mass currently
-  // reads as - the ray from the shared hinge point out to a line's own
-  // center (line.x/y IS that center; see createLine) - and whether the two
+  // reads as, the ray from the shared hinge point out to a line's own
+  // center (line.x/y IS that center; see createLine), and whether the two
   // rays point the same general way (dot > 0: hinge on one side, both
   // centers on the other, i.e. the two rods reading as overlapping) or
   // opposite ways (dot < 0: folded apart). `sign` is which side of ray 1
@@ -2248,7 +2248,7 @@
     return { sign: cross > 0 ? 1 : (cross < 0 ? -1 : 0), dot: dot };
   }
 
-  // Every step at which some pair of bodies STARTS touching - the bounce
+  // Every step at which some pair of bodies STARTS touching: the bounce
   // sound effect's own event source (see physics-sound.js), one JS
   // re-simulation same as runBounceCounts/runBounceCounts' own reasoning
   // (a GPU trajectory logs positions only, nothing about contact). Unlike
@@ -2257,23 +2257,23 @@
   // per-body "was this body touching anything a moment ago" can't tell one
   // simultaneous collision from two, and would double-fire a body already
   // resting against something else when a third body arrives. Pair state
-  // (keyed "a,b", a < b - matching how the engine itself always orders a
+  // (keyed "a,b", a < b, matching how the engine itself always orders a
   // contact's own a/b) has no such ambiguity. Returns a plain ascending
-  // array of 0-indexed step numbers - possibly with the same step appearing
+  // array of 0-indexed step numbers: possibly with the same step appearing
   // only once even if several pairs started touching in it at once, since
   // one bounce sound per step reads as the event, not a wall of them.
   //
   // Mutual Gravity scenes are commonly run with collisions turned OFF (see
-  // "Add ability to disable collisions" - it's what lets bodies orbit/pass
+  // "Add ability to disable collisions": it's what lets bodies orbit/pass
   // through each other instead of the contact solver fighting the gravity
   // force at close range), so the collision-response `contacts` array below
   // is frequently empty there even while bodies are visibly overlapping.
   // For Mutual Gravity, overlap is detected geometrically instead
-  // (overlappingPairs, above) - the engine's own definition of "touching"
-  // for this mode, independent of whether the solver is running at all -
+  // (overlappingPairs, above), the engine's own definition of "touching"
+  // for this mode, independent of whether the solver is running at all,
   // so the bounce sound still fires on genuine overlap either way. Non-
   // mutual-gravity scenes keep the original collision-contacts approach
-  // unchanged. Separately, ANY scene - mutual gravity or not - gets the
+  // unchanged. Separately, ANY scene, mutual gravity or not, gets the
   // double-pendulum-style line-hinge alignment check (lineHingeCrossState,
   // above) folded into the very same per-step event flag, since it's the
   // same "one bounce sound per step" output either way.
@@ -2283,22 +2283,22 @@
     sim.bodies.forEach(computeMass);
     var linePairs = hingedLinePairs(sim);
     // Nothing can ever touch AND no hinged-line pair exists to watch for
-    // alignment - skip the re-simulation entirely.
+    // alignment: skip the re-simulation entirely.
     if (!geometric && !collisionsEnabled(scene) && linePairs.length === 0) return [];
     var contactsBuf = [];
     var wasTouchingPairs = {};
-    // Seed with whatever's ALREADY overlapping in the scene as given - a
+    // Seed with whatever's ALREADY overlapping in the scene as given: a
     // pair placed touching (e.g. resting contact under ordinary gravity, or
     // two bodies positioned overlapping in Mutual Gravity) didn't just
     // collide, so the first step checked below must not read that
     // pre-existing overlap as a fresh one. This uses the same halfExtent
     // yardstick as the geometric branch even when this run will go on to use
-    // collision contacts instead - it's only asking "were these two already
+    // collision contacts instead: it's only asking "were these two already
     // touching before this replay started," not tracking every step, so the
     // approximation the rest of the engine already accepts for Mutual
     // Gravity (see overlappingPairs above) is close enough here too. A
     // hinge-connected pair is skipped by overlappingPairs itself, same as it
-    // is by the real collision loop below - so a hinged pair (which is
+    // is by the real collision loop below, so a hinged pair (which is
     // typically touching by construction) never reaches either detection
     // path and never needs this seeding to stay silent.
     var initialPairs = overlappingPairs(sim);
@@ -2306,7 +2306,7 @@
     // Same reasoning, for the line-hinge alignment check: seed each pair's
     // "which side" from the scene as given, so a double pendulum that
     // happens to start already folded into alignment doesn't read that as
-    // a crossing on step 0 - only an actual sign change, step to step,
+    // a crossing on step 0, only an actual sign change, step to step,
     // counts (see lineHingeCrossState above).
     var prevCrossSign = linePairs.map(function (lp) { return lineHingeCrossState(sim, lp).sign; });
     var events = [];
@@ -2330,7 +2330,7 @@
       for (var lp2 = 0; lp2 < linePairs.length; lp2++) {
         var state = lineHingeCrossState(sim, linePairs[lp2]);
         // dot > 0 keeps this to the "same orientation" alignment (hinge on
-        // one side, both centers of mass on the other) - the opposite
+        // one side, both centers of mass on the other): the opposite
         // alignment (rods folded apart, dot < 0) also flips this sign once
         // per swing but isn't what this sound is for.
         if (state.sign !== 0 && prevCrossSign[lp2] !== 0 && state.sign !== prevCrossSign[lp2] && state.dot > 0) {
@@ -2354,7 +2354,7 @@
     ANCHORED_GRAVITY_DENSITY: ANCHORED_GRAVITY_DENSITY,
     MUTUAL_GRAVITY_CONSTANT: MUTUAL_GRAVITY_CONSTANT,
     gravitationalMass: gravitationalMass,
-    // How far a body reaches from its own center in any direction - a
+    // How far a body reaches from its own center in any direction: a
     // circle's radius, a line's half-length, or a trapezoid's own corner
     // reach (its farthest point, so any direction is safely clear of it).
     // Exported for physics-ui.js's on-canvas resize handle, which needs
@@ -2369,7 +2369,7 @@
     createFunnel: createFunnel,
     createSplitter: createSplitter,
     // A splitter's descendants all answer to the body index the scene's
-    // Output/Input mapping names - see lineageOf's own comment.
+    // Output/Input mapping names: see lineageOf's own comment.
     lineageOf: lineageOf,
     computeOutputLineageAverage: computeOutputLineageAverage,
     computeOutputValue: computeOutputValue,
@@ -2379,7 +2379,7 @@
     shortestSeparation: shortestSeparation,
     outputDistanceMax: outputDistanceMax,
     getLineEndpoints: getLineEndpoints,
-    // Funnel geometry/mass constants - exported so physics-gpu.js's GLSL
+    // Funnel geometry/mass constants: exported so physics-gpu.js's GLSL
     // port and physics-hinge-geometry.js's AABB check bake the very same
     // numbers rather than keeping their own copies to drift out of sync.
     FUNNEL_MOUTH_HALF: FUNNEL_MOUTH_HALF,
@@ -2403,7 +2403,7 @@
     worldToLocal: worldToLocal,
     getHingeWorldPoint: getHingeWorldPoint,
     hingeConnects: hingeConnects,
-    // Springs - see the section of that name. The constants are exported so
+    // Springs: see the section of that name. The constants are exported so
     // physics-gpu.js bakes the same law, and the editor's sliders span the
     // same range a loaded scene is clamped into.
     SPRING_CORE: SPRING_CORE,

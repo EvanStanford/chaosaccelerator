@@ -1,30 +1,30 @@
 // This file is part of Chaos Accelerator, licensed under the Common Public
-// Attribution License, Version 1.0 (CPAL-1.0) - see LICENSE in the project
+// Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in the project
 // root, or https://chaosaccelerator.com/license for a hosted copy.
 
 // Compiles the current scene (<=6 bodies) into a specialized GLSL program and
 // runs it on the GPU via an offscreen WebGL2 context, logging every body's
 // (x, y, angle) at every physics step into a small texture, then reads that
-// back as a plain trajectory array. No physics runs in JS for playback -
+// back as a plain trajectory array. No physics runs in JS for playback:
 // physics-ui.js just looks up trajectory[step][bodyIndex] and draws it.
 //
 // This is a *specialized* simulator, not a general one: because the scene
 // (body count, types, hinge topology) is fixed at the moment Play is
 // clicked, everything that would need a dynamic loop or array in a general
-// engine - which pairs to collision-check, which hinges connect what - is
+// engine, which pairs to collision-check, which hinges connect what, is
 // fully unrolled into flat generated code instead. GLSL never needs to loop
 // over "however many bodies happen to exist."
 //
 // The physics math below (collision, impulse solver, hinge solver) is a
-// direct, function-for-function port of physics-engine.js - same formulas,
-// same variable names where possible - specifically so it can be checked
+// direct, function-for-function port of physics-engine.js, same formulas,
+// same variable names where possible, specifically so it can be checked
 // against the already-validated JS engine.
 (function (global) {
   "use strict";
 
   var MAX_BODIES = 6;
   // GLSL ES 3.00's hard ceiling on a function's parameter list. Only
-  // stepOnce() ever approaches it - see stepOnceParams.
+  // stepOnce() ever approaches it: see stepOnceParams.
   var MAX_GLSL_FUNCTION_PARAMS = 256;
 
   var LINE_THICKNESS = 20;
@@ -61,11 +61,11 @@
     "const float GRAVITY = " + fnum(global.PhysicsEngine.GRAVITY) + ";",
     "",
     // tHit defaults to 0.0 (already touching as of the START of this step)
-    // here - true for every contact except collideCircleCircle's swept
+    // here: true for every contact except collideCircleCircle's swept
     // branch, which overrides it with the actual sub-step instant. Every
     // other collide function builds on noContact() and never touches tHit
     // itself, so this one default line is all they need too.
-    // rA/rB default to the origin - every collide function that sets
+    // rA/rB default to the origin: every collide function that sets
     // hit=true also sets these explicitly, so this default is only ever
     // observed by a contact nothing touches.
     "Contact noContact() {",
@@ -168,11 +168,11 @@
     "// its own comment), so it has to be continuous in dt itself: dt=0.0 must",
     "// reduce to a clamp of an already-clamped vector, i.e. the identity.",
     // accel is the body's WHOLE acceleration this step, not just a downward
-    // scalar - under Mutual Gravity each body has its own direction, and
+    // scalar: under Mutual Gravity each body has its own direction, and
     // uniform gravity is just the case where every body's is (0, GRAVITY).
     "vec2 advanceVelocity(vec2 v, float dt, vec2 accel) {",
     "  v += accel * dt;",
-    // PhysicsEngine.AIR_DRAG (experimental) - no line at all when it is 0.
+    // PhysicsEngine.AIR_DRAG (experimental): no line at all when it is 0.
     (global.PhysicsEngine.AIR_DRAG ? "  v *= 1.0 - " + fnum(global.PhysicsEngine.AIR_DRAG) + " * dt;" : ""),
     "  float sq = dot(v, v);",
     "  if (sq > MAX_SPEED * MAX_SPEED) v *= MAX_SPEED / sqrt(sq);",
@@ -185,17 +185,17 @@
     "  float rsum = ra + rb;",
     "  Contact c = noContact();",
     "  if (dist >= rsum) {",
-    "    // Not touching yet at the start of this step - solve for whether",
+    "    // Not touching yet at the start of this step: solve for whether",
     "    // straight-line motion at the current velocities brings them",
     "    // together before this step's own DT elapses. Without this, a fast",
     "    // enough approach only gets caught once some future step's STARTING",
-    "    // position happens to already be past the boundary - which step that",
+    "    // position happens to already be past the boundary, which step that",
     "    // ends up being is a discontinuous function of the starting",
     "    // conditions, so the resulting bounce is too (a tiny nudge to a",
     "    // starting position can shift which discrete step first notices",
     "    // contact, and each step's own velocity/penetration state differs).",
     "    // Solving the exact crossing time instead makes the contact normal -",
-    "    // and everything downstream of it - a continuous function of where",
+    "    // and everything downstream of it: a continuous function of where",
     "    // things started.",
     "    vec2 vRel = vec2(b.vx - a.vx, b.vy - a.vy);",
     "    float qa = dot(vRel, vRel);",
@@ -209,12 +209,12 @@
     "    float hitDist = length(hitD);",
     "    vec2 n = hitDist > 1e-9 ? hitD / hitDist : vec2(0.0, 1.0);",
     "    // Evaluated at the true contact instant (a's position advanced by",
-    "    // t), not a's stale start-of-step position - otherwise rB below",
+    "    // t), not a's stale start-of-step position, otherwise rB below",
     "    // (point minus b's UNADVANCED center) picks up a spurious component",
     "    // along vRel*t instead of landing exactly on -n*rb, injecting",
     "    // phantom spin into a contact that should only ever be linear for",
     "    // two circles. rA/rB are the lever arms themselves, not derived by",
-    "    // subtracting a center from .point at solve time - for a circle the",
+    "    // subtracting a center from .point at solve time: for a circle the",
     "    // lever arm is always exactly +-n*radius by construction, regardless",
     "    // of any sub-step timing.",
     "    vec2 posA = vec2(a.x, a.y) + vec2(a.vx, a.vy) * t;",
@@ -239,12 +239,12 @@
     "}",
     "",
     "// Swept capsule (segment e0-e1, half-thickness halfThickness, moving at",
-    "// constant velocity segVel, otherwise rigid - rotation during the step",
+    "// constant velocity segVel, otherwise rigid: rotation during the step",
     "// is ignored) vs. circle. Shared by collideLineCircle (segment = the",
     "// line's own body, refCenter = its center) and every funnel edge",
     "// (segment = one of the funnel's edges, refCenter = the FUNNEL's",
     "// center, since rA is a lever arm on the whole funnel body, not on an",
-    "// implicit sub-body) - same three sub-tests (flat side of the capsule",
+    "// implicit sub-body): same three sub-tests (flat side of the capsule",
     "// plus a cap at each endpoint), earliest valid t wins.",
     "Contact sweptCapsuleCircleContact(vec2 e0, vec2 e1, vec2 segVel, vec2 refCenter, Body circle, float radius, float halfThickness) {",
     "  vec2 p0 = vec2(circle.x, circle.y);",
@@ -306,7 +306,7 @@
     "}",
     "",
     "// Two contacts (both ends of the overlap) when near-parallel and",
-    "// overlapping - a single point can't stop a rod from spinning around it -",
+    "// overlapping: a single point can't stop a rod from spinning around it -",
     "// otherwise falls back to a single closest-point contact.",
     "ContactPair collideLineLine(Body lineA, float halfLenA, Body lineB, float halfLenB) {",
     "  vec2 eA0 = lineEndpoint0(lineA, halfLenA);",
@@ -384,7 +384,7 @@
     "",
     "// ---- Funnel: a trapezoid (throat 1, mouth 3, legs 2 each, all scaled",
     "// by `size`) that teleports a circle touching its mouth to the center",
-    "// of its throat, velocity unchanged - direct port of",
+    "// of its throat, velocity unchanged: direct port of",
     "// physics-engine.js's Funnel functions, see that file's header comment",
     "// for the geometry. physics-gpu-df.js carries the df port of all of it.",
     "const float FUNNEL_MOUTH_HALF = " + fnum(global.PhysicsEngine.FUNNEL_MOUTH_HALF) + ";",
@@ -406,9 +406,9 @@
     "MouthHit noMouthHit() { MouthHit m; m.hit = false; m.tHit = 0.0; m.target = vec2(0.0); return m; }",
     "",
     "// Does circle's swept path touch funnel's mouth (the teleport trigger)",
-    "// this step? Only tHit/target matter - no impulse is ever applied for a",
+    "// this step? Only tHit/target matter: no impulse is ever applied for a",
     "// teleport, unlike the 3 solid edges (see collideFunnelCircle in",
-    "// physics-engine.js - this is its GLSL twin, minus the Contact-array",
+    "// physics-engine.js: this is its GLSL twin, minus the Contact-array",
     "// return since the caller here builds each edge separately). target is",
     "// the funnel's own throat center, advanced by the funnel's velocity to",
     "// the same tHit and rotated by its angle at the START of the step -",
@@ -431,7 +431,7 @@
     "// sides swapped. The long mouth is a wall (see the solid-edge codegen",
     "// in generateStepOnceGLSL) and the SHORT side is the trigger: a circle",
     "// crossing it becomes two on the long side. GLSL twin of",
-    "// physics-engine.js's collideSplitterShortSideTHit - see that function",
+    "// physics-engine.js's collideSplitterShortSideTHit: see that function",
     "// for why the answer is two displacements (the trapezoid's own leg",
     "// vectors) rather than two points on the long side.",
     "struct SplitHit { bool hit; float tHit; vec2 offset1; vec2 offset2; };",
@@ -445,7 +445,7 @@
     "  // since each split adds a body that is exponential growth measured in",
     "  // steps. sweptCapsuleCircleContact reports exactly that case as a hit at",
     "  // tHit = 0 (its own dist0 branch), so the guard has to be here, ahead of",
-    "  // it - the same order physics-engine.js uses.",
+    "  // it: the same order physics-engine.js uses.",
     "  vec2 p0 = vec2(circle.x, circle.y);",
     "  vec2 startClosest = closestPointOnSegment(v.throatLeft, v.throatRight, p0);",
     "  if (length(p0 - startClosest) < LINE_THICKNESS * 0.5 + radius) return s;",
@@ -468,7 +468,7 @@
     "}",
     "",
     "// invMass/invInertia are 0 for static bodies, which already makes every",
-    "// update below a no-op for them - no separate isAnchored branch needed.",
+    "// update below a no-op for them: no separate isAnchored branch needed.",
     "void applyImpulse(inout Body b, float invMass, float invInertia, vec2 impulse, vec2 r) {",
     "  b.vx += impulse.x * invMass;",
     "  b.vy += impulse.y * invMass;",
@@ -485,7 +485,7 @@
     "  if (!contact.hit) return;",
     "  vec2 n = contact.normal;",
     "  // Lever arms recorded at the contact instant by the narrow phase, NOT",
-    "  // re-derived as (point - center) here - the centers are mid-step and",
+    "  // re-derived as (point - center) here: the centers are mid-step and",
     "  // would contaminate the arms with up to a full step of travel, which",
     "  // changes invMassSum by an amount that depends on tHit.",
     "  vec2 rA = contact.rA;",
@@ -504,7 +504,7 @@
     "",
     "  // Was a hard step at RESTITUTION_THRESHOLD, which doubles j across a",
     "  // zero-width band. Smoothed so it still suppresses jitter at rest",
-    "  // without being a cliff - this is also what keeps a grazing hit",
+    "  // without being a cliff: this is also what keeps a grazing hit",
     "  // continuous with a near miss, since -velAlongNormal -> 0 as the",
     "  // impact goes tangential.",
     "  float e = smoothstep(0.5 * RESTITUTION_THRESHOLD, RESTITUTION_THRESHOLD, -velAlongNormal);",
@@ -568,7 +568,7 @@
     "}",
   ].join("\n");
 
-  // The df physics library lives in physics-gpu-df.js - a port of
+  // The df physics library lives in physics-gpu-df.js: a port of
   // GLSL_LIBRARY above, function for function. It used to be enough to keep
   // only the six accumulators in df and run the collision/solver math in
   // float32 inside a local frame; measurement killed that idea (see
@@ -585,7 +585,7 @@
   // Gravity runs a higher ceiling than ordinary downward gravity (see
   // PhysicsEngine.speedCapFor, which is the single source of truth for
   // which). It's prepended here rather than emitted with the other per-scene
-  // constants because every caller puts this library FIRST - the functions
+  // constants because every caller puts this library FIRST: the functions
   // below reference MAX_SPEED, so its declaration has to come before them.
   // Defaults to the plain cap so a caller that doesn't care can omit it.
   function speedCapDecls(precision, maxSpeed) {
@@ -602,7 +602,7 @@
   function libraryGLSL(precision, maxSpeed) {
     if (!global.PhysicsDF.isExtended(precision)) return speedCapDecls(precision, maxSpeed) + GLSL_LIBRARY;
     // Everything multi-float from here to the end of this shader's code
-    // generation is at THIS precision - see PhysicsDF.usePrecision. The
+    // generation is at THIS precision: see PhysicsDF.usePrecision. The
     // speed cap is declared after the arithmetic (it is an MF constant, and
     // MF is the arithmetic library's macro).
     global.PhysicsDF.usePrecision(precision);
@@ -625,14 +625,14 @@
 
   function shapeHalf(consts, i) {
     if (consts[i].type === "circle") return consts[i].radius;
-    // A splitter is the same trapezoid as a funnel - same half-extent.
+    // A splitter is the same trapezoid as a funnel: same half-extent.
     if (consts[i].type === "funnel" || consts[i].type === "splitter") return consts[i].size / 2;
     return consts[i].length / 2;
   }
 
   // Every pair is unrolled at codegen time: we already know each body's
   // type, so we know exactly which collision function applies and in which
-  // argument order - no runtime type dispatch needed at all.
+  // argument order, no runtime type dispatch needed at all.
   function collisionPairs(n, consts, hinges) {
     var pairs = [];
     for (var i = 0; i < n; i++) {
@@ -651,7 +651,7 @@
   // Hinge anchors are parameters too, not baked into stepOnce()'s body as
   // literals: a hinge anchor on a resized body is a runtime expression
   // (see physics-grid-codegen.js), and that expression is only in scope in
-  // the CALLER (main()) that declared it - a value can't be embedded
+  // the CALLER (main()) that declared it, a value can't be embedded
   // directly into a separate function's body and still reach a variable
   // local to whoever calls that function. Passing it as a `vec2` parameter
   // sidesteps the scoping question entirely: the caller builds the
@@ -662,7 +662,7 @@
   // A world hinge's anchor is inout in both modes because stepOnce() wraps
   // it in place at the frame edges and that has to persist across calls.
   // spawnBase, when given, is the number of AUTHORED bodies in a splitter
-  // scene - every slot from there up is a spawn slot, empty until some
+  // scene: every slot from there up is a spawn slot, empty until some
   // circle splits into it (see generateStepOnceGLSL's splitting section).
   // Those slots differ from authored ones in three ways, all of which have
   // to survive from one stepOnce() call to the next and so have to be inout:
@@ -687,7 +687,7 @@
   // precision) because a spring on a body whose size is linked to a pixel has
   // per-pixel anchors (see physics-grid-codegen.js), and stiffness/restLength
   // plain numbers because nothing can vary them. An anchor may carry
-  // `zero: true` - attached dead center - which is worth knowing at compile
+  // `zero: true`, attached dead center, which is worth knowing at compile
   // time: that end has no lever arm, so it needs no rotation (a sin/cos, the
   // dearest thing a multi-float pass can do), no torque and no parameter.
   // Omitted (undefined) by every caller with no springs to pass, which is
@@ -711,7 +711,7 @@
 
   // PhysicsEngine.springSpin, in GLSL: a body's spin after `t` of this step's
   // torque, explicit until the swing feeding it is too fast for the step and
-  // implicit in the excess beyond that - see that function for the why.
+  // implicit in the excess beyond that, see that function for the why.
   // Emitted only into a shader with a spring that can turn something. The
   // multi-float form branches rather than taking a max: its divide is the
   // expensive half, and on every ordinary step it is a divide by exactly one.
@@ -735,7 +735,7 @@
     var df = global.PhysicsDF.isExtended(precision);
     // In df mode the shape constants are df too. They are per-pixel values
     // whenever a size axis is linked, so leaving them float32 would put a
-    // ~1e-7 quantization back on exactly that axis - and now that the
+    // ~1e-7 quantization back on exactly that axis, and now that the
     // collision math is df, they are what it multiplies against.
     var sc = df ? "MF " : "float ";
     var spawnSlots = spawnSlotsFrom(n, spawnBase);
@@ -751,7 +751,7 @@
     (hingeAnchors || []).forEach(function (hg, h) {
       // A world hinge's own anchor is a coordinate in the SAME frame space
       // a body's position is (see generateStepOnceGLSL's frame-wrap
-      // comment) - inout so stepOnce() can wrap it in place and have that
+      // comment): inout so stepOnce() can wrap it in place and have that
       // persist to the next call, exactly like a body's own position
       // already does. A hinge to another body has no such thing:
       // localAnchorA there is a point in that OTHER body's own local
@@ -777,7 +777,7 @@
     // the whole run rather than anything recomputed from the alive flags.
     if (spawnSlots.length) params.push("inout int liveCount");
     // GLSL caps a function at 256 parameters, and this is the one function
-    // whose signature grows with the scene - 4 per authored body, 6 per
+    // whose signature grows with the scene: 4 per authored body, 6 per
     // spawn slot, 2 per hinge, plus liveCount. PhysicsEngine's
     // MAX_SIMULATION_BODIES_LIMIT is set to keep any authorable scene well
     // under it, but that bound can't know a particular scene's hinge count,
@@ -792,7 +792,7 @@
   }
 
   // The anchor expressions in `hingeAnchors` are float32 GLSL text in f32
-  // mode and df (vec2) GLSL text in df mode - whoever built them knows
+  // mode and df (vec2) GLSL text in df mode: whoever built them knows
   // which, and this just has to spell the right constructor.
   function stepOnceCallArgs(n, hingeAnchors, precision, spawnBase, springs) {
     var df = global.PhysicsDF.isExtended(precision);
@@ -828,7 +828,7 @@
   // its (possibly per-pixel-symbolic) authored value, that the step loop's
   // repeated stepOnce() calls read and wrap in place across steps. Emitted
   // by whoever assembles the locals a step loop runs against (see
-  // generateBodyLocalsGLSL) - nothing to declare for a hinge to another
+  // generateBodyLocalsGLSL), nothing to declare for a hinge to another
   // body, which never needs persistent state.
   function generateHingeAnchorLocalsGLSL(hingeAnchors, precision) {
     var df = global.PhysicsDF.isExtended(precision);
@@ -846,7 +846,7 @@
   // geometry of every ANCHORED line and trapezoid once per run, the first
   // time it finds g_dfStaticGeomReady false (see generateStepOnceGLSL).
   // A fresh set of bodies is a fresh run: a shader that simulates more than
-  // one starting point per invocation - the derived display modes' stencil -
+  // one starting point per invocation, the derived display modes' stencil,
   // would otherwise carry the previous point's geometry into the next.
   // Nothing to say in float32, which hoists nothing.
   function staticGeometryResetGLSL(precision) {
@@ -855,14 +855,14 @@
 
   // ---- Splitter scenes: pre-allocated spawn slots ----
   //
-  // A split creates a body, and a compiled shader has nowhere to put one -
+  // A split creates a body, and a compiled shader has nowhere to put one:
   // every body is its own unrolled GLSL variable, decided before the first
   // step runs. So the scene handed to the compiler is padded up front, out
   // to PhysicsEngine.MAX_SIMULATION_BODIES, with empty circles that start
   // dead. A split doesn't create a body; it wakes one up.
   //
   // A dead slot is a radius-0 circle, which computeMass already answers for
-  // with invMass = invInertia = 0 (its `mass > 0` guard) - so it has no
+  // with invMass = invInertia = 0 (its `mass > 0` guard), so it has no
   // shape to draw, no response to any impulse, and contributes no
   // gravitational mass. It is still integrated like anything else while
   // dead: it falls, and it wraps. That's deliberate rather than gated away,
@@ -883,7 +883,7 @@
   function padSceneForSplitting(scene) {
     if (!sceneHasSplitter(scene)) return { scene: scene, spawnBase: null };
     var authored = scene.bodies.length;
-    // The scene's own ceiling, not the global default - this is the control
+    // The scene's own ceiling, not the global default: this is the control
     // #editor-view exposes as "Max Objects", and it decides the compiled
     // shader's whole size.
     var cap = global.PhysicsEngine.maxSimulationBodiesFor(scene);
@@ -904,7 +904,7 @@
   // reference: one alive flag and one lineage tag per slot, plus the shared
   // liveCount. Emitted by whoever assembles the locals a step loop runs
   // against, alongside generateBodyLocalsGLSL / the grid's canonical
-  // declarations - the slots' Body and BODYn_* locals come from those, since
+  // declarations: the slots' Body and BODYn_* locals come from those, since
   // a dead slot is an ordinary (radius-0) body as far as they're concerned.
   function generateSpawnSlotLocalsGLSL(n, spawnBase) {
     var slots = spawnSlotsFrom(n, spawnBase);
@@ -925,22 +925,22 @@
   // of EXPLICIT body/mass parameters rather than implicit globals. This has
   // to be true for any caller whose initial body state isn't a compile-time
   // literal (the per-pixel fractal grid): GLSL requires GLOBAL variable
-  // initializers to be constant expressions - the same restriction that
+  // initializers to be constant expressions, the same restriction that
   // already forced per-pair contact variables to live inside stepOnce()
-  // itself rather than at file scope - so once a body's starting position
+  // itself rather than at file scope, so once a body's starting position
   // depends on a runtime value, nothing about it can be a global, including
   // the function that mutates it.
   // frame ({ width, height }), when given, wraps every non-static body's
-  // position Pac-Man-style once it crosses an edge - an object whose center
+  // position Pac-Man-style once it crosses an edge: an object whose center
   // moves past the right edge reappears the same distance past the left
   // edge (and correspondingly for the other three edges), velocity
   // untouched. Omitted entirely (undefined) for every caller that doesn't
-  // have a locked frame size yet - this is a per-scene opt-in, not a always
+  // have a locked frame size yet: this is a per-scene opt-in, not a always
   // -on behavior, so existing scenes/tests with no frameWidth/frameHeight
   // keep exactly their old unbounded-fall behavior.
-  // precision: "f32" (default), or one of the multi-float ones - "df", "tf",
-  // "qf" (see PhysicsDF). Float32 and multi-float differ only in spelling -
-  // same structure, same order of operations, same comments - because a
+  // precision: "f32" (default), or one of the multi-float ones, "df", "tf",
+  // "qf" (see PhysicsDF). Float32 and multi-float differ only in spelling,
+  // same structure, same order of operations, same comments, because a
   // single generator emitting both is the only thing keeping them in step.
   // mutualGravity: bake the n-body attraction in place of the constant
   // downward pull. A codegen flag rather than a uniform because the scene is
@@ -948,12 +948,12 @@
   // collisions: whether this scene's collisions are on. Everything else the
   // toggle controls is already carried by `pairs` being empty, but Mutual
   // Gravity's accel loop walks every body rather than the pair list, and it
-  // needs to know - see PhysicsEngine.computeAccelerations for why the
+  // needs to know: see PhysicsEngine.computeAccelerations for why the
   // touching-bodies rule becomes a discontinuity once collisions are off.
   // Defaults to on when omitted, matching PhysicsEngine.collisionsEnabled.
-  // spawnBase: the authored body count of a splitter scene - see
+  // spawnBase: the authored body count of a splitter scene, see
   // padSceneForSplitting and spawnSlotsFrom. Omitted for every other scene.
-  // springs: the scene's springs - see "Springs, as the generators see them"
+  // springs: the scene's springs, see "Springs, as the generators see them"
   // above. Omitted for every scene without one.
   function generateStepOnceGLSL(n, consts, pairs, hingeAnchors, frame, precision, mutualGravity, collisions, spawnBase, springs) {
     var df = global.PhysicsDF.isExtended(precision);
@@ -962,7 +962,7 @@
     var springList = springs || [];
     var PE = global.PhysicsEngine;
     // Which bodies a spring pulls on at all, and which of those it can TURN
-    // (attached off-center) - see the Springs section below, which is what
+    // (attached off-center): see the Springs section below, which is what
     // these are for. Worked out up here because the second decides whether
     // springSpinGLSL has to be emitted ahead of stepOnce().
     var sprung = {}, turned = {};
@@ -971,7 +971,7 @@
       if (!consts[sp.b].isAnchored) { sprung[sp.b] = true; if (!sp.localB.zero) turned[sp.b] = true; }
     });
     // One generator, two spellings. GLSL can't give a user type operators,
-    // so the df path has to say dfAdd(a, b) where float32 says a + b - but
+    // so the df path has to say dfAdd(a, b) where float32 says a + b, but
     // the STRUCTURE of the step is identical, and keeping it in one
     // function is what stops the two from drifting apart. Anything that
     // reads the same in both modes (a struct field assignment, a bool) is
@@ -1027,12 +1027,12 @@
 
     // Funnel<->circle pairs are handled entirely separately below (a mouth
     // teleport isn't expressible as a Contact at all, and the 3 solid edges
-    // don't fit the fixed 2-slot ContactPair every other pair type uses) -
+    // don't fit the fixed 2-slot ContactPair every other pair type uses):
     // pulled out of `pairs` here so the existing per-pair blocks below
     // (contact building, tHit fold, g_contact flags, the two solve loops)
     // can keep iterating a plain list of circle/line pairs, completely
     // unchanged. funnel<->line and funnel<->funnel aren't modeled yet either
-    // (see physics-engine.js's collidePair) - dropped silently, exactly like
+    // (see physics-engine.js's collidePair): dropped silently, exactly like
     // JS's collidePair returning null for them, rather than falling through
     // to the collideLineLine branch below and reading a funnel's undefined
     // "length".
@@ -1047,15 +1047,15 @@
     // Which of a trapezoid's four sides are walls, and in which order, per
     // kind. The two differ in exactly one entry: the funnel's short side is
     // solid and its long side teleports; the splitter's long side is solid
-    // and its short side splits. Everything downstream - contact building,
-    // the tHit fold, the contact flags, both solve loops - walks this list
+    // and its short side splits. Everything downstream, contact building,
+    // the tHit fold, the contact flags, both solve loops, walks this list
     // and so serves both without knowing which it has.
     function wallsFor(kind) {
       return kind === "splitter"
         ? [["mouth", "mouthLeft", "mouthRight"], ["leg1", "mouthLeft", "throatLeft"], ["leg2", "mouthRight", "throatRight"]]
         : [["throat", "throatLeft", "throatRight"], ["leg1", "mouthLeft", "throatLeft"], ["leg2", "mouthRight", "throatRight"]];
     }
-    // "Is this circle going THROUGH this trapezoid right now?" - in which
+    // "Is this circle going THROUGH this trapezoid right now?": in which
     // case the trapezoid's own solid edges must not push on it this step.
     // A funnel excludes the one it teleported through; a splitter excludes
     // the one it split at (its mouth and legs reach past the short side's
@@ -1081,7 +1081,7 @@
     });
     var funnelPairs = trapezoidPairs.filter(function (tp) { return tp.kind === "funnel"; });
     var splitterPairs = trapezoidPairs.filter(function (tp) { return tp.kind === "splitter"; });
-    // Every circle that could split this step, in ascending body index -
+    // Every circle that could split this step, in ascending body index:
     // the same order physics-engine.js's step() applies its own splits in,
     // which is what decides who gets the last free slot when more than one
     // ball splits on the same step.
@@ -1092,12 +1092,12 @@
     });
     splittableCircles.sort(function (a, b) { return a - b; });
     if (splitterPairs.length && (spawnBase === undefined || spawnBase === null)) {
-      throw new Error("A splitter scene must be compiled from a padded scene - see PhysicsGPU.padSceneForSplitting");
+      throw new Error("A splitter scene must be compiled from a padded scene: see PhysicsGPU.padSceneForSplitting");
     }
     var spawnSlots = spawnSlotsFrom(n, spawnBase);
     var isSpawnSlot = {};
     spawnSlots.forEach(function (i) { isSpawnSlot[i] = true; });
-    // "Are BOTH of these actually in play?" - null when neither is a spawn
+    // "Are BOTH of these actually in play?": null when neither is a spawn
     // slot, which is every body in every scene without a splitter, so those
     // shaders emit no test at all and stay spelled exactly as they were.
     function bothAliveExpr(i, j) {
@@ -1115,15 +1115,15 @@
     // ---- df only: segment geometry, built as seldom as the physics allows ----
     //
     // See physics-gpu-df.js's header. A line in a collision pair needs its
-    // DSegment, a funnel/splitter its DTrapezoid - each costing a df sin/cos,
+    // DSegment, a funnel/splitter its DTrapezoid: each costing a df sin/cos,
     // the most expensive thing in that library. A MOVABLE one is rebuilt once
     // per step (shared by every pair it is in, where the straight port
     // rebuilt it per pair). An ANCHORED one never moves, so it is built once
     // per run: into a global, on the first stepOnce() call that finds
     // g_dfStaticGeomReady false. Whoever declares a pixel's bodies clears
     // that flag (see staticGeometryResetGLSL), so a shader that simulates
-    // several starting points in one invocation - the derived display modes'
-    // stencil - rebuilds it for each.
+    // several starting points in one invocation, the derived display modes'
+    // stencil, rebuilds it for each.
     //
     // The float32 path is untouched by any of this: its sin/cos is a
     // hardware instruction, and its arithmetic stays exactly what it was.
@@ -1156,7 +1156,7 @@
       lines.push("    g_dfStaticGeomReady = true;");
       lines.push("  }");
     }
-    // The df path never needs a stand-in body for the world pin - its hinge
+    // The df path never needs a stand-in body for the world pin: its hinge
     // solvers have world-pin forms that leave side A out altogether.
     if (!df && hingeAnchors.some(function (h) { return h.aIsWorld; })) {
       lines.push("  " + E.bodyType + " worldBody = " + E.bodyType + "(" +
@@ -1166,13 +1166,13 @@
     // ---- This step's acceleration, per body ----
     //
     // Uniform gravity bakes to the same constant for everyone. Mutual
-    // Gravity instead sums an inverse-square pull toward every other body -
+    // Gravity instead sums an inverse-square pull toward every other body:
     // the GLSL port of PhysicsEngine.computeAccelerations, and kept
     // deliberately line-for-line comparable to it.
     //
     // Carried at the pass's OWN precision, force included. The df pass used
     // to collapse each separation to float32 and run the force math there, on
-    // the theory that only the accumulators need the extra digits - the same
+    // the theory that only the accumulators need the extra digits: the same
     // theory measurement killed for the collision math (see
     // physics-gpu-df.js's header), and it fails here the same way. A float32
     // separation cannot tell two pixels apart until they differ by one of ITS
@@ -1243,14 +1243,14 @@
             if (!consts[pa].isAnchored) applyLines.push("gravAcc" + pa + " = dv2Add(gravAcc" + pa + ", dv2Scale(gd, dfMul(gravGM" + pb + ", gk)));");
             if (!consts[pb].isAnchored) applyLines.push("gravAcc" + pb + " = dv2Sub(gravAcc" + pb + ", dv2Scale(gd, dfMul(gravGM" + pa + ", gk)));");
             if (collisionsOn) {
-              // Touching bodies pull on each other not at all - see
+              // Touching bodies pull on each other not at all: see
               // PhysicsEngine.computeAccelerations for why.
               lines.push("    if (" + gravGate(pa, pb, outside) + ") {");
               lines.push("      MF gk = dfDiv(DF_ONE, dfMul(gr2, dfSqrt(gr2)));");
               applyLines.forEach(function (l) { lines.push("      " + l); });
               lines.push("    }");
             } else {
-              // The smooth interior law - same formula, same reason, same
+              // The smooth interior law: same formula, same reason, same
               // comment as the JS engine's branch.
               var aliveOnly = bothAliveExpr(pa, pb);
               lines.push("    " + (aliveOnly ? "if (" + aliveOnly + ") " : "") + "{");
@@ -1289,7 +1289,7 @@
             if (b2 === a) continue;
             lines.push("  {");
             lines.push("    vec2 d = vec2(body" + b2 + ".x - body" + a + ".x, body" + b2 + ".y - body" + a + ".y);");
-            // Bodies that are touching pull on each other not at all - see
+            // Bodies that are touching pull on each other not at all: see
             // PhysicsEngine.computeAccelerations for why (short version: the
             // contact solver's positional correction would otherwise be lifting
             // the body out of a very steep well for free, inventing energy).
@@ -1298,7 +1298,7 @@
             // With collisions off nothing supplies that force and bodies pass
             // through each other, so inside `contact` the pull follows the
             // smooth interior law down to zero instead of being switched off at
-            // its rim - same reason, same formula, same comment as the JS
+            // its rim: same reason, same formula, same comment as the JS
             // engine's branch.
             lines.push("    float contact = " + reachExpr[a] + " + " + reachExpr[b2] + ";");
             lines.push("    float r2 = dot(d, d);");
@@ -1328,7 +1328,7 @@
 
     // ---- Springs ----
     //
-    // The GLSL port of PhysicsEngine.addSpringAccelerations - the same law,
+    // The GLSL port of PhysicsEngine.addSpringAccelerations: the same law,
     // the same softened length, the same stability limit on the stiffness,
     // written to be read against it line for line. Each spring adds to the
     // linear acceleration of whatever it is tied to (on top of gravity,
@@ -1364,7 +1364,7 @@
       }
       springList.forEach(function (sp, s) {
         var aMoves = !sp.aIsWorld && !consts[sp.a].isAnchored, bMoves = !consts[sp.b].isAnchored;
-        if (!aMoves && !bMoves) return; // nothing here can move - the JS engine skips it too
+        if (!aMoves && !bMoves) return; // nothing here can move: the JS engine skips it too
         // One end: where it is in the world, its lever arm (null dead center
         // or on the background), and how readily it gives way.
         function end(which) {
@@ -1394,13 +1394,13 @@
         var endA = end("A"), endB = end("B");
         var weights = [endA.weight, endB.weight].filter(Boolean);
         var stable = slit(PE.SPRING_STABILITY / (FIXED_DT * FIXED_DT));
-        // The law itself - PhysicsEngine.springForceFactor, and see the Springs
+        // The law itself, PhysicsEngine.springForceFactor, and see the Springs
         // header there for why it leaves Hooke inside a core: exact
-        // 1 - rest/r outside c = SPRING_CORE * rest, a polynomial in r^2
+        // 1, rest/r outside c = SPRING_CORE * rest, a polynomial in r^2
         // inside that meets it in value, slope and curvature and reaches zero
         // at zero length, so nothing flips as the ends pass through each
-        // other. A rest length of exactly zero has no core and no flip - the
-        // factor is exactly 1 in the JS engine too - so it needs no length at
+        // other. A rest length of exactly zero has no core and no flip, the
+        // factor is exactly 1 in the JS engine too, so it needs no length at
         // all, unless an end that can turn has a lever arm for the swing
         // tally to weigh.
         var limited = (aMoves && endA.arm) || (bMoves && endB.arm);
@@ -1444,7 +1444,7 @@
         [[sp.a, endA, aMoves, true], [sp.b, endB, bMoves, false]].forEach(function (side) {
           var idx = side[0], e = side[1], plus = side[3];
           if (!side[2]) return;
-          // The torque, and this end's share of the body's `swing` - the
+          // The torque, and this end's share of the body's `swing`: the
           // pendulum-like oscillation about its own center that the spring's
           // TENSION drives, which springSpin integrates implicitly once it
           // is too fast for the step (see PhysicsEngine.springSpin).
@@ -1474,14 +1474,14 @@
       lines.push("");
     }
     function accelFor(i) { return sprung[i] ? "accel" + i : gravityAccelFor(i); }
-    // A turned body's spin after `t` of this step's torque - see springSpinGLSL.
+    // A turned body's spin after `t` of this step's torque: see springSpinGLSL.
     function spinExpr(i, t) {
       return (df ? "dfSpringSpin(" : "springSpin(") + B(i) + ".w, sprAlpha" + i + ", sprSwing" + i + ", " + t + ")";
     }
 
     // Entering velocity (u, before any gravity this step) and the
     // whole-step gravity-advanced velocity (vFull) for every non-anchored
-    // body. vFull drives both detection below AND leg 1's position move -
+    // body. vFull drives both detection below AND leg 1's position move,
     // using anything else for one but not the other would let the body
     // travel along a different line than the one it was swept against.
     for (var g = 0; g < n; g++) {
@@ -1494,7 +1494,7 @@
     // Detect against PROBE bodies (real position, velocity = vFull) rather
     // than the raw pre-gravity bodies, so the swept tests solve against the
     // same straight-line motion leg 1 is about to take. An anchored body's
-    // probe is just itself - it never moves, so vFull was never computed
+    // probe is just itself: it never moves, so vFull was never computed
     // for it above.
     for (var p = 0; p < n; p++) {
       if (consts[p].isAnchored) continue;
@@ -1506,7 +1506,7 @@
 
     // df only: this step's geometry for every MOVABLE line and trapezoid a
     // pair below is about to test (the anchored ones were built once, above).
-    // From the probe, like the tests themselves - same position and angle as
+    // From the probe, like the tests themselves: same position and angle as
     // the body, which is all a segment is made of.
     if (df) {
       Object.keys(segLines).forEach(function (idx) {
@@ -1522,7 +1522,7 @@
     // float32 (the function derives the endpoints itself), its prebuilt
     // segment in df.
     function lineArg(idx) { return df ? segExpr(idx) : "BODY" + idx + "_HALF"; }
-    // Only a line<->line pair can ever fill its second contact slot - see
+    // Only a line<->line pair can ever fill its second contact slot: see
     // the solve loops below, which skip c1 for every other pair.
     function pairSlots(pair) {
       return consts[pair[0]].type === "line" && consts[pair[1]].type === "line" ? ["c0", "c1"] : ["c0"];
@@ -1530,7 +1530,7 @@
 
     // Contacts are computed ONCE per stepOnce() call and reused across every
     // velocity/position iteration within that step (matching JS: step()
-    // detects contacts once, then solves them repeatedly) - so these must be
+    // detects contacts once, then solves them repeatedly), so these must be
     // LOCAL variables, not global initializers, for the same reason as above.
     ordinaryPairs.forEach(function (pair) {
       var i = pair[0], j = pair[1];
@@ -1544,9 +1544,9 @@
       } else if (tA === "circle" && tB === "line") {
         // collideLineCircle(line, circle) always takes (line, circle) in
         // that order, so calling it as (body_j=line, body_i=circle) here
-        // returns rA/rB for (line=j, circle=i) - the opposite of this
+        // returns rA/rB for (line=j, circle=i): the opposite of this
         // pair's own i/j. Swap them back along with flipping the normal,
-        // matching physics-engine.js's collidePair - see its own comment.
+        // matching physics-engine.js's collidePair: see its own comment.
         lines.push("  " + E.contactType + " " + varName + "_raw = " + E.collideLineCircle + "(" + refJ + ", " + lineArg(j) + ", " + refI + ", BODY" + i + "_HALF);");
         lines.push("  " + varName + "_raw.normal = " + E.negVec(varName + "_raw.normal") + ";");
         lines.push("  { " + E.vecType + " tmp_" + i + "_" + j + " = " + varName + "_raw.rA; " + varName + "_raw.rA = " + varName + "_raw.rB; " + varName + "_raw.rB = tmp_" + i + "_" + j + "; }");
@@ -1558,8 +1558,8 @@
     // Any pair involving a spawn slot only counts while that slot is in
     // play. Emitted as a separate pass over the same list rather than
     // threaded into each branch above, so the four shape-specific spellings
-    // stay exactly as they were. Everything downstream - the contact flags,
-    // the tHit fold, both solve loops - already treats a !hit contact as
+    // stay exactly as they were. Everything downstream, the contact flags,
+    // the tHit fold, both solve loops, already treats a !hit contact as
     // nothing happened, so clearing the flag is the whole suppression.
     ordinaryPairs.forEach(function (pair) {
       var gate = bothAliveExpr(pair[0], pair[1]);
@@ -1568,7 +1568,7 @@
       lines.push("  if (!" + gate + ") { " + varName + ".c0.hit = false; " + varName + ".c1.hit = false; }");
     });
     // df only: everything about each contact that no solver iteration can
-    // change, built once here instead of on all 8 + 4 of them - see
+    // change, built once here instead of on all 8 + 4 of them, see
     // dfPrepareContact. After the gating above, so a suppressed contact is
     // never prepared.
     function prepareContactLine(contactExpr, a, b) {
@@ -1584,13 +1584,13 @@
     lines.push("");
 
     // "Is this body touching anything at all this step?", published per body
-    // for whoever called stepOnce() - the fractal grid's Bounce Count output
+    // for whoever called stepOnce(): the fractal grid's Bounce Count output
     // counts the steps where one of these flips false->true. Globals rather
     // than more inout parameters: every existing caller (the single-scene
     // trajectory player, the hover replay, the grid) would otherwise have to
     // thread a parameter it has no use for, and a bool with a constant
     // initializer is legal at global scope (unlike the ContactPairs above,
-    // whose initializers are function calls - see their own comment).
+    // whose initializers are function calls, see their own comment).
     // Assigned (not accumulated) every call, so they always describe the step
     // that just ran.
     for (var cf = 0; cf < n; cf++) {
@@ -1606,11 +1606,11 @@
 
     // Per-body tHit: the earliest contact instant among everything that
     // body touches this step, defaulting to DT (no contact -> the whole
-    // step is "leg 1", leg 2 never runs - see leg 2's own comment). A slot
+    // step is "leg 1", leg 2 never runs, see leg 2's own comment). A slot
     // that did not hit still carries a tHit (0.0, same as an
     // already-touching contact's), so an unguarded min() would drag every
     // body's tHit down to 0.0. Fold in a slot's tHit only when it actually
-    // hit - and only the slots this kind of pair can fill at all.
+    // hit, and only the slots this kind of pair can fill at all.
     function contactTHitExpr(varName, slot) {
       return varName + "." + slot + ".hit ? " + varName + "." + slot + ".tHit : " + E.DT;
     }
@@ -1634,14 +1634,14 @@
 
     // ---- Funnel/splitter <-> circle pairs ----
     //
-    // A mouth teleport isn't a Contact (no impulse - see this file's Funnel
+    // A mouth teleport isn't a Contact (no impulse: see this file's Funnel
     // header comment and physics-engine.js's own), and 3 solid edges don't
     // fit the fixed 2-slot ContactPair every ordinary pair above uses, so
     // this is entirely separate codegen rather than a branch inside it.
     // Direct port of physics-engine.js's step(): fold the 3 solid edges'
     // tHit into both bodies' THit exactly like an ordinary contact would,
     // THEN resolve the teleport against that (a tie goes to the teleport),
-    // THEN - only once teleWon is known - fold the solid edges' touching
+    // THEN, only once teleWon is known, fold the solid edges' touching
     // flags into g_contact, excluding the specific funnel a teleport just
     // won against (its rA/rB would otherwise be evaluated against this
     // circle's stale PRE-teleport position).
@@ -1649,7 +1649,7 @@
     // Written once for both precisions, like everything else in this
     // function. The one structural difference: float32 rebuilds the
     // trapezoid's vertices per pair (and again inside the trigger test),
-    // where df reads the body's one prebuilt DTrapezoid - see segExpr above.
+    // where df reads the body's one prebuilt DTrapezoid, see segExpr above.
     var funnelPairsByCircle = {};
     funnelPairs.forEach(function (fp) {
       (funnelPairsByCircle[fp.circle] = funnelPairsByCircle[fp.circle] || []).push(fp.trap);
@@ -1661,8 +1661,8 @@
         var vn = "trap_" + fi + "_" + ci;
         // A dead spawn slot is a radius-0 circle parked at the origin: it
         // would still register capsule contacts against anything it happens
-        // to be sitting inside, so every hit this pair can produce - walls
-        // and trigger alike - is suppressed while either body is out of
+        // to be sitting inside, so every hit this pair can produce, walls
+        // and trigger alike, is suppressed while either body is out of
         // play. Suppressing at the Contact rather than around the whole
         // block keeps the variables in scope for the solve loops below,
         // which run unconditionally and already no-op on a !hit contact.
@@ -1674,7 +1674,7 @@
           lines.push("  " + E.contactType + " " + vn + "_" + w[0] + " = " + E.sweptCapsule + "(" + segArgs +
             ", " + E.vec(refF + ".vx", refF + ".vy") + ", " + E.vec(refF + ".x", refF + ".y") + ", " + refC + ", BODY" + ci + "_HALF, " + E.halfThickness + ");");
           if (gate) lines.push("  if (!" + gate + ") " + vn + "_" + w[0] + ".hit = false;");
-          // The trapezoid is side A of each wall contact, the circle side B -
+          // The trapezoid is side A of each wall contact, the circle side B:
           // the order both solve loops below pass them in.
           if (df) lines.push(prepareContactLine(vn + "_" + w[0], fi, ci));
         });
@@ -1699,15 +1699,15 @@
 
       Object.keys(funnelPairsByCircle).forEach(function (ciStr) {
         var ci = Number(ciStr);
-        if (consts[ci].isAnchored) return; // never moves - leg 1 skips it entirely, so a teleport would be meaningless
+        if (consts[ci].isAnchored) return; // never moves, leg 1 skips it entirely, so a teleport would be meaningless
         // teleFound_{ci} matters as its own flag, separate from comparing
         // tHit values: DT is both "the whole step, no funnel mouth found"
-        // AND (by default) "the whole step, no ordinary contact either" -
+        // AND (by default) "the whole step, no ordinary contact either",
         // without a found flag, a step with neither would compare DT <= DT
         // and read as a trivially-true teleport with a meaningless zero
         // target, exactly the bug this comment is here to keep from coming
         // back (mirrors physics-engine.js's `if (tp && ...)`, where tp is
-        // null - not a tHit value - when nothing was found).
+        // null, not a tHit value, when nothing was found).
         lines.push("  " + E.scalarType + " teleTHit_" + ci + " = " + E.DT + ";");
         lines.push("  " + E.vecType + " teleTarget_" + ci + " = " + E.zeroVec + ";");
         lines.push("  int teleFunnel_" + ci + " = -1;");
@@ -1723,7 +1723,7 @@
       lines.push("");
 
       // Which splitter (if any) each circle is passing through this step,
-      // resolved HERE - before the contact flags and both solve loops below
+      // resolved HERE, before the contact flags and both solve loops below
       // - rather than where the split is applied at the end of the step,
       // because those three all have to know about it. Earliest hit wins
       // when a circle crosses more than one short side in the same step, the
@@ -1759,13 +1759,13 @@
       lines.push("");
     }
 
-    // Leg 1: move at vFull for tHit - matching detection exactly - then
+    // Leg 1: move at vFull for tHit, matching detection exactly, then
     // drop velocity to vPre (gravity applied only up to tHit, not the whole
     // step) before the impulse solve runs. Reflection doesn't commute with
     // adding gravity: reflecting v+g*DT (this step's full gravity, as if
     // the contact had waited until the very end to be noticed) differs from
     // reflecting v and then adding g*DT (as if it were noticed at the very
-    // start) by 2*(g.n)*DT along the normal - up to a real, visible amount
+    // start) by 2*(g.n)*DT along the normal, up to a real, visible amount
     // per step. That gap is what made a bounce's outcome depend on which
     // discrete step happened to catch it. Using each contact's own tHit
     // here closes it: the impulse always reflects the velocity the body
@@ -1776,9 +1776,9 @@
       var t1 = "body" + g3 + "THit";
       // A body that WON a teleport this step (see the Funnel block above)
       // gets its position OVERRIDDEN to the funnel's throat center instead
-      // of moved by vFull*tHit - that is the entire teleport. Velocity
+      // of moved by vFull*tHit: that is the entire teleport. Velocity
       // below is computed exactly the same way regardless: gravity applied
-      // up to tHit, nothing reflected - "keeps the same velocity" through a
+      // up to tHit, nothing reflected, "keeps the same velocity" through a
       // position discontinuity.
       if (funnelPairsByCircle[g3]) {
         lines.push("  if (teleWon_" + g3 + ") { " + B(g3) + ".x = teleTarget_" + g3 + ".x; " + B(g3) + ".y = teleTarget_" + g3 + ".y; } else { " +
@@ -1807,7 +1807,7 @@
     //
     // float32 is the straight port: every call re-derives what it needs.
     //
-    // df lifts everything a loop cannot change out of that loop - see
+    // df lifts everything a loop cannot change out of that loop, see
     // physics-gpu-df.js's header for the full list and for why each item
     // computes the same values the straight port would:
     //   - each hinged body's sin/cos, once, after leg 1 has set its angle;
@@ -1815,7 +1815,7 @@
     //     (dfPrepareHinge), which no velocity iteration can change;
     //   - each contact's effective mass and positional push
     //     (dfPrepareContact, emitted back where the contact was detected);
-    //   - and nothing at all for a side that cannot move - an anchored body,
+    //   - and nothing at all for a side that cannot move, an anchored body,
     //     or the world pin, which has solver forms of its own.
     // The position loop DOES turn bodies, so there each hinged body's sin/cos
     // is carried through the loop and advanced by the turn itself (dfTurn)
@@ -1842,7 +1842,7 @@
     }
 
     // Reads the HINGEn_A/B parameters stepOnceParams declared above, rather
-    // than constructing vec2(...) here - see stepOnceParams's comment.
+    // than constructing vec2(...) here: see stepOnceParams's comment.
     function hingeCall(hg, hi, velocityOrPosition) {
       var velocity = velocityOrPosition === "velocity";
       if (df) {
@@ -1898,7 +1898,7 @@
     lines.push("  }");
     lines.push("");
     // Leg 2: the remainder of the step, with the remainder of gravity
-    // applied to the POST-impulse velocity - never the whole DT applied
+    // applied to the POST-impulse velocity, never the whole DT applied
     // before the solve, for the same reason as leg 1. A body with no
     // contact this step has tHit=DT, tRest=0.0: vPost reduces to an
     // already-clamped vFull advanced by 0.0 (the identity), so this whole
@@ -1911,7 +1911,7 @@
       lines.push("  " + E.vecType + " vPost" + g2 + " = " + E.advanceVelocity + "(" + E.vec(B(g2) + ".vx", B(g2) + ".vy") + ", " + t2 + ", " + accelFor(g2) + ");");
       lines.push("  " + B(g2) + ".vx = vPost" + g2 + ".x; " + B(g2) + ".vy = vPost" + g2 + ".y;");
       // The rest of a spring's torque onto the post-impulse spin, before the
-      // turn below reads it - the same order as the velocity and the position.
+      // turn below reads it: the same order as the velocity and the position.
       if (turned[g2]) lines.push("  " + B(g2) + ".w = " + spinExpr(g2, t2) + ";");
       lines.push("  " + B(g2) + ".x = " + E.add(B(g2) + ".x", E.mul("vPost" + g2 + ".x", t2)) + ";");
       lines.push("  " + B(g2) + ".y = " + E.add(B(g2) + ".y", E.mul("vPost" + g2 + ".y", t2)) + ";");
@@ -1947,19 +1947,19 @@
 
     // Last thing stepOnce() does, so a wrap this step never feeds a
     // teleported position into this same step's own position-correction
-    // iterations above - any hinge/contact response to it plays out
+    // iterations above: any hinge/contact response to it plays out
     // starting next step instead.
     //
-    // Only ever decided by a "root" body - one with no hinge to another
+    // Only ever decided by a "root" body: one with no hinge to another
     // body (either completely free, or hinged straight to the world).
     // A hinge child is never independently wrapped: its position is a
     // rigid consequence of its parent, not an independent choice, so it
     // only ever moves as a cascade of the parent's own wrap below (a pure
     // translation of the whole rigid assembly by one frame period, which
-    // changes nothing physically on a wrapped/toroidal space - every hinge
+    // changes nothing physically on a wrapped/toroidal space, every hinge
     // in the subtree stays exactly satisfied regardless of how many hops
     // deep it is). A world-hinged root wraps by its PIN's position
-    // (HINGEh_A, inout per stepOnceParams), not its own center - see
+    // (HINGEh_A, inout per stepOnceParams), not its own center: see
     // stepOnceParams's comment for why the pin has to be the thing that
     // lives in wrapped frame-space.
     if (frame) {
@@ -1979,7 +1979,7 @@
       // a tethered group never wraps, and any other wraps as one when its
       // leader does. PhysicsEngine.springGroups is the single definition of
       // that, run here at codegen time over the same topology the JS engine
-      // runs it over every step - null for a scene with no springs, which
+      // runs it over every step: null for a scene with no springs, which
       // then emits exactly what it always did.
       var springGroups = PE.springGroups({
         bodies: consts,
@@ -2009,7 +2009,7 @@
           lines.push("  if (" + refX + " > " + frameW + ") " + dxVar + " = -" + frameW + "; else if (" + refX + " < 0.0) " + dxVar + " = " + frameW + ";");
           lines.push("  if (" + refY + " > " + frameH + ") " + dyVar + " = -" + frameH + "; else if (" + refY + " < 0.0) " + dyVar + " = " + frameH + ";");
         }
-        // What moves with this root: its own pin and its hinge descendants -
+        // What moves with this root: its own pin and its hinge descendants,
         // or, for a spring group's leader, every member of the group and
         // every background pin any of them hangs from (see
         // PhysicsEngine.translateSpringGroup).
@@ -2040,7 +2040,7 @@
     // Genuinely last, matching physics-engine.js's step(): each splitting
     // circle is displaced from its fully integrated (leg 1 + solve + leg 2 +
     // position solve + wrap) end-of-step state, and a slot woken here takes
-    // no part in the step it was born in - it starts fresh next step, like
+    // no part in the step it was born in, it starts fresh next step, like
     // any body added between steps.
     //
     // The circle that hit keeps its own slot as the first of the two (moved
@@ -2051,7 +2051,7 @@
     if (splittableCircles.length) {
       lines.push("");
       // Applied in ascending body index, the order physics-engine.js's own
-      // loop runs in - which is what decides who gets the last free slot
+      // loop runs in, which is what decides who gets the last free slot
       // when several balls split on the same step.
       splittableCircles.forEach(function (ci) {
         var lineage = isSpawnSlot[ci] ? "lineage" + ci : String(ci);
@@ -2063,14 +2063,14 @@
         lines.push("    " + B(ci) + ".x = " + E.add(B(ci) + ".x", "splitOff1_" + ci + ".x") + ";");
         lines.push("    " + B(ci) + ".y = " + E.add(B(ci) + ".y", "splitOff1_" + ci + ".y") + ";");
         if (spawnSlots.length) {
-          // At the ceiling the ball still passes through - the offset above
-          // has already been applied - it just doesn't duplicate.
+          // At the ceiling the ball still passes through, the offset above
+          // has already been applied, it just doesn't duplicate.
           lines.push("    if (liveCount < " + n + ") {");
           spawnSlots.forEach(function (k, si) {
             lines.push("      " + (si === 0 ? "if" : "else if") + " (liveCount == " + k + ") { " +
               B(k) + " = " + E.bodyType + "(childX_" + ci + ", childY_" + ci + ", " + B(ci) + ".angle, " + B(ci) + ".vx, " + B(ci) + ".vy, " + B(ci) + ".w); " +
               // A split never changes size, so the child's shape constants
-              // are the parent's, verbatim - no re-derivation from a radius
+              // are the parent's, verbatim: no re-derivation from a radius
               // that would have to agree with computeMass all over again.
               "BODY" + k + "_HALF = BODY" + ci + "_HALF; " +
               "BODY" + k + "_INV_MASS = BODY" + ci + "_INV_MASS; " +
@@ -2088,7 +2088,7 @@
     return lines.join("\n");
   }
 
-  // Per-body local declarations (LOCAL, not global - see generateStepOnceGLSL
+  // Per-body local declarations (LOCAL, not global: see generateStepOnceGLSL
   // above) with literal initial values baked straight from the scene as
   // authored. The per-pixel fractal grid emits its own version of this for
   // whichever body/property is linked (computed from that pixel's world X/Y
@@ -2097,7 +2097,7 @@
     var df = global.PhysicsDF.isExtended(precision);
     if (df) global.PhysicsDF.usePrecision(precision);
     // JS numbers are float64, so an authored coordinate already has more
-    // precision than a single float32 literal can carry - dfnum splits it
+    // precision than a single float32 literal can carry: dfnum splits it
     // across both words instead of rounding it away at codegen time.
     var dfnum = df ? global.PhysicsDF.num : null;
     var lines = [];
@@ -2124,14 +2124,14 @@
 
   // Every step gets its own row of an (numBodies x maxSteps) texture: texel
   // (body, step) redundantly re-simulates from scratch up to `step`, then
-  // reports that one body's (x, y, angle) - "acceptable at this tiny scale
+  // reports that one body's (x, y, angle), "acceptable at this tiny scale
   // since it's per-Play-click [or per-hover-point], not per-fractal-pixel."
   // Shared by the single-scene compiler below (bodies declared as globals
   // with baked literals) and the fractal grid's hover-replay compiler
   // (bodies declared from the same offset+cascade expressions the grid
-  // shader itself uses) - bodyDeclarationsGLSL is the only thing that
+  // shader itself uses): bodyDeclarationsGLSL is the only thing that
   // differs between the two, so it's the one parameter. (An earlier version
-  // of this function could also freeze a runaway body's position early -
+  // of this function could also freeze a runaway body's position early:
   // removed once frame wrapping made a position genuinely unbounded a
   // non-issue: a non-anchored body's x/y is now always kept in
   // [0, frameWidth)/[0, frameHeight) by PhysicsEngine.step's own wrap, not
@@ -2140,7 +2140,7 @@
   // ---- The trajectory program: every body's state at every step ----
   //
   // Texel (b, r) of the output is body b after r + 1 steps. The obvious way to
-  // fill it - and what this did for a long time - is for every texel to run
+  // fill it, and what this did for a long time, is for every texel to run
   // its own r + 1 steps from the start, all in one draw. That is quadratic in
   // the run length, and worse, the last row's pixels each do the WHOLE run
   // inside a single invocation: a few hundred steps of a heavy scene (or of
@@ -2148,18 +2148,18 @@
   // draw, which comes back as zeros.
   //
   // So it runs in CHUNKS, carrying the simulation's state between them in a
-  // float texture - the same packing grid playback uses
+  // float texture: the same packing grid playback uses
   // (playbackStateVariables), laid out as a strip: texel (l, 0) is state
   // layer l. Each chunk is two kinds of draw by the same program:
-  //   LOG      (u_trajAdvance == 0) - the chunk's rows. Row r starts from the
+  //   LOG      (u_trajAdvance == 0), the chunk's rows. Row r starts from the
   //            saved state at step u_trajBase and runs (r - u_trajBase + 1)
   //            steps, at most one chunk's worth.
-  //   ADVANCE  (u_trajAdvance  > 0) - the strip: every texel runs that many
+  //   ADVANCE  (u_trajAdvance  > 0): the strip: every texel runs that many
   //            steps from the saved state and keeps its own layer of the
   //            result. (The texels all repeat the same run. That is the cheap
   //            way round: they shade in parallel, so the strip takes about
   //            as long as one texel, and writing a strip needs only the one
-  //            color attachment the LOG draw already uses - several
+  //            color attachment the LOG draw already uses, several
   //            attachments would be a second pipeline for the driver to
   //            build, which above float32 is seconds.)
   // RGBA32F stores every float exactly, so stopping and resuming lands on the
@@ -2171,19 +2171,19 @@
   // Apple-silicon Mac WITH ITS DISPLAY ON, a fragment invocation that runs
   // past roughly 30-45ms is reported by Metal as a GPU hang
   // (kIOGPUCommandBufferCallbackErrorHang) and its command buffer thrown
-  // away - the compositor wants the GPU back every frame, and fragment work
+  // away, the compositor wants the GPU back every frame, and fragment work
   // cannot be preempted mid-tile. (With the display asleep the same draw is
   // allowed to run for seconds, which is how this hid for so long; compute
   // work is preemptible and is not subject to it, but WebGL has none.)
   // Nothing tells WebGL: no error, no lost context, just a texture that
-  // was never written - and after a few of them the OS ignores everything
+  // was never written, and after a few of them the OS ignores everything
   // the GPU process submits. A 20-slot splitter scene costs 0.4ms a step in
   // float32, so even 96 steps is too many there, while 96 steps of a small
   // scene is nothing. So the runner MEASURES: it times every chunk and sizes
   // the next one to take about TRAJECTORY_TARGET_MS (see
   // runCompiledTrajectoryOnGPU), starting from a single step.
   //
-  // The shader's own loop bound - the most steps a chunk can ever be.
+  // The shader's own loop bound: the most steps a chunk can ever be.
   var TRAJECTORY_MAX_CHUNK = 256;
   // What a draw's longest run is steered towards. Several times under the
   // limit above, because the estimate comes from the chunks already run and
@@ -2196,7 +2196,7 @@
 
   function trajectoryChunkInfo(n, consts, hingeAnchors, precision, spawnBase) {
     // Anchored bodies are left OUT of the carried state (nothing ever writes
-    // one - see playbackStateVariables), which is fine here too: every
+    // one: see playbackStateVariables), which is fine here too: every
     // invocation re-declares them from the scene before anything else.
     var vars = playbackStateVariables({ precision: precision, n: n, consts: consts, spawnBase: spawnBase, hingeAnchors: hingeAnchors });
     return {
@@ -2234,10 +2234,10 @@
     lines.push("  }");
     // Row 0 reports the state after 1 step (not 0) so that every row is a
     // real, distinct simulation step and trajectory[maxSteps-1] is the state
-    // after exactly maxSteps steps - matching how PhysicsEngine.step() is
+    // after exactly maxSteps steps, matching how PhysicsEngine.step() is
     // called maxSteps times, not maxSteps-1.
     //
-    // ONE loop, and so one call site, serves both kinds of draw - only the
+    // ONE loop, and so one call site, serves both kinds of draw, only the
     // step count differs. The compiler inlines stepOnce() wherever it is
     // called, and it is by far the largest thing in the shader: a second
     // call site doubles the program, and with it the seconds the driver
@@ -2257,7 +2257,7 @@
     lines.push("  int bodyIdx = int(gl_FragCoord.x);");
     lines.push("  vec3 outVal = vec3(0.0);");
     // The alpha channel is otherwise unused (nothing about position/angle
-    // needs a 4th component) - carrying BODYn_HALF through it costs
+    // needs a 4th component), carrying BODYn_HALF through it costs
     // nothing and lets a reader recover each body's actual rendered size,
     // which the fractal grid's hover-replay needs (a resize-linked body's
     // HALF is a per-hover-point value, not the scene's authored radius/
@@ -2266,17 +2266,17 @@
     lines.push("  float outHalf = 0.0;");
     for (var o = 0; o < n; o++) {
       // BODYn_HALF is a multi-float scalar above float32, but the alpha
-      // channel it lands in is a plain float either way - this is a rendered
+      // channel it lands in is a plain float either way: this is a rendered
       // size for the replay to draw with, not state.
       var half = df ? "dfToFloat(BODY" + o + "_HALF)" : "BODY" + o + "_HALF";
-      // A spawn slot nobody has split into yet reports size 0 - the same
+      // A spawn slot nobody has split into yet reports size 0: the same
       // signal a reader already uses to draw nothing, and what tells the
       // replay how many balls existed at this step without a second channel.
       if (isSpawnSlot[o]) half = "(alive" + o + " ? " + half + " : 0.0)";
       lines.push((o === 0 ? "  if" : "  else if") + " (bodyIdx == " + o + ") { outVal = vec3(" +
         readField(o, "x") + ", " + readField(o, "y") + ", " + readField(o, "angle") + "); outHalf = " + half + "; }");
     }
-    // The column past the last body is each row's sentinel - see the runner.
+    // The column past the last body is each row's sentinel: see the runner.
     lines.push("  if (bodyIdx == " + n + ") { outVal = vec3(gl_FragCoord.y + 0.5, TRAJECTORY_SENTINEL, 0.0); }");
     lines.push("  pbOut0 = vec4(outVal, outHalf);");
     lines.push("}");
@@ -2284,8 +2284,8 @@
   }
 
   // precision is "f32" (default) or "df". #editor-view's Play button never
-  // needs df - it runs one scene at one set of starting conditions, where
-  // float32 was never the limit - but the regression suite compiles the
+  // needs df, it runs one scene at one set of starting conditions, where
+  // float32 was never the limit, but the regression suite compiles the
   // same scene both ways to check the two agree, so it's a parameter here
   // rather than a hardcoded "f32".
   function compileSceneToTrajectoryGLSL(scene, maxSteps, precision) {
@@ -2309,7 +2309,7 @@
     // codegen (mouth teleport) is itself derived by pulling matching entries
     // OUT of this same list (see its own comment), so handing it none at
     // all is what turns off both the ordinary bounce/stick contacts AND a
-    // funnel's mouth in one place - exactly "never check for collisions,
+    // funnel's mouth in one place, exactly "never check for collisions,
     // objects pass right through each other" applied uniformly, with no
     // separate flag to keep in sync inside the generator itself.
     var pairs = PhysicsEngine.collisionsEnabled(scene) ? collisionPairs(n, consts, scene.hinges) : [];
@@ -2324,7 +2324,7 @@
                    : { x: fnum(hg.localAnchorB.x), y: fnum(hg.localAnchorB.y) },
       };
     });
-    // Only scenes with a locked frame size wrap at the edges - see
+    // Only scenes with a locked frame size wrap at the edges: see
     // generateStepOnceGLSL's own comment.
     // undefined in Infinite Space: no frame means the step loop emits no
     // wrap at all, which is exactly what that mode is.
@@ -2338,8 +2338,8 @@
     lines.push("");
     lines.push(libraryGLSL(precision, global.PhysicsEngine.speedCapFor(scene)));
     lines.push("");
-    // Nothing in the source depends on maxSteps any more - the runner walks
-    // the run a chunk at a time - so a different run length reuses the
+    // Nothing in the source depends on maxSteps any more, the runner walks
+    // the run a chunk at a time, so a different run length reuses the
     // compiled program instead of building another.
     var springs = springLinksFor(scene, df ? dfnum : fnum);
     lines.push(generateStepOnceGLSL(n, consts, pairs, hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), spawnBase, springs));
@@ -2367,7 +2367,7 @@
   // bodies) is a pure function of the pixel's world X/Y, so each draw
   // recomputes it from generateGridInitialStateGLSL's declarations instead.
   //
-  // The textures are RGBA32F, which store float32 values exactly - so as
+  // The textures are RGBA32F, which store float32 values exactly, so as
   // long as the same program does the stepping, stopping after k steps,
   // saving, reloading and running the rest lands on the same bits as one
   // uninterrupted run. physics-tests.js checks that.
@@ -2407,7 +2407,7 @@
   // site in generateStepOnceGLSL, and invMass/invInertia of 0 in
   // every solver), so its value at any step is its starting value, which
   // each draw recomputes anyway. extraBodies names any that must be carried
-  // regardless - a reader that has no starting state of its own, like the
+  // regardless: a reader that has no starting state of its own, like the
   // playback color pass reading an anchored Output body, needs them.
   //
   // A world hinge's anchor is carried because the frame wrap moves it in
@@ -2438,7 +2438,7 @@
     return withWords(vars, result.precision);
   }
 
-  // Stamps each state variable with its precision's word count - see
+  // Stamps each state variable with its precision's word count: see
   // stateFloats. Exported for callers that add state variables of their own
   // (the grid's sticky-edge bookkeeping).
   function withWords(vars, precision) {
@@ -2476,7 +2476,7 @@
   // Layer temporaries are prefixed pbState so they can't collide with the
   // gv_/pair_/probe names the rest of the generated code uses.
   //
-  // `strip` reads the other layout instead - a sampler2D whose texel (l, 0)
+  // `strip` reads the other layout instead: a sampler2D whose texel (l, 0)
   // is layer l, which is how the trajectory runner carries one simulation's
   // state (there is no lattice of them, so no texel to index by).
   function generatePlaybackStateLoadGLSL(vars, samplerName, texelExpr, strip) {
@@ -2498,7 +2498,7 @@
 
   // Fragment outputs for writing state: one per texture layer a single draw
   // can attach. A WebGL2 draw writes at most MAX_DRAW_BUFFERS attachments, so
-  // a state with more layers than that is written in groups - one draw per
+  // a state with more layers than that is written in groups: one draw per
   // group, each running the same steps and keeping a different slice.
   function generatePlaybackStateOutputsGLSL(layersPerGroup) {
     var lines = [];
@@ -2534,7 +2534,7 @@
   }
 
   // The strip layout's store: writes layer `layerExpr` (an int expression) to
-  // the one output. Flat ifs rather than an else-if chain - a quad-float
+  // the one output. Flat ifs rather than an else-if chain: a quad-float
   // splitter scene has a couple of hundred layers, and that deep a nest is
   // the kind of thing shader translators put a limit on.
   function generateStateStripStoreGLSL(vars, layerExpr, outName) {
@@ -2584,15 +2584,15 @@
 
   // ---- The trajectory runner: one context and its compiled programs, kept ----
   //
-  // This used to build everything from nothing on every call - a fresh
-  // OffscreenCanvas and context, a compile, a link - and lose the context on
+  // This used to build everything from nothing on every call, a fresh
+  // OffscreenCanvas and context, a compile, a link, and lose the context on
   // the way out. That is invisible for a Play click and ruinous for hover
   // replay, which calls it per mouse move and up to 300 times for one
   // Inspect line: in df the compile alone is seconds.
   //
   // Now there is one context for the life of the page, and programs are
   // cached by their SOURCE. The hover replay's source no longer depends on
-  // the hovered point (see compileHoverTrajectoryGLSL - the point is a
+  // the hovered point (see compileHoverTrajectoryGLSL: the point is a
   // uniform), so for a given scene, step count and precision every call
   // after the first is a draw and a readback.
   //
@@ -2647,9 +2647,9 @@
 
   // Runs an already-compiled { fragmentSource, numBodies, chunk, uniforms? }
   // (from either compileSceneToTrajectoryGLSL or the fractal grid's
-  // hover-replay compiler - same shape, same texture-logging convention) and
+  // hover-replay compiler: same shape, same texture-logging convention) and
   // reads back the resulting trajectory. `uniforms` is { name: [components...] },
-  // all floats - what the hover replay passes its world point in by. See
+  // all floats, what the hover replay passes its world point in by. See
   // generateTrajectoryMainGLSL for the chunked LOG / ADVANCE scheme this
   // drives.
   function runCompiledTrajectoryOnGPU(compiled, maxSteps) {
@@ -2692,7 +2692,7 @@
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       return t;
     }
-    // Where the trajectory is logged - a column wider than the bodies, for
+    // Where the trajectory is logged: a column wider than the bodies, for
     // each row's sentinel...
     var logWidth = numBodies + 1;
     var texture = floatTexture(logWidth, maxSteps);
@@ -2737,7 +2737,7 @@
     }
 
     // The program's first draw is where the driver really builds it, which
-    // can be seconds and says nothing about how long a step takes - so it is
+    // can be seconds and says nothing about how long a step takes, so it is
     // spent on a draw nobody times: row 0, which the loop below draws again.
     if (!entry.warmed) {
       drawLog(0, 1, 0);
@@ -2747,7 +2747,7 @@
 
     // Chunk by chunk, each one timed and the next sized from it (see
     // TRAJECTORY_TARGET_MS). A chunk is two draws of `rows` steps, and the
-    // time includes the round trip that measured it - both of which make a
+    // time includes the round trip that measured it: both of which make a
     // step look dearer than it is, which is the safe direction to be wrong
     // in. Growth is capped at doubling, so one optimistic estimate cannot
     // jump straight past the limit; the size it settles on is kept with the
@@ -2800,7 +2800,7 @@
 
     release();
     if (glError !== gl.NO_ERROR) throw new Error("GPU physics draw failed (GL error 0x" + glError.toString(16) + ")");
-    // A draw the GPU gave up on reports nothing - no error, no lost context -
+    // A draw the GPU gave up on reports nothing, no error, no lost context,
     // and reads back as whatever the texture held. Every caller would take
     // that for a trajectory, so it is an error here instead. (Seen when a
     // single step is itself too long for the GPU's watchdog, which is a
@@ -2808,7 +2808,7 @@
     // chunks had reached is forgotten so the next attempt starts over.)
     if (failure) {
       entry.chunkSteps = 1;
-      throw new Error("The GPU dropped a physics draw (" + failure + ") - the scene is too heavy for it at this precision.");
+      throw new Error("The GPU dropped a physics draw (" + failure + "): the scene is too heavy for it at this precision.");
     }
     return trajectory;
   }
@@ -2827,9 +2827,9 @@
     compileSceneToTrajectoryGLSL: compileSceneToTrajectoryGLSL,
     // Exposed so other GLSL-generating code (the per-pixel fractal grid) can
     // reuse the exact same physics formulas and step logic instead of a
-    // third hand-maintained copy - see generateStepOnceGLSL's own comment.
+    // third hand-maintained copy: see generateStepOnceGLSL's own comment.
     GLSL_LIBRARY: GLSL_LIBRARY,
-    // Assembles the full preamble for a given precision - df shaders need
+    // Assembles the full preamble for a given precision: df shaders need
     // the veil uniform, physics-df.js's arithmetic and the DBody bridge in
     // front of the float32 library, in that order.
     libraryGLSL: libraryGLSL,

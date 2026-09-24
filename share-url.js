@@ -1,8 +1,8 @@
 // This file is part of Chaos Accelerator, licensed under the Common Public
-// Attribution License, Version 1.0 (CPAL-1.0) - see LICENSE in the project
+// Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in the project
 // root, or https://chaosaccelerator.com/license for a hosted copy.
 
-// The whole app state as a URL fragment, and back - so sharing a scene (or a
+// The whole app state as a URL fragment, and back, so sharing a scene (or a
 // view of its map) is just sharing the address bar. Pure text in, plain data
 // out: no DOM, no storage, nothing here knows a page exists. transition.js
 // decides WHEN the address bar is read and written; this only says what it
@@ -27,7 +27,7 @@
 // plus view still comes to a few hundred against the ~2,000 that every
 // browser, chat app and mail client is safe with.
 //
-// WIRE DEFAULTS. A field at its default is left out - most scenes have no
+// WIRE DEFAULTS. A field at its default is left out: most scenes have no
 // starting velocities, run the usual duration and so on, which is a third of
 // the length. Those defaults belong to THIS FORMAT, not to the app: they are
 // what an absent field means in every link already out in the world, so they
@@ -36,7 +36,7 @@
 //
 // A link never ends in punctuation: chat apps and mail clients leave a
 // trailing "!" or "," out of the link they detect. The one value that can end
-// in "!" (an anchored body) is therefore never the last field - the frame
+// in "!" (an anchored body) is therefore never the last field: the frame
 // size follows the scene, and every view field ends in a letter or digit.
 (function (global) {
   "use strict";
@@ -54,7 +54,7 @@
   var DEFAULT_MOVIE_QUALITY = 4;
 
   var TYPE_CODES = { circle: "ci", line: "ln", funnel: "fu", splitter: "sp" };
-  // Which field holds a body's one size - the same split serializeScene
+  // Which field holds a body's one size: the same split serializeScene
   // writes and parseSceneData reads.
   var SIZE_FIELDS = { circle: "radius", line: "length", funnel: "size", splitter: "size" };
   var PROPERTY_CODES = {
@@ -82,7 +82,7 @@
 
   // The shortest text that reads back as exactly this number (String() is
   // specified to be that), less the characters a reader doesn't need: ".5"
-  // for "0.5", "1e21" for "1e+21". "+" is dropped for a second reason - some
+  // for "0.5", "1e21" for "1e+21". "+" is dropped for a second reason: some
   // software still reads it as a space.
   function num(v) {
     if (!isFinite(v) || v === 0) return "0";
@@ -109,13 +109,13 @@
 
   // ---- Double-double decimals ----
   //
-  // The map's view center is held as a double-double (hi + lo, ~106 bits -
+  // The map's view center is held as a double-double (hi + lo, ~106 bits:
   // see view.center in fractal-grid.js), because at a deep zoom one float64
   // cannot tell a pixel from its neighbour. It travels as ONE decimal with
   // as many places as the zoom can use, so a link's center reads as an
   // ordinary coordinate that simply grows digits as the view goes deeper.
   // Converting exactly in both directions needs integers wider than a
-  // float64, hence BigInt - written as BigInt(n) calls rather than 10n
+  // float64, hence BigInt: written as BigInt(n) calls rather than 10n
   // literals, which a browser without BigInt could not even parse (the same
   // care physics-df.js takes). Without it a center keeps float64 precision,
   // which is as deep as such a browser can render anyway.
@@ -198,7 +198,7 @@
     var fraction = dot === -1 ? "" : body.slice(dot + 1);
     var s = BigInt(((dot === -1 ? body : body.slice(0, dot)) + fraction) || "0");
     if (negative) s = -s;
-    // text - hi, as the exact fraction p / q.
+    // text: hi, as the exact fraction p / q.
     var h = exactParts(hi), q = pow10(fraction.length), p;
     if (h.e >= 0) {
       p = s - (h.m << BigInt(h.e)) * q;
@@ -233,8 +233,8 @@
 
   // ---- The scene ----
   //
-  // Takes and returns the AUTHORED scene JSON - centered, +y up, exactly
-  // what Export writes and Import reads (see physics-coords.js) - so a link
+  // Takes and returns the AUTHORED scene JSON, centered, +y up, exactly
+  // what Export writes and Import reads (see physics-coords.js), so a link
   // goes through the same validation a pasted scene does, and describes the
   // scene relative to the middle of its frame rather than to one screen.
 
@@ -243,7 +243,7 @@
       TYPE_CODES[b.type], sceneNum(b.x), sceneNum(b.y), sceneNum(b.angle), sceneNum(b[SIZE_FIELDS[b.type]]),
       sceneNum(b.vx), sceneNum(b.vy), sceneNum(b.w),
     ];
-    // Most bodies start at rest - the three velocities are optional from
+    // Most bodies start at rest: the three velocities are optional from
     // the right.
     while (parts.length > 5 && parts[parts.length - 1] === "0") parts.pop();
     return parts.join(":") + (b.isAnchored ? "!" : "");
@@ -345,7 +345,7 @@
     if (scene.collisionsEnabled === false) fields.push("coll:f");
     if (scene.simulationSteps && scene.simulationSteps !== DEFAULT_STEPS) fields.push("step:" + scene.simulationSteps);
     if (scene.maxSimulationBodies && scene.maxSimulationBodies !== DEFAULT_MAX_BODIES) fields.push("maxb:" + scene.maxSimulationBodies);
-    // Last on purpose - see this file's head on how a link must not end.
+    // Last on purpose: see this file's head on how a link must not end.
     fields.push("frmw:" + sceneNum(scene.frameWidth));
     fields.push("frmh:" + sceneNum(scene.frameHeight));
     return fields;
@@ -357,7 +357,7 @@
   }
   function splitList(text) { return text === "" ? [] : text.split(";"); }
 
-  // Null when the link names no bodies - a page with nothing to load, which
+  // Null when the link names no bodies: a page with nothing to load, which
   // is not the same as a scene that failed to parse (that throws).
   function decodeScene(fields) {
     if (!fields.body) return null;
@@ -393,8 +393,8 @@
   //     movie: { keyframes: [ { center: { x, xLo, y, yLo }, scale, zoom, step, seconds } ],
   //              quality, loop } }
   //
-  // A movie link ("movi") has no view of its own - its keyframes are its
-  // views - so there `center`, `zoom` and `inspect` are simply absent.
+  // A movie link ("movi") has no view of its own, its keyframes are its
+  // views, so there `center`, `zoom` and `inspect` are simply absent.
   //
   // `zoom` is the number the map's own readout shows, `scale` the world
   // units per view height behind it (only used here to decide how many
@@ -402,7 +402,7 @@
   // VIEW HEIGHTS FROM THE CENTER rather than world coordinates: at a deep
   // zoom a world coordinate needs thirty-odd digits to land on the right
   // pixel, where an offset from a center that already carries them needs
-  // nine - and nine is what they get, a millionth of a pixel.
+  // nine, and nine is what they get, a millionth of a pixel.
 
   function uvNum(v) {
     v = Number(v) || 0;
@@ -552,7 +552,7 @@
   // wrote: some software percent-encodes the punctuation on the way through
   // (nothing here contains a literal "%", so undoing that is always safe),
   // and a link lifted out of a sentence can arrive with the sentence's own
-  // closing punctuation still attached - which no link written here ends in.
+  // closing punctuation still attached, which no link written here ends in.
   function cleanFragment(fragment) {
     var text = String(fragment || "").replace(/^#/, "");
     try { text = decodeURIComponent(text); } catch (err) { /* a stray %: read it as it stands */ }
@@ -560,7 +560,7 @@
   }
 
   // null: not one of this app's links at all (no fragment, someone else's
-  // anchor). Otherwise { page, scene, view } - scene null when the link
+  // anchor). Otherwise { page, scene, view }: scene null when the link
   // names a page but no bodies, view null for the builder. THROWS, with a
   // message fit to show, when it is one of these links and the scene in it
   // can't be read.

@@ -1,5 +1,5 @@
 /* This file is part of Chaos Accelerator, licensed under the Common Public
-   Attribution License, Version 1.0 (CPAL-1.0) - see LICENSE in the project
+   Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in the project
    root, or https://chaosaccelerator.com/license for a hosted copy. */
 
 :root {
@@ -10,14 +10,14 @@
    chaos.html holds both shells at once, rather than the two separate
    pages (physics.html and fractal-grid.html) they used to be. They have
    to be able to be on screen
-   SIMULTANEOUSLY - the transition between them cross-fades one into the
-   other while both animate - so they stack rather than flow, and the
+   SIMULTANEOUSLY, the transition between them cross-fades one into the
+   other while both animate, so they stack rather than flow, and the
    transition drives their opacity directly.
 
    [hidden] is the fully-off state (no paint, no hit-testing, no layout
    cost). During a transition both views drop [hidden] and opacity takes
    over. An author `display` beats the UA's own [hidden] rule, hence the
-   explicit rule here - the same trap .dual-select[hidden] already needed. */
+   explicit rule here: the same trap .dual-select[hidden] already needed. */
 #app {
   position: relative;
 }
@@ -48,13 +48,13 @@
 }
 
 /* #grid-view, later in the document, paints over #editor-view whenever both
-   are un-hidden (see the comment above) - normally invisible since grid-view
+   are un-hidden (see the comment above): normally invisible since grid-view
    starts hidden, but during a transition it means the editor's own toolbar
    would be buried under the grid from the first frame, with no chance to be
    seen fading away. Lifted above that (and above #grid-menu-column's own
    z-index: 3, so the grid's menu column doesn't show through it in the
    same corner) only while transitioning; transition.js's own clip rect is
-   what keeps the tiles/fade off this same strip - see runTransition's
+   what keeps the tiles/fade off this same strip, see runTransition's
    `clip`. */
 #editor-view.is-transitioning #panel {
   position: relative;
@@ -101,7 +101,7 @@
    across both views and the transition between them. Fixed, not absolute,
    so it stays anchored to the viewport corner rather than scrolling or
    resizing with any container. pointer-events: none so it never blocks a
-   click on whatever's underneath it. Plain text, no link, no build step -
+   click on whatever's underneath it. Plain text, no link, no build step:
    delete this block and its one line in chaos.html to remove it. */
 #watermark {
   position: fixed;
@@ -125,7 +125,7 @@
    A direct child of .view rather than of #panel, positioned absolute
    against it, so it's independent of the panel's layout and of
    backdrop-filter's containing-block quirk (a filtered ancestor would have
-   hijacked position:fixed here - absolute against .view sidesteps that
+   hijacked position:fixed here, absolute against .view sidesteps that
    instead of fighting it). The right corner specifically: #panel lives on
    the LEFT, so this needs no space carved out of it to avoid overlapping.
    Same translucent-card look as the grid's own cards, since the two pages
@@ -184,7 +184,7 @@
 /* ---- The settings panel itself ----
    A floating card anchored at the exact same corner the button sits at
    (see .floating-settings-btn above) rather than a full-height drawer
-   sliding in from the screen edge - it reads as the button EXPANDING into
+   sliding in from the screen edge: it reads as the button EXPANDING into
    a panel, in the same translucent-card language as the grid page's own
    menu cards, instead of an unrelated modal. Always in the DOM (not [hidden]) so the
    opacity/transform transition below has something to animate; pointer-
@@ -239,8 +239,8 @@
 }
 
 /* ---- Playback controls (Play/Pause, Progress, Reset) ----
-   Shared row shape for both of this app's playback surfaces - the fractal
-   grid's hover/Compare preview and the editor's own Play transport - kept
+   Shared row shape for both of this app's playback surfaces, the fractal
+   grid's hover/Compare preview and the editor's own Play transport, kept
    here since both pages load this file. Each wires its own play/pause/
    seek/reset logic independently (see fractal-grid.js / physics-ui.js);
    only the layout is shared. Buttons keep .icon-button's fixed 32px square
@@ -259,7 +259,7 @@
 }
 
 /* The speed button shows its own value ("0.5x".."16x") rather than an icon,
-   so - unlike play/pause and reset - it can't stay a fixed 32px square; it
+   so, unlike play/pause and reset, it can't stay a fixed 32px square; it
    keeps .icon-button's height/colors/border and just widens to fit. */
 .speed-btn {
   width: auto;
@@ -274,7 +274,7 @@
 }
 
 /* Fixed-position popover, shown/measured/placed by JS against whichever
-   speed button opened it (see positionSpeedPopup in each page's own JS) -
+   speed button opened it (see positionSpeedPopup in each page's own JS):
    see the HTML comments by #speed-popup/#hover-speed-popup for why this
    can't just be an absolutely-positioned child of the button instead. Same
    translucent floating-card look as .settings-panel/#tip-popover, since
@@ -297,7 +297,7 @@
 .speed-popup[hidden] {
   display: none;
 }
-/* A horizontal <input type="range">, rotated into a vertical one - no
+/* A horizontal <input type="range">, rotated into a vertical one: no
    distinct "vertical" input type exists that both major browser engines
    agree on, so this is the standard way to get one everywhere. The track
    wrapper is sized as the rotated (visual) footprint; the input itself
@@ -305,7 +305,7 @@
    around the wrapper's middle, so nothing about its own hit-testing or
    dragging needs to know it's been turned sideways.
    rotate(-90deg) specifically (not 90deg): CSS rotation is clockwise for
-   positive angles, so -90deg turns the slider's right/max end to face UP -
+   positive angles, so -90deg turns the slider's right/max end to face UP,
    the direction "more speed" should read as, same as a volume slider. */
 .speed-slider-track {
   position: relative;
@@ -330,10 +330,10 @@
 
 /* ---- Sound volume (settings panel) ----
    "Sound" label, then the speaker icon, then the actual slider, all in one
-   row - the icon sits BETWEEN the label and the control it mirrors, rather
+   row, the icon sits BETWEEN the label and the control it mirrors, rather
    than replacing it the way .toggle-field's switch does, since the whole
    point here is that the icon keeps reflecting whatever the slider (or the
-   playback area's own mute button - see #btn-mute/#hover-mute below,
+   playback area's own mute button, see #btn-mute/#hover-mute below,
    updated by the exact same PhysicsSound.onVolumeChange listener) currently
    says. Same row shape as .toggle-field (flex, gap, same font-size/margin)
    since it lives in the same settings list, just with a 3rd element and a
@@ -356,12 +356,12 @@
 }
 
 /* The speaker icon shared by #btn-mute/#hover-mute (playback area) and each
-   settings panel's own .volume-icon - same SVG markup in all four spots
+   settings panel's own .volume-icon: same SVG markup in all four spots
    (see chaos.html), with .vol-arc-1/.vol-arc-2/.vol-mute-x shown or hidden
    by JS (setVolumeIconState in physics-ui.js/fractal-grid.js) rather than
    swapped for a different icon, so one small function keeps every instance
    of it in sync with PhysicsSound's own volume. Toggled via style.display
-   directly, not the `hidden` attribute - an SVG child's own [hidden] isn't
+   directly, not the `hidden` attribute: an SVG child's own [hidden] isn't
    reliably backed by a `display: none` rule in every engine the way an
    HTML element's is (see #inspect-preview's own children in
    fractal-grid.css for the exact same gotcha), so there's no attribute
@@ -374,7 +374,7 @@
   flex-shrink: 0;
   color: var(--text-dim);
 }
-/* Inside #btn-mute/#hover-mute instead, just sizing - stroke="currentColor"
+/* Inside #btn-mute/#hover-mute instead, just sizing: stroke="currentColor"
    on the svg already picks up .icon-button's own color, the same as the
    play/reset buttons' plain-text glyphs do. */
 .icon-button svg {

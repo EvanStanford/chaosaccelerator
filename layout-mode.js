@@ -1,9 +1,9 @@
 // This file is part of Chaos Accelerator, licensed under the Common Public
-// Attribution License, Version 1.0 (CPAL-1.0) - see LICENSE in the project
+// Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in the project
 // root, or https://chaosaccelerator.com/license for a hosted copy.
 
 // Which of the app's layouts, input styles and performance profiles applies
-// right now - answered in ONE place, as three separate questions, because a
+// right now: answered in ONE place, as three separate questions, because a
 // device does not answer them all the same way:
 //
 //   LAYOUT      - is the window small? Purely the viewport's size, never the
@@ -16,7 +16,7 @@
 //                 layout and a cursor. Whether a given TAP was a finger is
 //                 decided per event where it matters (see fractal-grid.js);
 //                 this only answers "could there be one", for what to show.
-//   PERFORMANCE - is this a phone/tablet-class GPU? Those share memory with
+//   PERFORMANCE: is this a phone/tablet-class GPU? Those share memory with
 //                 the whole system and are killed for using much of it, and
 //                 their screens report three device pixels per CSS pixel,
 //                 which nobody can see and every one of which is a whole
@@ -24,7 +24,7 @@
 //
 // The answers are published as classes on <html> (mobile.css is written
 // against them) and as window.LayoutMode for the scripts. Loaded in <head>,
-// before anything is laid out, so the first layout is already the right one -
+// before anything is laid out, so the first layout is already the right one:
 // both views measure their canvas area as they start up.
 (function (global) {
   "use strict";
@@ -62,7 +62,7 @@
   })();
 
   // The movie player (chaosplayback.html) runs this whole app inside a frame
-  // as its renderer, sized in pixels to the movie's resolution - 640x360 at
+  // as its renderer, sized in pixels to the movie's resolution: 640x360 at
   // the lower qualities, which by size alone is "a phone on its side". But
   // every frame of a movie is the map filling that frame edge to edge; a
   // dock taking its bottom half would change the picture's shape and what is
@@ -125,16 +125,16 @@
     // The small-window layout: the grid's cards in a dock along the bottom
     // (or, on its side, along the right) instead of floating over the map.
     isMobile: function () { return state.mobile; },
-    // "portrait" | "landscape" - only meaningful while isMobile().
+    // "portrait" | "landscape", only meaningful while isMobile().
     orientation: function () { return state.orientation; },
     // A touchscreen is present at all (it may not be the only pointer).
     hasTouch: function () { return !!anyCoarseQuery.matches; },
-    // The primary pointer can hover - false on a phone, where anything that
+    // The primary pointer can hover: false on a phone, where anything that
     // says "hover over..." is describing something that cannot be done.
     canHover: function () { return !noHoverQuery.matches; },
     // A phone/tablet-class GPU. Decides nothing by itself any more: it is
     // only which performance preset the map STARTS at (Low here, High
-    // everywhere else) - what the presets do, and every value in them, is
+    // everywhere else), what the presets do, and every value in them, is
     // Settings > Performance Settings, in fractal-grid.js, and can be changed
     // on any device.
     isConstrained: function () { return constrained; },

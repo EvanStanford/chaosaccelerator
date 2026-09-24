@@ -1,11 +1,11 @@
 // This file is part of Chaos Accelerator, licensed under the Common Public
-// Attribution License, Version 1.0 (CPAL-1.0) - see LICENSE in the project
+// Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in the project
 // root, or https://chaosaccelerator.com/license for a hosted copy.
 
 // ---- Global Stats: the analysis math ----
 //
 // Everything here is pure number crunching over ONE rectangular block of
-// sampled output values - no DOM, no WebGL, no scene. The fractal grid
+// sampled output values: no DOM, no WebGL, no scene. The fractal grid
 // renders that block with its own shader (see sampleValueGrid in
 // fractal-grid.js) and hands it here; fractal-stats-panel.js draws whatever
 // comes back. Kept DOM-free for the same reason physics-engine.js and
@@ -17,7 +17,7 @@
 // ---- Two conventions everything below depends on ----
 //
 // VALUES ARE t, NOT THE OUTPUT PROPERTY. Every sample is the same
-// normalized [0, 1] t the grid's own colorMap takes - so a "range" here is
+// normalized [0, 1] t the grid's own colorMap takes, so a "range" here is
 // a fraction of the whole rainbow, and the caller converts back to degrees/
 // steps/units for display. That is deliberate: t is what the picture on
 // screen is actually made of, and it's the only representation in which a
@@ -34,11 +34,11 @@
 // Rotation, and x/y under Pac-Man Warp, wrap: t = 0 and t = 1 are the same
 // physical value, one step apart, not a full range apart. Every difference
 // taken here therefore goes through delta(), which folds into [-0.5, 0.5]
-// when `circular` is set - so the seam where mod() happened to cut the
+// when `circular` is set, so the seam where mod() happened to cut the
 // circle produces no gradient and no false edge in the orientation rose.
 // Averages of circular data likewise go through
 // the trigonometric moments rather than a plain mean, which would put the
-// average of 0.99 and 0.01 at 0.5 - the exact opposite side of the wheel
+// average of 0.99 and 0.01 at 0.5: the exact opposite side of the wheel
 // from the truth.
 (function (global) {
   "use strict";
@@ -65,7 +65,7 @@
   // memory. Counting into 4096 buckets is one pass that CAN be broken up
   // (it rides along with the display histogram), needs 32KB whatever the
   // sample count, and pins every quantile to within 1/4096 of the color
-  // range - far finer than the two decimal places any of them is shown to.
+  // range: far finer than the two decimal places any of them is shown to.
   var QUANTILE_BUCKETS = 4096;
 
   function quantileFromCounts(counts, total, q) {
@@ -83,7 +83,7 @@
   }
 
   // The smallest arc of the color wheel containing every sampled value, as
-  // a fraction of the whole wheel - the full circle minus its single
+  // a fraction of the whole wheel: the full circle minus its single
   // largest gap. A plain max-minus-min can't see that 0.97 and 0.02 are
   // neighbours. Read off the same bucket counts as the quantiles: the
   // largest gap is the longest run of empty buckets, wrapping round the end
@@ -106,23 +106,23 @@
   //
   // Global stats run alongside the fractal's own rendering and the hover
   // replay, and must never make either of them stutter. So the whole
-  // analysis is built as a LIST OF STEPS rather than one function - the
+  // analysis is built as a LIST OF STEPS rather than one function: the
   // caller drives it from requestIdleCallback and can stop between any two
   // of them (see scheduleStatsSlice in fractal-grid.js).
   //
   // Every pass that walks the block is split by ROWS rather than being one
   // step of its own (see addRowPass). That is what lets the sample
   // resolution be a user setting: at the coarse end a pass is one step
-  // either way, and at full resolution - where a single pass over several
+  // either way, and at full resolution, where a single pass over several
   // million samples would be a visible frame hitch, however idle the page
-  // was when it started - the same pass becomes a few dozen steps of
+  // was when it started, the same pass becomes a few dozen steps of
   // constant size.
   //
   // spec:
   //   width, height  - sample block dimensions
   //   t              - Float32Array(width * height), row-major, row 0 at the BOTTOM
   //   circular       - whether t = 0 and t = 1 are the same value
-  //   groups         - { extremes, distribution, orientation, features } -
+  //   groups         - { extremes, distribution, orientation, features },
   //                    only the true ones are computed, and each costs
   //                    nothing when off
   //   colSeam        - Uint8Array(width - 1) or null: colSeam[c] set means
@@ -130,10 +130,13 @@
   //                    (see the host's own findInputSeams) and is not a real
   //                    neighbour comparison
   //   rowSeam        - Uint8Array(height - 1) or null, same for rows
+  //   returnT        - the t of the Output's STARTING value (the scene as
+  //                    authored), or null when the Output has none; the
+  //                    features group traces the contour at that level
 
   // Roughly how many samples one step should touch. Every pass below costs
   // about the same per sample, so this is the whole of what keeps a step's
-  // cost independent of the sample block - a few milliseconds at the top of
+  // cost independent of the sample block: a few milliseconds at the top of
   // the resolution slider just as at the bottom.
   var SAMPLES_PER_STEP = 60000;
 
@@ -145,6 +148,7 @@
     var colSeam = spec.colSeam || null;
     var rowSeam = spec.rowSeam || null;
     var histogramBuckets = spec.histogramBuckets || 96;
+    var returnT = (typeof spec.returnT === "number" && isFinite(spec.returnT)) ? spec.returnT : null;
     var orientationBins = spec.orientationBins || 180;
 
     var out = {
@@ -154,10 +158,10 @@
     };
 
     // Filled by the first passes and read by nearly every one after them.
-    var valid = null;      // Uint8Array - a NaN pixel (a simulation that blew up) is not a measurement
+    var valid = null;      // Uint8Array: a NaN pixel (a simulation that blew up) is not a measurement
     var validCount = 0;
     var mean = 0;          // linear mean, or the circular mean for a wrapping output
-    var centered = null;   // Float32Array of delta(mean, t) - the residual every second-order metric works from
+    var centered = null;   // Float32Array of delta(mean, t): the residual every second-order metric works from
 
     function xSeam(c) { return colSeam ? colSeam[c] === 1 : false; }
     function ySeam(r) { return rowSeam ? rowSeam[r] === 1 : false; }
@@ -289,7 +293,7 @@
         if (out.empty) return;
         // Shannon entropy of the bucketed distribution, in bits, plus the
         // same figure as a fraction of the most a histogram this size can
-        // carry (log2 of the bucket count) - which is the version that
+        // carry (log2 of the bucket count), which is the version that
         // means something without knowing how many buckets there were.
         var bits = 0, peak = 0, occupied = 0;
         for (var b = 0; b < histogramBuckets; b++) {
@@ -305,7 +309,7 @@
         d.entropyNormalized = bits / Math.log2(histogramBuckets);
         d.occupiedBuckets = occupied;
         // Quantiles need a "smallest" to count up from, and a circle has
-        // none - so a wrapping output gets the smallest containing arc
+        // none, so a wrapping output gets the smallest containing arc
         // instead, which is the honest answer to "how spread out is this."
         if (circular) {
           d.circularSpread = circularSpreadFromCounts(fine);
@@ -456,9 +460,9 @@
       // The same idea for the ridge LINES below, against the picture's own
       // curvature rather than its slope: a crest or trough has to curve at
       // least this much across itself to count as relief at all. Two per
-      // cent of the mean second difference is far below any real crest -
+      // cent of the mean second difference is far below any real crest,
       // a smooth band a thousand samples wide still curves a few thousand
-      // times more than that at its top - and far above the rounding
+      // times more than that at its top, and far above the rounding
       // texture of a float32 plateau, whose one-bit staircases would
       // otherwise read as perfectly straight, axis-aligned grooves running
       // the whole width of a flat region. The absolute floor is for a view
@@ -503,6 +507,12 @@
       // Whether an edge sample's step clears the SEED threshold (below) or
       // only the lower one it may be followed at.
       var edgeStrong = null;
+      // For the contours: how much contour length each level carries
+      // (the coarea formula: the gradient magnitude summed over the
+      // samples at a level IS the total length of that level's contours),
+      // and a fine value histogram for the median level.
+      var COAREA_BINS = 128;
+      var coarea = null, fineCounts = null;
       // And which of the pie's four classes each sample fell in, so the
       // panel can light up every sample of one class on the map when its
       // slice or legend line is hovered.
@@ -521,7 +531,7 @@
       var STEP_LEN2 = [1, 1, 2, 2];
       // The second difference along profile `dir` through sample i, taken
       // two samples out on each side rather than one, per unit length
-      // squared - or the one-sample figure when the wider one runs off the
+      // squared, or the one-sample figure when the wider one runs off the
       // block or onto a sample that isn't valid.
       //
       // Needed because a crest rarely falls on a sample: when it lies
@@ -542,7 +552,7 @@
         return (delta(t[i], t[a], circular) + delta(t[i], t[b], circular)) / (4 * STEP_LEN2[dir]);
       }
       // Is the sample the extreme point (sign = -1 a maximum, +1 a minimum)
-      // of profile `dir` - both neighbours strictly on the far side of it -
+      // of profile `dir`, both neighbours strictly on the far side of it,
       // and of at least one of the two profiles 45 degrees off it? Strictly
       // on both sides: allowing a tie on one would make the foot of every
       // step a valley line and its top a ridge line, and a crest that falls
@@ -561,6 +571,8 @@
         grad = new Float32Array(W * H);
         gradDir = new Uint8Array(W * H);
         edgeStrong = new Uint8Array(W * H);
+        coarea = new Float64Array(COAREA_BINS);
+        fineCounts = new Float64Array(QUANTILE_BUCKETS);
       });
       addRowPass(1, Math.max(1, H - 1), function census(r0, r1) {
         if (out.empty) return;
@@ -591,13 +603,17 @@
             var gy = ((nw + 2 * n + ne) - (sw + 2 * so + se)) / 8;
             grad[i] = Math.sqrt(gx * gx + gy * gy);
             gradDir[i] = Math.round(Math.atan2(gy, gx) / TAU * 256) & 255;
+            var tb = Math.floor(t[i] * COAREA_BINS);
+            coarea[tb < 0 ? 0 : (tb >= COAREA_BINS ? COAREA_BINS - 1 : tb)] += grad[i];
+            var fb = Math.floor(t[i] * QUANTILE_BUCKETS);
+            fineCounts[fb < 0 ? 0 : (fb >= QUANTILE_BUCKETS ? QUANTILE_BUCKETS - 1 : fb)]++;
 
             // ---- What shape the surface is here (the pie) ----
             //
             // Discrete Hessian. Eigenvalue SIGNS classify the local shape:
             // both negative curves down every way (a crest or a peak), both
             // positive curves up every way (a trough or a pit), opposite
-            // signs is a saddle - the pass where two basins meet.
+            // signs is a saddle, the pass where two basins meet.
             var txx = e + w, tyy = n + so;
             var txy = (ne - nw - se + sw) / 4;
             var trH = txx + tyy;
@@ -615,13 +631,13 @@
             // broad its flanks, and only the samples right on it should
             // count. So this is the topographer's definition instead: a
             // sample is on a ridge if, looking ACROSS the ridge, it is the
-            // highest point - a local maximum along the direction the
-            // surface curves down most steeply - and the surface runs on
+            // highest point, a local maximum along the direction the
+            // surface curves down most steeply, and the surface runs on
             // roughly level ALONG the ridge, which is what tells a crest
             // from an isolated bump.
             //
-            // The four profiles through the sample - E-W, N-S and the two
-            // diagonals - each get their second difference, per unit length
+            // The four profiles through the sample, E-W, N-S and the two
+            // diagonals, each get their second difference, per unit length
             // squared so the root-two diagonal steps compare with the axis
             // ones. The most negative profile is the across-ridge one; the
             // profile at right angles to it is the along-ridge one; the two
@@ -677,7 +693,7 @@
 
       // ---- Edges: where the picture jumps ----
       //
-      // A ridge is where the value peaks; an edge is where it STEPS - one
+      // A ridge is where the value peaks; an edge is where it STEPS: one
       // colour on this side, another on that, and each side keeping its
       // colour. In these maps that is a basin boundary, and unlike a ridge
       // it stays exactly as sharp however far you zoom in. The definition
@@ -747,7 +763,7 @@
             if (!profileClear(dir, i, c, r, 1)) continue;
             // The crest of the step: largest gradient of the three along
             // the gradient's own line. A step that falls exactly between
-            // two samples - which a discontinuity always does - puts the
+            // two samples, which a discontinuity always does, puts the
             // same gradient on both, so a tie is allowed on the one side
             // only: of two tied samples the forward one is the edge, and
             // the edge stays one sample wide.
@@ -775,11 +791,11 @@
       // completely different pictures. So: take the ridge-line samples as
       // one set and the valley-line samples as another, find their
       // 8-connected pieces, and measure the longest piece of each end to
-      // end - the crest of the range, and the river's own course.
+      // end, the crest of the range, and the river's own course.
       //
-      // "Length" here is the GEODESIC diameter - the distance from one end
+      // "Length" here is the GEODESIC diameter, the distance from one end
       // of the piece to the other along the piece itself, not the straight
-      // line between them - which is the honest answer for a feature that
+      // line between them, which is the honest answer for a feature that
       // curves. The naive way is a depth-first search for the longest chain
       // from every sample of the piece, which is quadratic in the piece;
       // the standard double sweep gets the same answer in two passes:
@@ -788,8 +804,8 @@
       // with no loops, and within a sample or two on one that has them.
       //
       // Cost. Labelling is one union-find pass over the block, near linear.
-      // The double sweep is quadratic in nothing - it is two passes over
-      // ONE piece - but it is only run on a handful of candidate pieces
+      // The double sweep is quadratic in nothing, it is two passes over
+      // ONE piece, but it is only run on a handful of candidate pieces
       // rather than all of them: the longest is always among the largest by
       // area or the largest by bounding box, and taking several of each
       // covers the case where a long thin piece loses on area to a fat
@@ -798,7 +814,7 @@
       var parent = null;      // union-find, indexed by sample; only line samples take part
       var comps = null;       // root -> { size, minC, maxC, minR, maxR, cls, strong }
       // Two edge samples join the same edge only if their gradients agree
-      // to within this many direction bytes - 21 of 256 is 30 degrees.
+      // to within this many direction bytes: 21 of 256 is 30 degrees.
       var EDGE_TURN_MAX = 21;
       function sameWay(a, b) {
         var d = Math.abs(gradDir[a] - gradDir[b]);
@@ -822,7 +838,7 @@
       });
 
       // Union with the four neighbours already walked (left, and the three
-      // above) - which is all it takes for 8-connectivity when the walk
+      // above), which is all it takes for 8-connectivity when the walk
       // goes in row order, and means a neighbour's own label is always set
       // by the time it is read.
       addRowPass(1, Math.max(1, H - 1), function labelPieces(r0, r1) {
@@ -864,7 +880,7 @@
       }, function choosePieces() {
         if (out.empty || !comps) return;
         // The longest piece is among the biggest by area or the biggest by
-        // bounding box - a long thin one can lose the first contest badly
+        // bounding box: a long thin one can lose the first contest badly
         // and win the second outright, which is exactly the shape this
         // whole measurement is looking for.
         var byClass = {};
@@ -934,6 +950,413 @@
         grad = null; gradDir = null; edgeStrong = null;
       });
 
+
+      // ---- Contours: the level sets, every level considered ----
+      //
+      // A contour at level v is the exact curve where the picture equals v:
+      // no thresholds, no detection, just marching squares. "Every level"
+      // is made affordable by the coarea histogram filled in the census:
+      // the levels carrying the most total contour length are the only
+      // ones where the longest single contour can be, so those few are
+      // traced and the rest skipped. Two more levels are traced whatever
+      // their length: the median (the one level that splits the view into
+      // equal halves) and the Output's starting value (every start that
+      // brings the body back exactly to where it began).
+      //
+      // Only OPEN contours compete across levels: pieces with an end, at
+      // the block's border, at a sample that isn't valid, at an input seam,
+      // or (on a wrapping Output) at the level's antipode. Closed loops are
+      // not reported; the longest of them is routinely a hairpin up one
+      // side of a thin band and back down the other, and no measure of them
+      // tried here told a real loop from that reliably. The median and
+      // return levels report their own longest piece, closed or open. Near
+      // a basin boundary the contours pile up along it and inherit its
+      // fractal wiggle, so an open contour's length grows with the sampling
+      // resolution.
+      //
+      // Connectivity is by union-find over the CELL EDGES the contour
+      // crosses, not over cells: a saddle cell carries two separate pieces
+      // of contour, and uniting by cell would weld them into one.
+      var CONTOUR_AUTO_LEVELS = 8;
+      var contourLevels = [];          // { v, kind: "auto" | "median" | "return" }
+      var cParent = null, cLen = null, cBorder = null;   // union-find over edge ids, 2 * W * H of them
+      var bestOpen = null, medianContour = null, returnContour = null;
+      var EDGE_COUNT = 2 * W * H;
+
+      steps.push(function chooseContourLevels() {
+        if (out.empty || !coarea) return;
+        var order = [];
+        for (var b = 0; b < COAREA_BINS; b++) if (coarea[b] > 0) order.push(b);
+        order.sort(function (a, b) { return coarea[b] - coarea[a]; });
+        for (var k = 0; k < Math.min(CONTOUR_AUTO_LEVELS, order.length); k++) {
+          contourLevels.push({ v: (order[k] + 0.5) / COAREA_BINS, kind: "auto" });
+        }
+        // A wheel has no median: there is no smallest value to count up from.
+        if (!circular && inspected > 0) contourLevels.push({ v: quantileFromCounts(fineCounts, inspected, 0.5), kind: "median" });
+        if (returnT !== null && returnT >= 0 && returnT <= 1) contourLevels.push({ v: returnT, kind: "return" });
+        coarea = null; fineCounts = null;
+      });
+
+      // How far a value sits from the level, signed: the short way round
+      // for a wrapping Output, so a contour of a hue never appears at the
+      // seam where mod() cut the wheel.
+      function lev(tv, v) { return circular ? delta(v, tv, true) : tv - v; }
+      // Does the contour cross between two neighbouring samples? Opposite
+      // sides of the level, and, on a wheel, not by way of the antipode.
+      function crosses(a, b) {
+        return (a >= 0) !== (b >= 0) && (!circular || Math.abs(a) + Math.abs(b) < 0.5);
+      }
+      // Where along the edge from a's sample to b's it crosses, 0..1.
+      function frac(a, b) {
+        var d = Math.abs(a) + Math.abs(b);
+        return d > 0 ? Math.abs(a) / d : 0.5;
+      }
+      // Edge ids: horizontal edge from (c, r) to (c+1, r) is r*W + c; vertical
+      // edge from (c, r) to (c, r+1) is W*H + r*W + c.
+      function cFind(e) {
+        while (cParent[e] !== e) { cParent[e] = cParent[cParent[e]]; e = cParent[e]; }
+        return e;
+      }
+      function cTouch(e) {
+        if (cParent[e] === -1) { cParent[e] = e; cLen[e] = 0; cBorder[e] = 0; }
+      }
+      function cUnite(a, b) {
+        cTouch(a); cTouch(b);
+        a = cFind(a); b = cFind(b);
+        if (a === b) return a;
+        cParent[b] = a;
+        cLen[a] += cLen[b];
+        cBorder[a] |= cBorder[b];
+        return a;
+      }
+      // The pairs of crossed edges joined inside cell (c, r) at level v,
+      // written into `pairs` as up to two [edgeA, edgeB]; returns how many.
+      // A cell with all four edges crossed is a saddle, and which way its
+      // two pieces pair is decided by the value at the cell's centre.
+      var cellPairsOut = [0, 0, 0, 0];
+      function cellPairs(c, r, v) {
+        var i00 = r * W + c, i10 = i00 + 1, i01 = i00 + W, i11 = i01 + 1;
+        if (!valid[i00] || !valid[i10] || !valid[i01] || !valid[i11]) return 0;
+        if (xSeam(c) || ySeam(r)) return 0;
+        var d00 = lev(t[i00], v), d10 = lev(t[i10], v), d01 = lev(t[i01], v), d11 = lev(t[i11], v);
+        var bottom = crosses(d00, d10), top = crosses(d01, d11), left = crosses(d00, d01), right = crosses(d10, d11);
+        var eBottom = r * W + c, eTop = (r + 1) * W + c, eLeft = W * H + r * W + c, eRight = W * H + r * W + c + 1;
+        var n = (bottom ? 1 : 0) + (top ? 1 : 0) + (left ? 1 : 0) + (right ? 1 : 0);
+        if (n < 2) return 0;
+        if (n === 4) {
+          var centre = (d00 + d10 + d01 + d11) / 4 >= 0;
+          if (centre === (d00 >= 0)) {
+            cellPairsOut[0] = eBottom; cellPairsOut[1] = eRight; cellPairsOut[2] = eLeft; cellPairsOut[3] = eTop;
+          } else {
+            cellPairsOut[0] = eBottom; cellPairsOut[1] = eLeft; cellPairsOut[2] = eTop; cellPairsOut[3] = eRight;
+          }
+          return 2;
+        }
+        var k = 0;
+        if (bottom) cellPairsOut[k++] = eBottom;
+        if (top) cellPairsOut[k++] = eTop;
+        if (left) cellPairsOut[k++] = eLeft;
+        if (right) cellPairsOut[k++] = eRight;
+        // On a linear Output the sign changes round a square, so k is 2
+        // here. On a WRAPPING one it need not be: two neighbours can sit on
+        // opposite sides of the level yet be nearer each other round the
+        // far side of the wheel, through the level's antipode, and crosses()
+        // rightly reports no crossing there. The contour then ENDS in this
+        // cell, at the antipode's own line. cellLoose says how many crossed
+        // edges were left unpaired (1 or 3); they are ends.
+        if (k === 2) { cellLoose = 0; return 1; }
+        cellLoose = k;
+        for (var m = 0; m < k; m++) cellLooseOut[m] = cellPairsOut[m];
+        return 0;
+      }
+      var cellLoose = 0, cellLooseOut = [0, 0, 0];
+      // Is edge e joined to another inside cell (c, r)? Every edge of a
+      // contour is, in exactly two cells; one where it is not is an end of
+      // the contour, whether because the cell can't be traced through or
+      // because the contour stops there at a wrap antipode.
+      function pairedIn(e, c, r) {
+        if (!cellUsable(c, r)) return false;
+        var n = cellPairs(c, r, levelNow);
+        for (var k = 0; k < n; k++) if (cellPairsOut[2 * k] === e || cellPairsOut[2 * k + 1] === e) return true;
+        return false;
+      }
+      var levelNow = 0;   // the level being traced, for pairedIn
+      function edgeIsEnd(e) {
+        var cells = edgeCells(e);
+        var c0 = cells[0], c1 = cells[1];
+        if (c0 < 0 || c1 < 0) return true;
+        return !pairedIn(e, c0 - ((c0 / W) | 0) * W, (c0 / W) | 0) || !pairedIn(e, c1 - ((c1 / W) | 0) * W, (c1 / W) | 0);
+      }
+      // Where edge e crosses level v, in sample coordinates.
+      var edgePointOut = { x: 0, y: 0 };
+      function edgePoint(e, v) {
+        if (e < W * H) {
+          var r = (e / W) | 0, c = e - r * W;
+          var a = lev(t[r * W + c], v), b = lev(t[r * W + c + 1], v);
+          edgePointOut.x = c + frac(a, b); edgePointOut.y = r;
+        } else {
+          var e2 = e - W * H, r2 = (e2 / W) | 0, c2 = e2 - r2 * W;
+          var a2 = lev(t[r2 * W + c2], v), b2 = lev(t[r2 * W + c2 + W], v);
+          edgePointOut.x = c2; edgePointOut.y = r2 + frac(a2, b2);
+        }
+        return edgePointOut;
+      }
+      // The two cells either side of an edge, as r*W + c of their lower-left
+      // sample, or -1 where the edge is on the block's border.
+      var edgeCellsOut = [-1, -1];
+      function edgeCells(e) {
+        if (e < W * H) {
+          var r = (e / W) | 0, c = e - r * W;
+          edgeCellsOut[0] = r > 0 ? (r - 1) * W + c : -1;
+          edgeCellsOut[1] = r < H - 1 ? r * W + c : -1;
+        } else {
+          var e2 = e - W * H, r2 = (e2 / W) | 0, c2 = e2 - r2 * W;
+          edgeCellsOut[0] = c2 > 0 ? r2 * W + c2 - 1 : -1;
+          edgeCellsOut[1] = c2 < W - 1 ? r2 * W + c2 : -1;
+        }
+        return edgeCellsOut;
+      }
+      // Can a contour be traced through cell (c, r) at all? Not past the
+      // block's edge, not through a sample that isn't valid, and not across
+      // an input seam. A contour that reaches such a cell simply ENDS
+      // there, and a piece with an end is open however far from the block's
+      // border that end is: without this, a contour cut by a seam would be
+      // filed as a loop, walked one way from an arbitrary point, and drawn
+      // as an open line.
+      function cellUsable(c, r) {
+        if (c < 0 || r < 0 || c >= W - 1 || r >= H - 1) return false;
+        var i00 = r * W + c;
+        if (!valid[i00] || !valid[i00 + 1] || !valid[i00 + W] || !valid[i00 + W + 1]) return false;
+        return !xSeam(c) && !ySeam(r);
+      }
+      // Does edge e, seen from cell `cell` (r*W + c), lead nowhere: is the
+      // cell on its other side one it is not paired in?
+      function edgeDangles(e, cell) {
+        var cells = edgeCells(e);
+        var other = cells[0] === cell ? cells[1] : cells[0];
+        return other < 0 || !pairedIn(e, other - ((other / W) | 0) * W, (other / W) | 0);
+      }
+      // One cell's contribution to the level's union-find. The pairs join
+      // the union-find with their lengths; an edge that dangles, or is left
+      // loose, marks its piece as having an end, i.e. open.
+      function contourCell(c, r, v) {
+        levelNow = v;
+        var n = cellPairs(c, r, v);
+        var cell = r * W + c;
+        if (n === 0) {
+          for (var q = 0; q < cellLoose; q++) { var le = cellLooseOut[q]; cTouch(le); cBorder[cFind(le)] = 1; }
+          return;
+        }
+        for (var k = 0; k < n; k++) {
+          var e1 = cellPairsOut[2 * k], e2 = cellPairsOut[2 * k + 1];
+          var p1 = edgePoint(e1, v), x1 = p1.x, y1 = p1.y;
+          var p2 = edgePoint(e2, v), x2 = p2.x, y2 = p2.y;
+          var root = cUnite(e1, e2);
+          cLen[root] += Math.sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
+          // pairedIn overwrites cellPairsOut, so the pair's edges are read
+          // out before it is asked.
+          if (edgeDangles(e1, cell) || edgeDangles(e2, cell)) cBorder[root] = 1;
+          n = cellPairs(c, r, v);
+        }
+      }
+      // Follows one contour edge to edge from `start` and returns its
+      // points. For an open contour `start` must be one of its ends, so
+      // the walk runs one way to the other.
+      var CONTOUR_PATH_POINTS_MAX = 6000;
+      function walkContour(start, v) {
+        var pts = [], e = start, prevCell = -1, guard = 0;
+        var p = edgePoint(e, v);
+        pts.push(p.x, p.y);
+        while (guard++ < EDGE_COUNT) {
+          var cells = edgeCells(e);
+          var cell = (cells[0] >= 0 && cells[0] !== prevCell) ? cells[0] : ((cells[1] >= 0 && cells[1] !== prevCell) ? cells[1] : -1);
+          if (cell < 0) break;
+          var cr = (cell / W) | 0, cc = cell - cr * W;
+          var n = cellPairs(cc, cr, v), partner = -1;
+          for (var k = 0; k < n; k++) {
+            if (cellPairsOut[2 * k] === e) { partner = cellPairsOut[2 * k + 1]; break; }
+            if (cellPairsOut[2 * k + 1] === e) { partner = cellPairsOut[2 * k]; break; }
+          }
+          if (partner < 0) break;
+          e = partner; prevCell = cell;
+          p = edgePoint(e, v);
+          pts.push(p.x, p.y);
+          if (e === start) break;
+        }
+        // Thinned for drawing, which is all the path is for.
+        if (pts.length / 2 > CONTOUR_PATH_POINTS_MAX) {
+          var stride = Math.ceil(pts.length / 2 / CONTOUR_PATH_POINTS_MAX), thin = [];
+          for (var q = 0; q < pts.length; q += 2 * stride) thin.push(pts[q], pts[q + 1]);
+          thin.push(pts[pts.length - 2], pts[pts.length - 1]);
+          pts = thin;
+        }
+        return pts;
+      }
+      // An END of the open contour `root`: one of its edges with nothing
+      // traceable on one side, where the walk has to start so that it runs
+      // the whole way to the other end.
+      function endEdgeOf(root, v) {
+        levelNow = v;
+        for (var e = 0; e < EDGE_COUNT; e++) {
+          if (cParent[e] === -1 || cFind(e) !== root) continue;
+          if (edgeIsEnd(e)) return e;
+        }
+        return -1;
+      }
+      function contourRecord(root, level) {
+        var closed = !cBorder[root];
+        var start = closed ? root : endEdgeOf(root, level.v);
+        var path = start >= 0 ? walkContour(start, level.v) : null;
+        return {
+          length: cLen[root],
+          closed: closed,
+          level: level.v,
+          path: path,
+        };
+      }
+      // One pass per level slot. The slots are fixed when the job is built
+      // (the step list is), and a slot whose level was never chosen does
+      // nothing.
+      for (var slot = 0; slot < CONTOUR_AUTO_LEVELS + 2; slot++) {
+        (function (k) {
+          var level = null;
+          addRowPass(0, Math.max(0, H - 1), function traceLevel(r0, r1) {
+            if (out.empty) return;
+            if (r0 === 0) {
+              level = k < contourLevels.length ? contourLevels[k] : null;
+              if (!level) return;
+              if (!cParent) {
+                cParent = new Int32Array(EDGE_COUNT);
+                cLen = new Float32Array(EDGE_COUNT);
+                cBorder = new Uint8Array(EDGE_COUNT);
+              }
+              cParent.fill(-1);
+            }
+            if (!level) return;
+            for (var r = r0; r < r1; r++) {
+              for (var c = 0; c < W - 1; c++) contourCell(c, r, level.v);
+            }
+          }, function finishLevel() {
+            if (out.empty || !level) return;
+            var openRoot = -1, openLen = 0;
+            for (var e = 0; e < EDGE_COUNT; e++) {
+              if (cParent[e] === e && cBorder[e] && cLen[e] > openLen) { openLen = cLen[e]; openRoot = e; }
+            }
+            var open = openRoot >= 0 && (!bestOpen || openLen > bestOpen.length) ? contourRecord(openRoot, level) : null;
+            if (open) bestOpen = open;
+            if (level.kind !== "auto") {
+              // This level's own longest piece, closed or open, whichever
+              // is longer, by LENGTH: recorded even when it is not the
+              // overall best. Here the level is the point, not the shape.
+              var loopRoot = -1, loopLen = 0;
+              for (var e2 = 0; e2 < EDGE_COUNT; e2++) {
+                if (cParent[e2] === e2 && !cBorder[e2] && cLen[e2] > loopLen) { loopLen = cLen[e2]; loopRoot = e2; }
+              }
+              var own = null;
+              if (loopRoot >= 0 && loopLen >= openLen) own = contourRecord(loopRoot, level);
+              else if (openRoot >= 0) own = open || contourRecord(openRoot, level);
+              if (level.kind === "median") medianContour = own;
+              else returnContour = own;
+            }
+            if (k === contourLevels.length - 1 || k === CONTOUR_AUTO_LEVELS + 1) {
+              cParent = null; cLen = null; cBorder = null;
+            }
+          });
+        })(slot);
+      }
+
+      steps.push(function finishContours() {
+        if (out.empty || !out.groups.features) return;
+        var f = out.groups.features;
+        var diagonal = f.diagonalSamples;
+        f.longestOpenContour = bestOpen;
+        f.longestOpenContourDiagonals = bestOpen ? bestOpen.length / diagonal : 0;
+        // undefined: no such level for this Output; null: the level has no
+        // contour in this view.
+        f.medianContour = circular ? undefined : medianContour;
+        f.medianContourDiagonals = medianContour ? medianContour.length / diagonal : 0;
+        f.returnContour = returnT === null ? undefined : returnContour;
+        f.returnContourDiagonals = returnContour ? returnContour.length / diagonal : 0;
+        f.returnT = returnT;
+      });
+
+      // ---- Watershed: the catchments, and the divides between them ----
+      //
+      // Read the picture as terrain: from every sample, water runs to its
+      // lowest neighbour and on down until it reaches a low point it cannot
+      // leave. Every sample that ends at the same low point is one
+      // catchment, and the samples where two catchments meet are the
+      // divides: the complete network of "mountain ranges", where the
+      // ridge line above is only the longest single crest. Steepest descent
+      // with path memoisation, so every sample is walked once: near linear.
+      // Not for a wrapping Output, where "lower" means nothing on a wheel.
+      // In a chaotic region every other sample is a low point of its own,
+      // and the divides there are honest about it: a mesh.
+      var wsLabel = null, wsDivides = null, wsBasins = 0;
+      var wsPath = [];
+      function lowestNeighbour(i, c, r) {
+        var best = -1, bestT = t[i];
+        for (var dr = -1; dr <= 1; dr++) {
+          var rr = r + dr;
+          if (rr < 0 || rr >= H) continue;
+          if (dr === -1 && ySeam(r - 1)) continue;
+          if (dr === 1 && ySeam(r)) continue;
+          for (var dc = -1; dc <= 1; dc++) {
+            if (dr === 0 && dc === 0) continue;
+            var cc = c + dc;
+            if (cc < 0 || cc >= W) continue;
+            if (dc === -1 && xSeam(c - 1)) continue;
+            if (dc === 1 && xSeam(c)) continue;
+            var j = rr * W + cc;
+            if (valid[j] && t[j] < bestT) { bestT = t[j]; best = j; }
+          }
+        }
+        return best;
+      }
+      if (!circular) {
+        steps.push(function watershedAllocate() {
+          if (out.empty) return;
+          wsLabel = new Int32Array(W * H);
+          wsLabel.fill(-1);
+        });
+        addRowPass(0, H, function watershedFlow(r0, r1) {
+          if (out.empty || !wsLabel) return;
+          for (var r = r0; r < r1; r++) {
+            for (var c = 0; c < W; c++) {
+              var i = r * W + c;
+              if (!valid[i] || wsLabel[i] !== -1) continue;
+              wsPath.length = 0;
+              var cur = i, cc = c, cr = r, label = -1;
+              for (;;) {
+                if (wsLabel[cur] !== -1) { label = wsLabel[cur]; break; }
+                wsPath.push(cur);
+                var next = lowestNeighbour(cur, cc, cr);
+                if (next < 0) { label = cur; wsBasins++; break; }
+                cur = next; cc = cur % W; cr = (cur - cc) / W;
+              }
+              for (var k = 0; k < wsPath.length; k++) wsLabel[wsPath[k]] = label;
+            }
+          }
+        });
+        addRowPass(0, H, function watershedDivides(r0, r1) {
+          if (out.empty || !wsLabel) return;
+          if (!wsDivides) wsDivides = new Uint8Array(W * H);
+          for (var r = r0; r < r1; r++) {
+            for (var c = 0; c < W; c++) {
+              var i = r * W + c, a = wsLabel[i];
+              if (a === -1) continue;
+              if (c + 1 < W && wsLabel[i + 1] !== -1 && wsLabel[i + 1] !== a && !xSeam(c)) wsDivides[i] = 1;
+              else if (r + 1 < H && wsLabel[i + W] !== -1 && wsLabel[i + W] !== a && !ySeam(r)) wsDivides[i] = 1;
+            }
+          }
+        }, function finishWatershed() {
+          if (out.empty) return;
+          var f = out.groups.features;
+          if (f) f.watershed = { basins: wsBasins, mask: wsDivides };
+          wsLabel = null;
+        });
+      }
+
       function unite(a, b) {
         a = findRoot(a); b = findRoot(b);
         if (a !== b) parent[b] = a;
@@ -954,7 +1377,7 @@
         for (var i = 0; i < n; i++) local.set(list[i], i);
         var dist = new Int32Array(n), prev = new Int32Array(n), queue = new Int32Array(n);
         // Breadth-first over the piece from `start`, leaving dist/prev
-        // filled and returning the last sample reached - which, from any
+        // filled and returning the last sample reached, which, from any
         // start, is one end of the piece.
         function sweep(start) {
           dist.fill(-1); prev.fill(-1);
@@ -999,7 +1422,7 @@
     // Each group returns its raw per-bin arrays (the histogram, the
     // orientation bins) and the tensor eigenvalues behind its summary
     // numbers, not only the
-    // summaries - the panel plots some of them, and the rest are what makes
+    // summaries: the panel plots some of them, and the rest are what makes
     // a summary number checkable against the data it came from rather than
     // having to be taken on trust.
     var index = 0;
@@ -1021,7 +1444,7 @@
   global.FractalStats = {
     createJob: createJob,
     // Exported for the regression page, which checks them directly against
-    // closed-form answers - see the fractal-stats tests in physics-tests.js.
+    // closed-form answers: see the fractal-stats tests in physics-tests.js.
     delta: delta,
     circularSpreadFromCounts: circularSpreadFromCounts,
     quantileFromCounts: quantileFromCounts,

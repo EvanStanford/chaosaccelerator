@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <!-- This file is part of Chaos Accelerator, licensed under the Common
-     Public Attribution License, Version 1.0 (CPAL-1.0) - see LICENSE in
+     Public Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in
      the project root, or https://chaosaccelerator.com/license for a
      hosted copy. -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -30,7 +30,7 @@
   redundant and only work because IEEE rounding makes them <em>not</em>
   redundant. GLSL ES 3.00 has no <code>precise</code> qualifier, so a
   shader compiler that reassociates float math is free to fold them to
-  nothing - silently. This page measures whether that happens on
+  nothing: silently. This page measures whether that happens on
   <em>this</em> machine/driver, both for raw arithmetic and for
   <code>physics-df.js</code>'s veiled version of it.
 </p>
@@ -46,7 +46,7 @@
 <h2 style="font-size:13px">3. A deep-zoom sweep of <code>worldX</code></h2>
 <p style="margin-top:0">
   512 samples across one screen row at scale 1e-9 about a center of
-  1234.5678901234 - exactly what <code>fractal-grid.js</code> feeds the
+  1234.5678901234, exactly what <code>fractal-grid.js</code> feeds the
   per-pixel simulation. The low word is drawn below: a clean ramp means
   every pixel got a distinct world coordinate; flat blocks mean they
   aliased onto each other.
@@ -56,8 +56,8 @@
 
 <h2 style="font-size:13px">4. What that actually buys, zoom by zoom</h2>
 <p style="margin-top:0">
-  The same scene - a ball dropped between two angled deflectors in a
-  wrapped frame, 500 steps, colored by where it ends up - rendered by
+  The same scene, a ball dropped between two angled deflectors in a
+  wrapped frame, 500 steps, colored by where it ends up, rendered by
   both shaders as the view zooms in.
 </p>
 <p>
@@ -67,7 +67,7 @@
   came out byte-identical, and that flattered the df pass by about three
   decades: a pair differing by pure quantization noise counts as "resolved"
   under that metric, so it credits detail that isn't there. Correlation
-  against the truth can't be fooled that way - noise decorrelates.
+  against the truth can't be fooled that way: noise decorrelates.
   It's sampled along a row of 24 points, each re-run in float64 on the CPU.
 </p>
 <table id="zoomtable"><thead><tr><th>View width (world units)</th><th>float32 vs truth</th><th>double-float vs truth</th><th></th></tr></thead><tbody></tbody></table>
@@ -277,7 +277,7 @@
   // cannot fall past them without being turned: it hits something every
   // lap, which is what makes the outcome after 500 steps a genuinely
   // sensitive function of where it started. A scene that merely falls
-  // would be a poor test - its answer is nearly linear in the starting
+  // would be a poor test: its answer is nearly linear in the starting
   // position, so it looks smooth at any zoom and any precision.
   var DEMO_SCENE = {
     bodies: [
@@ -368,7 +368,7 @@
     // Each tile is normalized to its OWN value range before coloring.
     // Zooming into a smooth patch legitimately narrows that range, and a
     // fixed ramp would render every deep tile as one flat color whether or
-    // not there was structure in it - which is the question being asked.
+    // not there was structure in it, which is the question being asked.
     var cv = document.createElement("canvas");
     cv.width = cv.height = TILE;
     var ctx = cv.getContext("2d");
@@ -481,7 +481,7 @@
       // tracking the real answer.
       var verdict = (cd > 0.5 && !(cf > 0.5)) ? "df still tracking the truth"
         : (cf > 0.5 && cd > 0.5) ? "both faithful"
-        : "both past their limit - this detail is noise";
+        : "both past their limit: this detail is noise";
       zoomBody.insertAdjacentHTML("beforeend",
         "<tr><td>" + scale.toExponential(0) + "</td><td>" + cell(cf) + "</td><td>" + cell(cd) +
         "</td><td class='" + (cd > 0.5 && !(cf > 0.5) ? "ok" : "") + "'>" + verdict + "</td></tr>");
@@ -503,8 +503,8 @@
 
   verdictEl.className = failures === 0 ? "ok" : "bad";
   verdictEl.textContent = failures === 0
-    ? "df arithmetic is sound on this driver - the deep-zoom path is safe to use"
-    : failures + " check(s) FAILED - df arithmetic is NOT reliable on this driver";
+    ? "df arithmetic is sound on this driver: the deep-zoom path is safe to use"
+    : failures + " check(s) FAILED: df arithmetic is NOT reliable on this driver";
 })();
 </script>
 </body>

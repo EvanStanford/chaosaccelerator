@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <!-- This file is part of Chaos Accelerator, licensed under the Common
-     Public Attribution License, Version 1.0 (CPAL-1.0) - see LICENSE in
+     Public Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in
      the project root, or https://chaosaccelerator.com/license for a
      hosted copy. -->
-<!-- The landing page. The app itself - the scene builder and the map, one
-     document - is chaos.html, which is where this file's name used to lead;
+<!-- The landing page. The app itself, the scene builder and the map, one
+     document, is chaos.html, which is where this file's name used to lead;
      see the script just below for the links that still do. -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#14161c">
@@ -17,12 +17,12 @@
   // Every link shared before this page existed points HERE, with the whole
   // scene in its fragment (see share-url.js): "#bldr/..." for the builder,
   // "#map/..." for a map. They are handed straight on to the app, fragment
-  // and all, before anything is drawn - replace(), so Back does not land on
+  // and all, before anything is drawn: replace(), so Back does not land on
   // a page that immediately forwards again. ("#movi/" links always went to
   // chaosplayback.html and never come through here.)
   if (/^#(bldr|map)\//.test(location.hash)) location.replace("chaos.html" + location.hash);
 </script>
-<link rel="stylesheet" href="landing.css?v=m56">
+<link rel="stylesheet" href="landing.css?v=m70">
 </head>
 <body>
 <main class="page flush-top">
@@ -53,14 +53,14 @@
     <h2 class="section-lead" id="howto-label">How to:</h2>
     <div class="steps">
       <div class="step">
-        <img src="assets/builder.jpg?v=m56" width="896" height="782" alt="The scene builder: a ball above two tilted rods on a dark grid" loading="lazy">
+        <img src="assets/builder.jpg?v=m70" width="896" height="782" alt="The scene builder: a ball above two tilted rods on a dark grid" loading="lazy">
         <div class="step-body">
           <h3>Step 1: Build a physics simulation scene</h3>
           <p>Add balls, rods, springs, hinges, and much more to create a scene.</p>
         </div>
       </div>
       <div class="step">
-        <img src="assets/map.jpg?v=m56" width="896" height="782" alt="The map that scene makes: bands and folds of rainbow color, each pixel one run of the scene from a slightly different start" loading="lazy">
+        <img src="assets/map.jpg?v=m70" width="896" height="782" alt="The map that scene makes: bands and folds of rainbow color, each pixel one run of the scene from a slightly different start" loading="lazy">
         <div class="step-body">
           <h3>Step 2: Explore the resulting fractal your scene creates!</h3>
         </div>

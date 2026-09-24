@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <!-- This file is part of Chaos Accelerator, licensed under the Common
-     Public Attribution License, Version 1.0 (CPAL-1.0) - see LICENSE in
+     Public Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in
      the project root, or https://chaosaccelerator.com/license for a
      hosted copy. -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -64,7 +64,7 @@
     <ul>
       <li>
         <b>Any editing control used while a run is playing/paused resets the
-        scene to its pre-play state first, then applies that action -
+        scene to its pre-play state first, then applies that action,
         never requires a manual Reset first.</b>
         This is a DOM/interaction-state behavior (see
         resetBeforeLockedControlAction and lockedDuringPlaybackControls in
@@ -72,7 +72,7 @@
         scene-in/scene-out style of test. Check by hand in #editor-view: let
         a run finish (or Pause it, or drag the progress slider mid-run),
         then click a tool, a sample, Clear All, or change a mapping/
-        simulation setting - confirm the scene visibly resets to what
+        simulation setting, confirm the scene visibly resets to what
         was authored before Play, and the action you just took (the new
         tool armed, the new sample loaded, the new setting applied) takes
         effect immediately, with no separate Reset click needed. Try it for
@@ -88,7 +88,7 @@
         authored scene. initialScene is the fix: it's untouched by playback
         (only scene.bodies gets written to), so tick()'s completion branch can
         just pausePlayback() and leave the display frozen, while Fractal-ize
-        calls resetToInitialScene() first - silently restoring the true
+        calls resetToInitialScene() first, silently restoring the true
         start before it acts, without that restore itself being visible if the
         user was just looking at the frozen frame a moment before. (Reset already
         worked this way.) Check by hand after touching tick()/
@@ -119,8 +119,8 @@
   // physics-hinge-geometry.js is plain scene math with no DOM dependency,
   // so (unlike when this logic lived inside physics-ui.js) there's no need
   // to load a whole hidden copy of #editor-view in an iframe just to reach
-  // it - a direct <script> tag above is enough.
-  // ?only=<text> runs just the tests whose name contains it - see runAll.
+  // it: a direct <script> tag above is enough.
+  // ?only=<text> runs just the tests whose name contains it: see runAll.
   var only = new URLSearchParams(location.search).get("only");
   window.__physicsTests.runAll(only);
   document.getElementById("btn-rerun").addEventListener("click", function () {

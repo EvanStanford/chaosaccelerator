@@ -1,5 +1,5 @@
 /* This file is part of Chaos Accelerator, licensed under the Common Public
-   Attribution License, Version 1.0 (CPAL-1.0) - see LICENSE in the project
+   Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in the project
    root, or https://chaosaccelerator.com/license for a hosted copy. */
 
 :root {
@@ -14,7 +14,7 @@
   --danger: #ff5f56;
   --panel-width: 320px;
   /* The floating panel's gap from the viewport edges, and its own
-     translucent fill - a touch lighter than the docked --bg-panel so it
+     translucent fill: a touch lighter than the docked --bg-panel so it
      reads as sitting ON the fractal rather than being cut out of it. */
   --panel-inset: 14px;
   --bg-panel-float: rgba(27, 30, 39, 0.86);
@@ -22,14 +22,14 @@
      box (see .menu-toggle / .menu-card: the wide 10px-down, 30px-blur
      shadow reaches 40px below and 30px to either side). Both menu columns
      are scroll containers, and a scroll container clips everything past its
-     padding edge - so each pads itself by this much and pulls that padding
+     padding edge, so each pads itself by this much and pulls that padding
      back out with a matching negative margin (see #grid-menu-stack and
      #grid-right-menu-column): the shadows get room to fade out, and nothing
      on screen moves. */
   --menu-shadow-room: 40px;
   /* What the menu column keeps clear for the back link and the four menu
      buttons, so an open card can never push the other menus off the bottom
-     of the screen. Named because two rules have to agree on it - the card's
+     of the screen. Named because two rules have to agree on it: the card's
      own max-height, and the portrait override of it. The multiplier is one
      per collapsed menu button, so it grows with the number of menus. */
   --menu-reserved: calc((var(--settings-btn-size) + 8px) * 4 + 20px);
@@ -113,24 +113,24 @@ html, body {
   gap: 8px;
   /* Viewport units, not a percentage: the column's own height is auto (it
      shrinks to this stack), and a percentage max-height against an
-     auto-height parent resolves to none - so the stack would never
+     auto-height parent resolves to none, so the stack would never
      scroll, it would just run off the bottom of the screen. */
   max-height: calc(100vh - var(--panel-inset) * 2);
   overflow-y: auto;
   /* overflow-y: auto would otherwise also compute overflow-x to auto (per
      the CSS Overflow spec, a non-visible value on one axis pulls the
-     visible other axis to auto) - a long unbroken hover readout (see
+     visible other axis to auto), a long unbroken hover readout (see
      #grid-view #hover-readout below) was enough to grow a horizontal
      scrollbar this never needs. */
   overflow-x: hidden;
   /* Being a scroll container, this clips its children's shadows at its own
-     edge - the buttons' and cards' shadows used to end in a hard line down
+     edge: the buttons' and cards' shadows used to end in a hard line down
      the left and along the bottom. So: room for them as padding, and the
      same amounts as negative margin so the column's box (and everything in
      it) stays exactly where it was. Up and left only the viewport inset is
      available, which is all a shadow there can be seen in anyway; right and
      down the full reach. content-box, so that the max-height rules for this
-     element - here, in responsive-layout.css and in mobile.css - go on
+     element, here, in responsive-layout.css and in mobile.css, go on
      measuring the content, not the content plus this padding. The column's
      pointer-events: none is inherited, so the padded band stays
      click-through to the map. */
@@ -144,12 +144,12 @@ html, body {
 }
 
 /* Both the column itself and an open card's own body (see .menu-card-body
-   below) can grow a vertical scrollbar - most visibly on Analysis, whose
+   below) can grow a vertical scrollbar: most visibly on Analysis, whose
    body is the tallest once more than a couple of sections are switched on.
    Unstyled, that scrollbar is whatever light/system default the browser
    ships, sitting on top of this page's own dark floating-card look. Firefox
    reads the two scrollbar-* properties; everything else reads the
-   ::-webkit-scrollbar rules below them - painting the same thumb/track
+   ::-webkit-scrollbar rules below them, painting the same thumb/track
    twice, not painting it differently, so it never needs a browser check. */
 #grid-menu-stack,
 .menu-card-body {
@@ -179,7 +179,7 @@ html, body {
 
 /* The shared look of every control in the column: a translucent card
    sitting ON the fractal rather than cut out of it. Two shadows, not one:
-   the wide 10/30 one alone is almost all bottom - at that offset, blur
+   the wide 10/30 one alone is almost all bottom, at that offset, blur
    alone leaves the top and left edges too faint to read against the
    fractal, so the shadow looks like it's been cut off there rather than
    just fading out. The tight 2/6 shadow is close enough to the edge to
@@ -195,7 +195,7 @@ html, body {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5), 0 10px 30px rgba(0, 0, 0, 0.45);
 }
 
-/* Wider than the three below it because it carries its own label - the
+/* Wider than the three below it because it carries its own label: the
    only one of the four whose destination isn't obvious from an icon. */
 .menu-back {
   display: inline-flex;
@@ -240,7 +240,7 @@ html, body {
   background: var(--bg-input);
   border-color: var(--accent);
 }
-/* Exactly one of the button and the card is in the layout at a time -
+/* Exactly one of the button and the card is in the layout at a time,
    never both, and never a hidden-but-present one taking up space in a
    column whose whole job is to push what's below it down. */
 .menu-item.is-open > .menu-toggle {
@@ -251,7 +251,7 @@ html, body {
   width: var(--panel-width);
   max-width: 100%;
   /* Leave room for the back link and the four menu buttons, so opening a
-     tall card never pushes the other menus off the bottom of the screen -
+     tall card never pushes the other menus off the bottom of the screen:
      the card scrolls inside itself instead. The column scrolls too (see
      #grid-menu-stack), which is what catches the case of several open at
      once; this is what stops ONE of them swallowing the column. */
@@ -276,7 +276,7 @@ html, body {
 }
 
 /* The whole header line is the collapse control (see makeMenu in
-   fractal-grid.js), not just the caret at its end - cursor and a hover fill
+   fractal-grid.js), not just the caret at its end: cursor and a hover fill
    are what tell the pointer that clicking anywhere on this row, not just
    the button, shuts the card. */
 .menu-card-header {
@@ -326,7 +326,7 @@ html, body {
   overflow-x: hidden;
 }
 /* Inspect's three groups want more air between them than a settings card's
-   fields do - the extra 8px on top of the gap above is what the old
+   fields do: the extra 8px on top of the gap above is what the old
    floating panel's own 20px worked out to. */
 .menu-card-body > .panel-section + .panel-section {
   margin-top: 8px;
@@ -356,7 +356,7 @@ html, body {
   background: var(--accent);
 }
 /* Widen the hit area past the visible 6px line without widening the line
-   itself - a bare 6px target is uncomfortably thin to grab. */
+   itself: a bare 6px target is uncomfortably thin to grab. */
 #panel-resizer::after {
   content: "";
   position: absolute;
@@ -391,7 +391,7 @@ button:hover { background: var(--accent-hover); }
 }
 button.secondary:hover { background: var(--bg-input); }
 /* btnInspectLine/btnInspectGrid only: gray/outlined at rest, same as every
-   other idle button on the first page - matches .tool-btn's own default
+   other idle button on the first page, matches .tool-btn's own default
    over there. Its own rule rather than .secondary, which also shrinks
    padding and would resize the button the moment it arms; this keeps the
    idle and armed (below) states the exact same size. */
@@ -406,11 +406,11 @@ button.secondary:hover { background: var(--bg-input); }
   background: var(--bg-input);
 }
 /* Armed (waiting for a grid drag): blue, same as .tool-btn.active over on
-   the first page - so blue reads as "engaged" consistently everywhere in
+   the first page, so blue reads as "engaged" consistently everywhere in
    the app, not just here. See armInspect's own comment in fractal-grid.js
    for the (now corrected) history of why this used to run the other way.
    Selectors combine the ID with the class (not just button.inspect-armed)
-   so this outranks the idle rule above on specificity alone - two ID
+   so this outranks the idle rule above on specificity alone: two ID
    selectors otherwise beat a single class every time, regardless of which
    rule comes later in the file. */
 #btn-inspect-line.inspect-armed,
@@ -486,7 +486,7 @@ input[type="range"] {
 }
 
 /* Two native range inputs stacked on the same track (the standard
-   dependency-free way to build a dual-handle slider) - see
+   dependency-free way to build a dual-handle slider): see
    resolutionMinSlider/resolutionMaxSlider in fractal-grid.js. Both inputs
    span the full width and are pointer-events:none themselves so a click
    between the handles doesn't get grabbed by whichever happens to be on
@@ -553,12 +553,12 @@ input[type="range"] {
   cursor: pointer;
 }
 
-/* Apple-style toggle switch - under the hood this is still the exact same
+/* Apple-style toggle switch: under the hood this is still the exact same
    <input type="checkbox" id="color-zoom-checkbox">, just visually hidden
    (see .toggle-switch input below) with .toggle-slider drawn on top of it
    and styled off its :checked state, so all of fractal-grid.js's existing
    .checked/change-event logic needs no changes at all. Mirrors physics.
-   html's Sticky Edges toggle exactly (minus :disabled - this checkbox is
+   html's Sticky Edges toggle exactly (minus :disabled, this checkbox is
    never disabled). */
 #grid-view .toggle-field {
   display: flex;
@@ -620,7 +620,7 @@ input[type="range"] {
 
 /* #hover-readout is the one .readout in this panel that's actually long
    (coordinates plus a step count) rather than a short fixed label like the
-   zoom readout - nowrap on it was what needed a horizontal scrollbar
+   zoom readout: nowrap on it was what needed a horizontal scrollbar
    before .menu-card-body gained overflow-x: hidden above. Higher specificity
    than #grid-view .readout (two ID selectors beat one ID + one class) so
    this wins regardless of source order. */
@@ -635,7 +635,7 @@ input[type="range"] {
   border-radius: 8px;
   overflow: hidden;
   border: 1px solid var(--border);
-  /* Same reasoning as #grid-canvas-area: a plain color here, not transparent -
+  /* Same reasoning as #grid-canvas-area: a plain color here, not transparent,
      the mini canvas is drawn once per replay frame and the background
      color between shapes is what actually carries the Output value. */
   background: #0c0d11;
@@ -666,7 +666,7 @@ input[type="range"] {
 }
 
 #grid-canvas-area {
-  /* How far the toast has to sit above the bottom edge - clear of the
+  /* How far the toast has to sit above the bottom edge: clear of the
      render-progress ring (lower left) and the watermark (lower right),
      which are the whole of what lives down there now that the timeline
      transport has moved into the Map Evolution card. See .inspect-toast. */
@@ -680,19 +680,19 @@ input[type="range"] {
      paint on top of everything. (The old left panel used to be
      unpositioned, which put this element above it in stacking order
      whatever the DOM order; the menu column has its own z-index now, so
-     that half no longer applies - the clipping still does.) */
+     that half no longer applies: the clipping still does.) */
   overflow: hidden;
   /* Hand every touch gesture here to fractal-grid.js's own pan/pinch-zoom
-     handlers instead of the browser's default scroll/pinch-zoom - without
+     handlers instead of the browser's default scroll/pinch-zoom, without
      this, the two fight over the same gesture (the page zooms/scrolls
      underneath while the grid also tries to pan/zoom itself). */
   touch-action: none;
 }
 
-/* One of these per Inspect point ("point" and "line" entries only - a
+/* One of these per Inspect point ("point" and "line" entries only, a
    "grid" entry draws its own connected mesh instead, see
-   #inspect-preview's own comment), on the grid itself - background color
-   is set from JS (as --marker-color, not background directly - see
+   #inspect-preview's own comment), on the grid itself, background color
+   is set from JS (as --marker-color, not background directly: see
    updateInspectMarkers) to that point's own golden-angle hue (matching its
    bodies in the hover preview), with a black outline so it stays visible
    over any hue the fractal coloring underneath happens to be. Position
@@ -719,7 +719,7 @@ input[type="range"] {
    button (.inspect-row-remove), so there's no doubt clicking removes this
    point rather than adding another one on top of it. Plain background here
    (not !important) is enough to beat the base rule above despite its color
-   coming from an inline custom property - a :hover selector already
+   coming from an inline custom property: a :hover selector already
    outranks the bare class it's attached to, custom property or not. */
 .inspect-marker:hover {
   background: var(--bg-panel);
@@ -738,15 +738,15 @@ input[type="range"] {
 
 /* Three things share this one SVG, none of them ever visible at once:
    1. The dashed "if you let go now" line + dots while dragging Inspect
-      (Line) - see updateInspectLinePreview.
-   2. The axis-aligned rectangle outline while dragging Inspect (Grid) -
+      (Line): see updateInspectLinePreview.
+   2. The axis-aligned rectangle outline while dragging Inspect (Grid):
       see updateInspectGridPreview.
    3. Once a grid is actually added, its own permanent connect-the-dots
-      mesh - one <line> per pair of adjacent points, colored by
+      mesh: one <line> per pair of adjacent points, colored by
       inspectGridPointColor and kept in world-position sync with pan/zoom
       by updateInspectMarkers (same as .inspect-marker dots above). Drawn
       here rather than as extra WebGL geometry since, like the marker dots,
-      it's a cheap, occasional, screen-space-only overlay - not something
+      it's a cheap, occasional, screen-space-only overlay, not something
       that needs to survive being reprojected into the fractal shader.
    No viewBox is set, so 1 SVG user unit = 1 CSS pixel, matching
    worldToCanvasAreaPixel's output directly. */
@@ -760,23 +760,23 @@ input[type="range"] {
 /* The line/dots/rect above are shown and hidden by toggling a plain
    `hidden` ATTRIBUTE on each one (see hideInspectLinePreview/
    hideInspectGridPreview) rather than the `.hidden` IDL property, since
-   that property isn't reliably wired up for SVG elements - but the
+   that property isn't reliably wired up for SVG elements, but the
    browser's own UA stylesheet rule for `[hidden]` turns out to be just as
    unreliable here: SVG shape elements were staying `display: inline`
    (visibly drawn) even with the attribute present. This rule is the actual
-   fix - an explicit, author-authored `[hidden] { display: none }` that
+   fix: an explicit, author-authored `[hidden] { display: none }` that
    does apply, scoped to this SVG so it can't affect anything else. */
 #inspect-preview [hidden] {
   display: none;
 }
 
-/* The rendering-progress gauge, lower left - see updateRenderProgressRing
+/* The rendering-progress gauge, lower left: see updateRenderProgressRing
    and makeMenu in fractal-grid.js. Positioned exactly like #inspect-toast
    above it, but as a fifth accordion menu rather than a plain overlay: the
    .menu-item/.menu-toggle/.menu-card machinery (see .menu-toggle and
    .menu-card further up this file) is shared with the four menus in the
    column, including the LEFT is-open accordion group (Inspect, Analysis,
-   Display Mode) it joins since it sits in that same corner - even though
+   Display Mode) it joins since it sits in that same corner, even though
    this one lives down here instead of in that stack. Opening it never
    closes Settings or Map Evolution on the right, and vice versa. */
 #menu-render-progress {
@@ -785,7 +785,7 @@ input[type="range"] {
   bottom: var(--panel-inset);
 }
 
-/* Settings and Map Evolution, top right - same .menu-item/.menu-toggle/
+/* Settings and Map Evolution, top right: same .menu-item/.menu-toggle/
    .menu-card machinery as the four menus in the left column (and the
    render-progress gauge below), just anchored to the opposite corner
    instead of living in that stack, and their own accordion group (see
@@ -797,7 +797,7 @@ input[type="range"] {
    A real column, mirroring #grid-menu-stack: a collapsed menu's button
    leaves the layout when its card opens (see .menu-item.is-open >
    .menu-toggle), so the two have to stack rather than each own a fixed
-   spot - otherwise an open Settings card would simply paint over the Map
+   spot, otherwise an open Settings card would simply paint over the Map
    Evolution button below it. align-items: flex-end keeps the two collapsed
    buttons on the right edge, where a full-width card's own right edge also
    lands, so nothing shifts sideways as one opens. */
@@ -814,7 +814,7 @@ input[type="range"] {
   /* Same reasoning as #grid-menu-stack's: viewport units, since the
      column's own height is auto. */
   max-height: calc(100vh - var(--panel-inset) * 2);
-  /* And it scrolls, as that stack does and for the same reason - more than
+  /* And it scrolls, as that stack does and for the same reason: more than
      one card open at once. Only one of Settings and Map Evolution ever is,
      but the Movie card is meant to stay open beside Map Evolution (see
      menuGroups in fractal-grid.js), and the two together are taller than a
@@ -839,28 +839,28 @@ input[type="range"] {
   flex-shrink: 0;
   pointer-events: auto;
 }
-/* A card is what its button turned into, so - unlike the left column's
-   menus, which grow from their own top-left corner - these grow from top
+/* A card is what its button turned into, so, unlike the left column's
+   menus, which grow from their own top-left corner, these grow from top
    right, matching the corner their toggle buttons sit in.
 
    Each also leaves room for the OTHER TWO's collapsed buttons plus the
    gaps between them, so opening any one never pushes the others off the
-   bottom - this column is only three items deep, so it needs nothing like
+   bottom: this column is only three items deep, so it needs nothing like
    the left column's --menu-reserved. */
 #grid-right-menu-column .menu-card {
   transform-origin: top right;
   max-height: calc(100vh - var(--panel-inset) * 2 - (var(--settings-btn-size) + 8px) * 2);
 }
-/* The collapsed state: no button chrome of its own (no background/border -
+/* The collapsed state: no button chrome of its own (no background/border,
    deliberately unlike .menu-toggle elsewhere), just the ring, sized to
    roughly three quarters of the other collapsed buttons and dimmed to
    half-opacity so it reads as a passive gauge sitting over the fractal
    rather than another control competing with the four real buttons above.
-   drop-shadow rather than a box-shadow, deliberately - box-shadow follows
+   drop-shadow rather than a box-shadow, deliberately: box-shadow follows
    the element's rectangular box, which would draw a square shadow behind a
    ring; drop-shadow follows the painted stroke itself, matching the shape. */
 /* Same rule as .menu-item.is-open > .menu-toggle above, restated for this
-   toggle's own class - it deliberately isn't .menu-toggle itself (that
+   toggle's own class: it deliberately isn't .menu-toggle itself (that
    class also carries a square button's background/border/shadow, which
    this bare ring doesn't want), so it needs its own copy of the rule that
    removes the collapsed control from the layout while its card is open. */
@@ -884,7 +884,7 @@ input[type="range"] {
   opacity: 0.5;
   filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5)) drop-shadow(0 10px 30px rgba(0, 0, 0, 0.45));
 }
-/* The open state: a single header row and nothing below it - there is no
+/* The open state: a single header row and nothing below it, there is no
    .menu-card-body, so the card is exactly one line tall, and (unlike the
    other four cards, where only the header collapses the menu so the body's
    own controls stay clickable) clicking anywhere on it closes it, because
@@ -917,11 +917,11 @@ input[type="range"] {
 }
 /* Both rings share one path (see each pair's identical cx/cy/r in
    chaos.html) so progress reads as one ring changing color, not two
-   concentric ones. Rotated 90deg so the dash pattern's start point - the
-   circle's own 3-o'clock point - lands at 6 o'clock (south) instead;
+   concentric ones. Rotated 90deg so the dash pattern's start point, the
+   circle's own 3-o'clock point, lands at 6 o'clock (south) instead;
    stroke-dasharray/dashoffset are set from JS, where the sweep direction
    (dashoffset shrinking from the full circumference to 0) is what actually
-   draws it clockwise from there - south to west at a quarter, south to
+   draws it clockwise from there: south to west at a quarter, south to
    north at half. */
 .render-progress-ring-track {
   fill: none;
@@ -934,7 +934,7 @@ input[type="range"] {
 #render-progress-ring-coarse-open {
   stroke: var(--text-dim);
 }
-/* Drawn second, directly on top of the coarse ring's own path - at rest
+/* Drawn second, directly on top of the coarse ring's own path: at rest
    (dashoffset left at its own circumference) it is fully invisible, so the
    coarse ring alone shows through until antialiasing actually starts. */
 #render-progress-ring-aa,
@@ -946,10 +946,10 @@ input[type="range"] {
    The body of the Map Evolution card (see #menu-playback in chaos.html and
    the Playback section of fractal-grid.js): the shared .playback-controls
    row, the frame readout under it, then the Simulation Duration slider that
-   sets where that timeline ends. The card itself needs no look of its own -
+   sets where that timeline ends. The card itself needs no look of its own:
    it is an ordinary .menu-card like every other menu's. */
 /* .playback-controls carries a margin-top for the flowing column it was
-   designed for - meaningless as the first thing in this card's body. */
+   designed for: meaningless as the first thing in this card's body. */
 #grid-playback-panel .playback-controls {
   margin-top: 0;
 }
@@ -958,7 +958,7 @@ input[type="range"] {
   text-align: center;
 }
 
-/* Sits right above #inspect-list, but its own margin - not the list's -
+/* Sits right above #inspect-list, but its own margin, not the list's,
    is what has to carry the gap above it: nothing else here puts any space
    between the .tool-grid superlative row above it and a plain button,
    which otherwise left the two touching. */
@@ -991,7 +991,7 @@ input[type="range"] {
   border: 2px solid #000;
 }
 
-/* A "line"/"grid" row's stand-in for .inspect-dot above - see
+/* A "line"/"grid" row's stand-in for .inspect-dot above: see
    updateInspectList's own comment on why it's a big glyph instead of a
    small one. align-self: stretch (overriding .inspect-row's own
    align-items: center just for this child) is what lets it actually reach
@@ -1015,7 +1015,7 @@ input[type="range"] {
 }
 
 /* A "line"/"grid" row's two-line body (start coords, end coords) in place
-   of a single .inspect-coords span - same flex:1 role in the row, just
+   of a single .inspect-coords span: same flex:1 role in the row, just
    stacked instead of single-line, so the row still reads as ONE entry with
    ONE remove button rather than two. */
 .inspect-coords-group {
@@ -1040,10 +1040,10 @@ input[type="range"] {
   color: var(--text);
 }
 
-/* "Drag to inspect a line/grid" - see #inspect-toast's own HTML comment
+/* "Drag to inspect a line/grid": see #inspect-toast's own HTML comment
    for when this shows. Opacity-animated rather than the usual [hidden]
    snap, so it actually reads as a toast (fades in, sits, fades out)
-   instead of just blinking on and off - which is also why, unlike this
+   instead of just blinking on and off, which is also why, unlike this
    file's other transient UI, it is never [hidden]: toggling display:none
    and an opacity transition in the same moment leaves the transition
    nothing to animate from (the same reasoning as .settings-panel's own
@@ -1052,7 +1052,7 @@ input[type="range"] {
 .inspect-toast {
   position: absolute;
   left: 50%;
-  /* Clear of the bottom row - see --toast-bottom on #grid-canvas-area. */
+  /* Clear of the bottom row: see --toast-bottom on #grid-canvas-area. */
   bottom: var(--toast-bottom);
   transform: translateX(-50%);
   z-index: 20;
@@ -1078,13 +1078,13 @@ input[type="range"] {
   display: block;
   cursor: default;
   /* Belt-and-suspenders with #grid-canvas-area's own touch-action: none (which
-     already covers this element as its ancestor) - set directly on the
+     already covers this element as its ancestor), set directly on the
      actual touch target too. */
   touch-action: none;
   /* The backing store matches the display's actual device pixels (see
      resizeCanvas in fractal-grid.js), so this is only a safety net against
      the rare sub-pixel rounding mismatch between CSS size and device
-     pixels - nearest-neighbor is never worse than smoothed for that. */
+     pixels: nearest-neighbor is never worse than smoothed for that. */
   image-rendering: pixelated;
   image-rendering: crisp-edges;
 }
@@ -1104,7 +1104,7 @@ input[type="range"] {
 }
 /* An unconditional `display: flex` above would win over the browser's own
    [hidden] { display: none }, since author styles beat user-agent defaults
-   regardless of specificity - only apply it once `hidden` is gone. */
+   regardless of specificity, only apply it once `hidden` is gone. */
 #empty-state:not([hidden]) {
   display: flex;
 }
@@ -1112,10 +1112,10 @@ input[type="range"] {
   color: var(--accent);
 }
 
-/* Reusable tip popover (see showTip in fractal-grid.js) - one shared
+/* Reusable tip popover (see showTip in fractal-grid.js): one shared
    instance, positioned in JS against whatever element it's currently
    pointing at. Fixed positioning so it isn't clipped by the menu column's
-   own overflow-y: auto - see #grid-menu-stack and .menu-card-body, both of
+   own overflow-y: auto, see #grid-menu-stack and .menu-card-body, both of
    which scroll and both of which hold tip anchors. */
 .tip-popover {
   position: fixed;
@@ -1165,7 +1165,7 @@ input[type="range"] {
   padding: 5px 10px;
 }
 
-/* Gear button in the panel head, and its × twin inside the settings panel -
+/* Gear button in the panel head, and its × twin inside the settings panel:
    square, icon-only, otherwise matching button.secondary's look. */
 .icon-button {
   flex-shrink: 0;
@@ -1185,7 +1185,7 @@ input[type="range"] {
   background: var(--bg-input);
 }
 
-/* .settings-panel and its header/body are styled in app-shell.css now - the
+/* .settings-panel and its header/body are styled in app-shell.css now: the
    settings button and the panel it opens both moved to a shared, cross-view
    floating design (see .floating-settings-btn there) instead of each page
    keeping its own copy of a slide-in drawer. */
@@ -1195,11 +1195,11 @@ input[type="range"] {
  * One row per mode: a thumbnail of what that mode looks like, and a
  * sentence saying what it does with the sample cost on its last line.
  * A radiogroup rather than a <select>, because the thumbnail IS the
- * explanation here - the difference between these five is entirely visual,
+ * explanation here: the difference between these five is entirely visual,
  * and a dropdown can only ever name them.
  *
  * The rows sit flush against each other with dividers between, so the four
- * read as one list of choices rather than five separate controls - that's
+ * read as one list of choices rather than five separate controls: that's
  * #grid-display-mode-list's own gap: 0 below, kept separate from the card
  * body's gap so it doesn't also flatten the space above the list, between
  * it and the Reset View/zoom row. */
@@ -1246,7 +1246,7 @@ input[type="range"] {
   flex: 0 0 auto;
   /* Both of these, and min-width: 0 as well. An <img> is a replaced element,
      so its intrinsic 400px is what min-width: auto resolves to inside a flex
-     row - a flex-basis alone loses to that and the thumbnail renders full
+     row, a flex-basis alone loses to that and the thumbnail renders full
      size, pushing the text out of the card entirely. */
   width: 44%;
   min-width: 0;
@@ -1256,19 +1256,19 @@ input[type="range"] {
 }
 
 /* min-width: 0 so a long word can wrap instead of forcing the row wider
-   than the card - the default min-width:auto on a flex child would let it
+   than the card, the default min-width:auto on a flex child would let it
    push the thumbnail out instead.
  *
  * The font size and line height here are tuned against the thumbnail's
  * width above so that a one-sentence description plus the sample line comes
- * out a little shorter than the image is tall - about 0.83 of it - at the
+ * out a little shorter than the image is tall, about 0.83 of it, at the
  * card's DEFAULT width. Widening the card only rewraps the text shorter, so
  * the relationship holds from there up.
  *
  * It does not hold below the default, and cannot: in a side-by-side row the
  * text's height is set by how narrow its column is, and giving it more room
  * means taking width from the thumbnail, which shrinks the thumbnail's
- * height by as much - there is no share of the row that wins at every
+ * height by as much, there is no share of the row that wins at every
  * width. Dragging the panel narrower than its default therefore makes these
  * rows progressively more text than picture. Nothing clips or overflows
  * when it does; the row just stops being the shape it was tuned to be,
@@ -1287,13 +1287,13 @@ input[type="range"] {
   font-weight: 600;
   color: var(--text);
 }
-/* Standard's own row only (see the DISPLAY_MODES loop in fractal-grid.js) -
+/* Standard's own row only (see the DISPLAY_MODES loop in fractal-grid.js):
    .toggle-field's own margin-bottom already separates it from the sample
    cost line below, but nothing put space between it and the name above. */
 .display-mode-text .toggle-field {
   margin-top: 6px;
 }
-/* The sample cost, on its own last line - the one number that says what
+/* The sample cost, on its own last line: the one number that says what
    choosing this row will cost, so it is set apart from the sentence rather
    than buried at the end of it. */
 .display-mode-cost {
@@ -1307,7 +1307,7 @@ input[type="range"] {
    when Feature Census's own switch asks for it, so it costs nothing at all
    the rest of the time. Sits over the grid inside #grid-canvas-area's own
    box, in the same CSS pixels the canvas fills, and takes no pointer
-   events: panning and zooming still belong to the grid underneath - which
+   events: panning and zooming still belong to the grid underneath, which
    is what removes this in the first place. */
 #grid-feature-overlay {
   position: absolute;
@@ -1435,7 +1435,7 @@ input[type="range"] {
 /* ---- Settings > Performance Settings (see "Performance settings" in
    fractal-grid.js) ---- */
 
-/* A titled group inside a card's body - the first the Settings card has
+/* A titled group inside a card's body: the first the Settings card has
    needed. Set off from the controls above it by a rule rather than a box:
    the card is already a box. */
 .settings-section {
@@ -1491,14 +1491,14 @@ input[type="range"] {
   color: var(--text);
   font-weight: 600;
 }
-/* "Custom" names a place the slider can only end up, never be put - so its
+/* "Custom" names a place the slider can only end up, never be put, so its
    name is only there while the slider is. (Hidden, not removed: it is the
    middle column of the grid above.) */
 .perf-preset-labels [data-preset="custom"]:not(.is-current) {
   visibility: hidden;
 }
 /* The controls the slider sets, folded away under it (see #perf-details in
-   chaos.html) - the editor's own "Advanced" disclosure, whose legend has to
+   chaos.html): the editor's own "Advanced" disclosure, whose legend has to
    sit on this card's fill rather than the editor panel's. */
 #perf-details {
   margin-top: 0;
@@ -1513,10 +1513,10 @@ input[type="range"] {
   opacity: 0.55;
 }
 
-/* The performance readout: bottom centre of the map - the one stretch of its
+/* The performance readout: bottom centre of the map, the one stretch of its
    edge no menu opens over (the columns hang from the two upper corners, and
-   an open card reaches the bottom of its side) - and above the watermark's
-   line. pointer-events: none - the map under it still pans and zooms. Wraps
+   an open card reaches the bottom of its side), and above the watermark's
+   line. pointer-events: none, the map under it still pans and zooms. Wraps
    rather than clips, since a phone is narrower than some of its lines. */
 #perf-readout {
   position: absolute;

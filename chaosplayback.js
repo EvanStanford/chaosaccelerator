@@ -1,10 +1,10 @@
 // This file is part of Chaos Accelerator, licensed under the Common Public
-// Attribution License, Version 1.0 (CPAL-1.0) - see LICENSE in the project
+// Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in the project
 // root, or https://chaosaccelerator.com/license for a hosted copy.
 
 // The movie player (chaosplayback.html). Three things, in order:
 //
-//  1. READ the movie out of the address - the scene, how its map is drawn,
+//  1. READ the movie out of the address: the scene, how its map is drawn,
 //     and the keyframes (share-url.js). Nothing else is needed, which is
 //     what makes a movie's link something that can be sent to anyone: opened
 //     cold, it renders and plays the same movie.
@@ -12,15 +12,15 @@
 //  2. RENDER every frame before showing any of them. The camera's position
 //     at each frame comes from movie-path.js. The PICTURE comes from the app
 //     itself, loaded in a frame and asked for one finished still at a time
-//     (FractalGrid.renderStill) - so a movie is drawn by exactly the code
+//     (FractalGrid.renderStill), so a movie is drawn by exactly the code
 //     that draws the map: the same precision ladder at a deep zoom, the same
 //     draws sized to what the GPU will allow, the same antialiasing. A second
 //     renderer here would be thousands of lines, and would be a different
 //     picture by the first deep zoom.
 //
 //  3. PLAY what was rendered, looping, from memory. Frames are kept as JPEG
-//     blobs rather than bitmaps - a minute of full-resolution movie is tens
-//     of gigabytes unpacked, and tens of megabytes packed - and unpacked a
+//     blobs rather than bitmaps, a minute of full-resolution movie is tens
+//     of gigabytes unpacked, and tens of megabytes packed, and unpacked a
 //     little ahead of the playhead as it goes.
 (function () {
   "use strict";
@@ -66,8 +66,8 @@
   var quality = MoviePath.QUALITIES[Math.min(movie.quality, MoviePath.QUALITIES.length - 1)];
 
   // The way back. The map gets the keyframes back too, in its own link, so
-  // the Movie card comes up holding the movie this was rendered from - ready
-  // to be changed and rendered again - on the first keyframe's view.
+  // the Movie card comes up holding the movie this was rendered from, ready
+  // to be changed and rendered again, on the first keyframe's view.
   var first = movie.keyframes[0];
   $("back-to-map").href = "chaos.html#" + ShareUrl.encode({
     page: ShareUrl.PAGE_MAP,
@@ -81,7 +81,7 @@
   // ---- The screen ----
   //
   // One canvas, the size of the stage in device pixels. Whatever is being
-  // shown - a frame just rendered, or the movie playing - is drawn to fit
+  // shown, a frame just rendered, or the movie playing, is drawn to fit
   // inside it whole, so a movie keeps its shape in a window that has changed
   // since it was rendered.
   var shown = null; // the last thing drawn, for redrawing after a resize
@@ -111,7 +111,7 @@
 
   // ---- 2. Rendering ----
 
-  var frames = [];        // [{ center, scale, step }] - see MoviePath.frames
+  var frames = [];        // [{ center, scale, step }]: see MoviePath.frames
   var blobPromises = [];  // one per frame; the same promise twice where two frames are the same picture
   var blobs = [];         // what they resolve to
   var frameWidth = 0, frameHeight = 0;
@@ -122,7 +122,7 @@
   var recentFrameMs = [];
   // What has been packed so far, for estimating what the whole movie will
   // come to. Counted per frame of the MOVIE, so a picture shared by several
-  // identical frames is counted as often as it plays - an estimate of the
+  // identical frames is counted as often as it plays: an estimate of the
   // movie, which is what a reader expects, a little over what is held.
   var packedBytes = 0, packedFrames = 0;
   function formatBytes(bytes) {
@@ -271,7 +271,7 @@
       }
       beginRender(grid);
     });
-    // The app, opened on this movie's map - drawn the way the movie is to be
+    // The app, opened on this movie's map: drawn the way the movie is to be
     // drawn, and otherwise at its defaults.
     engine.src = "chaos.html#" + ShareUrl.encode({
       page: ShareUrl.PAGE_MAP,
@@ -288,7 +288,7 @@
   // each faded by a window over log-frequency centred on 220 Hz (an A, so
   // the partials all land on A's at every thousandfold zoom): full volume
   // within an octave of the centre, falling away by a cosine to silence two
-  // octaves further out - fuller and more organ-like than Shepard's own
+  // octaves further out, fuller and more organ-like than Shepard's own
   // Gaussian, with nothing shrill at the top. As the pitch climbs, a partial
   // fading out at the top is replaced by one fading in at the bottom, and
   // since a partial's volume depends only on its absolute frequency the join
@@ -319,7 +319,7 @@
     }
     // Where partial k sits in the window for a tone at `octaves`: it climbs
     // continuously with the tone, and wraps from the top of the window to
-    // the bottom - both silent - rather than every partial jumping an octave
+    // the bottom, both silent, rather than every partial jumping an octave
     // whenever the tone crosses a whole number, which was audible however
     // smoothly it was done.
     function place(octaves, k) {
@@ -345,7 +345,7 @@
           var x = place(octaves, p.k);
           var hz = TONE_CENTER_HZ * Math.pow(2, x);
           // Small moves are smoothed so nothing zippers; a wrap round the
-          // window (or the movie looping or being seeked) is taken at once -
+          // window (or the movie looping or being seeked) is taken at once:
           // an oscillator changes pitch without a break in its wave, so an
           // instant change makes no click where a smoothed one would chirp.
           // Volume is always smoothed: an instant change there IS a click.
@@ -374,7 +374,7 @@
   }
 
   // The live sound: off until asked for, and the AudioContext made only then,
-  // in the click - browsers don't let a page start sound on its own.
+  // in the click, browsers don't let a page start sound on its own.
   var btnSound = $("sound");
   var soundOn = false, audioCtx = null, liveTone = null;
   function updateSound() {
@@ -526,7 +526,7 @@
   // ---- Saving it as a file ----
   //
   // The frames are replayed once, off screen, into a canvas the browser's own
-  // MediaRecorder is filming - so this takes as long as the movie runs, and
+  // MediaRecorder is filming, so this takes as long as the movie runs, and
   // produces whatever video format this browser records (WebM in Chrome and
   // Firefox, MP4 in Safari). That is the price of having no encoder of our
   // own: a real one would mean shipping a muxer library. Every frame is held
@@ -596,7 +596,7 @@
     var movieLength = formatRecorded(blobs.length / FPS);
     function film1(i) {
       if (i >= blobs.length) {
-        // One more frame's time, or the last frame is cut short - and with
+        // One more frame's time, or the last frame is cut short, and with
         // sound, long enough for the tone to fade out rather than stop dead.
         if (filmTone) filmTone.setLevel(0);
         setTimeout(function () { recorder.stop(); }, filmTone ? Math.max(1000 / FPS, 1000 * TONE_FADE_S * 4) : 1000 / FPS);

@@ -1,16 +1,16 @@
 // This file is part of Chaos Accelerator, licensed under the Common Public
-// Attribution License, Version 1.0 (CPAL-1.0) - see LICENSE in the project
+// Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in the project
 // root, or https://chaosaccelerator.com/license for a hosted copy.
 
 // Per-pixel initial-conditions codegen for the fractal grid (Milestone 2):
 // given a scene with xInput/yInput mapped, generates GLSL that computes,
 // for whichever pixel is being shaded, the same scene the interactive
 // editor would produce after adding that pixel's world X/Y to the linked
-// property - including the hinge-preserving cascade rules from
+// property, including the hinge-preserving cascade rules from
 // PhysicsUI.applyBodyEditPreservingHinge / translateBodyPreservingHinges.
 //
-// Body count and hinge topology are fixed once a scene is sent here, so -
-// matching physics-gpu.js's own "specialize, don't generalize" style - the
+// Body count and hinge topology are fixed once a scene is sent here, so,
+// matching physics-gpu.js's own "specialize, don't generalize" style, the
 // whole cascade is resolved once, at codegen time, into a flat sequence of
 // GLSL statements. Nothing here walks the hinge graph at runtime; by the
 // time the shader exists, the graph has already been fully unrolled into
@@ -29,7 +29,7 @@
   //
   // Everything below builds GLSL as expression STRINGS, never numbers, so
   // switching the whole per-pixel cascade from float32 to double-float is
-  // a matter of spelling each arithmetic step differently - not of having
+  // a matter of spelling each arithmetic step differently, not of having
   // a second copy of the cascade. `f32` emits exactly the operators it
   // always did; `df` emits calls into physics-df.js. Both walk the same
   // hinge graph, in the same order, producing the same sequence of
@@ -37,7 +37,7 @@
   //
   // Why the cascade needs the extended precision at all: this is where a
   // pixel's world X/Y is ADDED to an authored coordinate of order 10^3.
-  // That single add is the original 32-bit wall - at a deep enough zoom
+  // That single add is the original 32-bit wall: at a deep enough zoom
   // the offset lands below the coordinate's own ULP and a whole block of
   // pixels ends up with byte-identical starting scenes. No amount of
   // precision later in the step loop can recover a distinction that was
@@ -63,7 +63,7 @@
       toFloat: function (a) { return a; },
       fromFloat: function (a) { return a; },
     },
-    // Every multi-float precision - "df", "tf", "qf" - spells its arithmetic
+    // Every multi-float precision, "df", "tf", "qf", spells its arithmetic
     // the same way: the library's functions keep their df names whatever the
     // word count, and the scalar type is the MF macro (see physics-df.js).
     df: {
@@ -80,8 +80,8 @@
       rotate: function (x, y, angle) { return "dfRotate(" + x + ", " + y + ", " + angle + ")"; },
       absCos: function (a) { return "dfAbs(dfCos(" + a + "))"; },
       absSin: function (a) { return "dfAbs(dfSin(" + a + "))"; },
-      // The modulus is always a frame dimension - an integer canvas size,
-      // exactly representable - so it stays a plain float here.
+      // The modulus is always a frame dimension, an integer canvas size,
+      // exactly representable, so it stays a plain float here.
       mod: function (a, m) { return "dfMod(" + a + ", " + m + ")"; },
       greater: function (a, b) { return "dfGreater(" + a + ", " + b + ")"; },
       less: function (a, b) { return "dfLess(" + a + ", " + b + ")"; },
@@ -97,7 +97,7 @@
   }
 
   // An angle link moves the WHOLE circle in radians per world unit, same as
-  // a position link moves it in pixels per world unit - but 2*PI world
+  // a position link moves it in pixels per world unit, but 2*PI world
   // units (about 6px at default zoom) is a full spin, so an angle-linked
   // body was completing hundreds of turns over a screen's width while an
   // x/y-linked body only crossed it once. Scaling the angle offset down
@@ -108,7 +108,7 @@
   // Both "y" (position) and "vy" (velocity) run along the same axis, so a
   // link to either gets the same sign flip: world-space Y increases upward
   // (this is the fractal view's math/OpenGL convention) while the physics
-  // scene's own y increases downward (screen convention, same as vy - a
+  // scene's own y increases downward (screen convention, same as vy, a
   // positive vy already means "falling," i.e. moving toward larger y).
   // Panning the world view "up" should read as "up" for a velocity link
   // exactly as it already does for a position link, which needs the same
@@ -122,8 +122,8 @@
     return -1;
   }
 
-  // The hinge that pins bodyIndex to *something else* - world or another
-  // body - mirrors PhysicsHingeGeometry.findOwnHinge exactly.
+  // The hinge that pins bodyIndex to *something else*, world or another
+  // body, mirrors PhysicsHingeGeometry.findOwnHinge exactly.
   function findOwnHingeIndex(scene, bodyIndex) {
     for (var i = 0; i < scene.hinges.length; i++) {
       if (scene.hinges[i].bodyB === bodyIndex) return i;
@@ -135,8 +135,8 @@
   //
   // Two links pointing at the same (body, property) just add. A body CAN
   // also be targeted by both a position link (x/y) and a shape/rotation
-  // link (radius/length/angle) at once - resize/rotate's hinge-preserving
-  // recenter is an ABSOLUTE assignment (body.x = pivot.x - rB.x), which
+  // link (radius/length/angle) at once, resize/rotate's hinge-preserving
+  // recenter is an ABSOLUTE assignment (body.x = pivot.x, rB.x), which
   // would silently discard a translate's effect if the translate ran
   // first, but generateGridInitialStateGLSL always applies every
   // resize/rotate target before any translate target (see its own
@@ -169,7 +169,7 @@
   // Builds the flat GLSL statement sequence that turns this scene's literal
   // authored body state into the offset-and-cascaded state for whatever
   // pixel calls it, given `worldX`/`worldY` are already in scope as floats.
-  // Returns { declarationLines, bodyState, shapeState, consts, n } - the
+  // Returns { declarationLines, bodyState, shapeState, consts, n }: the
   // caller (Stage 1: a debug/verification shader; Stage 2: the real grid
   // shader) is responsible for turning bodyState/shapeState into a Body
   // struct + calling PhysicsGPU.generateStepOnceGLSL's stepOnce().
@@ -179,7 +179,7 @@
       throw new Error("GPU physics supports at most " + PhysicsGPU.MAX_BODIES + " bodies (scene has " + scene.bodies.length + ")");
     }
     // A splitter scene is padded out to PhysicsEngine.MAX_SIMULATION_BODIES
-    // with dead spawn slots before anything else looks at it - see
+    // with dead spawn slots before anything else looks at it: see
     // PhysicsGPU.padSceneForSplitting. The padding appends, so every
     // authored body keeps its index and the whole offset/cascade walk below
     // (which addresses bodies and hinges by index) is untouched by it. The
@@ -209,13 +209,13 @@
     var shapeState = consts.map(function (b, i) {
       return { half: B.lit(PhysicsGPU.shapeHalf(consts, i)), invMass: B.lit(b.invMass), invInertia: B.lit(b.invInertia) };
     });
-    // Hinge anchors as symbolic {x,y} pairs, parallel to scene.hinges -
+    // Hinge anchors as symbolic {x,y} pairs, parallel to scene.hinges:
     // mutated in place exactly like PhysicsUI's rescaleAllAnchorsOnBody /
     // translateBodyPreservingHinges mutate the real hinge objects.
     var anchorA = scene.hinges.map(function (h) { return { x: B.lit(h.localAnchorA.x), y: B.lit(h.localAnchorA.y) }; });
     var anchorB = scene.hinges.map(function (h) { return { x: B.lit(h.localAnchorB.x), y: B.lit(h.localAnchorB.y) }; });
     // Springs, in the same symbolic shape (see PhysicsGPU.springLinksFor,
-    // whose descriptors these are) - the anchors start as the authored
+    // whose descriptors these are): the anchors start as the authored
     // literals and are rescaled below when the body they sit on is resized.
     // Nothing else about a spring varies per pixel: a body an Input MOVES
     // takes its end of the spring with it and the spring simply starts
@@ -236,7 +236,7 @@
       return { x: name + ".x", y: name + ".y" };
     }
     // Circles and funnels scale uniformly; lines only scale along their own
-    // local X axis (no adjustable thickness) - matches
+    // local X axis (no adjustable thickness): matches
     // physics-ui.js's scaleAnchorForResize exactly (via
     // PhysicsHingeGeometry.scaleAnchorForResize).
     function scaleAnchor(anchor, ratioExpr, bodyType) {
@@ -246,9 +246,9 @@
     }
 
     // The current world position of a hinge's "A" side, as GLSL expression
-    // strings - a constant when bodyA is null (the world pin never moves on
+    // strings: a constant when bodyA is null (the world pin never moves on
     // its own), or derived from the parent's CURRENT symbolic state
-    // otherwise. Reading state[parentIdx] here - rather than a snapshot -
+    // otherwise. Reading state[parentIdx] here, rather than a snapshot,
     // is what makes this correct regardless of whether the parent's own
     // target has already been resolved by the time this runs: mirrors
     // PhysicsHingeGeometry.hingeWorldPointA exactly.
@@ -264,7 +264,7 @@
     }
 
     // ---- Direct translate (x/y links): mirrors
-    // PhysicsUI.translateBodyPreservingHinges exactly - unconditional
+    // PhysicsUI.translateBodyPreservingHinges exactly, unconditional
     // cascade to descendants; the body's own world hinge (if any) drags
     // its pin along by the same delta instead of staying fixed.
     function translateAndCascade(bodyIndex, dxExpr, dyExpr, visited) {
@@ -290,11 +290,11 @@
 
     // ---- Starting velocity (vx/vy links) ----
     //
-    // A direct additive offset on the one targeted body only - no hinge
+    // A direct additive offset on the one targeted body only: no hinge
     // recenter, no cascade to descendants. Both exist for position because
     // a hinge anchor is a GEOMETRIC constraint (the pin has to stay exactly
     // coincident, or the joint tears the instant the scene starts stepping);
-    // velocity has no such constraint at the starting instant - a hinged
+    // velocity has no such constraint at the starting instant: a hinged
     // child simply authored with a different starting velocity than its
     // parent is a normal, valid starting state, and PhysicsEngine.step's own
     // hinge velocity solver reconciles any mismatch within the very first
@@ -304,7 +304,7 @@
     }
 
     // ---- Resize/rotate (radius/length/angle links): mirrors
-    // PhysicsHingeGeometry.applyBodyEditPreservingHinge exactly - only
+    // PhysicsHingeGeometry.applyBodyEditPreservingHinge exactly, only
     // cascades if the EDITED body itself has an own hinge, to the world OR
     // to another body (no own hinge means just apply the edit in place: no
     // recenter, no cascade, even if this body has its own children);
@@ -331,7 +331,7 @@
         state[bodyIndex].angle = num(B.add(state[bodyIndex].angle, offsetExpr));
       } else if (property === "radius") {
         // A large enough negative offset would otherwise drive the radius
-        // below zero - collision/rendering code all assumes radius >= 0, so
+        // below zero: collision/rendering code all assumes radius >= 0, so
         // clamp to the magnitude rather than let it go negative and corrupt
         // downstream math (still lets X/Y Input sweep radius smoothly
         // through zero and back out the other side, just as a size).
@@ -339,7 +339,7 @@
         shapeState[bodyIndex].half = newRadius;
         // A static body's mass/inertia are always exactly zero regardless
         // of shape (PhysicsEngine.computeMass short-circuits on isAnchored
-        // before ever touching the area/mass formulas) - the literal "0.0"
+        // before ever touching the area/mass formulas): the literal "0.0"
         // already seeded above is correct as-is; don't recompute it into
         // some tiny-but-nonzero value, or an "anchored" body would stop
         // being treated as infinitely heavy in the solver.
@@ -351,7 +351,7 @@
           shapeState[bodyIndex].invInertia = num(B.div(B.mul(B.lit(2), invMass), B.mul(newRadius, newRadius)));
         }
       } else if (property === "length") {
-        // Same reasoning as radius above - a negative length is just as
+        // Same reasoning as radius above: a negative length is just as
         // invalid.
         var newLen = num(B.abs(B.add(B.mul(B.lit(2), oldHalf), offsetExpr)));
         shapeState[bodyIndex].half = num(B.mul(newLen, B.lit(0.5)));
@@ -362,7 +362,7 @@
           // inertia = mass * len^2 / 12  =>  invInertia = 12 / (mass * len^2)
           shapeState[bodyIndex].invInertia = num(B.div(B.lit(12), B.mul(B.mul(mass, newLen), newLen)));
         }
-      } else { // size (funnel) - same negative-magnitude guard as above.
+      } else { // size (funnel): same negative-magnitude guard as above.
         var newSize = num(B.abs(B.add(B.mul(B.lit(2), oldHalf), offsetExpr)));
         shapeState[bodyIndex].half = num(B.mul(newSize, B.lit(0.5)));
         if (!isAnchored) {
@@ -377,8 +377,8 @@
         }
       }
 
-      // A spring's attachment point keeps its place ON the body - the end of
-      // a line stays the end of the line - whether or not the body is hinged
+      // A spring's attachment point keeps its place ON the body, the end of
+      // a line stays the end of the line, whether or not the body is hinged
       // to anything: mirrors PhysicsHingeGeometry.rescaleSpringAnchorsOnBody.
       // A dead-center anchor is left alone (zero times anything), which is
       // what lets it stay a compile-time "no lever arm here".
@@ -409,13 +409,13 @@
       }
 
       // hingeWorldPointAExpr reads the parent's CURRENT state, so this is
-      // correct even if the parent's own target hasn't been resolved yet -
+      // correct even if the parent's own target hasn't been resolved yet:
       // resolveOffsetTargets' fixed X-then-Y processing order can put a
       // child's target before its parent's. Recentering the child now
       // against the parent's not-yet-updated point, then translating it
       // again by the parent's own later before/after delta (see the
       // children.forEach cascade below, run when the PARENT's own target is
-      // processed), is a sum of two pure translations - order doesn't
+      // processed), is a sum of two pure translations: order doesn't
       // change the total, exactly like PhysicsHingeGeometry's recursive
       // cascade doesn't care which order sibling subtrees are visited in.
       var pivot = hingeWorldPointAExpr(ownHingeIdx);
@@ -440,7 +440,7 @@
       });
     }
 
-    // Resize/rotate targets first - their recenter is an ABSOLUTE
+    // Resize/rotate targets first: their recenter is an ABSOLUTE
     // assignment to body.x/y, so applying them after a translate would
     // silently discard it. This order is what makes it safe for X and Y to
     // target a position property and a shape/rotation property on the same
@@ -459,7 +459,7 @@
     // ---- Settle every body's STARTING position back into the frame ----
     //
     // The per-step wrap PhysicsGPU.generateStepOnceGLSL emits only ever
-    // needs to correct a small overshoot (see its own comment) - this
+    // needs to correct a small overshoot (see its own comment): this
     // corrects the STARTING state instead, which can be arbitrarily far
     // outside the frame once worldX/worldY is a large, zoomed-out-enough
     // offset (mod(), not a single subtract, is what makes that safe in one
@@ -471,23 +471,23 @@
     // positive span, exactly like PhysicsHingeGeometry.wrapIntoRange.
     //
     // Only ever applied to a ROOT body (unhinged, or hinged straight to the
-    // world) - never to a body hinged TO ANOTHER BODY: that body's position
+    // world), never to a body hinged TO ANOTHER BODY: that body's position
     // is a rigid consequence of its parent (free to rotate about the
-    // joint, not to independently translate), so wrapping it directly -
+    // joint, not to independently translate), so wrapping it directly,
     // plausible-looking, since a rigid "arm" can genuinely put a child way
-    // outside the frame - would move it without moving what it's pinned
+    // outside the frame, would move it without moving what it's pinned
     // to, tearing the joint immediately. Each root's own correction already
     // cascades to its entire subtree via applyTranslateTarget below, the
     // same as a manual drag would, so one pass over just the roots is
-    // enough - see PhysicsHingeGeometry.normalizeAllBodiesIntoFrame, this
+    // enough: see PhysicsHingeGeometry.normalizeAllBodiesIntoFrame, this
     // function's direct JS/numeric mirror, for the same reasoning.
     //
     // Skipped entirely under Infinite Space, where there is no frame to
     // settle into: a pixel's offset then simply places the body where it
     // says, however far outside. That makes the X/Y Input mapping linear
-    // rather than periodic - zooming out sweeps the body steadily further
+    // rather than periodic, zooming out sweeps the body steadily further
     // away instead of the mod() cycling it back through the frame over and
-    // over - and it removes that mod()'s seam, the discontinuity where two
+    // over, and it removes that mod()'s seam, the discontinuity where two
     // neighbouring pixels straddle a wrap point and get starting positions a
     // whole frame apart (see fractal-grid.js's inputStateCrossesSeam, which
     // exists to keep the superlative scans from mistaking that seam for real
@@ -499,12 +499,12 @@
       // against a value of the pass's own precision.
       var frameW = fnum(scene.frameWidth), frameH = fnum(scene.frameHeight);
       var frameWLit = B.lit(scene.frameWidth), frameHLit = B.lit(scene.frameHeight);
-      // Bodies joined by springs settle the way they wrap - see
+      // Bodies joined by springs settle the way they wrap: see
       // PhysicsEngine.springGroups: a group tethered to the background (or to
       // an anchored body) is left wherever its pixel put it, and any other
       // moves as one, by its leader's position. Settling one end of a spring
       // on its own would start it a whole frame longer than the pixel next
-      // door - the seam this block otherwise only puts BETWEEN bodies, put
+      // door: the seam this block otherwise only puts BETWEEN bodies, put
       // through the middle of a force. Null for a scene with no springs.
       var springGroups = PhysicsEngine.springGroups(scene);
       for (var wi = 0; wi < n; wi++) {
@@ -520,7 +520,7 @@
             halfX = shapeState[wi].half;
             halfY = shapeState[wi].half;
           } else if (consts[wi].type === "funnel") {
-            // Max |local x|/|local y| over the 4 rotated vertices - mirrors
+            // Max |local x|/|local y| over the 4 rotated vertices: mirrors
             // PhysicsHingeGeometry.frameHalfExtent's numeric version. A
             // leading "-" negates a df value too: it is a vec2, and negating
             // both words is exactly dfNeg.
@@ -547,7 +547,7 @@
           dyExpr = B.sub(B.mod(by, frameH), by);
         }
         if (springGroup) {
-          // Every member, and every background pin one of them hangs from -
+          // Every member, and every background pin one of them hangs from:
           // mirrors PhysicsEngine.translateSpringGroup.
           var gdx = num(dxExpr), gdy = num(dyExpr);
           springGroup.members.forEach(function (m) {
@@ -562,7 +562,7 @@
       }
     }
 
-    // In the shape PhysicsGPU.generateStepOnceGLSL expects - localA/localB
+    // In the shape PhysicsGPU.generateStepOnceGLSL expects: localA/localB
     // are already GLSL text (a literal for an untouched hinge, a computed
     // variable name for one rescaled above), never raw numbers, so a caller
     // building a step loop on top of this can hand them straight through.
@@ -570,7 +570,7 @@
       return { aIsWorld: hg.bodyA === null, a: hg.bodyA, b: hg.bodyB, localA: anchorA[hi], localB: anchorB[hi] };
     });
     // Same "hand it nothing" approach as physics-gpu.js's own
-    // compileSceneToTrajectoryGLSL - see its comment. Applies to the grid's
+    // compileSceneToTrajectoryGLSL: see its comment. Applies to the grid's
     // per-pixel step loop and the hover replay alike, since both are built
     // from this same result.
     var pairs = PhysicsEngine.collisionsEnabled(scene) ? PhysicsGPU.collisionPairs(n, consts, scene.hinges) : [];
@@ -583,7 +583,7 @@
       n: n,
       pairs: pairs,
       hingeAnchors: hingeAnchors,
-      // For generateStepOnceGLSL / stepOnceCallArgs, beside hingeAnchors -
+      // For generateStepOnceGLSL / stepOnceCallArgs, beside hingeAnchors:
       // empty for a scene with no springs.
       springs: springs,
       // null for every scene without a splitter, which is what every
@@ -598,13 +598,13 @@
   }
 
   // generateGridInitialStateGLSL tracks each body's state as separate
-  // scalar expressions (bodyState[i].x/.y/.angle, shapeState[i].half/...) -
+  // scalar expressions (bodyState[i].x/.y/.angle, shapeState[i].half/...):
   // enough to read out a single property (Stage 1's debug shader, and the
   // regression tests, only ever need one), but PhysicsGPU.generateStepOnceGLSL
   // needs real `inout Body bodyN` struct variables plus the canonically-named
   // BODYn_INV_MASS/INV_INERTIA/HALF locals to call stepOnce(...) against
   // (see stepOnceCallArgs). This assembles exactly those, each initialized
-  // from whatever expression the offset computation produced - a literal
+  // from whatever expression the offset computation produced: a literal
   // for an untouched body, a reference to one of generateGridInitialStateGLSL's
   // own computed variables for a linked one. Must be emitted AFTER
   // result.declarationLines, since these expressions can reference locals
@@ -615,7 +615,7 @@
     var lines = [];
     for (var i = 0; i < result.n; i++) {
       var s = result.bodyState[i], sh = result.shapeState[i];
-      // vx/vy come from bodyState now - seeded from the body's own authored
+      // vx/vy come from bodyState now: seeded from the body's own authored
       // velocity (the Set Velocity tool writes vx/vy, and scene JSON has
       // always carried vx/vy/w) and overwritten wherever a vx/vy Input
       // target lands on this body (see applyVelocityTarget), exactly like
@@ -641,7 +641,7 @@
     // way the BODYn_* names above already do.
     var spawnLocals = PhysicsGPU.generateSpawnSlotLocalsGLSL(result.n, result.spawnBase);
     if (spawnLocals) lines.push(spawnLocals);
-    // A fresh set of bodies is a fresh run - see staticGeometryResetGLSL.
+    // A fresh set of bodies is a fresh run: see staticGeometryResetGLSL.
     var geomReset = PhysicsGPU.staticGeometryResetGLSL(result.precision);
     if (geomReset) lines.push(geomReset);
     return lines.join("\n");
@@ -649,15 +649,15 @@
 
   // The hover-replay feature's entry point: "run the grid's WebGL code,
   // but with logging on" for the ONE specific (worldX, worldY) point under
-  // the cursor. Reuses PhysicsGPU.generateTrajectoryMainGLSL - the exact same
+  // the cursor. Reuses PhysicsGPU.generateTrajectoryMainGLSL: the exact same
   // texture-logging convention (redundant re-simulation per texel) as the
   // single-scene player, so the readback/replay code on the JS side doesn't
   // need to know or care that this scene came from an offset instead of
   // being authored directly.
   //
   // The point arrives as UNIFORMS, not as baked constants. It used to be
-  // baked - generateGridInitialStateGLSL only needs `worldX`/`worldY` to be
-  // in scope, and a literal is as good as anything - but that made every
+  // baked, generateGridInitialStateGLSL only needs `worldX`/`worldY` to be
+  // in scope, and a literal is as good as anything, but that made every
   // hovered point its own shader: a compile, a link and (in df) a
   // pipeline build measured in seconds, per mouse move, and up to 300 of
   // them for one Inspect line or grid. As uniforms the source depends only
@@ -667,9 +667,9 @@
   // world point from uniforms too.
   //
   // `precision` must match whatever the grid itself is currently rendering
-  // with, or the replay stops agreeing with the pixel it is replaying -
+  // with, or the replay stops agreeing with the pixel it is replaying,
   // which is the one property this feature exists to have.
-  // worldXLo/worldYLo are the low halves of a double-double point - omitted
+  // worldXLo/worldYLo are the low halves of a double-double point: omitted
   // (zero) by every caller that only has a float64 to give.
   function compileHoverTrajectoryGLSL(scene, worldX, worldY, maxSteps, precision, worldXLo, worldYLo) {
     var df = global.PhysicsDF.isExtended(precision);
@@ -688,7 +688,7 @@
     // deep enough to need more than float32 in the first place. Each
     // precision reads as many of the words as it carries.
     global.PhysicsDF.wordUniformDecls("u_hoverWorld").forEach(function (l) { lines.push(l); });
-    // The chunked LOG / ADVANCE scheme - see PhysicsGPU.generateTrajectoryMainGLSL.
+    // The chunked LOG / ADVANCE scheme: see PhysicsGPU.generateTrajectoryMainGLSL.
     var chunk = PhysicsGPU.trajectoryChunkInfo(initial.n, initial.consts, initial.hingeAnchors, precision, initial.spawnBase);
     lines.push(PhysicsGPU.generateTrajectoryHeaderGLSL(chunk));
     lines.push("");
@@ -723,7 +723,7 @@
   // instead of a GLSL expression string built from "worldX"/"worldY".
   // Deliberately a small, direct, side-by-side mirror of that function
   // rather than one implementation trying to serve both a text-generator
-  // and a number-generator - the same reason physics-engine.js and
+  // and a number-generator: the same reason physics-engine.js and
   // physics-gpu.js's GLSL_LIBRARY stay as two hand-synced implementations
   // instead of one. Kept honest by the lockstep regression test comparing
   // this against the GLSL path for the same (worldX, worldY).
@@ -745,7 +745,7 @@
 
   // The hover-preview's "instant, no-WebGL" path: computes the actual
   // offset scene at (worldX, worldY) as real numbers, using the same
-  // PhysicsHingeGeometry functions the interactive editor itself calls -
+  // PhysicsHingeGeometry functions the interactive editor itself calls,
   // so this is exactly what the editor would show if you dragged the
   // linked property to worldX/worldY by hand, not a re-derivation of that
   // math. Same resize/rotate-before-translate ordering as
@@ -775,29 +775,29 @@
     translateTargets.forEach(function (t) {
       PhysicsHingeGeometry.translateBodyPreservingHinges(result, t.body, t.property === "x" ? t.value : 0, t.property === "y" ? t.value : 0);
     });
-    // Direct additive offset, no hinge-preserving call - see
+    // Direct additive offset, no hinge-preserving call: see
     // generateGridInitialStateGLSL's applyVelocityTarget for why velocity
     // needs none of the geometric-constraint machinery position/angle do.
     velocityTargets.forEach(function (t) {
       result.bodies[t.body][t.property] += t.value;
     });
     // A large enough worldX/worldY (zoomed far enough out) can land a
-    // linked body way outside the frame - settle every body back inside it
+    // linked body way outside the frame: settle every body back inside it
     // before this starting state is used for anything, the same as the
     // editor does on every render() and the GLSL codegen below does for the
     // GPU paths. Skipped under Infinite Space, which has no frame to settle
-    // into and lets a body simply start wherever its pixel puts it - the
+    // into and lets a body simply start wherever its pixel puts it: the
     // matching skip is in generateGridInitialStateGLSL, and these two must
     // agree or the hover preview would show a different starting scene from
     // the pixel it is previewing.
-    // `true`: by spring group, as the GLSL above settles them - NOT the
+    // `true`: by spring group, as the GLSL above settles them, NOT the
     // editor's own per-body settle (see normalizeAllBodiesIntoFrame).
     if (PhysicsEngine.wrapsAtEdges(result)) PhysicsHingeGeometry.normalizeAllBodiesIntoFrame(result, true);
     return result;
   }
 
   // The state-carrying helpers (playbackStateVariables and friends) live in
-  // physics-gpu.js now - the trajectory runner needs them too, and that file
+  // physics-gpu.js now: the trajectory runner needs them too, and that file
   // loads first. They are re-exported below under the names every caller of
   // this module already uses.
 

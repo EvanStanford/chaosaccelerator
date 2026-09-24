@@ -1,5 +1,5 @@
 // This file is part of Chaos Accelerator, licensed under the Common Public
-// Attribution License, Version 1.0 (CPAL-1.0) - see LICENSE in the project
+// Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in the project
 // root, or https://chaosaccelerator.com/license for a hosted copy.
 
 // ---- Global Stats: the panel ----
@@ -7,19 +7,19 @@
 // The floating card under the gear button on the fractal page. It owns the
 // section list, the accordion that opens one of them, and every chart; it
 // owns none of the measuring. fractal-stats.js does the arithmetic and
-// fractal-grid.js does the sampling and the scheduling - this file is the
+// fractal-grid.js does the sampling and the scheduling: this file is the
 // seam between them, which is why it takes a `host` of callbacks (turn a t
 // into a real Output value, into that value's color, into world
 // coordinates) rather than reaching for any of that itself.
 //
-// Exactly one section is open at a time - never none, never two - and only
+// Exactly one section is open at a time, never none, never two, and only
 // the open one is measured: the accordion is not a display filter, it is
 // the compute budget. Each section is a full extra pass over the sampled
 // view, so "closed" has to mean "not computed," not "computed and hidden."
 (function (global) {
   "use strict";
 
-  // Each section is one heading and one renderer - no blurb: every one of
+  // Each section is one heading and one renderer: no blurb: every one of
   // these is a picture that explains itself, and any text was text in front
   // of it. The `key` is what fractal-stats.js's own `groups` flags are
   // named, so enabledGroups() below is a direct copy of whichever one is
@@ -60,7 +60,7 @@
     return node;
   }
 
-  // One label/value line. `note` becomes the row's tooltip - the numbers on
+  // One label/value line. `note` becomes the row's tooltip: the numbers on
   // this panel are only worth anything if the reader knows what they mean.
   function row(parent, label, value, note) {
     var r = el("div", "stat-row");
@@ -73,7 +73,7 @@
   }
   // ---- Chart plumbing ----
   //
-  // Three small canvases, all 2-D, all drawn from scratch on every result -
+  // Three small canvases, all 2-D, all drawn from scratch on every result:
   // they are at most a few hundred points each, so there is nothing here
   // worth keeping between draws.
   function readPalette() {
@@ -126,14 +126,14 @@
   // here, and the switch for it cost a click and a line of chrome on every
   // reading of a plot whose whole job is to be glanced at.
   //
-  // Under the bars sit two pointers - where the median falls, and where the
+  // Under the bars sit two pointers, where the median falls, and where the
   // mean does. The gap between them IS the shape of the distribution: none
   // at all means symmetric, and a mean pulled away from the median means a
   // tail running that way. That is what the row of moment numbers under
   // this plot used to say, shown instead of tabulated.
   function drawHistogram(canvas, dist, host) {
     var p = readPalette();
-    // Room under the axis for a pointer and one line of text - one line,
+    // Room under the axis for a pointer and one line of text: one line,
     // however many pointers there are.
     var padBottom = 28, padTop = 4;
     var c = prepareCanvas(canvas, 132);
@@ -158,7 +158,7 @@
     ctx.stroke();
 
     // White for the median, grey for the mean, in the pointer and in the
-    // word alike - which is the whole of the legend this needs.
+    // word alike, which is the whole of the legend this needs.
     var MEDIAN_COLOR = "#ffffff", MEAN_COLOR = "#9399ad";
     var marks = [];
     // A circular Output has no median (there is no smallest value on a
@@ -213,7 +213,7 @@
   // ---- The orientation rose ----
   //
   // 180 one-degree bins, drawn twice (theta and theta + 180) because a line
-  // has no direction, only a heading - the mirrored petal is the same
+  // has no direction, only a heading: the mirrored petal is the same
   // measurement, and drawing it is what makes the plot read as an
   // orientation rose rather than half of one. Screen orientation
   // throughout: right is 0 degrees, up is 90.
@@ -322,21 +322,21 @@
   // not about comparing four independent quantities.
   //
   // Warm for ridge, cool for valley. (The map overlay draws the longest of
-  // each in white and black instead - the two colours no hue ramp
+  // each in white and black instead: the two colours no hue ramp
   // contains, so the lines stay visible over any part of the picture.)
   var SHAPES = [
     { key: "ridge", title: "Ridges", color: "#ffd479", fraction: "ridgeFraction",
-      note: "Curving down in every direction - the crests of the picture." },
+      note: "Curving down in every direction: the crests of the picture." },
     { key: "valley", title: "Valleys", color: "#7fd4ff", fraction: "valleyFraction",
-      note: "Curving up in every direction - the troughs." },
+      note: "Curving up in every direction: the troughs." },
     { key: "saddle", title: "Saddles", color: "#c58cff", fraction: "saddleFraction",
-      note: "Curving up one way and down another - the passes between two basins. A high share means a tangled, interleaved structure." },
+      note: "Curving up one way and down another: the passes between two basins. A high share means a tangled, interleaved structure." },
     { key: "flat", title: "Flat", color: "#6b7280", fraction: "flatFraction",
       note: "Curving negligibly compared with how much this view varies overall." },
   ];
 
-  // Draws the pie and returns its geometry - centre, radius, and each
-  // slice's angular span - so the caller can tell which slice the pointer
+  // Draws the pie and returns its geometry, centre, radius, and each
+  // slice's angular span, so the caller can tell which slice the pointer
   // is over. `hot` is the key of the slice to draw raised and outlined.
   function drawShapePie(canvas, g, hot) {
     var p = readPalette();
@@ -348,7 +348,7 @@
     var total = 0, i;
     for (i = 0; i < SHAPES.length; i++) total += g[SHAPES[i].fraction];
     if (!(total > 0)) return geom;
-    // From twelve o'clock, clockwise - where a reader's eye starts on a
+    // From twelve o'clock, clockwise, where a reader's eye starts on a
     // pie whether or not the code agrees.
     var at = -Math.PI / 2;
     for (i = 0; i < SHAPES.length; i++) {
@@ -402,7 +402,7 @@
     return r;
   }
 
-  function renderFeatures(body, g, host, info) {
+  function renderFeatures(body, g, host, info, state) {
     var holder = el("div", "stat-chart");
     var canvas = document.createElement("canvas");
     holder.appendChild(canvas);
@@ -415,10 +415,11 @@
     // ---- Hovering a class: its legend line, its slice, and its samples ----
     //
     // The pie says how much of the view is saddle; hovering says WHERE, by
-    // lighting every saddle sample on the map itself - the one way to check
+    // lighting every saddle sample on the map itself: the one way to check
     // that the classification means what the reader thinks it means.
     var geom = null, hot = null;
     function setHot(key) {
+      if (state.stale) key = null;
       if (key === hot) return;
       hot = key;
       SHAPES.forEach(function (shape) {
@@ -449,40 +450,119 @@
     // nothing about whether it is organised: a third of the view can be
     // valley as ten thousand specks or as one canyon crossing it corner to
     // corner. These measure the biggest connected line of each kind, end
-    // to end ALONG itself, in screens - one screen being the view's own
-    // diagonal, corner to corner - so the number means the same thing at
+    // to end ALONG itself, as a share of the view's own diagonal, corner
+    // to corner ("screen length"), so the number means the same thing at
     // any sampling resolution or window size. Ridge and valley share one
     // row, whichever is longer: the reader wants the longest crest OR
     // trough, not a comparison between them.
     //
-    // Hovering a row lights it and draws its path over the fractal itself -
-    // the only way to tell "0.8 screens" from a number that happens to be
+    // Hovering a row lights it and draws its path over the fractal itself:
+    // the only way to tell "80% screen length" from a number that happens to be
     // 0.8. Nothing to switch on: a length is a claim about the picture, and
     // the moment the reader looks at the claim they see it checked.
     body.appendChild(el("div", "stat-divider"));
-    function longest(label, diagonals, piece, note) {
-      var r = row(body, label,
-        piece && diagonals > 0 ? fixed(diagonals, 2) + " screens" : "none found",
-        note + " Measured along itself rather than end to end in a straight line; 1.00 would reach corner to corner of the screen." +
-        (piece ? " Hover to see it drawn on the map." : ""));
-      if (!piece || !host.setFeatureOverlay) return;
+    // One hover row: lights up while hovered and shows `show` on the map,
+    // either a path ({ path }) or every sample of a mask ({ mask }). A row
+    // with nothing to show (value "none found") still reads, but is inert.
+    //
+    // A path row can also be PINNED with a click: its line then stays on
+    // the map after the pointer leaves, after the section or the whole card
+    // is closed, until the row is clicked again, the line itself is clicked
+    // on the map, or the view moves. One pin at a time; pinning a second
+    // row releases the first. The pin is remembered by `key` rather than by
+    // the row element, because the rows are rebuilt every time the section
+    // is redrawn.
+    function hoverRow(label, valueText, note, show, key) {
+      var canPin = !!(show && show.path && key && host.setPinnedOverlay);
+      var r = row(body, label, valueText, note);
+      if (!show) return r;
       r.classList.add("stat-legend");
+      if (canPin) r.classList.add("stat-legend-pinnable");
+      function place() { return { width: info.sampleWidth, height: info.sampleHeight }; }
+      function showOnMap() {
+        if (show.path && host.setFeatureOverlay) {
+          var o = place(); o.path = show.path; host.setFeatureOverlay(o);
+        }
+        if (show.mask && host.setFeatureHighlight) {
+          var h = place(); h.mask = show.mask; h.cls = 1; host.setFeatureHighlight(h);
+        }
+      }
+      function hideFromMap() {
+        if (show.path && host.setFeatureOverlay) host.setFeatureOverlay(null);
+        if (show.mask && host.setFeatureHighlight) host.setFeatureHighlight(null);
+      }
+      function pinned() { return canPin && state.pinnedKey === key; }
+      function pin() {
+        unpin();
+        state.pinnedKey = key;
+        r.classList.add("stat-row-pinned", "stat-row-hot");
+        var o = place(); o.path = show.path; host.setPinnedOverlay(o);
+      }
       r.addEventListener("mouseenter", function () {
+        if (state.stale) return;
         r.classList.add("stat-row-hot");
-        host.setFeatureOverlay({ width: info.sampleWidth, height: info.sampleHeight, path: piece.path });
+        showOnMap();
       });
       r.addEventListener("mouseleave", function () {
-        r.classList.remove("stat-row-hot");
-        host.setFeatureOverlay(null);
+        if (!pinned()) r.classList.remove("stat-row-hot");
+        hideFromMap();
       });
+      if (canPin) {
+        r.addEventListener("click", function () {
+          if (state.stale) return;
+          if (pinned()) unpin();
+          else pin();
+        });
+        // Rebuilt while pinned (a redraw, a fresh result for the same
+        // view): the pin carries over to the new row and the new path.
+        if (pinned()) pin();
+      }
+      return r;
     }
+    function screens(diagonals, piece) {
+      return piece && diagonals > 0 ? Math.round(diagonals * 100) + "% screen length" : "none found";
+    }
+    function pathOf(piece) { return piece && piece.path ? { path: piece.path } : null; }
+
     var ridgeWins = g.longestRidgeDiagonals >= g.longestValleyDiagonals;
-    longest("Longest Ridge/Valley",
-      ridgeWins ? g.longestRidgeDiagonals : g.longestValleyDiagonals,
-      ridgeWins ? g.longestRidge : g.longestValley,
-      "The longest unbroken crest or trough in the view" + (g.longestRidge || g.longestValley ? (ridgeWins ? " (a crest)." : " (a trough).") : "."));
-    longest("Longest Sharp Edge", g.longestEdgeDiagonals, g.longestEdge,
-      "The longest unbroken sharp boundary - a line along which the colour steps from one value to another and stays there, by at least 5% of the range somewhere along it.");
+    var longestLine = ridgeWins ? g.longestRidge : g.longestValley;
+    hoverRow("Longest Open Contour", screens(g.longestOpenContourDiagonals, g.longestOpenContour),
+      "The longest contour at any level that runs from one edge of the view to another rather than closing on itself. Near a sharp boundary the contours follow it and inherit its wiggle, so this grows with the sampling resolution.",
+      pathOf(g.longestOpenContour), "open");
+    hoverRow("Longest Ridge/Valley", screens(ridgeWins ? g.longestRidgeDiagonals : g.longestValleyDiagonals, longestLine),
+      "The longest unbroken crest or trough in the view" + (longestLine ? (ridgeWins ? " (a crest)." : " (a trough).") : "."),
+      pathOf(longestLine), "ridgeValley");
+    if (g.returnContour !== undefined) {
+      hoverRow("Return Line", screens(g.returnContourDiagonals, g.returnContour),
+        "The longest piece of the contour at the Output's starting value: every start in the view that brings the body back exactly to where it began, as the scene is authored.",
+        pathOf(g.returnContour), "return");
+    }
+    hoverRow("Longest Sharp Edge", screens(g.longestEdgeDiagonals, g.longestEdge),
+      "The longest unbroken sharp boundary: a line along which the colour steps from one value to another and stays there, by at least 5% of the range somewhere along it.",
+      pathOf(g.longestEdge), "edge");
+    if (g.medianContour !== undefined) {
+      hoverRow("Median Contour", screens(g.medianContourDiagonals, g.medianContour),
+        "The longest piece of the contour at the median value, the one level that splits the view into two equal halves by area.",
+        pathOf(g.medianContour), "median");
+    }
+    if (g.watershed) {
+      hoverRow("Catchments", g.watershed.basins.toLocaleString() + (g.watershed.basins === 1 ? " basin" : " basins"),
+        "Read as terrain, how many separate low points the view drains to. Hovering shows the divides between them, the complete network of ranges, where Longest Ridge/Valley is only the single longest crest. In a chaotic region every other sample is a low point of its own, and the divides there are honestly a mesh.",
+        g.watershed.mask ? { mask: g.watershed.mask } : null);
+    }
+    // A pinned row whose line is gone from this result (it was measured
+    // again and nothing of that kind was found) has nothing to keep.
+    if (state.pinnedKey && !body.querySelector(".stat-row-pinned")) unpin();
+
+    // Lets go of the pinned line, wherever the request came from: its row,
+    // the line itself on the map, or the view moving.
+    function unpin() {
+      if (!state.pinnedKey) return;
+      state.pinnedKey = null;
+      var was = body.querySelectorAll(".stat-row-pinned");
+      for (var k = 0; k < was.length; k++) was[k].classList.remove("stat-row-pinned", "stat-row-hot");
+      if (host.setPinnedOverlay) host.setPinnedOverlay(null);
+    }
 
     return function () { geom = drawShapePie(canvas, g, hot); };
   }
@@ -503,21 +583,40 @@
     var activeKey = null;   // the one open section; never null once built
     var sections = {};      // key -> { wrap, body, head }
     var lastResult = null;
+    // Shared with the renderers: `stale` is true from the moment the view
+    // moves until the next result lands. Anything drawn on the map from the
+    // last result would be drawn in the coordinates of a view that is no
+    // longer there, so while it is set the hover rows and the pie do
+    // nothing at all.
+    var panelState = { stale: false, pinnedKey: null };
     var lastInfo = null;
-    // Chart draws deferred until after the whole body is in the DOM - a
+    // Chart draws deferred until after the whole body is in the DOM: a
     // canvas measures its parent to size itself, and a parent that hasn't
     // been laid out yet reports zero.
     var pendingDraws = [];
 
-    // Takes Topography's drawings off the map - the hovered path and the
-    // hovered class - wherever the request came from: the section being
-    // closed, the card being cleared, or the grid telling us the view has
-    // moved out from under them. Both are drawn in the coordinates of the
-    // block that was measured, so they stop meaning anything the moment the
-    // view moves, however long the pointer stays where it is.
-    function featureOverlayOff() {
+    // Takes Topography's passing drawings off the map, the hovered path
+    // and the hovered class, when the section closes: the rows they came
+    // from are going away. The pinned line stays; it was asked for.
+    function hoverOverlaysOff() {
       if (host.setFeatureHighlight) host.setFeatureHighlight(null);
       if (host.setFeatureOverlay) host.setFeatureOverlay(null);
+    }
+    // Everything off, pinned line included: the view has moved (or a new
+    // scene arrived), and all of it is drawn in the coordinates of the
+    // block that was measured, so none of it means anything any more.
+    function featureOverlayOff() {
+      hoverOverlaysOff();
+      unpin();
+    }
+    // Lets go of the pinned line. Its row, if the section is open, loses
+    // its highlight; the grid drops the drawing.
+    function unpin() {
+      if (!panelState.pinnedKey) return;
+      panelState.pinnedKey = null;
+      var was = bodyEl.querySelectorAll(".stat-row-pinned");
+      for (var k = 0; k < was.length; k++) was[k].classList.remove("stat-row-pinned", "stat-row-hot");
+      if (host.setPinnedOverlay) host.setPinnedOverlay(null);
     }
 
     var statusEl = el("p", "stats-status", "");
@@ -525,7 +624,7 @@
 
     // An accordion: one heading per section, and clicking a heading opens
     // that section and closes whichever one was open. Clicking the open one
-    // does nothing - there is always exactly one open, so there is no
+    // does nothing: there is always exactly one open, so there is no
     // "close" to offer.
     SECTIONS.forEach(function (section) {
       var wrap = el("section", "stats-section");
@@ -559,9 +658,10 @@
         s.body.hidden = !open;
         if (!open) s.body.innerHTML = "";
       });
-      // Closing Topography takes its drawings off the map with it - the
-      // rows that were being hovered have just gone away.
-      if (previous === "features") featureOverlayOff();
+      // Closing Topography takes its hover drawings off the map with it:
+      // the rows that were being hovered have just gone away. A pinned line
+      // stays until the view moves or it is clicked away.
+      if (previous === "features") hoverOverlaysOff();
       renderSection(key);
       flushDraws();
       if (previous !== null) onSectionChange();
@@ -576,7 +676,7 @@
       if (!s || key !== activeKey) return;
       s.body.innerHTML = "";
       var g = lastResult ? lastResult.groups[key] : null;
-      // Nothing to show yet - either nothing has been measured at all, or
+      // Nothing to show yet, either nothing has been measured at all, or
       // this section wasn't part of the last measurement. Either way one is
       // on its way (the host measures whichever section is open), so a
       // spinner says exactly that where a sentence would have to explain.
@@ -587,7 +687,7 @@
         s.body.appendChild(wait);
         return;
       }
-      var draw = RENDERERS[key](s.body, g, host, lastInfo);
+      var draw = RENDERERS[key](s.body, g, host, lastInfo, panelState);
       if (typeof draw === "function") pendingDraws.push(draw);
     }
 
@@ -605,7 +705,7 @@
     }
 
     // Open the default section. Done last, once every section exists, so
-    // setActive can close the others - and with no host callback, since
+    // setActive can close the others, and with no host callback, since
     // the host hasn't got the panel object back yet to act on one.
     var initial = SECTIONS[0].key;
     SECTIONS.forEach(function (s) { if (s.defaultOpen) initial = s.key; });
@@ -638,14 +738,14 @@
         } else {
           statusEl.textContent = text;
         }
-        // A finished, seam-free measurement passes "" - nothing wrong to
-        // report - and an empty <p> would otherwise still sit there as a
+        // A finished, seam-free measurement passes "", nothing wrong to
+        // report, and an empty <p> would otherwise still sit there as a
         // blank gap above the first section.
         statusEl.hidden = !text;
       },
       // A fresh measurement: keep it, and redraw the open section against
       // it. With `merge` set the new groups are added to the ones already
-      // held rather than replacing them - the host passes that when the
+      // held rather than replacing them: the host passes that when the
       // view hasn't moved since the last result, so that opening a section
       // measured earlier shows it at once instead of measuring it again.
       showResult: function (result, info, merge) {
@@ -660,12 +760,19 @@
         redrawCharts();
       },
       // The view moved. The numbers on screen describe somewhere else now,
-      // so they are dimmed rather than cleared - a blank panel mid-pan is
+      // so they are dimmed rather than cleared: a blank panel mid-pan is
       // worse than a visibly stale one.
       markStale: function () {
+        panelState.stale = true;
         bodyEl.classList.add("stats-stale");
+        // A row lit at the moment the view moved stays lit otherwise, with
+        // nothing on the map to go with it. The pinned row keeps its look:
+        // its line is still on the map, or is about to be redrawn there.
+        var lit = bodyEl.querySelectorAll(".stat-row-hot:not(.stat-row-pinned)");
+        for (var i = 0; i < lit.length; i++) lit[i].classList.remove("stat-row-hot");
       },
       markFresh: function () {
+        panelState.stale = false;
         bodyEl.classList.remove("stats-stale");
       },
       // A different scene arrived. Not the same thing as a stale view: the
@@ -675,6 +782,7 @@
         featureOverlayOff();
         lastResult = null;
         lastInfo = null;
+        panelState.stale = false;
         bodyEl.classList.remove("stats-stale");
         redrawCharts();
       },
@@ -686,6 +794,12 @@
       // block that was measured, so they stop describing anything the
       // instant the view they were measured from moves.
       featureOverlayOff: featureOverlayOff,
+      // The hover drawings only, what the grid calls on a resize, which
+      // moves nothing in the world and so keeps the pinned line.
+      hoverOverlaysOff: hoverOverlaysOff,
+      // The grid calls this when the pinned line itself is clicked on the
+      // map.
+      unpin: unpin,
     };
   }
 

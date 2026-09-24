@@ -1,8 +1,8 @@
 // This file is part of Chaos Accelerator, licensed under the Common Public
-// Attribution License, Version 1.0 (CPAL-1.0) - see LICENSE in the project
+// Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in the project
 // root, or https://chaosaccelerator.com/license for a hosted copy.
 
-// Keeping a hinge point fixed under a resize/rotate/move edit - pure scene
+// Keeping a hinge point fixed under a resize/rotate/move edit: pure scene
 // math, no DOM. Originally lived inside physics-ui.js (the interactive
 // editor), extracted so it can be reused anywhere a scene needs editing
 // without dragging in a whole page's worth of UI: the fractal grid's
@@ -12,19 +12,19 @@
 // directly instead of through a hidden iframe of #editor-view.
 //
 // A world hinge's localAnchorA IS the fixed background pin (bodyA is null,
-// so it's never expressed relative to anything that could move) - the
+// so it's never expressed relative to anything that could move): the
 // point that must not move is always just that constant. localAnchorB is
 // the pinned point *on the body*, in the body's own local frame.
 //
 // Resizing (radius/length) rescales every hinge anchor ON the resized body
-// proportionally first - so an anchor sitting exactly at an endpoint stays
-// exactly at the (new) endpoint - then recenters the body so its world
+// proportionally first, so an anchor sitting exactly at an endpoint stays
+// exactly at the (new) endpoint, then recenters the body so its world
 // hinge still lands on that fixed pin. Rotating just recenters (anchors
 // are already rotation-invariant in local coordinates).
 //
 // Any body hinged TO the edited one has its own attachment point on that
 // body checked before/after, and is translated by whatever that point
-// moved - which is exactly how a hinge "drags along" what's attached to
+// moved, which is exactly how a hinge "drags along" what's attached to
 // it. Because that's a pure translation, it composes trivially for further
 // descendants (every point on a body moves identically under a
 // translation), so the same offset just cascades outward.
@@ -38,8 +38,8 @@
     return null;
   }
 
-  // The hinge that pins bodyIndex to *something else* - the world, or
-  // another body - i.e. the incoming hinge where bodyIndex is the "B" side.
+  // The hinge that pins bodyIndex to *something else*, the world, or
+  // another body, i.e. the incoming hinge where bodyIndex is the "B" side.
   // A body is only ever expected to have one such hinge (same assumption
   // findWorldHinge already made; a hinge graph is a forest, not a DAG with
   // multiple parents per node).
@@ -50,7 +50,7 @@
     return null;
   }
 
-  // The current world position of a hinge's "A" side - a constant when
+  // The current world position of a hinge's "A" side: a constant when
   // bodyA is null (the world pin never moves on its own), or derived from
   // the parent body's current position/angle otherwise.
   function hingeWorldPointA(scene, hinge) {
@@ -67,9 +67,9 @@
     return body.length;
   }
 
-  // Circles and funnels scale uniformly (no preferred axis - a funnel's
+  // Circles and funnels scale uniformly (no preferred axis, a funnel's
   // whole trapezoid grows from its one `size` parameter); a line only
-  // scales along its own local X axis - there's no adjustable "thickness"
+  // scales along its own local X axis, there's no adjustable "thickness"
   // to scale.
   function scaleAnchorForResize(body, anchor, ratio) {
     return body.type === "line"
@@ -87,7 +87,7 @@
 
   // A spring's attachment point keeps its place ON the body through a resize
   // - the end of a line stays the end of the line, a point on a rim stays on
-  // the rim - by the same proportional rule a hinge anchor follows. Unlike a
+  // the rim: by the same proportional rule a hinge anchor follows. Unlike a
   // hinge's, it applies whether or not the body is hinged to anything: a
   // spring asks nothing of the body's position, so there is no recenter to do
   // and nothing to cascade, only the anchor itself to keep where the user put
@@ -118,7 +118,7 @@
   // world hinge ON the moved body itself: its localAnchorA is a fixed
   // background point, not derived from any body's position, so nothing
   // updates it automatically. Left alone, the pin stays where it was and
-  // Play immediately snaps the body back onto it - translate the pin by
+  // Play immediately snaps the body back onto it: translate the pin by
   // the same delta so the move actually sticks.
   function translateBodyPreservingHinges(scene, bodyIndex, dx, dy) {
     if (dx === 0 && dy === 0) return;
@@ -140,7 +140,7 @@
     var ownHinge = findOwnHinge(scene, bodyIndex);
     var body = scene.bodies[bodyIndex];
     var oldSize = isResize ? shapeSize(body) : null;
-    // Hinged or not - see rescaleSpringAnchorsOnBody.
+    // Hinged or not: see rescaleSpringAnchorsOnBody.
     function rescaleSprings() {
       if (!isResize) return;
       var springRatio = oldSize > 1e-9 ? shapeSize(body) / oldSize : 1;
@@ -160,7 +160,7 @@
 
     // The parent's attachment point never moves as a result of `mutate()`
     // (which only ever changes scene.bodies[bodyIndex]), so it's safe to
-    // read before or after - computed here, before, to mirror the order
+    // read before or after: computed here, before, to mirror the order
     // children's old attachment points are captured in.
     var pivot = hingeWorldPointA(scene, ownHinge);
 
@@ -190,13 +190,13 @@
   // ---- Keeping a body's STARTING position inside a locked frame ----
   //
   // A per-step wrap (see PhysicsEngine.step) only ever needs to correct a
-  // small overshoot - a body can't move more than MAX_SPEED*dt in one step,
-  // always far less than a reasonable frame size - so a single subtract-or-
+  // small overshoot, a body can't move more than MAX_SPEED*dt in one step,
+  // always far less than a reasonable frame size, so a single subtract-or-
   // add-one-frame-width is enough there. A STARTING position has no such
   // bound: the physics editor lets you type or paste an arbitrary
   // coordinate, and the fractal grid can offset a linked property by a
   // worldX/worldY that's thousands of units out once you've zoomed out far
-  // enough - either can land many frame-widths away in one go, so this
+  // enough, either can land many frame-widths away in one go, so this
   // needs a real wrap-to-range, not a single correction.
   function wrapIntoRange(v, span) {
     return ((v % span) + span) % span; // JS's % can return negative; this can't
@@ -204,7 +204,7 @@
 
   // The axis-aligned half-extent of a body's own shape, used only to decide
   // whether an ANCHORED body's edit is worth doing at all (see
-  // frameWrapDelta) - a circle is the same in both axes; a rotated line's
+  // frameWrapDelta): a circle is the same in both axes; a rotated line's
   // bounding box depends on its angle.
   function frameHalfExtent(body) {
     if (body.type === "circle") return { x: body.radius, y: body.radius };
@@ -226,7 +226,7 @@
   // a moving (non-static) body wraps as soon as its CENTER crosses an edge
   // (matching the per-step rule exactly, just generalized to any distance
   // past it); a body anchored in place only wraps if its own shape would be
-  // ENTIRELY past one edge - nudging an anchored body that's merely
+  // ENTIRELY past one edge, nudging an anchored body that's merely
   // sticking out past an edge would move something the user deliberately
   // placed there. {dx:0, dy:0} means "leave it alone."
   function frameWrapDelta(body, frameWidth, frameHeight) {
@@ -240,14 +240,14 @@
     return { dx: dx, dy: dy };
   }
 
-  // True for a body hinged TO another body (not the world) - its position
+  // True for a body hinged TO another body (not the world): its position
   // is a rigid consequence of that parent (free to rotate about the joint,
   // but not to independently translate), so it must never be wrapped on
   // its own: normalizeAllBodiesIntoFrame below only ever wraps a body
   // itself, then lets translateBodyPreservingHinges's own cascade carry
   // that correction to every descendant, exactly like a manual drag would.
-  // Wrapping a hinge child directly - plausible-looking, since a rigid
-  // "arm" can genuinely put a child way outside the frame - would move it
+  // Wrapping a hinge child directly, plausible-looking, since a rigid
+  // "arm" can genuinely put a child way outside the frame, would move it
   // without moving what it's pinned to, tearing the joint immediately.
   function isHingeChild(scene, bodyIndex) {
     for (var i = 0; i < scene.hinges.length; i++) {
@@ -262,13 +262,13 @@
   }
 
   // Only ever wraps root bodies (unhinged, or hinged straight to the world)
-  // - never a hinge child (see isHingeChild) - so every hinge chain is
+  // - never a hinge child (see isHingeChild), so every hinge chain is
   // fully correct after exactly one pass: roots don't depend on each other,
   // and each root's own correction already cascades to its entire subtree
   // in one call.
   //
   // bySpringGroup: settle bodies joined by springs the way the engine WRAPS
-  // them (see PhysicsEngine.springGroups) - a tethered group not at all, any
+  // them (see PhysicsEngine.springGroups), a tethered group not at all, any
   // other as one, by its leader. This is what a pixel's starting scene needs
   // (computeOffsetSceneNumeric, mirroring the GLSL settle beside it): one end
   // of a spring settled on its own would start it a whole frame longer than
@@ -290,16 +290,16 @@
   }
 
   // Bodies whose crossing a frame edge can trigger Sticky Edges' early
-  // stop - the exact same set PhysicsEngine.step's own end-of-step wrap
+  // stop, the exact same set PhysicsEngine.step's own end-of-step wrap
   // cascade calls "roots": non-static (a static body never moves, so it
   // can never wrap) and not a hinge child (its position is a rigid
   // consequence of its parent, not independently choosable, so it never
-  // independently wraps - only ever corrected as a cascade side effect of
+  // independently wraps, only ever corrected as a cascade side effect of
   // its own root's wrap; watching it separately here would just be
   // re-detecting the same crossing its root already reports).
   //
   // A body joined to anything by a spring wraps only as its group's leader,
-  // and not at all if the group is tethered (see PhysicsEngine.springGroups) -
+  // and not at all if the group is tethered (see PhysicsEngine.springGroups),
   // so those are the only sprung bodies worth watching. A member that merely
   // follows its leader's wrap would register the same crossing, but from a
   // position nowhere near the edge, and findWrapStopStep would then solve for
@@ -320,20 +320,20 @@
   // ---- "Stop on wrap": finding the last good step before a body wraps ----
   //
   // Given a logged trajectory (an array of per-step {x, y, angle} rows for
-  // each body - physics-ui.js's playback array, or a GLSL hover-replay's),
+  // each body, physics-ui.js's playback array, or a GLSL hover-replay's),
   // finds the first step at which ANY of watchedBodyIndices' positions shows
   // the signature of a frame wrap ("any object reaches the frame edge," not
-  // just one specific Output body - a scene can stop early because of a
+  // just one specific Output body, a scene can stop early because of a
   // body that was never the one being colored by), so playback can stop
   // there instead of continuing through the teleport. A wrap wouldn't be
-  // exactly ±frameWidth/height as observed here - PhysicsEngine.step's wrap
+  // exactly ±frameWidth/height as observed here, PhysicsEngine.step's wrap
   // corrects that step's POST-motion position, so the delta between two
   // consecutive LOGGED (post-step) frames is frameWidth/height minus that
-  // step's own small normal motion - but per-step motion is always tiny
+  // step's own small normal motion, but per-step motion is always tiny
   // (bounded by the engine's speed cap) next to any usable frame size, so
   // any observed delta anywhere near half the frame size can only be a
   // wrap. Only ever checked against watchedBodyIndices (see
-  // wrapWatchedBodyIndices) - a hinge child's own position moves in lockstep
+  // wrapWatchedBodyIndices): a hinge child's own position moves in lockstep
   // with its root's wrap already, so it would just be re-detecting the same
   // crossing a step later or earlier depending on cascade order, not a
   // genuinely separate event.
@@ -341,30 +341,30 @@
   // Returns null (nothing in watchedBodyIndices ever wraps within this
   // run), or { step, tFrac, tTarget, bodyIndex, x, y, angle }: step is the
   // 1-indexed stepCount to stop playback at (an effectiveMaxSteps), tFrac
-  // (in [0, dt]) is how far into that step the crossing actually happened -
-  // the "Scene lifespan" output type's own value is step - 1 + tFrac/dt,
-  // a genuinely continuous step count rather than a jumping integer - and
-  // tTarget = tFrac - dt. x/y/angle are bodyIndex's own position/angle, NOT
-  // simply trajectory[step-1] - they're extrapolated to one whole
+  // (in [0, dt]) is how far into that step the crossing actually happened,
+  // the "Scene lifespan" output type's own value is step, 1 + tFrac/dt,
+  // a genuinely continuous step count rather than a jumping integer, and
+  // tTarget = tFrac, dt. x/y/angle are bodyIndex's own position/angle, NOT
+  // simply trajectory[step-1]: they're extrapolated to one whole
   // step-duration *before* the exact continuous instant the crossing
   // happens, using that body's own velocity (reconstructed by finite
   // difference). bodyIndex is targetBodyIndex when it's given (not null);
   // when it's null (Scene Lifespan has no target body of its own to
   // extrapolate for), it's whichever watched body actually triggered this
-  // crossing instead - a caller still needs SOME body's continuous,
+  // crossing instead, a caller still needs SOME body's continuous,
   // pre-wrap position to draw on the frozen final frame, and always falling
   // back to nobody's (leaving every body's raw discretely-wrapped
   // trajectory row on screen instead) is exactly what produced a real bug:
   // a body that crosses on its very first logged step had no earlier
   // pre-wrap sample to show at all, so the raw row was already
-  // post-teleport - visibly "jumping to the opposite edge and freezing
+  // post-teleport, visibly "jumping to the opposite edge and freezing
   // there" the instant Scene Lifespan was selected, even though the exact
   // same scene rendered correctly with the body's own x/y as Output.
   //
   // Why not just trajectory[step-1] (this function's old behavior): that
   // value is only ever a discrete LOGGED sample, and WHICH sample counts as
   // "the one before the wrap" is an integer that jumps by 1 exactly when
-  // starting conditions sweep past a step boundary - producing a real,
+  // starting conditions sweep past a step boundary, producing a real,
   // large, spurious discontinuity (confirmed empirically: a lone free-
   // falling circle, no collisions at all, shows a clean ~16px jump every
   // ~16px of starting-position sweep, matching one step's fall distance at
@@ -372,31 +372,31 @@
   // discontinuous in this simple case. Solving for the exact sub-step
   // crossing time and interpolating from there removes that artifact,
   // mirroring the fix already applied to collision detection (see
-  // PhysicsGPU's collideCircleCircle) - same idea, applied to the frame-
+  // PhysicsGPU's collideCircleCircle): same idea, applied to the frame-
   // wrap boundary instead of a circle's radius.
   //
   // Evaluating "at the exact crossing instant" would trivially always equal
   // the boundary itself for whichever property is doing the wrapping (by
-  // definition - that instant IS when it equals the boundary), collapsing
+  // definition: that instant IS when it equals the boundary), collapsing
   // to a constant for exactly the common case of Output being the wrapping
   // property. "One step before that instant" keeps the current feature's
   // actual intent (a snapshot of where things were, right before they
   // would've wrapped) while still being a continuous function of the
-  // starting conditions - the reference TIME is now a smooth real number,
+  // starting conditions: the reference TIME is now a smooth real number,
   // not a jumping integer step index.
   function findWrapStopStep(traj, watchedBodyIndices, targetBodyIndex, frameWidth, frameHeight, initialBodies, dt) {
     if (!frameWidth || !frameHeight) return null;
     // prev[idx] is the frame immediately before the crossing (what this
     // function used to return outright, for the single watched body it
-    // used to take); prevPrev[idx] is one frame further back still - its
+    // used to take); prevPrev[idx] is one frame further back still: its
     // own velocity (prev-prevPrev)/dt is what "one step before the
     // crossing" needs to extrapolate from, for whichever body turns out to
     // be targetBodyIndex. Starts from the AUTHORED pre-simulation state,
-    // not traj[0] itself - a wrap on the very first physics step would
+    // not traj[0] itself: a wrap on the very first physics step would
     // otherwise be invisible, since traj only ever logs post-step states.
     // targetBodyIndex is tracked the same way even when it isn't itself
     // being watched (e.g. Output is body 2 but body 0 is the one that
-    // crosses first) - every tracked body advances in lockstep below.
+    // crosses first): every tracked body advances in lockstep below.
     var tracked = watchedBodyIndices.slice();
     if (targetBodyIndex !== null && tracked.indexOf(targetBodyIndex) === -1) tracked.push(targetBodyIndex);
     var prev = {}, prevPrev = {};
@@ -413,7 +413,7 @@
         var dx = cur.x - p1.x, dy = cur.y - p1.y;
         if (Math.abs(dx) <= frameWidth / 2 && Math.abs(dy) <= frameHeight / 2) continue;
         // Which axis actually crossed, and its position this step WITHOUT
-        // the wrap correction PhysicsEngine.step already applied - undoing
+        // the wrap correction PhysicsEngine.step already applied, undoing
         // that (always exactly ±span, see wrapCoord) is what makes a real,
         // physical velocity recoverable by finite difference between two
         // logged (pre-wrap) positions.
@@ -432,14 +432,14 @@
       if (best !== null) {
         var tTarget = best.tFrac - dt; // in [-dt, 0): one whole step before the crossing
         // No target body (Scene Lifespan) still needs SOME body's
-        // continuous position for a caller to draw - the one that actually
+        // continuous position for a caller to draw, the one that actually
         // crossed is the only sensible choice (see this function's own
         // comment above on why leaving this unset was a real bug).
         var effectiveTargetIndex = targetBodyIndex !== null ? targetBodyIndex : best.crossingBodyIndex;
         var result = { step: i, tFrac: best.tFrac, tTarget: tTarget, bodyIndex: effectiveTargetIndex };
         var tp1 = prev[effectiveTargetIndex], tp0 = prevPrev[effectiveTargetIndex];
         if (tp0 === undefined) {
-          // Crossed on the very first step - nothing precedes tp1 to take
+          // Crossed on the very first step, nothing precedes tp1 to take
           // a "one step earlier" velocity from, so fall back to tp1
           // itself (matches the old behavior, only in this rare edge
           // case).
@@ -471,7 +471,7 @@
   // The tip sits where the straight line from the frame's center to the body
   // crosses the frame's edge, so the arrow is always on the edge nearest the
   // direction you'd look. Its LENGTH grows with how far past that crossing
-  // the body actually is, and - the property that makes it feel right -
+  // the body actually is, and, the property that makes it feel right,
   // reaches exactly zero as the body arrives at the edge, so the arrow
   // shrinks away rather than popping out of existence when the body comes
   // back on screen.
@@ -482,7 +482,7 @@
   // of one reference length the arrow is half its maximum, and it approaches
   // the maximum from there without ever exceeding it.
   //
-  // Returns null when the body is inside the frame - nothing to point at.
+  // Returns null when the body is inside the frame, nothing to point at.
   function offscreenPointer(x, y, frameWidth, frameHeight, maxLength) {
     if (!frameWidth || !frameHeight) return null;
     if (x >= 0 && x <= frameWidth && y >= 0 && y <= frameHeight) return null;
