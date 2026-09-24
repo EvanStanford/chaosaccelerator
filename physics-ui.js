@@ -79,6 +79,7 @@
   var btnExportScene = document.getElementById("btn-export-scene");
   var btnImportScene = document.getElementById("btn-import-scene");
   var modalBackdrop = document.getElementById("modal-backdrop");
+  var editorView = document.getElementById("editor-view"); // undo/redo only fire while this is the view up
   var modalTitle = document.getElementById("modal-title");
   var btnModalClose = document.getElementById("btn-modal-close");
   var exportModalContent = document.getElementById("export-modal-content");
@@ -1571,6 +1572,7 @@
     // would overwrite the real saved scene with a mid-animation frame.
     if (!isPlaying) {
       saveEditorAutosave();
+      recordUndoState(); // same piggyback, same reason - see "Undo / redo" below
     }
   }
 
@@ -2350,6 +2352,116 @@
     } else {
       render(); // otherwise the delete zone drawn on the last mousemove would linger on screen
     }
+  });
+
+  // ---- Undo / redo ----
+  //
+  // One step each way, in memory only: the scene as it was before the most
+  // recent edit, and - once undone - the scene as it was before the undo.
+  // Deliberately not a history: a second Cmd/Ctrl-Z after an undo does
+  // nothing, and a fresh edit after an undo drops the redo.
+  //
+  // States are the same authored JSON the auto-save writes (so a snapshot
+  // is a string, and two states compare with ===), taken from render()
+  // exactly where the auto-save is - after every editing mutation. But not
+  // DURING one: render() also runs on every pointermove of a drag, and a
+  // step per pixel would make undo revert the last pixel of a move rather
+  // than the move. So nothing is recorded while a canvas gesture is under
+  // way or while any pointer is held down anywhere on the page (a slider
+  // being dragged fires input events by the dozen); the release records the
+  // finished edit as one step against the state before the press.
+  var undoPrevJSON = null;    // the step back, or null when there is none
+  var undoCurrentJSON = null; // the scene as last recorded
+  var redoJSON = null;        // the step forward, only ever set by undo
+  var pointerHeld = false;
+
+  function currentUndoJSON() {
+    return JSON.stringify(PhysicsCoords.toAuthoredJSON(serializeScene()));
+  }
+  function editInProgress() {
+    return pointerHeld || dragging || !!hingeDrag || !!springDrag || !!drawingShape ||
+      !!springDraw || !!velocityDrag || !!rotationHandleDrag || !!resizeHandleDrag;
+  }
+  function recordUndoState() {
+    if (editInProgress()) return;
+    var json = currentUndoJSON();
+    if (json === undoCurrentJSON) return;
+    // The very first record is the loaded scene: a baseline, not an edit.
+    // (Loose null test: a render reaching here before this block has run
+    // - a ResizeObserver can fire early - finds these vars hoisted but not
+    // yet assigned.)
+    if (undoCurrentJSON != null) {
+      undoPrevJSON = undoCurrentJSON;
+      redoJSON = null;
+    }
+    undoCurrentJSON = json;
+  }
+  // Capture phase, so pointerHeld is already true/false by the time any
+  // handler (and the render() it calls) runs. The bubble-phase pointerup
+  // below runs AFTER the canvas's own pointerup handlers, which is what
+  // records a resize or rotation drag - the two gestures whose release
+  // doesn't render (their last pointermove already did).
+  window.addEventListener("pointerdown", function () { pointerHeld = true; }, true);
+  window.addEventListener("pointerup", function () { pointerHeld = false; }, true);
+  window.addEventListener("pointercancel", function () { pointerHeld = false; }, true);
+  window.addEventListener("pointerup", function () { if (!isPlaying) recordUndoState(); });
+  window.addEventListener("pointercancel", function () { if (!isPlaying) recordUndoState(); });
+
+  // The same door a pasted scene comes in through, frame and all.
+  function restoreUndoJSON(json) {
+    applySceneData(parseSceneData(PhysicsCoords.toEngineJSON(JSON.parse(json), liveFrame())));
+    finishSceneReplace();
+    render();
+  }
+  function undoLastEdit() {
+    if (undoPrevJSON == null) return;
+    var target = undoPrevJSON;
+    var before = undoCurrentJSON;
+    restoreUndoJSON(target);
+    // Set AFTER the render inside restoreUndoJSON, which records on its own
+    // and would otherwise have counted the undo as a fresh edit (clearing
+    // the redo it just made possible). Re-serialized rather than reusing
+    // `target`, so the next comparison is against exactly what the scene
+    // now round-trips to.
+    undoCurrentJSON = currentUndoJSON();
+    undoPrevJSON = null; // one step only
+    redoJSON = before;
+  }
+  function redoLastEdit() {
+    if (redoJSON == null) return;
+    var target = redoJSON;
+    var before = undoCurrentJSON;
+    restoreUndoJSON(target);
+    undoCurrentJSON = currentUndoJSON();
+    undoPrevJSON = before; // the redo can itself be undone, once
+    redoJSON = null;
+  }
+
+  var IS_APPLE = /Mac|iPhone|iPad|iPod/.test((navigator.platform || navigator.userAgent) || "");
+  window.addEventListener("keydown", function (e) {
+    // Cmd on Apple, Ctrl elsewhere; Ctrl-Y is the Windows/Linux redo,
+    // Shift-Z the one every platform shares.
+    var mod = IS_APPLE ? e.metaKey : e.ctrlKey;
+    if (!mod || e.altKey) return;
+    var key = typeof e.key === "string" ? e.key.toLowerCase() : "";
+    var isUndo = key === "z" && !e.shiftKey;
+    var isRedo = (key === "z" && e.shiftKey) || (!IS_APPLE && key === "y");
+    if (!isUndo && !isRedo) return;
+    // Builder screen only, and not while it is playing back (the scene is
+    // mid-simulation then, not the one being edited), nor over the Import/
+    // Export modal, whose textarea has an undo of its own.
+    if (editorView.hidden || isPlaying || !modalBackdrop.hidden) return;
+    // A focused text field owns its own undo; a slider or checkbox has none
+    // to own (same split the Delete key makes above). A field that is no
+    // longer on screen doesn't count: the Export textarea keeps focus after
+    // its modal closes, and would otherwise swallow every Cmd-Z until the
+    // user happened to click somewhere else.
+    var focused = document.activeElement;
+    if (focused && focused.offsetParent === null) focused = null;
+    if (focused && (focused.tagName === "TEXTAREA" || focused.isContentEditable ||
+        (focused.tagName === "INPUT" && focused.type !== "range" && focused.type !== "checkbox"))) return;
+    e.preventDefault();
+    if (isUndo) undoLastEdit(); else redoLastEdit();
   });
 
   // ---- Gravity ----

@@ -773,7 +773,7 @@
 
   // Display has nothing to start or stop when it opens - the rows are
   // built once and the mode itself lives on whether the card is up or not -
-  // so unlike the other three it needs no onChange at all. Kept (unlike the
+  // so unlike Inspect and Analysis it needs no onChange at all. Kept (unlike the
   // old discarded return value) because checkColorSpreadAndMaybeSuggestColorZoom
   // needs to open this card itself before pointing the Color Zoom tip at the
   // toggle now living inside it.
