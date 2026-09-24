@@ -5,62 +5,45 @@
 // ---- Global Stats: the panel ----
 //
 // The floating card under the gear button on the fractal page. It owns the
-// section list, the per-section on/off switches, and every chart; it owns
-// none of the measuring. fractal-stats.js does the arithmetic and
+// section list, the accordion that opens one of them, and every chart; it
+// owns none of the measuring. fractal-stats.js does the arithmetic and
 // fractal-grid.js does the sampling and the scheduling - this file is the
 // seam between them, which is why it takes a `host` of callbacks (turn a t
 // into a real Output value, into that value's color, into world
 // coordinates) rather than reaching for any of that itself.
 //
-// Every section starts OFF, and nothing is measured for a section that is
-// off: the switches are not a display filter, they are the compute budget.
-// Each one is a full extra pass over the sampled view, and the user asked
-// for this to be the lowest-priority work on the page - so "off" has to
-// mean "not computed," not "computed and hidden."
+// Exactly one section is open at a time - never none, never two - and only
+// the open one is measured: the accordion is not a display filter, it is
+// the compute budget. Each section is a full extra pass over the sampled
+// view, so "closed" has to mean "not computed," not "computed and hidden."
 (function (global) {
   "use strict";
 
-  // Each section is one switch, one explanation, and one renderer. The
-  // `key` is what fractal-stats.js's own `groups` flags are named, so
-  // enabledGroups() below is a direct copy of whatever is switched on.
+  // Each section is one heading and one renderer - no blurb: every one of
+  // these is a picture that explains itself, and any text was text in front
+  // of it. The `key` is what fractal-stats.js's own `groups` flags are
+  // named, so enabledGroups() below is a direct copy of whichever one is
+  // open.
   var SECTIONS = [
     {
       key: "orientation",
       title: "Rose Plot",
-      // No hint: the plot is the explanation, and the one line under it
-      // says what it is. Anything longer was text in front of a picture.
-      defaultOn: true,
+      defaultOpen: true,
     },
     {
       key: "distribution",
       title: "Value Distribution",
     },
     {
-      key: "roughness",
-      title: "Gradient & Roughness",
-      hint: "How fast the picture changes from one place to the next - three standard measures of how much fine detail there is.",
-    },
-    {
       key: "features",
-      title: "Feature Census",
-      hint: "How many distinct peaks and pits there are, what shape the surface takes around a typical point, and how far the longest single ridge and valley run.",
-    },
-    {
-      key: "spectrum",
-      title: "Spatial Scale",
-      hint: "Which sizes of feature this view is built from - broad washes, fine grain, or a particular repeating scale.",
-    },
-    {
-      key: "correlation",
-      title: "Spatial Correlation",
-      hint: "How far one sample's value tells you about its neighbours, and how much of the whole view is explained by a single smooth ramp.",
+      title: "Topography",
     },
   ];
 
   // ---- Number formatting ----
   //
   // Everything on this panel is read at a glance next to other numbers, so
-  // these three keep column widths stable rather than each value choosing
+  // these two keep column widths stable rather than each value choosing
   // its own precision.
   function fixed(v, places) {
     if (v === null || v === undefined || !isFinite(v)) return "-";
@@ -70,33 +53,6 @@
     if (v === null || v === undefined || !isFinite(v)) return "-";
     return (v * 100).toFixed(places === undefined ? 1 : places) + "%";
   }
-  function compact(v) {
-    if (v === null || v === undefined || !isFinite(v)) return "-";
-    var a = Math.abs(v);
-    if (a !== 0 && (a < 1e-3 || a >= 1e5)) return v.toExponential(2);
-    if (a >= 100) return v.toFixed(1);
-    if (a >= 1) return v.toFixed(3);
-    return v.toFixed(4);
-  }
-  function degrees(v) {
-    if (v === null || v === undefined || !isFinite(v)) return "-";
-    return v.toFixed(1) + "°";
-  }
-
-  // Which way a line at this angle actually runs, in words - the rose is
-  // read far more often as "mostly vertical" than as "mostly 88 degrees."
-  function compassFor(deg) {
-    var d = ((deg % 180) + 180) % 180;
-    if (d < 15 || d >= 165) return "horizontal";
-    if (d < 37.5) return "shallow diagonal (up to the right)";
-    if (d < 52.5) return "diagonal (up to the right)";
-    if (d < 75) return "steep diagonal (up to the right)";
-    if (d < 105) return "vertical";
-    if (d < 127.5) return "steep diagonal (up to the left)";
-    if (d < 142.5) return "diagonal (up to the left)";
-    return "shallow diagonal (up to the left)";
-  }
-
   function el(tag, className, text) {
     var node = document.createElement(tag);
     if (className) node.className = className;
@@ -104,8 +60,7 @@
     return node;
   }
 
-  // One label/value line. `note` becomes the row's tooltip AND, when the
-  // caller marks it important, a wrapped line underneath - the numbers on
+  // One label/value line. `note` becomes the row's tooltip - the numbers on
   // this panel are only worth anything if the reader knows what they mean.
   function row(parent, label, value, note) {
     var r = el("div", "stat-row");
@@ -116,214 +71,9 @@
     parent.appendChild(r);
     return r;
   }
-  function note(parent, text) {
-    parent.appendChild(el("p", "stat-note", text));
-  }
-
-  // ---- Number lines ----
-  //
-  // A number on this panel has nothing to read itself against: "gradient
-  // energy 0.0008" tells a reader who hasn't memorised the formula nothing
-  // at all about whether this view is smooth or busy. So every stat with a
-  // SCENE-INDEPENDENT range - one fixed by the maths alone, depending at
-  // most on whether the Output wraps, and never on the fractal, the zoom or
-  // the sample count - gets a line with both ends named and an arrow where
-  // this view falls. Stats without such a range (anything that scales with
-  // zoom) stay plain text on purpose: an invented axis reads exactly like a
-  // real one and would be worse than no axis at all.
-  //
-  // Built from DOM and CSS rather than a canvas. Every part is positioned
-  // as a percentage of the track, so it reflows with the card at any width
-  // and needs no measurement - which also keeps these clear of the deferred
-  // pendingDraws dance that the canvases need in order to size themselves.
-
-  // Where `value` sits along the track, 0..1, or null when it can't be
-  // placed at all (missing, NaN, an empty view). Clamped rather than
-  // dropped: a value past the end is still worth showing, and it shows as
-  // an arrow pinned to that end.
-  function numberLinePosition(value, opts) {
-    if (value === null || value === undefined || !isFinite(value)) return null;
-    if (!(opts.max > opts.min)) return null;
-    var f;
-    if (opts.scale === "log") {
-      // A log track's low end is a real number, never zero. A perfectly
-      // flat view measures exactly 0 on every one of these stats, which is
-      // off the bottom of any log axis - so it pins to the left end, which
-      // is precisely where the word "flat" is written.
-      if (value <= 0) return 0;
-      f = (Math.log(value) - Math.log(opts.min)) / (Math.log(opts.max) - Math.log(opts.min));
-    } else if (opts.scale === "sqrt") {
-      f = Math.sqrt(Math.max(0, (value - opts.min) / (opts.max - opts.min)));
-    } else {
-      f = (value - opts.min) / (opts.max - opts.min);
-    }
-    if (!isFinite(f)) return null;
-    return f < 0 ? 0 : (f > 1 ? 1 : f);
-  }
-
-  // A label centred on its own tick hangs off the end of the track when
-  // that tick is at one of the ends, so the outermost ones anchor to the
-  // end they are nearest instead of straddling it.
-  function anchorClass(pos) {
-    if (pos < 0.15) return "stat-numline-at-lo";
-    if (pos > 0.85) return "stat-numline-at-hi";
-    return "";
-  }
-
-  // Two labels closer together than this (as a fraction of the track) would
-  // overlap at the card's narrowest, so the later one keeps its tick mark
-  // and its tooltip but loses its written name.
-  var NUMBER_LINE_LABEL_GAP = 0.2;
-
-  // One number line. Passing null for `label` makes it a bare track with no row
-  // of its own, which is how two related rows (average and steepest) come
-  // to share one line.
-  //
-  // opts: { value | markers, min, max, scale, ticks, endLabels }
-  //   markers  - [{ at, label, title, weak }]; `value` is shorthand for one
-  //   ticks    - [{ at, label, title }] reference points, named above
-  //   endLabels- [low, high]; what the two ends of the track MEAN
-  function numberLine(parent, label, valueText, noteText, opts) {
-    var owner = parent;
-    if (label !== null && label !== undefined) owner = row(parent, label, valueText, noteText);
-
-    var wrap = el("div", "stat-numline");
-    if (noteText && owner === parent) wrap.title = noteText;
-
-    // Reference ticks, named above the track. A tick outside the track's
-    // own range is dropped rather than clamped: clamping would write a name
-    // at a place the scale doesn't actually reach, which is a lie about the
-    // axis rather than a rounding of it.
-    var marks = el("div", "stat-numline-marks");
-    var ticks = opts.ticks || [];
-    var placed = [], i, pos, lastLabelled = -1;
-    for (i = 0; i < ticks.length; i++) {
-      if (ticks[i].at < opts.min || ticks[i].at > opts.max) continue;
-      pos = numberLinePosition(ticks[i].at, opts);
-      if (pos !== null) placed.push({ pos: pos, tick: ticks[i] });
-    }
-    placed.sort(function (a, b) { return a.pos - b.pos; });
-    for (i = 0; i < placed.length; i++) {
-      var labelled = placed[i].pos - lastLabelled >= NUMBER_LINE_LABEL_GAP;
-      if (labelled && placed[i].tick.label) {
-        var mk = el("span", "stat-numline-mark " + anchorClass(placed[i].pos), placed[i].tick.label);
-        mk.style.left = (placed[i].pos * 100).toFixed(2) + "%";
-        if (placed[i].tick.title) mk.title = placed[i].tick.title;
-        marks.appendChild(mk);
-        lastLabelled = placed[i].pos;
-      }
-    }
-    if (marks.firstChild) wrap.appendChild(marks);
-
-    var track = el("div", "stat-numline-track");
-    for (i = 0; i < placed.length; i++) {
-      var tk = el("span", "stat-numline-tick");
-      tk.style.left = (placed[i].pos * 100).toFixed(2) + "%";
-      tk.title = placed[i].tick.title || placed[i].tick.label || "";
-      track.appendChild(tk);
-    }
-    wrap.appendChild(track);
-
-    // The arrows, under the track, pointing up at it.
-    var markers = opts.markers || (opts.value === undefined ? [] : [{ at: opts.value }]);
-    var arrows = el("div", "stat-numline-arrows");
-    var anyArrow = false;
-    for (i = 0; i < markers.length; i++) {
-      pos = numberLinePosition(markers[i].at, opts);
-      if (pos === null) continue;   // no data: the track still shows what the range IS
-      anyArrow = true;
-      var m = el("div", "stat-numline-arrow" + (markers[i].weak ? " stat-numline-arrow-weak" : ""));
-      m.style.left = (pos * 100).toFixed(2) + "%";
-      if (markers[i].title) m.title = markers[i].title;
-      m.appendChild(el("span", "stat-numline-point"));
-      if (markers[i].label) m.appendChild(el("span", "stat-numline-arrow-label " + anchorClass(pos), markers[i].label));
-      arrows.appendChild(m);
-    }
-    if (!anyArrow) arrows.appendChild(el("span", "stat-numline-empty", "no data"));
-    wrap.appendChild(arrows);
-
-    var ends = el("div", "stat-numline-ends");
-    ends.appendChild(el("span", "stat-numline-end", (opts.endLabels && opts.endLabels[0]) || ""));
-    ends.appendChild(el("span", "stat-numline-end stat-numline-end-hi", (opts.endLabels && opts.endLabels[1]) || ""));
-    wrap.appendChild(ends);
-
-    owner.appendChild(wrap);
-    return wrap;
-  }
-
-  // ---- What the roughness numbers can possibly be ----
-  //
-  // Every roughness stat is built out of delta()s of t, so the largest step
-  // between two neighbouring samples is the whole of what bounds them: s =
-  // 1 for a linear Output (0 next to 1), and s = 0.5 for a circular one,
-  // where delta() folds a step into [-0.5, 0.5] and half a turn is as far
-  // apart as two hues can be. Every minimum is 0, a flat image.
-  //
-  // The maxima below are attained by a one-sample checkerboard, which is
-  // the busiest picture a sample grid can hold:
-  //
-  //   meanGradient, maxGradient  sqrt(2)*s   |grad| = sqrt(s^2 + s^2)
-  //   gradientEnergy             2*s^2       mean of |grad|^2
-  //   totalVariation             2*s         |dx| + |dy|, both maxed
-  //   meanAbsDx, meanAbsDy       s each      (one-sample stripes max one)
-  //   laplacianVariance          16*s^2      see below
-  //
-  // Laplacian variance: the five-point Laplacian here is a sum of four
-  // delta()s from the centre, so it lies in [-4s, 4s] and Popoviciu's
-  // inequality caps its variance at (8s)^2/4 = 16*s^2. That analytic bound
-  // is also ATTAINED - a checkerboard sends every term the same way at
-  // once, giving lap = +4s and -4s on alternating samples, mean 0 and
-  // variance exactly 16*s^2. Verified by exhaustive search over all 2^16
-  // periodic 4x4 binary grids (max 16.000000*s^2, argmax the checkerboard)
-  // and by hill-climbing 6x6 grids with continuous values, which found
-  // nothing above it. So the bound used here is the true maximum, not a
-  // loose analytic ceiling.
-  function roughnessBounds(circular) {
-    var s = circular ? 0.5 : 1;
-    return {
-      s: s,
-      meanGradient: Math.SQRT2 * s,
-      gradientEnergy: 2 * s * s,
-      totalVariation: 2 * s,
-      absDelta: s,
-      laplacianVariance: 16 * s * s,
-      // Where UNIFORM WHITE NOISE lands on each of these - the far more
-      // useful reference than the checkerboard, since it is what "no
-      // structure at all" measures rather than what the worst case does.
-      // Computed, not guessed. For a circular Output each wrapped
-      // difference is exactly uniform on [-0.5, 0.5] and independent of the
-      // others, which makes all five closed-form; for a linear one dx and
-      // dy share their centre sample and so are correlated, and the mean
-      // gradient is the one that has no tidy closed form - 0.51786660 is a
-      // Simpson integration of E[sqrt((b-a)^2 + (c-a)^2)] over the unit
-      // cube, confirmed by Monte Carlo.
-      noiseGradient: circular ? s * (Math.SQRT2 + Math.log(1 + Math.SQRT2)) / 3 : 0.51786660 * s,
-      noiseEnergy: circular ? 2 * s * s / 3 : s * s / 3,
-      noiseTotalVariation: circular ? s : 2 * s / 3,
-      noiseAbsDelta: circular ? s / 2 : s / 3,
-      noiseLaplacianVariance: circular ? 4 * s * s / 3 : 5 * s * s / 3,
-    };
-  }
-
-  // How many decades of log scale a roughness number line covers.
-  //
-  // Real fractal views sit at a per-cent or two of the checkerboard
-  // maximum, so a linear track would pin every arrow to the left edge and
-  // show nothing. Four decades puts a typical view near the middle and
-  // still reaches white noise (a third to a half of maximum) without
-  // crowding the top.
-  //
-  // The SQUARED stats - gradient energy and Laplacian variance - get eight,
-  // for the same reason a squared quantity needs twice the decades to cover
-  // the same ground: it keeps a view's arrow in the same place on the
-  // energy track as on the gradient track instead of half as far along.
-  var NUMBER_LINE_DECADES = 4;
-  var NUMBER_LINE_DECADES_SQUARED = 8;
-  function logFloor(max, decades) { return max * Math.pow(10, -decades); }
-
   // ---- Chart plumbing ----
   //
-  // Four small canvases, all 2-D, all drawn from scratch on every result -
+  // Three small canvases, all 2-D, all drawn from scratch on every result -
   // they are at most a few hundred points each, so there is nothing here
   // worth keeping between draws.
   function readPalette() {
@@ -538,113 +288,6 @@
     }
   }
 
-  // ---- The radial power spectrum ----
-  //
-  // Log-log, because that is the axis pair on which a self-similar picture
-  // is a straight line - and whether it IS a straight line is most of what
-  // this plot is for. The fitted slope is drawn over the data so a reader
-  // can see how well it actually fits rather than trusting the one number.
-  function drawSpectrum(canvas, spec) {
-    var p = readPalette();
-    var c = prepareCanvas(canvas, 130);
-    var ctx = c.ctx;
-    var padL = 6, padR = 6, padB = 14, padT = 6;
-    var plotW = c.w - padL - padR, plotH = c.h - padB - padT;
-    var power = spec.radialPower, maxK = spec.maxK;
-    var minLogP = Infinity, maxLogP = -Infinity, k;
-    for (k = 1; k <= maxK; k++) {
-      if (power[k] <= 0) continue;
-      var lp = Math.log(power[k]);
-      if (lp < minLogP) minLogP = lp;
-      if (lp > maxLogP) maxLogP = lp;
-    }
-    if (!isFinite(minLogP) || maxLogP <= minLogP) return;
-    var logKMin = Math.log(1), logKMax = Math.log(maxK);
-    function px(kk) { return padL + (Math.log(kk) - logKMin) / (logKMax - logKMin) * plotW; }
-    function py(pp) { return padT + plotH - (Math.log(pp) - minLogP) / (maxLogP - minLogP) * plotH; }
-
-    ctx.strokeStyle = p.border;
-    ctx.lineWidth = 1;
-    ctx.strokeRect(padL + 0.5, padT + 0.5, plotW - 1, plotH - 1);
-
-    ctx.beginPath();
-    var started = false;
-    for (k = 1; k <= maxK; k++) {
-      if (power[k] <= 0) continue;
-      var x = px(k), y = py(power[k]);
-      if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
-    }
-    ctx.strokeStyle = p.accent;
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-
-    if (spec.slope !== null && isFinite(spec.slope)) {
-      var kA = spec.fitFrom, kB = spec.fitTo;
-      var refLog = Math.log(power[Math.max(1, Math.round((kA + kB) / 2))] || 1);
-      var midLogK = Math.log((kA + kB) / 2);
-      ctx.beginPath();
-      ctx.moveTo(px(kA), py(Math.exp(refLog - spec.slope * (Math.log(kA) - midLogK))));
-      ctx.lineTo(px(kB), py(Math.exp(refLog - spec.slope * (Math.log(kB) - midLogK))));
-      ctx.strokeStyle = p.dim;
-      ctx.setLineDash([4, 3]);
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-
-    axisLabel(ctx, "broad", padL, c.h - 3, "left", p.dim);
-    axisLabel(ctx, "← feature size →", c.w / 2, c.h - 3, "center", p.dim);
-    axisLabel(ctx, "fine", c.w - padR, c.h - 3, "right", p.dim);
-  }
-
-  // ---- Correlation against lag ----
-  //
-  // The 1/e line is drawn because that is where the correlation length is
-  // read off, and a number quoted without the curve it came from is very
-  // easy to over-trust on a picture whose correlation doesn't decay
-  // monotonically at all.
-  function drawCorrelation(canvas, corr) {
-    var p = readPalette();
-    var c = prepareCanvas(canvas, 110);
-    var ctx = c.ctx;
-    var padL = 6, padR = 6, padB = 14, padT = 6;
-    var plotW = c.w - padL - padR, plotH = c.h - padB - padT;
-    var curve = corr.curve, maxLag = corr.maxLag;
-    var lo = 0, hi = 1, i;
-    for (i = 0; i <= maxLag; i++) lo = Math.min(lo, curve[i]);
-    function px(l) { return padL + (l / maxLag) * plotW; }
-    function py(v) { return padT + plotH - (v - lo) / (hi - lo) * plotH; }
-
-    ctx.strokeStyle = p.border;
-    ctx.lineWidth = 1;
-    ctx.strokeRect(padL + 0.5, padT + 0.5, plotW - 1, plotH - 1);
-    if (lo < 0) {
-      ctx.beginPath();
-      ctx.moveTo(padL, py(0)); ctx.lineTo(c.w - padR, py(0));
-      ctx.stroke();
-    }
-    ctx.beginPath();
-    ctx.moveTo(padL, py(1 / Math.E)); ctx.lineTo(c.w - padR, py(1 / Math.E));
-    ctx.strokeStyle = p.dim;
-    ctx.setLineDash([3, 3]);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    axisLabel(ctx, "1/e", c.w - padR - 2, py(1 / Math.E) - 3, "right", p.dim);
-
-    ctx.beginPath();
-    for (i = 0; i <= maxLag; i++) {
-      var x = px(i), y = py(curve[i]);
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    }
-    ctx.strokeStyle = p.accent;
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-
-    axisLabel(ctx, "0", padL, c.h - 3, "left", p.dim);
-    axisLabel(ctx, "distance between samples →", c.w / 2, c.h - 3, "center", p.dim);
-    axisLabel(ctx, maxLag + "", c.w - padR, c.h - 3, "right", p.dim);
-  }
-
   // ---- Section renderers ----
   //
   // Each takes the body element it may fill, that section's slice of the
@@ -663,165 +306,12 @@
     return function () { drawHistogram(canvas, g, host); };
   }
 
-  function renderRoughness(body, g, host, info) {
-    // The ends every number line below is drawn against depend only on
-    // whether the Output wraps - see roughnessBounds for where each one
-    // comes from.
-    var b = roughnessBounds(info.circular);
-    // The gentlest picture that still uses the whole colour range: one
-    // straight ramp from end to end of the view. Unlike the two ends of
-    // these lines it does depend on the sample count, which is why it is a
-    // reference TICK and not an end of the axis - but it is the one place
-    // on the line a reader can recognise by eye, so it earns its place.
-    var rampStep = 1 / Math.max(1, info.sampleWidth - 1);
-
-    numberLine(body, "Gradient energy", compact(g.gradientEnergy),
-      "The mean of the squared slope. Unlike the average slope it is dominated by the sharp places, which is what makes it the usual measure of how busy a picture is.",
-      {
-        value: g.gradientEnergy,
-        min: logFloor(b.gradientEnergy, NUMBER_LINE_DECADES_SQUARED), max: b.gradientEnergy, scale: "log",
-        ticks: [
-          { at: rampStep * rampStep, label: "smooth ramp", title: "One straight ramp across the whole view." },
-          { at: b.noiseEnergy, label: "noise", title: "Where uniform random noise lands." },
-        ],
-        endLabels: ["flat", "checkerboard"],
-      });
-
-    numberLine(body, "Total variation", compact(g.totalVariation) + " per sample",
-      "Add up every left-right and up-down change and divide by the sample count. Roughly, how much total contour there is to cross.",
-      {
-        value: g.totalVariation,
-        min: logFloor(b.totalVariation, NUMBER_LINE_DECADES), max: b.totalVariation, scale: "log",
-        ticks: [
-          { at: rampStep, label: "smooth ramp", title: "One straight ramp across the whole view." },
-          { at: b.noiseTotalVariation, label: "noise", title: "Where uniform random noise lands." },
-        ],
-        endLabels: ["flat", "checkerboard"],
-      });
-
-    // No "smooth ramp" tick: a straight ramp has zero second derivative
-    // everywhere, so it sits at the flat end of this one rather than
-    // somewhere recognisable along it.
-    numberLine(body, "Laplacian variance", compact(g.laplacianVariance),
-      "The classic sharpness measure: high means lots of fine detail, low means broad smooth washes.",
-      {
-        value: g.laplacianVariance,
-        min: logFloor(b.laplacianVariance, NUMBER_LINE_DECADES_SQUARED), max: b.laplacianVariance, scale: "log",
-        ticks: [{ at: b.noiseLaplacianVariance, label: "noise", title: "Where uniform random noise lands." }],
-        endLabels: ["flat or a plain ramp", "checkerboard"],
-      });
-
-    note(body, "The scales above run from a flat image to a one-sample checkerboard, which is the busiest picture this sampling can hold" +
-      (info.circular ? " - and this Output wraps, so its largest possible step is half the colour wheel rather than the whole of it" : "") +
-      ". They are logarithmic: a real view sits a long way below the checkerboard, and on a linear scale every arrow would be pinned to the left.");
-    note(body, "Measured on " + info.sampleWidth + "×" + info.sampleHeight + " samples of the view, one sample every " +
-      compact(info.worldPerSample) + " world units (about " + fixed(info.screenPixelsPerSample, 1) +
-      " screen pixels). Detail finer than that spacing is not counted - zoom in and these numbers grow.");
-  }
-
   function renderOrientation(body, g, host) {
     var holder = el("div", "stat-chart");
     var canvas = document.createElement("canvas");
     holder.appendChild(canvas);
     body.appendChild(holder);
-    note(body, "Directions of the lines in the map");
     return function () { drawRose(canvas, g); };
-  }
-
-  function describeCoherence(v) {
-    if (v < 0.1) return "no preferred direction";
-    if (v < 0.25) return "a slight lean";
-    if (v < 0.5) return "clearly directional";
-    if (v < 0.8) return "strongly directional";
-    return "almost entirely one direction";
-  }
-
-  function describeSlope(beta) {
-    if (beta === null || !isFinite(beta)) return "";
-    if (beta < 0.5) return "near-white: fine grain at every scale, little large-scale structure";
-    if (beta < 1.5) return "pink: detail at every scale, the hallmark of a self-similar picture";
-    if (beta < 2.5) return "brown: dominated by broad smooth structure, fine detail falling away fast";
-    return "very smooth: almost all of the energy is in large features";
-  }
-
-  function renderSpectrum(body, g, host, info) {
-    var holder = el("div", "stat-chart");
-    var canvas = document.createElement("canvas");
-    holder.appendChild(canvas);
-    body.appendChild(holder);
-    note(body, "How much of the picture is built at each size of feature, on a log-log plot. A straight line here means the view looks equally detailed however far you zoom - the dashed line is the fitted straight one.");
-    row(body, "Spectral slope", g.slope === null ? "-" : fixed(g.slope, 2),
-      "Power falls off as (feature size) to this power. See the reading below it.");
-    if (g.slope !== null) note(body, describeSlope(g.slope) + ".");
-    if (g.dominantWavelength) {
-      row(body, "Dominant feature size",
-        fixed(g.dominantWavelength * info.screenPixelsPerSample, 1) + " screen px  (" +
-        compact(g.dominantWavelength * info.worldPerSample) + " world units)",
-        "One scale carries noticeably more than the straight-line trend predicts - a repeating structure about this big.");
-    } else {
-      row(body, "Dominant feature size", "none",
-        "No one scale stands out above the trend: the view is built the same way at every size, which is what a self-similar picture looks like.");
-    }
-    numberLine(body, "Frequency-domain anisotropy", fixed(g.angularAnisotropy, 3) + "  (" + describeCoherence(g.angularAnisotropy) + ")",
-      "An independent check on Direction of Lines, measured in the frequency domain rather than from gradients, and on the same 0-to-1 scale as that section's coherence. Each frequency is weighed against others the same distance from the origin, so this describes the spectrum's shape rather than which scales happen to be loudest.",
-      {
-        value: g.angularAnisotropy, min: 0, max: 1, scale: "linear",
-        ticks: [
-          { at: 0.25, label: "a lean", title: "Above this the spectrum has a slight preferred direction." },
-          { at: 0.5, label: "directional", title: "Above this the spectrum is clearly directional." },
-          { at: 0.8, label: "strongly", title: "Above this the spectrum is almost entirely one direction." },
-        ],
-        endLabels: ["the same in every direction", "one direction only"],
-      });
-    if (g.angularAnisotropy >= 0.1) {
-      row(body, "  strongest at", degrees(g.angularPeakDegrees) + "  (" + compassFor(g.angularPeakDegrees) + ")",
-        "Already rotated to the direction the structure runs, so it should agree with the rose above.");
-    }
-    note(body, "Measured on the central " + g.size + "×" + g.size + " block of samples, windowed - a square keeps the frequency bins the same size in every direction, which is what makes the anisotropy number above mean anything.");
-    return function () { drawSpectrum(canvas, g); };
-  }
-
-  function renderCorrelation(body, g, host, info) {
-    var holder = el("div", "stat-chart");
-    var canvas = document.createElement("canvas");
-    holder.appendChild(canvas);
-    body.appendChild(holder);
-    note(body, "How alike two samples are as they get further apart. A curve that falls away immediately is noise; one that stays high for a long way is made of big smooth regions.");
-    if (g.correlationLength === null) {
-      row(body, "Correlation length", "over " + g.maxLag + " samples",
-        "Still correlated at the furthest distance measured - the structures here are larger than the measured window.");
-    } else {
-      row(body, "Correlation length",
-        fixed(g.correlationLength, 2) + " samples  (" + fixed(g.correlationLength * info.screenPixelsPerSample, 1) + " screen px)",
-        "The distance at which two samples stop resembling each other - the typical size of one patch of similar color.");
-    }
-    row(body, "Moran's I", fixed(g.moransI, 3) + "  (" + describeMoran(g.moransI) + ")",
-      "Clustering of neighbouring samples. Near " + fixed(g.moransExpected, 3) + " would mean no clustering at all; 1 is perfectly smooth; below that baseline is checkerboard-like.");
-    if (g.planeR2 !== undefined) {
-      numberLine(body, "Flat-ramp fit (R²)", percent(g.planeR2, 1) + "  (" + describeR2(g.planeR2) + ")",
-        "How much of the whole view a single straight gradient - one color ramp across the screen - already explains. The rest is structure.",
-        {
-          // A coefficient of determination is a fraction of variance
-          // explained, so 0 and 1 are both real ends of it.
-          value: g.planeR2, min: 0, max: 1, scale: "linear",
-          endLabels: ["position predicts nothing", "exactly one flat ramp"],
-        });
-    }
-    return function () { drawCorrelation(canvas, g); };
-  }
-
-  function describeMoran(v) {
-    if (v > 0.9) return "very smooth";
-    if (v > 0.5) return "strongly clustered";
-    if (v > 0.15) return "mildly clustered";
-    if (v > -0.05) return "essentially random";
-    return "alternating, checkerboard-like";
-  }
-  function describeR2(v) {
-    if (v > 0.9) return "almost entirely a simple ramp";
-    if (v > 0.5) return "a ramp with structure on top";
-    if (v > 0.15) return "a faint overall trend";
-    return "no simple trend - position alone predicts nothing";
   }
 
   // ---- The shape census, as a pie ----
@@ -892,11 +382,6 @@
   }
 
   function renderFeatures(body, g, host, info, state) {
-    row(body, "Peaks / pits", g.peaks.toLocaleString() + " / " + g.pits.toLocaleString(),
-      "Samples that are strictly higher (or lower) than all eight of their neighbours - one count of how many distinct features are on screen.");
-    row(body, "Local extrema", fixed(g.extremaPerThousand, 1) + " per 1,000 samples",
-      "The same count as a density, so it is comparable between views at the same sample resolution. It falls as that resolution rises: a coarse pass reads a whole cluster of nearby features as one.");
-
     var holder = el("div", "stat-chart");
     var canvas = document.createElement("canvas");
     holder.appendChild(canvas);
@@ -916,12 +401,13 @@
     // nothing about whether it is organised: a third of the view can be
     // valley as ten thousand specks or as one canyon crossing it corner to
     // corner. These two measure the biggest connected piece of each, end to
-    // end ALONG itself, and report it in screen diagonals so the number
-    // means the same thing at any sampling resolution or window size.
+    // end ALONG itself, and report it in screens - one screen being the
+    // view's own diagonal, corner to corner - so the number means the same
+    // thing at any sampling resolution or window size.
     function longest(label, diagonals, piece, colorNote) {
       row(body, label,
-        piece && diagonals > 0 ? fixed(diagonals, 2) + " screen diagonals" : "none found",
-        "The longest unbroken " + colorNote + " in the view, measured along itself rather than end to end in a straight line. 1.00 would reach corner to corner.");
+        piece && diagonals > 0 ? fixed(diagonals, 2) + " screens" : "none found",
+        "The longest unbroken " + colorNote + " in the view, measured along itself rather than end to end in a straight line. 1.00 would reach corner to corner of the screen.");
     }
     longest("Longest ridge", g.longestRidgeDiagonals, g.longestRidge, "crest");
     longest("Longest valley", g.longestValleyDiagonals, g.longestValley, "trough");
@@ -966,10 +452,7 @@
 
   var RENDERERS = {
     distribution: renderDistribution,
-    roughness: renderRoughness,
     orientation: renderOrientation,
-    spectrum: renderSpectrum,
-    correlation: renderCorrelation,
     features: renderFeatures,
   };
 
@@ -978,11 +461,10 @@
   function create(options) {
     var bodyEl = options.body;
     var host = options.host;
-    var onEnabledChange = options.onEnabledChange || function () {};
-    var onSampleResolutionChange = options.onSampleResolutionChange || function () {};
+    var onSectionChange = options.onSectionChange || function () {};
 
-    var enabled = {};       // key -> bool; every section starts off, deliberately
-    var sections = {};      // key -> { wrap, body, input }
+    var activeKey = null;   // the one open section; never null once built
+    var sections = {};      // key -> { wrap, body, head }
     var lastResult = null;
     var lastInfo = null;
     var uiState = { featureOverlay: false };
@@ -1007,122 +489,68 @@
     var statusEl = el("p", "stats-status", "");
     bodyEl.appendChild(statusEl);
 
-    // ---- How finely to sample the view ----
-    //
-    // First control on the card, because it sets what every number below it
-    // is a measurement OF. The block is a re-render of the view at its own
-    // resolution rather than the screen's, so without this the card would
-    // silently be describing a 256-wide thumbnail of a multi-megapixel
-    // picture - and a reader looking at the gradient numbers has no way to
-    // tell. The readout says the block size and the cost outright.
-    // Rebuilt on every relayout, not captured once: its top stop is "one
-    // sample per rendered pixel", so resizing the window changes both what
-    // that means and how many stops sit below it.
-    var ladder = host.sampleLadder();
-    var resField = el("label", "stats-field");
-    var resLabel = el("span", "stats-field-label", "");
-    resField.appendChild(resLabel);
-    var resInput = document.createElement("input");
-    resInput.type = "range";
-    resInput.min = "0";
-    resInput.step = "1";
-    resInput.setAttribute("aria-label", "Sampling resolution");
-    resField.appendChild(resInput);
-    bodyEl.appendChild(resField);
-
-    // Snaps the slider to whichever stop the host is currently set to,
-    // against a freshly read ladder. 0 (one per rendered pixel) is always
-    // the last stop, so a setting whose own stop has disappeared under a
-    // smaller window lands there - which is what it now resolves to anyway,
-    // since statsSampleBlock clamps it to the same place.
-    function syncSampleSlider() {
-      ladder = host.sampleLadder();
-      resInput.max = String(ladder.length - 1);
-      var want = host.sampleLongSide();
-      var best = ladder.length - 1;
-      for (var i = 0; i < ladder.length; i++) {
-        if (ladder[i] === want) { best = i; break; }
-      }
-      resInput.value = String(best);
-    }
-
-    function updateSampleReadout() {
-      var d = host.describeSample(ladder[Number(resInput.value)]);
-      resLabel.textContent = "Sampling resolution: " + d.width + " × " + d.height;
-    }
-    syncSampleSlider();
-    updateSampleReadout();
-    // Dragging only re-labels; the measurement restarts on release, so
-    // sweeping the slider doesn't start (and abandon) a run per notch.
-    resInput.addEventListener("input", updateSampleReadout);
-    resInput.addEventListener("change", function () {
-      updateSampleReadout();
-      onSampleResolutionChange(ladder[Number(resInput.value)]);
-    });
-
+    // An accordion: one heading per section, and clicking a heading opens
+    // that section and closes whichever one was open. Clicking the open one
+    // does nothing - there is always exactly one open, so there is no
+    // "close" to offer.
     SECTIONS.forEach(function (section) {
       var wrap = el("section", "stats-section");
-      var head = el("label", "stats-section-head");
-      var sw = el("span", "toggle-switch");
-      var input = document.createElement("input");
-      input.type = "checkbox";
-      input.checked = !!section.defaultOn;
-      sw.appendChild(input);
-      sw.appendChild(el("span", "toggle-slider"));
+      var head = el("button", "stats-section-head");
+      head.type = "button";
       head.appendChild(el("span", "stats-section-title", section.title));
-      head.appendChild(sw);
+      head.appendChild(el("span", "stats-section-caret"));
       wrap.appendChild(head);
 
-      // A section whose picture explains itself carries no blurb at all -
-      // see the Rose Plot and Value Distribution above.
-      var hint = null;
-      if (section.hint) {
-        hint = el("p", "stats-section-hint", section.hint);
-        hint.hidden = !section.defaultOn;
-        wrap.appendChild(hint);
-      }
-
       var body = el("div", "stats-section-body");
-      body.hidden = !section.defaultOn;
       wrap.appendChild(body);
 
-      if (section.defaultOn) enabled[section.key] = true;
+      head.addEventListener("click", function () { setActive(section.key); });
 
-      input.addEventListener("change", function () {
-        enabled[section.key] = input.checked;
-        if (hint) hint.hidden = !input.checked;
-        body.hidden = !input.checked;
-        // Anything already measured stays on screen; a section only just
-        // switched on has nothing yet, and says so until the next run.
-        if (input.checked) { renderSection(section.key); flushDraws(); }
-        else {
-          // Closing Feature Census takes its drawing off the map with it -
-          // the switch that turned it on has just gone away.
-          if (section.key === "features") featureOverlayOff();
-          body.innerHTML = "";
-        }
-        onEnabledChange();
-      });
-
-      sections[section.key] = { wrap: wrap, body: body, hint: hint, input: input };
+      sections[section.key] = { wrap: wrap, body: body, head: head };
       bodyEl.appendChild(wrap);
     });
 
-    // Declared after the switches that call them: both are function
-    // declarations, so they are hoisted to the top of create() and the
-    // handlers above close over them fine. Kept down here with the other
-    // rendering rather than moved up, since that is what they are.
+    // Opens `key` and closes the rest. Anything already measured for the
+    // newly opened section is drawn at once; otherwise it shows a spinner
+    // until the host's next measurement arrives.
+    function setActive(key) {
+      if (key === activeKey || !sections[key]) return;
+      var previous = activeKey;
+      activeKey = key;
+      SECTIONS.forEach(function (section) {
+        var s = sections[section.key];
+        var open = section.key === key;
+        s.wrap.classList.toggle("stats-section-open", open);
+        s.head.setAttribute("aria-expanded", open ? "true" : "false");
+        s.body.hidden = !open;
+        if (!open) s.body.innerHTML = "";
+      });
+      // Closing Topography takes its drawing off the map with it - the
+      // switch that turned it on has just gone away.
+      if (previous === "features") featureOverlayOff();
+      renderSection(key);
+      flushDraws();
+      if (previous !== null) onSectionChange();
+    }
+
+    // Declared after the handler that calls it: a function declaration, so
+    // it is hoisted to the top of create() and the handler above closes
+    // over it fine. Kept down here with the other rendering rather than
+    // moved up, since that is what it is.
     function renderSection(key) {
       var s = sections[key];
-      if (!s || !s.input.checked) return;
+      if (!s || key !== activeKey) return;
       s.body.innerHTML = "";
-      if (!lastResult) {
-        s.body.appendChild(el("p", "stat-note", "Nothing measured yet."));
-        return;
-      }
-      var g = lastResult.groups[key];
+      var g = lastResult ? lastResult.groups[key] : null;
+      // Nothing to show yet - either nothing has been measured at all, or
+      // this section wasn't part of the last measurement. Either way one is
+      // on its way (the host measures whichever section is open), so a
+      // spinner says exactly that where a sentence would have to explain.
       if (!g) {
-        s.body.appendChild(el("p", "stat-note", "Not in the last measurement - it will appear after the next one."));
+        var wait = el("div", "stat-loading");
+        wait.appendChild(el("span", "stats-spinner"));
+        wait.setAttribute("aria-label", "Measuring");
+        s.body.appendChild(wait);
         return;
       }
       var draw = RENDERERS[key](s.body, g, host, lastInfo, uiState, function () { renderSection(key); });
@@ -1138,44 +566,39 @@
     }
 
     function redrawCharts() {
-      SECTIONS.forEach(function (section) {
-        if (sections[section.key].input.checked) renderSection(section.key);
-      });
+      renderSection(activeKey);
       flushDraws();
     }
+
+    // Open the default section. Done last, once every section exists, so
+    // setActive can close the others - and with no host callback, since
+    // the host hasn't got the panel object back yet to act on one.
+    var initial = SECTIONS[0].key;
+    SECTIONS.forEach(function (s) { if (s.defaultOpen) initial = s.key; });
+    setActive(initial);
 
     return {
       // Exactly the flags fractal-stats.js's createJob wants, so nothing in
       // between has to translate between two lists of section names.
       enabledGroups: function () {
         var g = {};
-        SECTIONS.forEach(function (s) { if (enabled[s.key]) g[s.key] = true; });
+        g[activeKey] = true;
         return g;
       },
-      anyEnabled: function () {
-        for (var i = 0; i < SECTIONS.length; i++) if (enabled[SECTIONS[i].key]) return true;
-        return false;
-      },
-      // Is there a switched-on section with nothing to show? Switching one
-      // OFF leaves every other section's numbers exactly as valid as they
-      // were, so the host asks this rather than re-measuring the whole view
-      // every time a switch moves in either direction.
+      // Does the open section have nothing to show? Opening a section the
+      // last measurement already covered needs no new run, so the host asks
+      // this rather than re-measuring the view on every click.
       needsMeasurement: function () {
-        for (var i = 0; i < SECTIONS.length; i++) {
-          var key = SECTIONS[i].key;
-          if (!enabled[key]) continue;
-          if (!lastResult || !lastResult.groups[key]) return true;
-        }
-        return false;
+        return !lastResult || !lastResult.groups[activeKey];
       },
       setStatus: function (text, kind) {
         statusEl.className = "stats-status" + (kind ? " stats-status-" + kind : "");
         statusEl.innerHTML = "";
-        // "loading" gets a spinner next to the text - reserved for "nothing
-        // to show yet, but something is coming" (the view moved and the
-        // fractal is still rendering), as opposed to "working", which is
-        // already mid-measurement and has its own percent-complete text.
-        if (kind === "loading") {
+        // Both "something is coming" states get a spinner next to the
+        // text: "loading" (a run is about to start) and "working" (one is
+        // under way, with its own percent-complete text). Text alone read
+        // as inert, easy to mistake for a dead end rather than a wait.
+        if (kind === "loading" || kind === "working") {
           statusEl.appendChild(el("span", "stats-spinner"));
           statusEl.appendChild(el("span", "stats-status-text", text));
         } else {
@@ -1183,13 +606,22 @@
         }
         // A finished, seam-free measurement passes "" - nothing wrong to
         // report - and an empty <p> would otherwise still sit there as a
-        // blank gap above Sampling resolution.
+        // blank gap above the first section.
         statusEl.hidden = !text;
       },
-      // A fresh measurement: keep it, and redraw every switched-on section
-      // against it.
-      showResult: function (result, info) {
-        lastResult = result;
+      // A fresh measurement: keep it, and redraw the open section against
+      // it. With `merge` set the new groups are added to the ones already
+      // held rather than replacing them - the host passes that when the
+      // view hasn't moved since the last result, so that opening a section
+      // measured earlier shows it at once instead of measuring it again.
+      showResult: function (result, info, merge) {
+        if (merge && lastResult) {
+          for (var key in result.groups) {
+            if (Object.prototype.hasOwnProperty.call(result.groups, key)) lastResult.groups[key] = result.groups[key];
+          }
+        } else {
+          lastResult = result;
+        }
         lastInfo = info;
         redrawCharts();
       },
@@ -1213,29 +645,13 @@
         redrawCharts();
       },
       // The panel's own size changed (it opened, or the window resized), so
-      // every canvas needs re-measuring against its parent - and the top
-      // notch of the resolution slider is "match the grid", which a resize
-      // has just changed the meaning of.
-      relayout: function () {
-        syncSampleSlider();
-        updateSampleReadout();
-        redrawCharts();
-      },
-      // The slider alone. Separate from relayout because the canvas can
-      // resize while the card is CLOSED - the top stop is "one sample per
-      // rendered pixel", so what it means and how many stops sit below it
-      // have both just changed - and redrawing charts into a card with no
-      // laid-out width would only have to be undone when it opens.
-      refreshSampleReadout: function () {
-        syncSampleSlider();
-        updateSampleReadout();
-      },
+      // every canvas needs re-measuring against its parent.
+      relayout: redrawCharts,
       // Called by the grid from statsOnViewChanged, i.e. on every pan,
       // zoom and resize. The overlay's paths are in the coordinates of the
       // block that was measured, so they stop describing anything the
       // instant the view they were measured from moves.
       featureOverlayOff: featureOverlayOff,
-      sections: SECTIONS,
     };
   }
 

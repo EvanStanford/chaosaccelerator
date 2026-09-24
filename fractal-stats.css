@@ -42,16 +42,17 @@
 }
 .stats-status-working { color: var(--accent); }
 .stats-status-stale { color: #e0b36a; }
-.stats-status-loading {
+.stats-status-loading,
+.stats-status-working {
   display: flex;
   align-items: center;
   gap: 9px;
-  color: var(--text-dim);
 }
+.stats-status-loading { color: var(--text-dim); }
 
-/* The spinning ring next to "Metrics will be calculated after rendering
-   completes." - text alone read as inert, easy to mistake for a dead end
-   rather than a wait. */
+/* The spinning ring next to "Measuring the view on screen…" in the status
+   bar, and on its own in a section whose numbers haven't arrived yet - text
+   alone read as inert, easy to mistake for a dead end rather than a wait. */
 .stats-spinner {
   flex: none;
   width: 20px;
@@ -65,40 +66,12 @@
   to { transform: rotate(360deg); }
 }
 
-/* The sample-resolution slider at the top of the card. Same shape as the
-   grid's own .field blocks (label above, control, hint below - see
-   fractal-grid.css) rather than a second idiom for the same thing. */
-.stats-field {
-  display: block;
-  font-size: 12px;
-}
-.stats-field-label {
-  display: block;
-  margin-bottom: 6px;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-.stats-field input[type="range"] {
-  width: 100%;
-  accent-color: var(--accent);
-}
-.stats-field-hint {
-  display: block;
-  margin-top: 5px;
-  font-size: 11px;
-  line-height: 1.45;
-  color: var(--text-dim);
-}
-
-.stats-actions {
-  display: flex;
-  gap: 8px;
-}
-
 /* ---- One section ----
-   The switch IS the section: off means collapsed AND not measured (each
-   one is a full extra pass over the sampled view), so there is no second
-   collapse control to get out of step with it. */
+   An accordion: exactly one section is open at a time, and the open one is
+   the only one measured (each is a full extra pass over the sampled view).
+   The heading is the whole control - clicking a closed section's heading
+   opens it and closes the other - so there is no second collapse control
+   to get out of step with it. */
 .stats-section {
   border-top: 1px solid var(--border);
   padding-top: 10px;
@@ -108,17 +81,52 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
   font-size: 13px;
+  color: var(--text-dim);
+  text-align: left;
   cursor: pointer;
+}
+/* The open section's heading is inert - there is always exactly one open,
+   so it cannot be collapsed - and so gets no hover state and no pointer;
+   the closed ones light up because clicking them does something. */
+.stats-section:not(.stats-section-open) > .stats-section-head:hover,
+.stats-section-open > .stats-section-head {
+  color: var(--text);
+}
+.stats-section-open > .stats-section-head {
+  cursor: default;
 }
 .stats-section-title {
   font-weight: 600;
 }
-.stats-section-hint {
-  margin: 6px 0 0 0;
-  font-size: 11.5px;
-  line-height: 1.45;
-  color: var(--text-dim);
+/* A disclosure caret, drawn in CSS so it takes the heading's own colour:
+   pointing right when closed, down when open. */
+.stats-section-caret {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-right: 4px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+  opacity: 0.8;
+}
+.stats-section-open > .stats-section-head .stats-section-caret {
+  transform: rotate(45deg);
+}
+/* The placeholder in an open section whose numbers haven't arrived yet:
+   the spinner alone, centred where the chart is about to be. */
+.stat-loading {
+  display: flex;
+  justify-content: center;
+  padding: 22px 0;
 }
 .stats-section-body {
   margin-top: 8px;
@@ -153,13 +161,6 @@
   text-align: right;
   margin-left: auto;
 }
-.stat-note {
-  margin: 6px 0 2px 0;
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--text-dim);
-}
-
 /* A color chip in front of a label - the pie chart's legend lines use it
    to tie each share to its slice. */
 .stat-swatch {
@@ -192,142 +193,9 @@
   opacity: 0.45;
 }
 
-/* ---- Number lines ----
-   A number line: both ends named, reference points along it, and an
-   arrow showing where this view falls - for every stat whose range is fixed by the maths rather than by the
-   scene (see numberLine in fractal-stats-panel.js). Four stacked strips:
-   reference names above, the track, the arrows under it, and what the two
-   ends mean at the bottom.
-
-   All of it is positioned in percentages so it reflows with the card and
-   needs no measuring - which is the whole reason these are DOM rather than
-   another canvas. Nothing here clips: an arrow at the very end of a track
-   lets its triangle bleed a couple of pixels into the card's own padding,
-   which is invisible, where overflow: hidden would shave it in half. */
-.stat-numline {
-  width: 100%;
-  /* The parent is sometimes .stat-row (row direction, wrapping) and
-     sometimes the section body (column direction). `auto` keeps the basis
-     out of the height in the column case; the rule below forces the wrap
-     in the row one. */
-  flex: 0 0 auto;
-  margin: 5px 0 9px 0;
-}
-.stat-row > .stat-numline {
-  flex-basis: 100%;
-}
-
-.stat-numline-marks {
-  position: relative;
-  height: 13px;
-  font-size: 9.5px;
-  line-height: 13px;
-  color: var(--text-dim);
-  white-space: nowrap;
-}
-.stat-numline-mark {
-  position: absolute;
-  top: 0;
-  transform: translateX(-50%);
-}
-/* Reference ticks and arrow labels both anchor rather than straddle when
-   they sit at an end - see anchorClass in fractal-stats-panel.js. */
-.stat-numline-mark.stat-numline-at-lo,
-.stat-numline-arrow-label.stat-numline-at-lo {
-  transform: translateX(0);
-}
-.stat-numline-mark.stat-numline-at-hi,
-.stat-numline-arrow-label.stat-numline-at-hi {
-  transform: translateX(-100%);
-}
-
-.stat-numline-track {
-  position: relative;
-  height: 6px;
-  border-radius: 3px;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-}
-/* A reference tick is a hairline THROUGH the track, so it reads as a place
-   on the axis rather than as another value being plotted on it. */
-.stat-numline-tick {
-  position: absolute;
-  top: -1px;
-  bottom: -1px;
-  width: 1px;
-  background: var(--border);
-}
-
-.stat-numline-arrows {
-  position: relative;
-  height: 20px;
-  font-size: 9.5px;
-  line-height: 12px;
-  white-space: nowrap;
-}
-.stat-numline-arrow {
-  position: absolute;
-  top: 0;
-  width: 0;
-}
-/* The arrowhead itself: a CSS triangle pointing up at the track. */
-.stat-numline-point {
-  position: absolute;
-  top: 0;
-  left: 0;
-  transform: translateX(-50%);
-  width: 0;
-  height: 0;
-  border-left: 4px solid transparent;
-  border-right: 4px solid transparent;
-  border-bottom: 5px solid var(--accent);
-}
-.stat-numline-arrow-label {
-  position: absolute;
-  top: 6px;
-  left: 0;
-  transform: translateX(-50%);
-  color: var(--accent);
-}
-/* The second arrow on a shared track (the steepest step next to the
-   average one). Dimmed and outlined so the two are told apart at a glance
-   and the primary reading stays the primary one. */
-.stat-numline-arrow-weak .stat-numline-point {
-  border-bottom-color: var(--text-dim);
-}
-.stat-numline-arrow-weak .stat-numline-arrow-label {
-  color: var(--text-dim);
-}
-.stat-numline-empty {
-  color: var(--text-dim);
-  font-style: italic;
-}
-
-/* What the two ends MEAN - the part that makes the arrow's position
-   readable at all. Allowed to wrap onto two lines: "all horizontal change
-   (vertical bands)" will not fit on one at the card's width, and shortening
-   it to fit would lose the half that says what it looks like. */
-.stat-numline-ends {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 1px;
-  font-size: 9.5px;
-  line-height: 1.25;
-  color: var(--text-dim);
-}
-.stat-numline-end {
-  max-width: 46%;
-}
-.stat-numline-end-hi {
-  text-align: right;
-}
-
-/* The switch under Feature Census that draws the longest ridge and valley
-   onto the map itself. A plain checkbox rather than the section switches'
-   sliding toggle: those mean "measure this or don't", which costs a pass
-   over the view, and this one only decides whether something already
-   measured is also drawn. */
+/* The switch under Topography that draws the longest ridge and valley
+   onto the map itself. A plain checkbox: it only decides whether something
+   already measured is also drawn, and costs nothing either way. */
 .stat-overlay-toggle {
   display: flex;
   align-items: center;

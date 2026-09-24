@@ -5828,11 +5828,6 @@
     progressive.sublattice = 1; // so presentFrame shows the accumulator, not a preview
     presentFrame();
     updateResolutionBoundsUI();
-    // The one moment the view is genuinely finished - full resolution (or
-    // whatever the resolution slider stops at) AND every antialiasing
-    // sample averaged in. Global Stats waits for exactly this and then a
-    // further beat on top, being the lowest-priority work on the page.
-    statsOnRenderSettled();
     deliverStill();
   }
 
@@ -5888,14 +5883,14 @@
       canvas.height = h;
       gl.viewport(0, 0, w, h);
       markDirty();
-      // Global Stats' resolution slider is expressed against this size -
-      // its top stop is one sample per rendered pixel - so the card has to
-      // be told, whether or not anyone is looking at it. (The measurement
-      // itself reads the canvas when it runs and is never stale; it is the
-      // readout, and how many stops the slider has, that would be.)
+      // The Analysis card's charts size themselves to the card, and the
+      // sampling readout in Settings is a fraction of THIS size - so both
+      // are told, whether or not anyone is looking at them. (The
+      // measurement itself reads the canvas when it runs and is never
+      // stale; it is only the readout that would be.)
       if (statsPanel) {
         if (statsOpen) statsPanel.relayout();
-        else statsPanel.refreshSampleReadout();
+        updateStatsSampleReadout();
       }
     }
     // Spent whether or not the size changed: it was about THIS resize.
@@ -8233,12 +8228,12 @@
   // below.
   //
   // Three rules, all of them the user's own: nothing is measured unless the
-  // card is open AND that section's switch is on; every section starts off;
-  // and the whole thing is the lowest-priority work on the page. The last
-  // one is why this never runs on the render path. It waits for the
-  // refinement ladder (and its antialiasing pass) to finish completely,
-  // waits a further beat on top of that, and only then works through the
-  // measurement in requestIdleCallback slices - the GPU sampling banded
+  // card is open; only the one section that is open on it is measured; and
+  // the measuring starts as soon as the view stops moving, without waiting
+  // for the refinement ladder to finish - the card should fill in while the
+  // picture is still sharpening, not after. It still never runs on the
+  // render path: a short settle after the last view change, then the work
+  // goes through requestIdleCallback slices - the GPU sampling banded
   // against the same adaptive pixel budget the ladder uses, and the
   // arithmetic split into steps by fractal-stats.js. Any view change at all
   // abandons whatever is in flight, mid-slice, and the card dims to say the
@@ -8255,90 +8250,43 @@
   // ---- How finely to sample the view ----
   //
   // The block the whole card is measured from is a re-render of the view at
-  // its own resolution, which is NOT the screen's. Sampling coarsely is
-  // cheap and describes the broad shape of the picture; sampling at one
-  // simulation per rendered pixel measures exactly what is on screen, at
-  // several million simulations a go. Which of those the user wants depends
-  // entirely on what they are looking for, so it is a slider at the top of
-  // the card rather than a constant here.
-  //
-  // Long-side sample counts, in the same doubling-ish progression as the
-  // resolution ladder: each notch is roughly twice the work of the one
-  // before it. 0 is the top notch and means "match the grid" - one sample
-  // per rendered pixel, whatever that is on this screen.
-  var STATS_SAMPLE_STOPS = [96, 128, 192, 256, 384, 512, 800, 1024, 1536, 2048, 3072, 4096, 6144];
-  // 800 on the LONG side, the short one proportioned to the canvas by
-  // statsSampleBlock - so the default block is 800 x something at most, and
-  // the sampled rectangle is the one on screen rather than a stretched
-  // version of it. Enough samples for the connected-feature measurements
-  // (longest ridge and longest valley) to find real structure rather than
-  // a handful of specks, which a 256-wide block routinely did.
-  //
-  // On a screen whose own long side is under 800 this stop is trimmed out
-  // of the ladder entirely (see statsSampleLadder) and the slider lands on
-  // "one sample per rendered pixel" instead, which is the finest the view
-  // can honestly be measured at anyway.
-  var STATS_DEFAULT_SAMPLE_LONG_SIDE = 800;
-  var statsSampleLongSide = STATS_DEFAULT_SAMPLE_LONG_SIDE;
+  // its own resolution, which need not be the screen's: one simulation per
+  // rendered pixel measures exactly what is on screen, at several million
+  // simulations a go, and one per 8 pixels each way describes the broad
+  // shape of the picture at a sixty-fourth of the cost. Which of those the
+  // user wants depends on the device as much as on what they are looking
+  // for, so it is a slider under Settings > Performance Settings > Advanced
+  // (#stats-sample-slider) rather than a constant here. Full is the default:
+  // the connected-feature measurements (longest ridge and longest valley)
+  // find real structure at full resolution where a coarse block finds
+  // specks, and the work only happens while the Analysis card is open.
+  var STATS_SAMPLE_FRACTIONS = [
+    { fraction: 1 / 8, label: "1/8" },
+    { fraction: 1 / 4, label: "1/4" },
+    { fraction: 1 / 2, label: "1/2" },
+    { fraction: 1, label: "Full" },
+  ];
+  var statsSampleStop = STATS_SAMPLE_FRACTIONS.length - 1;
 
-  // The stops the slider actually offers on THIS screen: everything below
-  // one sample per rendered pixel, then that. Trimmed rather than fixed,
-  // because every stop past the screen's own resolution would measure the
-  // identical block - several indistinguishable notches at the top of a
-  // slider, all of them the most expensive setting there is.
-  function statsSampleLadder() {
-    var cap = Math.min(MAX_TEXTURE_SIZE, Math.max(canvas.width, canvas.height, 1));
-    var list = [];
-    for (var i = 0; i < STATS_SAMPLE_STOPS.length; i++) {
-      if (STATS_SAMPLE_STOPS[i] < cap) list.push(STATS_SAMPLE_STOPS[i]);
-    }
-    list.push(0); // one sample per rendered pixel, whatever that is here
-    return list;
-  }
-
-  // The block a given ladder entry asks for, in samples, proportioned to
-  // the canvas so the sampled rectangle is the one on screen rather than a
-  // stretched version of it - which matters far more here than it does for
-  // the superlative buttons, since whole sections of this card are about
-  // direction and scale.
-  function statsSampleBlock(longSide) {
+  // The block the current stop asks for, in samples: the canvas scaled by
+  // the fraction, so the sampled rectangle is the one on screen rather than
+  // a stretched version of it - which matters here far more than it does
+  // for the superlative buttons, since the Rose Plot is about direction.
+  // Never past one sample per rendered pixel (two samples would run the
+  // same simulation the grid ran once) and never past what one texture can
+  // hold.
+  function statsSampleBlock() {
+    var f = STATS_SAMPLE_FRACTIONS[statsSampleStop].fraction;
     var cw = Math.max(1, canvas.width), ch = Math.max(1, canvas.height);
-    // One sample per rendered pixel is the finest that means anything: past
-    // it, two samples would run the same simulation the grid ran once.
-    var cap = Math.min(MAX_TEXTURE_SIZE, Math.max(cw, ch));
-    var side = longSide > 0 ? Math.min(longSide, cap) : cap;
-    if (side >= cap) {
-      return {
-        width: Math.min(cw, MAX_TEXTURE_SIZE),
-        height: Math.min(ch, MAX_TEXTURE_SIZE),
-        full: true,
-      };
-    }
-    var scale = side / Math.max(cw, ch);
     return {
-      width: Math.max(8, Math.round(cw * scale)),
-      height: Math.max(8, Math.round(ch * scale)),
-      full: false,
+      width: Math.min(MAX_TEXTURE_SIZE, Math.max(8, Math.round(cw * f))),
+      height: Math.min(MAX_TEXTURE_SIZE, Math.max(8, Math.round(ch * f))),
+      full: f >= 1,
     };
   }
 
-  // Everything the slider's own readout needs, in the units the rest of
-  // this page already speaks (see describeStride: "px" is a rendered pixel,
-  // "1 sim/px" is one simulation per one of them).
-  function statsDescribeSample(longSide) {
-    var block = statsSampleBlock(longSide);
-    var stride = block.height > 0 ? canvas.height / block.height : 1;
-    return {
-      width: block.width,
-      height: block.height,
-      full: block.full,
-      samples: block.width * block.height,
-      stride: stride,
-      strideLabel: block.full ? "1 sim/px" : "1 sim per " + stride.toFixed(stride < 10 ? 1 : 0) + "px",
-    };
-  }
-  // How long after the ladder settles before measuring. Long enough that a
-  // pan which pauses briefly and resumes never triggers a run at all.
+  // How long after the last view change before measuring. Long enough that
+  // a pan which pauses briefly and resumes never triggers a run at all.
   var STATS_SETTLE_DELAY_MS = 400;
   // requestIdleCallback's own deadline. Reached, it fires anyway on a busy
   // page - which is handled by doing a single step in that case (see
@@ -8355,6 +8303,16 @@
   var STATS_MAX_BAND_SAMPLES = 262144;
 
   var statsPanel = null;        // the FractalStatsPanel instance, once built
+  var statsSampleSlider = document.getElementById("stats-sample-slider");
+  var statsSampleReadout = document.getElementById("stats-sample-readout");
+  // "Full (1920 × 1080)": the stop's name and the block it comes to on this
+  // screen, since a fraction alone says nothing about the cost.
+  function updateStatsSampleReadout() {
+    if (!statsSampleReadout) return;
+    var block = statsSampleBlock();
+    statsSampleReadout.textContent = STATS_SAMPLE_FRACTIONS[statsSampleStop].label +
+      " (" + block.width + " × " + block.height + ")";
+  }
   var statsOpen = false;
   var statsRun = null;          // the measurement in flight, if any
   // Bumped by every view change. A slice belonging to an older generation
@@ -8469,8 +8427,7 @@
   // to gets settled back into the frame before the simulation starts, and
   // that settle is a sawtooth in world coordinates. Its reset points are
   // false edges - perfectly straight ones - which would otherwise put a
-  // spurious spike into the orientation rose at exactly 0 and 90 degrees,
-  // inflate every roughness number, and add a phantom peak to the spectrum.
+  // spurious spike into the orientation rose at exactly 0 and 90 degrees.
   //
   // The superlative buttons handle this by computing the starting scene for
   // every sample and comparing neighbours, which at their sample count is
@@ -8549,11 +8506,11 @@
   }
 
   function statsWantsWork() {
-    return statsOpen && statsPanel !== null && statsPanel.anyEnabled();
+    return statsOpen && statsPanel !== null;
   }
 
-  // Whether the measurement currently in flight will produce every section
-  // that is switched on right now.
+  // Whether the measurement currently in flight will produce the section
+  // that is open right now.
   function statsRunCoversEnabled() {
     if (!statsRun) return false;
     var wanted = statsPanel.enabledGroups();
@@ -8588,16 +8545,17 @@
     // is nothing on the card but its own explanations, and dimming those
     // reads as the panel being disabled.
     if (statsHasResult) statsPanel.markStale();
-    statsPanel.setStatus(statsHasResult
-      ? "Metrics will be calculated after rendering completes."
-      : "Waiting for the fractal to finish rendering.", "loading");
+    scheduleStatsRun();
   }
 
-  // Called from finishRun - the one place that knows the ladder has reached
-  // the end of its resolution range AND finished averaging its antialiasing
-  // samples, which together is the whole of "the view is done."
-  function statsOnRenderSettled() {
+  // Starts a measurement once the view has held still for the settle
+  // delay. Called from every view change, and from every change on the
+  // card itself that needs a fresh run - it does not wait for the ladder:
+  // the sampler re-renders the view into its own target, so the picture
+  // being mid-refinement on screen makes no difference to what is measured.
+  function scheduleStatsRun() {
     if (!statsWantsWork() || statsRun) return;
+    statsPanel.setStatus("Measuring the view on screen…", "loading");
     if (statsSettleTimer) clearTimeout(statsSettleTimer);
     statsSettleTimer = setTimeout(function () {
       statsSettleTimer = null;
@@ -8607,15 +8565,11 @@
 
   function beginStatsRun() {
     if (!statsWantsWork() || statsRun) return;
-    // The settle delay is long enough that the view can have moved again
-    // while it ran; starting anyway would measure one view and label it
-    // with another's.
-    if (dirty || !progressive.complete) return;
     if (!canSampleField()) {
       statsPanel.setStatus("This browser can't read floating-point values back from the GPU, so Global Stats can't measure anything here.", "stale");
       return;
     }
-    var block = statsSampleBlock(statsSampleLongSide);
+    var block = statsSampleBlock();
     var w = block.width, h = block.height;
     // How tall one band is. Half the refinement ladder's own adaptive pixel
     // budget - which is already a measurement of how many simulated pixels
@@ -8638,6 +8592,11 @@
       row: 0,
       phase: "sample",
       groups: statsPanel.enabledGroups(),
+      // Whether this run's result can be MERGED into the panel's last one
+      // rather than replacing it: true when the view and block are the ones
+      // the last result was measured from, so a section opened later joins
+      // the sections already measured instead of throwing them away.
+      merge: statsResultIsCurrent,
       seam: null,
       job: null,
     };
@@ -8782,7 +8741,7 @@
     statsHasResult = true;
     statsResultIsCurrent = true;
     statsPanel.markFresh();
-    statsPanel.showResult(result, info);
+    statsPanel.showResult(result, info, run.merge);
     // Just the seam warning, if there is one - the sample size and Output
     // are already right there in the Sampling resolution slider and the
     // scene's own X/Y Input mapping, so restating them here was pure
@@ -8805,9 +8764,9 @@
 
   // ---- The longest ridge / longest valley overlay ----
   //
-  // Feature Census can draw the two paths it measured straight onto the
-  // map, which is the only way to tell "the longest valley is 0.8 screen
-  // diagonals" from a number that happens to be 0.8. Its own canvas over
+  // Topography can draw the two paths it measured straight onto the
+  // map, which is the only way to tell "the longest valley is 0.8 screens"
+  // from a number that happens to be 0.8. Its own canvas over
   // the grid rather than anything in the WebGL pipeline: this is an
   // annotation that comes and goes with a switch on a card, and rebuilding
   // the render for it would tie a piece of UI to the thing the whole page
@@ -8878,7 +8837,7 @@
     drawFeatureOverlay();
   }
 
-  if (statsPanelBodyEl && global.FractalStatsPanel && global.FractalStats) {
+  if (statsPanelBodyEl && statsSampleSlider && global.FractalStatsPanel && global.FractalStats) {
     statsPanel = FractalStatsPanel.create({
       body: statsPanelBodyEl,
       host: {
@@ -8895,57 +8854,52 @@
         worldAt: function (col, row) {
           return sampleCoordToWorld({ width: statsLastWidth, height: statsLastHeight }, col, row);
         },
-        sampleLadder: statsSampleLadder,
-        sampleLongSide: function () { return statsSampleLongSide; },
-        describeSample: statsDescribeSample,
         setFeatureOverlay: setFeatureOverlay,
       },
-      onSampleResolutionChange: function (longSide) {
-        statsSampleLongSide = longSide | 0;
-        // A different block size makes every number on the card a
-        // measurement of something else, so this invalidates a finished run
-        // exactly as a pan does - and abandons one in flight, which is
-        // measuring at the old resolution.
-        statsResultIsCurrent = false;
-        abandonStatsRun();
+      onSectionChange: function () {
         if (!statsWantsWork()) return;
-        if (progressive.complete && !dirty) {
-          statsPanel.setStatus("Measuring the view on screen…", "working");
-          statsOnRenderSettled();
-        } else {
-          statsPanel.setStatus("Waiting for the fractal to finish rendering.", "loading");
-        }
-      },
-      onEnabledChange: function () {
-        if (!statsWantsWork()) {
-          abandonStatsRun();
-          statsPanel.setStatus("Every measurement below is off. Switch one on to analyze the view currently on screen.");
-          return;
-        }
-        // Switching a section OFF invalidates nothing, so it neither starts
-        // a run nor disturbs one in flight.
+        // Opening a section the last result already covers (the view
+        // hasn't moved since it was measured) needs no new run - the panel
+        // has just drawn it from what it holds.
         if (statsResultIsCurrent && !statsPanel.needsMeasurement()) {
           if (!statsRun) statsPanel.setStatus(statsLastStatus);
           return;
         }
-        // Switching one ON while a run is in flight is different: which
-        // sections to compute is fixed when the job is built, so a run that
-        // doesn't already cover the new section never will. Restarting is
-        // the only way it gets measured, and it costs only the slices
-        // already spent.
+        // Opening one while a run is in flight is different: which section
+        // to compute is fixed when the job is built, so a run that doesn't
+        // already cover the new section never will. Restarting is the only
+        // way it gets measured, and it costs only the slices already spent.
         if (statsRun) {
           if (statsRunCoversEnabled()) return;
           abandonStatsRun();
         }
-        if (progressive.complete && !dirty) {
-          statsPanel.setStatus("Measuring the view on screen…", "working");
-          statsOnRenderSettled();
-        } else {
-          statsPanel.setStatus("Waiting for the fractal to finish rendering.", "loading");
-        }
+        scheduleStatsRun();
       },
     });
-    statsPanel.setStatus("Every measurement below is off. Switch one on to analyze the view currently on screen.");
+
+    // ---- The sampling slider, under Settings > Performance > Advanced ----
+    statsSampleSlider.min = "0";
+    statsSampleSlider.max = String(STATS_SAMPLE_FRACTIONS.length - 1);
+    statsSampleSlider.value = String(statsSampleStop);
+    updateStatsSampleReadout();
+    // Dragging only re-labels; the measurement restarts on release, so
+    // sweeping the slider doesn't start (and abandon) a run per notch.
+    statsSampleSlider.addEventListener("input", function () {
+      statsSampleStop = clamp(Number(statsSampleSlider.value) | 0, 0, STATS_SAMPLE_FRACTIONS.length - 1);
+      updateStatsSampleReadout();
+    });
+    statsSampleSlider.addEventListener("change", function () {
+      statsSampleStop = clamp(Number(statsSampleSlider.value) | 0, 0, STATS_SAMPLE_FRACTIONS.length - 1);
+      updateStatsSampleReadout();
+      // A different block size makes every number on the card a
+      // measurement of something else, so this invalidates a finished run
+      // exactly as a pan does - and abandons one in flight, which is
+      // measuring at the old resolution.
+      statsResultIsCurrent = false;
+      abandonStatsRun();
+      if (statsHasResult) statsPanel.markStale();
+      scheduleStatsRun();
+    });
 
     // A chart sizes itself to the card's width, which only exists once the
     // card is laid out - and changes when a portrait window is resized.
@@ -8967,15 +8921,10 @@
     statsOpen = open;
     if (!open) { abandonStatsRun(); return; }
     statsPanel.relayout();
-    if (!statsPanel.anyEnabled()) {
-      statsPanel.setStatus("Every measurement below is off. Switch one on to analyze the view currently on screen.");
-    } else if (statsResultIsCurrent && !statsPanel.needsMeasurement()) {
+    if (statsResultIsCurrent && !statsPanel.needsMeasurement()) {
       statsPanel.setStatus(statsLastStatus);
-    } else if (progressive.complete && !dirty) {
-      statsPanel.setStatus("Measuring the view on screen…", "working");
-      statsOnRenderSettled();
     } else {
-      statsPanel.setStatus("Waiting for the fractal to finish rendering.", "loading");
+      scheduleStatsRun();
     }
   }
 

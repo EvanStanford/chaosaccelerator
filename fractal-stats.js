@@ -11,8 +11,8 @@
 // comes back. Kept DOM-free for the same reason physics-engine.js and
 // physics-hinge-geometry.js are: it can then be loaded straight into the
 // regression page (physics-tests.html) and checked against closed-form
-// answers, which is the only practical way to know a structure tensor or an
-// FFT is right rather than merely plausible.
+// answers, which is the only practical way to know a structure tensor or a
+// circular mean is right rather than merely plausible.
 //
 // ---- Two conventions everything below depends on ----
 //
@@ -35,8 +35,8 @@
 // physical value, one step apart, not a full range apart. Every difference
 // taken here therefore goes through delta(), which folds into [-0.5, 0.5]
 // when `circular` is set - so the seam where mod() happened to cut the
-// circle produces no gradient, no false edge in the orientation rose, and
-// no spike in the spectrum. Averages of circular data likewise go through
+// circle produces no gradient and no false edge in the orientation rose.
+// Averages of circular data likewise go through
 // the trigonometric moments rather than a plain mean, which would put the
 // average of 0.99 and 0.01 at 0.5 - the exact opposite side of the wheel
 // from the truth.
@@ -54,90 +54,6 @@
     if (d > 0.5) return d - 1;
     if (d < -0.5) return d + 1;
     return d;
-  }
-
-  // ---- Fast Fourier transform ----
-  //
-  // Iterative radix-2 Cooley-Tukey, in place over separate real/imaginary
-  // arrays. `n` must be a power of two; the only caller crops to one.
-  // Written out rather than pulled from a library for the same reason the
-  // rest of this project has no dependencies - it is thirty lines, and a
-  // build step would cost more than it saves.
-  function fftInPlace(re, im, n) {
-    for (var i = 1, j = 0; i < n; i++) {
-      var bit = n >> 1;
-      for (; j & bit; bit >>= 1) j ^= bit;
-      j ^= bit;
-      if (i < j) {
-        var tr = re[i]; re[i] = re[j]; re[j] = tr;
-        var ti = im[i]; im[i] = im[j]; im[j] = ti;
-      }
-    }
-    for (var len = 2; len <= n; len <<= 1) {
-      var ang = -TAU / len;
-      var wr = Math.cos(ang), wi = Math.sin(ang);
-      for (var start = 0; start < n; start += len) {
-        var cr = 1, ci = 0;
-        for (var k = 0; k < len / 2; k++) {
-          var ar = re[start + k], ai = im[start + k];
-          var br = re[start + k + len / 2], bi = im[start + k + len / 2];
-          var pr = br * cr - bi * ci;
-          var pi = br * ci + bi * cr;
-          re[start + k] = ar + pr;
-          im[start + k] = ai + pi;
-          re[start + k + len / 2] = ar - pr;
-          im[start + k + len / 2] = ai - pi;
-          var ncr = cr * wr - ci * wi;
-          ci = cr * wi + ci * wr;
-          cr = ncr;
-        }
-      }
-    }
-  }
-
-  // Separable 2-D transform: every row, then every column. Power is
-  // accumulated by the caller, so this leaves the spectrum in place.
-  function fft2dInPlace(re, im, n) {
-    var rowRe = new Float64Array(n), rowIm = new Float64Array(n);
-    var i, k, base;
-    for (i = 0; i < n; i++) {
-      base = i * n;
-      for (k = 0; k < n; k++) { rowRe[k] = re[base + k]; rowIm[k] = im[base + k]; }
-      fftInPlace(rowRe, rowIm, n);
-      for (k = 0; k < n; k++) { re[base + k] = rowRe[k]; im[base + k] = rowIm[k]; }
-    }
-    for (i = 0; i < n; i++) {
-      for (k = 0; k < n; k++) { rowRe[k] = re[k * n + i]; rowIm[k] = im[k * n + i]; }
-      fftInPlace(rowRe, rowIm, n);
-      for (k = 0; k < n; k++) { re[k * n + i] = rowRe[k]; im[k * n + i] = rowIm[k]; }
-    }
-  }
-
-  // ---- Small shared helpers ----
-
-  // Largest power of two <= v (and at least 1).
-  function floorPow2(v) {
-    var p = 1;
-    while (p * 2 <= v) p *= 2;
-    return p;
-  }
-
-  function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
-
-  // Least-squares slope/intercept of y against x, ignoring any non-finite
-  // pair. Used for the spectral slope fit, where a zero-power annulus (and
-  // so a -Infinity log) is perfectly possible.
-  function linearFit(xs, ys) {
-    var n = 0, sx = 0, sy = 0, sxx = 0, sxy = 0;
-    for (var i = 0; i < xs.length; i++) {
-      if (!isFinite(xs[i]) || !isFinite(ys[i])) continue;
-      n++; sx += xs[i]; sy += ys[i]; sxx += xs[i] * xs[i]; sxy += xs[i] * ys[i];
-    }
-    if (n < 2) return null;
-    var den = n * sxx - sx * sx;
-    if (Math.abs(den) < 1e-30) return null;
-    var slope = (n * sxy - sx * sy) / den;
-    return { slope: slope, intercept: (sy - slope * sx) / n, count: n };
   }
 
   // ---- Order statistics from a fine histogram, not from a sort ----
@@ -188,12 +104,11 @@
 
   // ---- The job ----
   //
-  // Global stats are explicitly the lowest-priority work on this page: the
-  // user asked for them to wait until the fractal itself is fully rendered
-  // and the hover replay is running properly. So the whole analysis is
-  // built as a LIST OF STEPS rather than one function - the caller drives
-  // it from requestIdleCallback and can stop between any two of them (see
-  // scheduleStatsRun in fractal-grid.js).
+  // Global stats run alongside the fractal's own rendering and the hover
+  // replay, and must never make either of them stutter. So the whole
+  // analysis is built as a LIST OF STEPS rather than one function - the
+  // caller drives it from requestIdleCallback and can stop between any two
+  // of them (see scheduleStatsSlice in fractal-grid.js).
   //
   // Every pass that walks the block is split by ROWS rather than being one
   // step of its own (see addRowPass). That is what lets the sample
@@ -207,9 +122,9 @@
   //   width, height  - sample block dimensions
   //   t              - Float32Array(width * height), row-major, row 0 at the BOTTOM
   //   circular       - whether t = 0 and t = 1 are the same value
-  //   groups         - { extremes, distribution, roughness, orientation,
-  //                      spectrum, correlation, features } - only the true
-  //                    ones are computed, and each costs nothing when off
+  //   groups         - { extremes, distribution, orientation, features } -
+  //                    only the true ones are computed, and each costs
+  //                    nothing when off
   //   colSeam        - Uint8Array(width - 1) or null: colSeam[c] set means
   //                    the step from column c to c+1 crosses an INPUT seam
   //                    (see the host's own findInputSeams) and is not a real
@@ -221,16 +136,6 @@
   // cost independent of the sample block - a few milliseconds at the top of
   // the resolution slider just as at the bottom.
   var SAMPLES_PER_STEP = 60000;
-
-  // The transform runs on blocks of this size at most, however large the
-  // sample block is. Past this the extra frequency bins are finer than a
-  // 300-pixel-wide plot can show, while the cost of one transform keeps
-  // quadrupling - and one transform is one step, so it is also what sets
-  // how long the longest step in the whole analysis takes. Covering a large
-  // sample block is done by averaging over MANY of these instead (see the
-  // spectrum section): the same cost per sample, spread over four times as
-  // many steps, and a cleaner spectrum at the end of it.
-  var FFT_BLOCK_MAX = 256;
 
   function createJob(spec) {
     var W = spec.width | 0, H = spec.height | 0;
@@ -281,8 +186,9 @@
     }
 
     // `centered` is a whole extra copy of the block, so it is only built
-    // for the groups that actually need a residual.
-    var needsCentered = !!(groups.distribution || groups.correlation);
+    // when the one group that needs a residual (the distribution's moments)
+    // is wanted.
+    var needsCentered = !!groups.distribution;
 
     // ---- Validity, and the mean every second-order metric is measured from ----
     var sum = 0, cosSum = 0, sinSum = 0;
@@ -446,82 +352,6 @@
       });
     }
 
-    // ---- Roughness: how fast the picture changes from one sample to the
-    // next ----
-    //
-    // Forward differences, not Sobel: this is measuring the actual step
-    // between adjacent samples, and any smoothing would report a gentler
-    // picture than the one on screen. (The orientation pass below wants the
-    // opposite and uses Sobel for exactly that reason.)
-    if (groups.roughness) {
-      var sumAbsX = 0, sumAbsY = 0, pairsX = 0, pairsY = 0;
-      var sumMag = 0, sumMag2 = 0, magCount = 0, maxMag = 0;
-      var sumLap = 0, sumLap2 = 0, lapCount = 0;
-
-      addRowPass(0, H, function accumulateGradient(r0, r1) {
-        if (out.empty) return;
-        for (var r = r0; r < r1; r++) {
-          for (var c = 0; c < W; c++) {
-            var i = r * W + c;
-            if (!valid[i]) continue;
-            var haveX = c + 1 < W && valid[i + 1] && !xSeam(c);
-            var haveY = r + 1 < H && valid[i + W] && !ySeam(r);
-            var dx = haveX ? delta(t[i], t[i + 1], circular) : 0;
-            var dy = haveY ? delta(t[i], t[i + W], circular) : 0;
-            if (haveX) { sumAbsX += Math.abs(dx); pairsX++; }
-            if (haveY) { sumAbsY += Math.abs(dy); pairsY++; }
-            if (haveX && haveY) {
-              var mag = Math.sqrt(dx * dx + dy * dy);
-              sumMag += mag; sumMag2 += mag * mag; magCount++;
-              if (mag > maxMag) maxMag = mag;
-            }
-          }
-        }
-      });
-
-      // Five-point Laplacian, every term taken as a wrapped difference FROM
-      // THE CENTRE - so it stays seam-free on a circular output in the same
-      // way the gradient does.
-      addRowPass(1, Math.max(1, H - 1), function accumulateLaplacian(r0, r1) {
-        if (out.empty) return;
-        for (var r = r0; r < r1; r++) {
-          if (ySeam(r - 1) || ySeam(r)) continue;
-          for (var c = 1; c < W - 1; c++) {
-            if (xSeam(c - 1) || xSeam(c)) continue;
-            var i = r * W + c;
-            if (!valid[i] || !valid[i - 1] || !valid[i + 1] || !valid[i - W] || !valid[i + W]) continue;
-            var lap = delta(t[i], t[i - 1], circular) + delta(t[i], t[i + 1], circular) +
-                      delta(t[i], t[i - W], circular) + delta(t[i], t[i + W], circular);
-            sumLap += lap; sumLap2 += lap * lap; lapCount++;
-          }
-        }
-      }, function finishRoughness() {
-        if (out.empty) return;
-        var meanMag = magCount > 0 ? sumMag / magCount : 0;
-        var lapMean = lapCount > 0 ? sumLap / lapCount : 0;
-        out.groups.roughness = {
-          // The headline number: how much of the color range one sample
-          // step moves through, on average.
-          meanGradient: meanMag,
-          maxGradient: maxMag,
-          // Mean of |grad|^2. Weighted towards the sharp places in a way
-          // the plain mean isn't, which is what makes it the standard
-          // "is this picture busy" measure rather than a second copy of it.
-          gradientEnergy: magCount > 0 ? sumMag2 / magCount : 0,
-          // Anisotropic total variation, per sample: |dx| + |dy|. Its two
-          // halves are reported separately as well, since a picture built
-          // of vertical bands has all of its variation in one of them.
-          totalVariation: (pairsX > 0 ? sumAbsX / pairsX : 0) + (pairsY > 0 ? sumAbsY / pairsY : 0),
-          meanAbsDx: pairsX > 0 ? sumAbsX / pairsX : 0,
-          meanAbsDy: pairsY > 0 ? sumAbsY / pairsY : 0,
-          // Variance of the Laplacian - the classic focus measure. High
-          // means lots of fine detail; low means broad smooth washes.
-          laplacianVariance: lapCount > 0 ? sumLap2 / lapCount - lapMean * lapMean : 0,
-          comparedPairs: magCount,
-        };
-      });
-    }
-
     // ---- Orientation: which way do the sharp lines run ----
     //
     // Sobel gradients (a central difference pre-smoothed across the
@@ -616,392 +446,6 @@
       });
     }
 
-    // ---- Spectrum: which spatial scales carry the picture ----
-    //
-    // Runs on POWER-OF-TWO SQUARE blocks, so the radial frequency bins are
-    // isotropic - a rectangle stretched to a square would report a
-    // directional bias that is purely an artifact of the stretching, right
-    // next to a section whose whole job is measuring directional bias.
-    //
-    // As many such blocks as fit, tiled over the sample block and their
-    // power spectra averaged (Welch's method in two dimensions). One
-    // enormous transform would cost the same per sample but need the whole
-    // thing in memory at once, and would give a NOISIER spectrum: averaging
-    // independent blocks is what trades the frequency resolution nobody can
-    // read off a 300-pixel-wide plot for a curve whose shape can actually
-    // be trusted.
-    //
-    // A circular output can't be transformed directly (the mod() seam is a
-    // step edge with a spectrum of its own, and it isn't in the picture).
-    // cos(2*pi*t) and sin(2*pi*t) are both continuous across that seam, and
-    // the sum of their two power spectra is the standard seam-free stand-in.
-    if (groups.spectrum) {
-      var S = Math.min(FFT_BLOCK_MAX, floorPow2(Math.min(W, H)));
-      var tilesX = S >= 8 ? Math.max(1, Math.floor(W / S)) : 0;
-      var tilesY = S >= 8 ? Math.max(1, Math.floor(H / S)) : 0;
-      var tileCount = tilesX * tilesY;
-      var fftState = null;
-
-      if (tileCount > 0) {
-        steps.push(function spectrumPrepare() {
-          if (out.empty) return;
-          // Separable Hann window. Without it each block's own four edges
-          // are a step discontinuity whose spectrum (a bright cross through
-          // the origin) would swamp the picture's.
-          var win = new Float64Array(S);
-          for (var k = 0; k < S; k++) win[k] = 0.5 - 0.5 * Math.cos(TAU * k / (S - 1));
-          fftState = {
-            win: win,
-            power: new Float64Array(S * S),
-            re: new Float64Array(S * S),
-            im: new Float64Array(S * S),
-            // The tiling is centered, so an odd leftover row or column is
-            // split between the two edges rather than all falling off one.
-            originX: Math.floor((W - tilesX * S) / 2),
-            originY: Math.floor((H - tilesY * S) / 2),
-            blocks: 0,
-          };
-        });
-
-        // One step per tile: at S = 512 that is about two million butterfly
-        // operations, which is the same order as one of the row passes
-        // above and so keeps every step the same size.
-        for (var tile = 0; tile < tileCount; tile++) {
-          steps.push((function (index) {
-            return function spectrumTile() {
-              if (!fftState || out.empty) return;
-              var tx = index % tilesX, ty = (index / tilesX) | 0;
-              var c0 = fftState.originX + tx * S, r0 = fftState.originY + ty * S;
-              var channels = circular ? 2 : 1;
-              for (var ch = 0; ch < channels; ch++) {
-                var re = fftState.re, im = fftState.im, k, rr, cc, v;
-                var sum = 0;
-                for (rr = 0; rr < S; rr++) {
-                  for (cc = 0; cc < S; cc++) {
-                    var src = (r0 + rr) * W + (c0 + cc);
-                    v = valid[src] ? t[src] : mean;
-                    v = circular ? (ch === 0 ? Math.cos(TAU * v) : Math.sin(TAU * v)) : v;
-                    re[rr * S + cc] = v;
-                    sum += v;
-                  }
-                }
-                // Remove the mean before windowing: DC carries no shape
-                // information and would otherwise sit orders of magnitude
-                // above everything the plot is about.
-                var avg = sum / (S * S);
-                for (rr = 0; rr < S; rr++) {
-                  for (cc = 0; cc < S; cc++) {
-                    k = rr * S + cc;
-                    re[k] = (re[k] - avg) * fftState.win[rr] * fftState.win[cc];
-                    im[k] = 0;
-                  }
-                }
-                fft2dInPlace(re, im, S);
-                for (k = 0; k < S * S; k++) fftState.power[k] += re[k] * re[k] + im[k] * im[k];
-              }
-              fftState.blocks++;
-            };
-          })(tile));
-        }
-
-        steps.push(function spectrumReduce() {
-          if (!fftState || out.empty || fftState.blocks === 0) return;
-          var half = S / 2, maxK = half;
-          var radial = new Float64Array(maxK + 1), radialN = new Float64Array(maxK + 1);
-          var ry, rx, ky, kx, kr, bin, b;
-          for (ry = 0; ry < S; ry++) {
-            // Frequencies above Nyquist are the negative ones; fold them.
-            ky = ry <= half ? ry : ry - S;
-            for (rx = 0; rx < S; rx++) {
-              kx = rx <= half ? rx : rx - S;
-              if (kx === 0 && ky === 0) continue;
-              kr = Math.sqrt(kx * kx + ky * ky);
-              bin = Math.round(kr);
-              if (bin > maxK) continue;
-              radial[bin] += fftState.power[ry * S + rx];
-              radialN[bin]++;
-            }
-          }
-          var meanPower = new Float64Array(maxK + 1);
-          for (b = 0; b <= maxK; b++) meanPower[b] = radialN[b] > 0 ? radial[b] / radialN[b] / fftState.blocks : 0;
-
-          // Slope of log(mean power) against log(k), fitted away from both
-          // ends: k < 2 is a handful of bins dominated by the window, and
-          // the top quarter runs into the block's own Nyquist corner where
-          // only the diagonal directions still have any bins at all.
-          var loK = 2, hiK = Math.max(loK + 2, Math.floor(maxK * 0.75));
-          var xs = [], ys = [];
-          for (var f = loK; f <= hiK; f++) {
-            if (meanPower[f] <= 0) continue;
-            xs.push(Math.log(f)); ys.push(Math.log(meanPower[f]));
-          }
-          var fit = linearFit(xs, ys);
-
-          // ---- Is there a dominant scale at all? ----
-          //
-          // Deliberately NOT the frequency carrying the most energy: on a
-          // power-law spectrum - which is what a self-similar picture has,
-          // and most of these are - that answer is decided entirely by the
-          // slope and lands at one end of the axis or the other whatever
-          // the picture actually looks like. What makes a scale dominant is
-          // sticking OUT of the trend, so this measures each bin's excess
-          // over the fitted line and reports the largest, or reports none
-          // at all when nothing rises far enough above it.
-          var dominantK = null, bestExcess = 0, excesses = null;
-          if (fit) {
-            excesses = new Float64Array(hiK + 1);
-            for (var f2 = loK; f2 <= hiK; f2++) {
-              if (meanPower[f2] <= 0) continue;
-              excesses[f2] = Math.log(meanPower[f2]) - (fit.intercept + fit.slope * Math.log(f2));
-              if (excesses[f2] > bestExcess) bestExcess = excesses[f2];
-            }
-          }
-          // Twice the trend. Below that a "peak" is the ordinary bin-to-bin
-          // scatter of a smooth spectrum, not a feature size.
-          if (bestExcess >= Math.LN2) {
-            // The peak of the LOWEST run of bins that stands out - not the
-            // tallest peak anywhere.
-            //
-            // Lowest run, because anything periodic puts harmonics at 2x,
-            // 3x, ... its own frequency, and against a steep fitted line a
-            // harmonic can easily stand further above the trend than the
-            // fundamental that produced it; the feature a reader can
-            // actually see is the fundamental, always the lowest of the
-            // family. Peak WITHIN the run, because the Hann window spreads
-            // every real peak across its two neighbouring bins, so the
-            // first bin over the threshold is routinely one short of the
-            // real one.
-            var cutoff = Math.max(Math.LN2, 0.6 * bestExcess);
-            for (var f3 = loK; f3 <= hiK; f3++) {
-              if (excesses[f3] < cutoff) continue;
-              dominantK = f3;
-              for (var f4 = f3 + 1; f4 <= hiK && excesses[f4] >= cutoff; f4++) {
-                if (excesses[f4] > excesses[dominantK]) dominantK = f4;
-              }
-              break;
-            }
-          }
-
-          // ---- Directionality, measured in the frequency domain ----
-          //
-          // Each cell is divided by the mean power of its own radial ring
-          // before being binned by angle, so this describes the SHAPE of
-          // the spectrum rather than its radial falloff. Without that
-          // division the handful of cells nearest the origin - which on a
-          // steep spectrum outweigh everything else by orders of magnitude,
-          // and which fall into whichever few angle bins they happen to
-          // fall into - would set the answer on their own.
-          var ANG_BINS = 72;
-          var angular = new Float64Array(ANG_BINS);
-          var wSum = 0, wCos = 0, wSin = 0;
-          for (ry = 0; ry < S; ry++) {
-            ky = ry <= half ? ry : ry - S;
-            for (rx = 0; rx < S; rx++) {
-              kx = rx <= half ? rx : rx - S;
-              if (kx === 0 && ky === 0) continue;
-              kr = Math.sqrt(kx * kx + ky * ky);
-              bin = Math.round(kr);
-              if (bin < loK || bin > hiK || meanPower[bin] <= 0) continue;
-              var w = fftState.power[ry * S + rx] / fftState.blocks / meanPower[bin];
-              // The structure a frequency describes runs PERPENDICULAR to
-              // that frequency's own direction, so this is rotated 90
-              // degrees to match the orientation rose above and share its
-              // reading.
-              var ang = Math.atan2(kx, -ky);
-              if (ang < 0) ang += Math.PI;
-              if (ang >= Math.PI) ang -= Math.PI;
-              var ab = Math.floor(ang * ANG_BINS / Math.PI);
-              if (ab >= ANG_BINS) ab = ANG_BINS - 1;
-              angular[ab] += w;
-              // Doubled angle, because an orientation repeats every 180
-              // degrees - the same trick the circular mean uses, one octave
-              // up.
-              wSum += w;
-              wCos += w * Math.cos(2 * ang);
-              wSin += w * Math.sin(2 * ang);
-            }
-          }
-          var anisotropy = wSum > 0 ? Math.sqrt(wCos * wCos + wSin * wSin) / wSum : 0;
-          var peakAngle = 0.5 * Math.atan2(wSin, wCos);
-          if (peakAngle < 0) peakAngle += Math.PI;
-
-          out.groups.spectrum = {
-            size: S,
-            blocks: fftState.blocks,
-            radialPower: meanPower,
-            maxK: maxK,
-            slope: fit ? -fit.slope : null,      // P ~ k^-slope
-            fitFrom: loK, fitTo: hiK,
-            dominantK: dominantK,
-            // In samples. The caller turns this into screen pixels and
-            // world units, which are the two forms a reader can act on.
-            // null means the spectrum is a smooth power law with no one
-            // scale standing out - which is itself the interesting answer.
-            dominantWavelength: dominantK ? S / dominantK : null,
-            dominantExcess: bestExcess,
-            angularPower: angular,
-            angularBins: ANG_BINS,
-            angularPeakDegrees: peakAngle * 180 / Math.PI,
-            // Comparable with the orientation section's coherence: same
-            // [0, 1] scale, same meaning, measured a completely different
-            // way.
-            angularAnisotropy: anisotropy,
-          };
-          fftState = null;
-        });
-      }
-    }
-
-    // ---- Correlation: how far one sample's value reaches ----
-    if (groups.correlation) {
-      // How far out to measure. Fixed at 32 samples this used to mean 32
-      // screen pixels at the old sample resolution and rather less than
-      // that at a finer one, so the range it covers now scales with the
-      // block - a correlation length is only meaningful against a distance
-      // the reader can see, and at one sample per pixel a 64-sample ceiling
-      // puts most real ones out of reach. The ceiling can afford to be this
-      // high because each lag's cost is already held flat by the scan-line
-      // stride below, not by the number of lags.
-      var lags = clamp(spec.maxLag || Math.round(Math.min(W, H) / 5), 8, 256);
-      lags = Math.max(1, Math.min(lags, Math.floor(Math.min(W, H) / 2) - 1));
-      var corr = new Float64Array(lags + 1);
-      // Running seam totals, so "is there a seam anywhere between column c
-      // and column c + h" is one subtraction rather than a scan - which is
-      // what keeps a lag pass linear instead of quadratic.
-      var colSeamPrefix = null, rowSeamPrefix = null;
-      // Every lag walks the block again, so at a high sample resolution the
-      // lags together would cost more than everything else here put
-      // together. They don't need to: a correlation is an average, and
-      // scanning every Nth line rather than every line changes only how
-      // many pairs it is averaged over - which stays in the hundreds of
-      // thousands even at the coarsest stride this picks.
-      var scanLines = clamp(Math.floor(SAMPLES_PER_STEP / Math.max(1, W + H)), 8, Math.min(W, H));
-      var rowStep = Math.max(1, Math.floor(H / scanLines));
-      var colStep = Math.max(1, Math.floor(W / scanLines));
-
-      steps.push(function correlationPrepare() {
-        if (out.empty) return;
-        corr[0] = 1;
-        colSeamPrefix = new Int32Array(W);
-        for (var c = 1; c < W; c++) colSeamPrefix[c] = colSeamPrefix[c - 1] + (xSeam(c - 1) ? 1 : 0);
-        rowSeamPrefix = new Int32Array(H);
-        for (var r = 1; r < H; r++) rowSeamPrefix[r] = rowSeamPrefix[r - 1] + (ySeam(r - 1) ? 1 : 0);
-      });
-
-      for (var lag = 1; lag <= lags; lag++) {
-        steps.push((function (h) {
-          return function correlationLag() {
-            if (out.empty) return;
-            var num = 0, den = 0, n = 0;
-            var c, r, i, j;
-            for (r = 0; r < H; r += rowStep) {
-              for (c = 0; c + h < W; c++) {
-                if (colSeamPrefix[c + h] !== colSeamPrefix[c]) continue;
-                i = r * W + c; j = i + h;
-                if (!valid[i] || !valid[j]) continue;
-                num += centered[i] * centered[j];
-                den += centered[i] * centered[i] + centered[j] * centered[j];
-                n += 2;
-              }
-            }
-            for (c = 0; c < W; c += colStep) {
-              for (r = 0; r + h < H; r++) {
-                if (rowSeamPrefix[r + h] !== rowSeamPrefix[r]) continue;
-                i = r * W + c; j = i + h * W;
-                if (!valid[i] || !valid[j]) continue;
-                num += centered[i] * centered[j];
-                den += centered[i] * centered[i] + centered[j] * centered[j];
-                n += 2;
-              }
-            }
-            // Normalised by the variance of the pairs actually compared
-            // (both halves of each pair), not by the whole block's - the
-            // usual correction that keeps a lag correlation inside [-1, 1]
-            // when the compared subset isn't the full picture.
-            corr[h] = n > 0 && den > 0 ? 2 * num / den : 0;
-          };
-        })(lag));
-      }
-
-      // Moran's I over rook neighbours: lag 1 read as a clustering
-      // statistic. ~1 is smooth patches, ~0 is noise, negative is a
-      // checkerboard. Its own no-clustering baseline is -1/(n-1), which is
-      // reported alongside rather than folded in.
-      var moranNum = 0, moranDen = 0, moranW = 0;
-      addRowPass(0, H, function accumulateMoran(r0, r1) {
-        if (out.empty) return;
-        for (var r = r0; r < r1; r++) {
-          for (var c = 0; c < W; c++) {
-            var i = r * W + c;
-            if (!valid[i]) continue;
-            moranDen += centered[i] * centered[i];
-            if (c + 1 < W && !xSeam(c) && valid[i + 1]) { moranNum += 2 * centered[i] * centered[i + 1]; moranW += 2; }
-            if (r + 1 < H && !ySeam(r) && valid[i + W]) { moranNum += 2 * centered[i] * centered[i + W]; moranW += 2; }
-          }
-        }
-      }, function finishCorrelation() {
-        if (out.empty) return;
-        // Correlation length: where the curve first falls to 1/e, linearly
-        // interpolated between the two lags that straddle it.
-        var THRESHOLD = 1 / Math.E;
-        var length = null;
-        for (var h = 1; h <= lags; h++) {
-          if (corr[h] < THRESHOLD) {
-            var prev = corr[h - 1];
-            length = prev > corr[h] ? (h - 1) + (prev - THRESHOLD) / (prev - corr[h]) : h;
-            break;
-          }
-        }
-        out.groups.correlation = out.groups.correlation || {};
-        out.groups.correlation.curve = corr;
-        out.groups.correlation.maxLag = lags;
-        out.groups.correlation.correlationLength = length;   // in samples; null = still correlated at maxLag
-        out.groups.correlation.moransI = moranDen > 0 && moranW > 0 ? (validCount / moranW) * (moranNum / moranDen) : 0;
-        out.groups.correlation.moransExpected = validCount > 1 ? -1 / (validCount - 1) : 0;
-      });
-
-      // ---- How close is the whole view to one flat ramp? ----
-      //
-      // Least squares of value against (x, y) over the block. R^2 near 1
-      // means the picture is essentially a single smooth gradient with
-      // detail on top; near 0 means position alone predicts nothing, which
-      // is what a fully developed fractal looks like.
-      var pn = 0, psx = 0, psy = 0, psz = 0, psxx = 0, psxy = 0, psyy = 0, psxz = 0, psyz = 0, pszz = 0;
-      addRowPass(0, H, function accumulatePlane(r0, r1) {
-        if (out.empty) return;
-        for (var r = r0; r < r1; r++) {
-          for (var c = 0; c < W; c++) {
-            var i = r * W + c;
-            if (!valid[i]) continue;
-            // Normalised to [-1, 1] on the longer axis so the fit is
-            // numerically well behaved whatever the block size is.
-            var x = (c - (W - 1) / 2) / Math.max(W, H);
-            var y = (r - (H - 1) / 2) / Math.max(W, H);
-            var z = centered[i];
-            pn++; psx += x; psy += y; psz += z;
-            psxx += x * x; psxy += x * y; psyy += y * y;
-            psxz += x * z; psyz += y * z; pszz += z * z;
-          }
-        }
-      }, function finishPlane() {
-        if (out.empty || pn < 3) return;
-        var mx = psx / pn, my = psy / pn, mz = psz / pn;
-        var cxx = psxx - pn * mx * mx, cxy = psxy - pn * mx * my, cyy = psyy - pn * my * my;
-        var cxz = psxz - pn * mx * mz, cyz = psyz - pn * my * mz, czz = pszz - pn * mz * mz;
-        var det = cxx * cyy - cxy * cxy;
-        var r2 = 0, bx = 0, by = 0;
-        if (Math.abs(det) > 1e-30 && czz > 0) {
-          bx = (cyy * cxz - cxy * cyz) / det;
-          by = (cxx * cyz - cxy * cxz) / det;
-          r2 = clamp((bx * cxz + by * cyz) / czz, 0, 1);
-        }
-        out.groups.correlation = out.groups.correlation || {};
-        out.groups.correlation.planeR2 = r2;
-        out.groups.correlation.planeSlopeX = bx;
-        out.groups.correlation.planeSlopeY = by;
-      });
-    }
-
     // ---- Features: how many distinct things are in the picture, and what
     // shape they are ----
     if (groups.features) {
@@ -1023,7 +467,7 @@
         flatCutoff = scaleN > 0 ? (scaleSum / scaleN) * 0.25 : 0;
       });
 
-      var peaks = 0, pits = 0, ridges = 0, valleys = 0, saddles = 0, flats = 0, inspected = 0;
+      var ridges = 0, valleys = 0, saddles = 0, flats = 0, inspected = 0;
       // Which way each sample curves, kept rather than only counted:
       // the longest-ridge and longest-valley measurements below need
       // to know WHICH samples were which, not just how many.
@@ -1049,21 +493,6 @@
             if (!ok) continue;
             inspected++;
 
-            // Strict local extremum over all eight neighbours - the count
-            // of distinct peaks and pits, which is the simplest honest
-            // answer to "how many features are there".
-            var isPeak = true, isPit = true;
-            for (var dr2 = -1; dr2 <= 1; dr2++) {
-              for (var dc2 = -1; dc2 <= 1; dc2++) {
-                if (dr2 === 0 && dc2 === 0) continue;
-                var d = delta(t[i], t[i + dr2 * W + dc2], circular);
-                if (d >= 0) isPeak = false;
-                if (d <= 0) isPit = false;
-              }
-            }
-            if (isPeak) peaks++;
-            if (isPit) pits++;
-
             // Discrete Hessian, every term a wrapped offset from the
             // center. Eigenvalue SIGNS are what classify the local shape:
             // both negative is a ridge/peak, both positive a valley/pit,
@@ -1085,9 +514,6 @@
         if (out.empty) return;
         out.groups.features = {
           inspected: inspected,
-          peaks: peaks,
-          pits: pits,
-          extremaPerThousand: inspected > 0 ? 1000 * (peaks + pits) / inspected : 0,
           ridgeFraction: inspected > 0 ? ridges / inspected : 0,
           valleyFraction: inspected > 0 ? valleys / inspected : 0,
           saddleFraction: inspected > 0 ? saddles / inspected : 0,
@@ -1302,8 +728,8 @@
     }
 
     // Each group returns its raw per-bin arrays (the histogram, the
-    // orientation bins, the radial and angular power, the lag curve) and
-    // the tensor eigenvalues behind its summary numbers, not only the
+    // orientation bins) and the tensor eigenvalues behind its summary
+    // numbers, not only the
     // summaries - the panel plots some of them, and the rest are what makes
     // a summary number checkable against the data it came from rather than
     // having to be taken on trust.
@@ -1327,13 +753,9 @@
     createJob: createJob,
     // Exported for the regression page, which checks them directly against
     // closed-form answers - see the fractal-stats tests in physics-tests.js.
-    fftInPlace: fftInPlace,
-    fft2dInPlace: fft2dInPlace,
     delta: delta,
     circularSpreadFromCounts: circularSpreadFromCounts,
     quantileFromCounts: quantileFromCounts,
-    linearFit: linearFit,
-    floorPow2: floorPow2,
     QUANTILE_BUCKETS: QUANTILE_BUCKETS,
   };
 })(window);
