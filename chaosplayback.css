@@ -220,10 +220,15 @@ button.bar-link:disabled {
   opacity: 0.4;
   cursor: default;
 }
-/* Loop is a switch: lit while it is on. */
-#loop[aria-pressed="true"] {
+/* Loop and Sound are switches: lit while they are on. */
+#loop[aria-pressed="true"],
+#sound[aria-pressed="true"] {
   color: var(--accent);
   border-color: var(--accent);
+}
+#sound[aria-pressed="true"] .when-off,
+#sound[aria-pressed="false"] .when-on {
+  display: none;
 }
 
 /* ---- Phones, and fingers ----

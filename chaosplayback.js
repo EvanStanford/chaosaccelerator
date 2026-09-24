@@ -65,11 +65,10 @@
   var movie = link.view.movie;
   var quality = MoviePath.QUALITIES[Math.min(movie.quality, MoviePath.QUALITIES.length - 1)];
 
-  // The ways back. The map gets the keyframes back too, in its own link, so
+  // The way back. The map gets the keyframes back too, in its own link, so
   // the Movie card comes up holding the movie this was rendered from - ready
   // to be changed and rendered again - on the first keyframe's view.
   var first = movie.keyframes[0];
-  $("back-to-scene").href = "chaos.html#" + ShareUrl.encode({ page: ShareUrl.PAGE_BUILDER, scene: link.scene });
   $("back-to-map").href = "chaos.html#" + ShareUrl.encode({
     page: ShareUrl.PAGE_MAP,
     scene: link.scene,
@@ -234,6 +233,7 @@
 
   function beginRender(grid) {
     var defaultScale = grid.defaultScale();
+    log10DefaultScale = Math.log10(defaultScale);
     var lastStep = link.scene.simulationSteps;
     frames = MoviePath.frames(movie.keyframes.map(function (k) {
       return { center: k.center, scale: defaultScale / k.zoom, step: Math.min(k.step, lastStep), seconds: k.seconds };
@@ -278,6 +278,119 @@
       scene: link.scene,
       view: { display: link.view.display, precision: link.view.precision },
     });
+  }
+
+  // ---- The sound ----
+  //
+  // A Shepard tone that follows the zoom: three orders of magnitude in is one
+  // octave up, three out is one down, so a movie that dives forever climbs
+  // forever without ever getting anywhere. Six partials an octave apart,
+  // each faded by a window over log-frequency centred on 220 Hz (an A, so
+  // the partials all land on A's at every thousandfold zoom): full volume
+  // within an octave of the centre, falling away by a cosine to silence two
+  // octaves further out - fuller and more organ-like than Shepard's own
+  // Gaussian, with nothing shrill at the top. As the pitch climbs, a partial
+  // fading out at the top is replaced by one fading in at the bottom, and
+  // since a partial's volume depends only on its absolute frequency the join
+  // is seamless. Each partial is one plain sine: two a few cents apart, for
+  // warmth, beat against each other at a few hertz, which is worse. Everything
+  // moves through smoothing so nothing clicks.
+  var OCTAVES_PER_DECADE = 1 / 3;
+  var TONE_CENTER_HZ = 220;
+  var TONE_FLAT = 1;           // octaves either side of the centre at full volume
+  var TONE_HALF_WIDTH = 3;     // octaves; silent from here out, and partials live in [-3, 3)
+  var TONE_LEVEL = 0.12;       // six sines, about four of them at full volume at once
+  var TONE_FADE_S = 0.12;      // time constant of the fade in and out
+
+  function ShepardTone(ctx, destination) {
+    var master = ctx.createGain();
+    master.gain.value = 0;
+    master.connect(destination);
+    var partials = [];
+    for (var k = -TONE_HALF_WIDTH; k < TONE_HALF_WIDTH; k++) {
+      var gain = ctx.createGain();
+      gain.gain.value = 0;
+      gain.connect(master);
+      var osc = ctx.createOscillator();
+      osc.type = "sine";
+      osc.connect(gain);
+      osc.start();
+      partials.push({ k: k, gain: gain, osc: osc, x: null });
+    }
+    // Where partial k sits in the window for a tone at `octaves`: it climbs
+    // continuously with the tone, and wraps from the top of the window to
+    // the bottom - both silent - rather than every partial jumping an octave
+    // whenever the tone crosses a whole number, which was audible however
+    // smoothly it was done.
+    function place(octaves, k) {
+      var width = 2 * TONE_HALF_WIDTH, x = (octaves + k + TONE_HALF_WIDTH) % width;
+      if (x < 0) x += width;
+      return x - TONE_HALF_WIDTH;
+    }
+    // The window over log-frequency: flat in the middle, cosine edges, and
+    // exactly zero at the window's edge so the partial that wraps round does
+    // so in silence.
+    function bell(x) {
+      var a = Math.abs(x);
+      if (a <= TONE_FLAT) return 1;
+      if (a >= TONE_HALF_WIDTH) return 0;
+      return 0.5 * (1 + Math.cos(Math.PI * (a - TONE_FLAT) / (TONE_HALF_WIDTH - TONE_FLAT)));
+    }
+    return {
+      // `octaves` is the tone's position: any real number, only its fraction
+      // is audible.
+      setPitch: function (octaves) {
+        var now = ctx.currentTime;
+        partials.forEach(function (p) {
+          var x = place(octaves, p.k);
+          var hz = TONE_CENTER_HZ * Math.pow(2, x);
+          // Small moves are smoothed so nothing zippers; a wrap round the
+          // window (or the movie looping or being seeked) is taken at once -
+          // an oscillator changes pitch without a break in its wave, so an
+          // instant change makes no click where a smoothed one would chirp.
+          // Volume is always smoothed: an instant change there IS a click.
+          var jump = p.x === null || Math.abs(x - p.x) > 0.5;
+          if (jump) p.osc.frequency.setValueAtTime(hz, now);
+          else p.osc.frequency.setTargetAtTime(hz, now, 0.02);
+          p.gain.gain.setTargetAtTime(bell(x), now, 0.02);
+          p.x = x;
+        });
+      },
+      // 1 is on, 0 is off; either way it gets there smoothly.
+      setLevel: function (level) {
+        master.gain.setTargetAtTime(TONE_LEVEL * level, ctx.currentTime, TONE_FADE_S);
+      },
+      stop: function () {
+        partials.forEach(function (p) { p.osc.stop(); });
+        master.disconnect();
+      },
+    };
+  }
+
+  // Frame i's place on the tone, from the zoom it was rendered at.
+  var log10DefaultScale = 0;
+  function pitchOf(i) {
+    return (log10DefaultScale - Math.log10(frames[i].scale)) * OCTAVES_PER_DECADE;
+  }
+
+  // The live sound: off until asked for, and the AudioContext made only then,
+  // in the click - browsers don't let a page start sound on its own.
+  var btnSound = $("sound");
+  var soundOn = false, audioCtx = null, liveTone = null;
+  function updateSound() {
+    if (liveTone) liveTone.setLevel(soundOn && playing ? 1 : 0);
+  }
+  function setSoundOn(next) {
+    soundOn = next;
+    if (soundOn && !audioCtx && typeof AudioContext === "function") {
+      audioCtx = new AudioContext();
+      liveTone = new ShepardTone(audioCtx, audioCtx.destination);
+    }
+    if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+    btnSound.setAttribute("aria-pressed", soundOn ? "true" : "false");
+    btnSound.title = soundOn ? "Sound on" : "Sound off";
+    btnSound.setAttribute("aria-label", btnSound.title);
+    updateSound();
   }
 
   // ---- 3. Playback ----
@@ -335,6 +448,7 @@
     btnPlayPause.innerHTML = playing ? "&#10074;&#10074;" : "&#9654;";
     btnPlayPause.title = playing ? "Pause" : "Play";
     btnPlayPause.setAttribute("aria-label", btnPlayPause.title);
+    updateSound();
   }
 
   function tick(now) {
@@ -356,6 +470,7 @@
       show(bitmap);
       shownIndex = index;
     }
+    if (liveTone) liveTone.setPitch(pitchOf(index));
     if (!scrubbing) scrubber.value = String(Math.floor(position));
     timeReadout.textContent = formatClock(position / FPS) + " / " + formatClock(frames.length / FPS);
     requestAnimationFrame(tick);
@@ -373,7 +488,7 @@
       frameWidth + " \u00d7 " + frameHeight + "  \u00b7  " +
       formatBytes(blobs.reduce(function (sum, blob) { return sum + blob.size; }, 0)) + "  \u00b7  rendered in " + formatDuration((performance.now() - renderStartedAt) / 1000);
     scrubber.max = String(frames.length - 1);
-    [btnPlayPause, scrubber, btnSpeed, btnLoop, btnRestart].forEach(function (control) { control.disabled = false; });
+    [btnPlayPause, scrubber, btnSpeed, btnLoop, btnRestart, btnSound].forEach(function (control) { control.disabled = false; });
 
     btnPlayPause.addEventListener("click", function () {
       // Play, at the end of a movie that doesn't loop, means play it again.
@@ -391,9 +506,11 @@
       btnLoop.setAttribute("aria-pressed", looping ? "true" : "false");
     });
     btnRestart.addEventListener("click", function () { seek(0); });
+    btnSound.addEventListener("click", function () { setSoundOn(!soundOn); });
     window.addEventListener("keydown", function (event) {
       if (event.target === scrubber) return; // it has arrow keys of its own
       if (event.key === " ") { event.preventDefault(); btnPlayPause.click(); }
+      else if (event.key === "m") btnSound.click();
       else if (event.key === "ArrowRight") { setPlaying(false); seek(Math.floor(position) + 1); }
       else if (event.key === "ArrowLeft") { setPlaying(false); seek(Math.floor(position) - 1); }
       else if (event.key === "Home") seek(0);
@@ -415,6 +532,10 @@
   // own: a real one would mean shipping a muxer library. Every frame is held
   // for exactly one frame's time, paced against the clock rather than by
   // counting timeouts, so the file runs at the movie's own speed.
+  //
+  // With the sound on, the file gets the tone too: a second Shepard tone,
+  // played into the recording alone and not the speakers, following the
+  // frames as they are filmed. With it off the file has no audio track.
   var DOWNLOAD_LABEL = "Download";
   function downloadMovie() {
     if (btnDownload.disabled) return;
@@ -427,15 +548,24 @@
     film.width = frameWidth;
     film.height = frameHeight;
     var filmCtx = film.getContext("2d");
-    var type = ["video/mp4;codecs=avc1", "video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].filter(function (t) {
-      return MediaRecorder.isTypeSupported(t);
-    })[0];
-    var recorder;
+    var withSound = soundOn && !!audioCtx;
+    var types = withSound
+      ? ["video/mp4;codecs=avc1,mp4a.40.2", "video/mp4", "video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"]
+      : ["video/mp4;codecs=avc1", "video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
+    var type = types.filter(function (t) { return MediaRecorder.isTypeSupported(t); })[0];
+    var recorder, filmTone = null;
     try {
+      var stream = film.captureStream(FPS);
+      if (withSound) {
+        var sink = audioCtx.createMediaStreamDestination();
+        filmTone = new ShepardTone(audioCtx, sink);
+        stream.addTrack(sink.stream.getAudioTracks()[0]);
+      }
       // Generous on purpose: this picture is mostly fine noise, which a
       // default bitrate turns to mush.
-      recorder = new MediaRecorder(film.captureStream(FPS), { mimeType: type, videoBitsPerSecond: Math.min(60e6, Math.max(8e6, frameWidth * frameHeight * 12)) });
+      recorder = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: Math.min(60e6, Math.max(8e6, frameWidth * frameHeight * 12)), audioBitsPerSecond: 128000 });
     } catch (err) {
+      if (filmTone) filmTone.stop();
       btnDownload.textContent = "Not supported in this browser";
       btnDownload.disabled = true;
       return;
@@ -443,6 +573,7 @@
     var chunks = [];
     recorder.ondataavailable = function (event) { if (event.data && event.data.size) chunks.push(event.data); };
     recorder.onstop = function () {
+      if (filmTone) filmTone.stop();
       var file = new Blob(chunks, { type: recorder.mimeType || type });
       var a = document.createElement("a");
       a.href = URL.createObjectURL(file);
@@ -456,10 +587,19 @@
     };
     btnDownload.disabled = true;
     var startedAt = 0;
+    // "1m29s", or "29s" inside the first minute.
+    function formatRecorded(seconds) {
+      seconds = Math.floor(seconds);
+      var m = Math.floor(seconds / 60), s = seconds % 60;
+      return m ? m + "m" + (s < 10 ? "0" : "") + s + "s" : s + "s";
+    }
+    var movieLength = formatRecorded(blobs.length / FPS);
     function film1(i) {
       if (i >= blobs.length) {
-        // One more frame's time, or the last frame is cut short.
-        setTimeout(function () { recorder.stop(); }, 1000 / FPS);
+        // One more frame's time, or the last frame is cut short - and with
+        // sound, long enough for the tone to fade out rather than stop dead.
+        if (filmTone) filmTone.setLevel(0);
+        setTimeout(function () { recorder.stop(); }, filmTone ? Math.max(1000 / FPS, 1000 * TONE_FADE_S * 4) : 1000 / FPS);
         return;
       }
       createImageBitmap(blobs[i]).then(function (bitmap) {
@@ -467,7 +607,8 @@
         setTimeout(function () {
           filmCtx.drawImage(bitmap, 0, 0);
           bitmap.close();
-          btnDownload.textContent = "Recording " + Math.round(100 * (i + 1) / blobs.length) + "%";
+          if (filmTone) filmTone.setPitch(pitchOf(i));
+          btnDownload.textContent = "Recording in real time " + formatRecorded((i + 1) / FPS) + " out of " + movieLength;
           film1(i + 1);
         }, Math.max(0, due - performance.now()));
       }, function () { recorder.stop(); });
@@ -477,6 +618,7 @@
     createImageBitmap(blobs[0]).then(function (bitmap) {
       filmCtx.drawImage(bitmap, 0, 0);
       bitmap.close();
+      if (filmTone) { filmTone.setPitch(pitchOf(0)); filmTone.setLevel(1); }
       recorder.start();
       startedAt = performance.now();
       film1(1);

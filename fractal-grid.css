@@ -1314,8 +1314,9 @@ input[type="range"] {
 }
 .movie-keyframe-what {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px 8px;
   white-space: pre;
 }
 .movie-keyframe-what b {
@@ -1331,25 +1332,54 @@ input[type="range"] {
   color: #fff;
   font-size: 11px;
 }
-.movie-keyframe-what span {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--text);
-}
-.movie-keyframe-seconds {
+/* A number in the row (see movieField in fractal-grid.js): caption, the
+   number, and a stacked pair of arrows that say it can be changed. */
+.movie-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   flex-shrink: 0;
 }
-.movie-keyframe-seconds input {
-  width: 52px;
+.movie-field-caption {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.movie-field input {
+  width: 62px;
   padding: 2px 4px;
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
   text-align: right;
   color: var(--text);
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: 5px;
+}
+.movie-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.movie-field-arrows {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.movie-field-arrows button {
+  width: 16px;
+  height: 10px;
+  padding: 0;
+  font-size: 7px;
+  line-height: 1;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.movie-field-arrows button:hover {
+  color: var(--text);
+  background: var(--bg-input);
+  border-color: var(--accent);
 }
 .movie-keyframe-actions {
   display: flex;

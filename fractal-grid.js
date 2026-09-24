@@ -10996,6 +10996,82 @@
     return button;
   }
 
+  // A zoom as typed: "1.4e+25", "1.4e25", "1.4\u00d710^25", "10^25", "1,400",
+  // with or without the readout's trailing "\u00d7". Positive, or null.
+  function parseZoomText(text) {
+    var s = String(text).trim().toLowerCase().replace(/[\s,]/g, "").replace(/[\u00d7x*]$/, "");
+    s = s.replace(/[\u00d7x*]10\^/, "e").replace(/^10\^/, "1e");
+    var zoom = Number(s);
+    return zoom > 0 && isFinite(zoom) ? zoom : null;
+  }
+
+  // One number in a keyframe's row, with a caption, a pair of arrows and,
+  // once it is clicked into, a place to type. The arrows are what says the
+  // number can be changed at all. `field` is:
+  //   show()       the text at rest
+  //   edit()       the text to type over, when focused (defaults to show())
+  //   parse(text)  what was typed as a value, or undefined to leave it be
+  //   step(dir)    the value one arrow press up (+1) or down (-1) from here
+  //   apply(value) commits, and the row is rebuilt after
+  function movieField(caption, label, field) {
+    var wrap = document.createElement("label");
+    wrap.className = "movie-field";
+    if (field.title) wrap.title = field.title;
+    var input = document.createElement("input");
+    input.type = "text";
+    input.inputMode = "decimal";
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    input.value = field.show();
+    if (field.placeholder) input.placeholder = field.placeholder;
+    input.setAttribute("aria-label", label);
+    var editing = false;
+    function commit(value) {
+      if (value === undefined) { updateMovieUI(); return; }
+      field.apply(value);
+      updateMovieUI();
+    }
+    input.addEventListener("focus", function () {
+      if (!editing) {
+        editing = true;
+        input.value = field.edit ? field.edit() : field.show();
+      }
+      input.select();
+    });
+    input.addEventListener("blur", function () { if (editing) commit(field.parse(input.value)); });
+    input.addEventListener("keydown", function (event) {
+      if (event.key === "Enter") { event.preventDefault(); input.blur(); }
+      else if (event.key === "Escape") { event.preventDefault(); editing = false; updateMovieUI(); }
+      else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        event.preventDefault();
+        editing = false;
+        commit(field.step(event.key === "ArrowUp" ? 1 : -1));
+      }
+    });
+    var arrows = document.createElement("span");
+    arrows.className = "movie-field-arrows";
+    [["\u25b2", "up", 1], ["\u25bc", "down", -1]].forEach(function (a) {
+      var button = document.createElement("button");
+      button.type = "button";
+      button.tabIndex = -1;
+      button.textContent = a[0];
+      button.title = label + " " + a[1] + (field.stepHint ? " " + field.stepHint : "");
+      button.setAttribute("aria-label", button.title);
+      // mousedown, not click: a click would first blur the input, whose own
+      // commit rebuilds the row from under the button.
+      button.addEventListener("mousedown", function (event) { event.preventDefault(); });
+      button.addEventListener("click", function () { editing = false; commit(field.step(a[2])); });
+      arrows.appendChild(button);
+    });
+    var cap = document.createElement("span");
+    cap.className = "movie-field-caption";
+    cap.textContent = caption;
+    wrap.appendChild(cap);
+    wrap.appendChild(input);
+    wrap.appendChild(arrows);
+    return wrap;
+  }
+
   // Rebuilt whole on every change: a movie has a handful of keyframes, and
   // each row's text depends on its neighbours (the time a move takes is a
   // property of BOTH its ends).
@@ -11010,32 +11086,53 @@
       what.className = "movie-keyframe-what";
       var index = document.createElement("b");
       index.textContent = String(i + 1);
-      var text = document.createElement("span");
-      text.textContent = formatZoom(DEFAULT_SCALE / k.scale) + "  \u00b7  frame " + Math.min(k.step, simulationSteps).toLocaleString();
       what.appendChild(index);
-      what.appendChild(text);
+
+      // Zoom: typed in any notation, shown to two figures while it is being
+      // typed, and stepped a power of ten at a time. Changing it here moves
+      // the keyframe, not the map.
+      what.appendChild(movieField("zoom", "Zoom of keyframe " + (i + 1), {
+        title: "The zoom at this keyframe. Type any notation - 1.4e+25, 1.4\u00d710^25 - or step it a power of ten with the arrows.",
+        stepHint: "a power of ten",
+        show: function () { return formatZoom(DEFAULT_SCALE / k.scale); },
+        edit: function () { return (DEFAULT_SCALE / k.scale).toExponential(1); },
+        parse: function (text) { var z = parseZoomText(text); return z === null ? undefined : z; },
+        step: function (dir) { return DEFAULT_SCALE / k.scale * (dir > 0 ? 10 : 0.1); },
+        apply: function (zoom) { k.scale = clamp(DEFAULT_SCALE / zoom, MIN_SCALE, MAX_SCALE); },
+      }));
+
+      // Frame: the simulation frame the map is drawn at here.
+      what.appendChild(movieField("frame", "Frame of keyframe " + (i + 1), {
+        title: "The simulation frame the map shows at this keyframe.",
+        stepHint: "a frame",
+        show: function () { return Math.min(k.step, simulationSteps).toLocaleString(); },
+        edit: function () { return String(Math.min(k.step, simulationSteps)); },
+        parse: function (text) {
+          var n = Number(String(text).replace(/[\s,]/g, ""));
+          return isFinite(n) ? Math.round(n) : undefined;
+        },
+        step: function (dir) { return Math.min(k.step, simulationSteps) + dir; },
+        apply: function (step) { k.step = clamp(step, 0, simulationSteps); },
+      }));
 
       // The move that ARRIVES here. The first keyframe has one only in a
-      // movie that returns to it.
+      // movie that returns to it. Left empty, the time is worked out - and
+      // the arrows step from THAT, not from nothing.
       var arriving = i > 0 ? moves[i - 1] : (movie.loop && movie.keyframes.length > 1 ? moves[moves.length - 1] : null);
       if (arriving) {
-        var secondsField = document.createElement("label");
-        secondsField.className = "movie-keyframe-seconds";
-        secondsField.title = "How long the move arriving at this keyframe takes. Left empty, it is worked out from how far the camera and the simulation have to go.";
-        var secondsInput = document.createElement("input");
-        secondsInput.type = "number";
-        secondsInput.min = "0.1"; secondsInput.max = "60"; secondsInput.step = "0.1";
-        secondsInput.placeholder = String(arriving.seconds);
-        if (k.seconds) secondsInput.value = String(k.seconds);
-        secondsInput.setAttribute("aria-label", "Seconds to reach keyframe " + (i + 1));
-        secondsInput.addEventListener("change", function () {
-          var v = Number(secondsInput.value);
-          k.seconds = v > 0 ? clamp(Math.round(v * 10) / 10, 0.1, 60) : null;
-          updateMovieUI();
-        });
-        secondsField.appendChild(secondsInput);
-        secondsField.appendChild(document.createTextNode(" s"));
-        what.appendChild(secondsField);
+        what.appendChild(movieField("s", "Seconds to reach keyframe " + (i + 1), {
+          title: "How long the move arriving at this keyframe takes. Left empty, it is worked out from how far the camera and the simulation have to go.",
+          stepHint: "a tenth of a second",
+          placeholder: String(arriving.seconds),
+          show: function () { return k.seconds ? String(k.seconds) : ""; },
+          parse: function (text) {
+            if (String(text).trim() === "") return null;
+            var v = Number(text);
+            return v > 0 ? v : undefined;
+          },
+          step: function (dir) { return (k.seconds || arriving.seconds) + dir * 0.1; },
+          apply: function (seconds) { k.seconds = seconds === null ? null : clamp(Math.round(seconds * 10) / 10, 0.1, 60); },
+        }));
       }
       row.appendChild(what);
 

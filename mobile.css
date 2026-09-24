@@ -296,10 +296,16 @@ html.input-coarse #grid-view .field select {
   font-size: 16px;
   padding: 8px 8px;
 }
-html.input-coarse .movie-keyframe-seconds input {
+html.input-coarse .movie-field input {
   font-size: 16px;
-  width: 64px;
+  width: 78px;
   padding: 4px 6px;
+}
+html.input-coarse .movie-field-arrows button {
+  width: 28px;
+  height: 18px;
+  min-height: 0;
+  font-size: 10px;
 }
 
 /* Targets. 44px is Apple's minimum and 48dp Android's; the desktop sizes

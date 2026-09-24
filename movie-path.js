@@ -43,11 +43,16 @@
 //    minus the distance covered - and both ends land exactly on their
 //    keyframes.
 //
-// EASING is applied to where along that path a moment falls, so every move
-// starts and stops gently; the simulation frame rides the same curve. The
-// curve is smootherstep, flat in both velocity and acceleration at its ends,
-// so a camera arriving at a keyframe and leaving on the next move never
-// jerks.
+// EASING is applied to where along that path a moment falls; the simulation
+// frame rides the same curve. A movie starts and ends at rest, but it does
+// NOT stop at every keyframe in between: a keyframe passed on the way from
+// 1x to 10000x is passed at speed, where one the camera turns round at (in
+// at 1e8x, back out to 1e4x) is where it slows to a halt. Each keyframe is
+// given a velocity - the average of the move arriving and the move leaving,
+// as vectors, so continuing cancels nothing and reversing cancels everything
+// - and each move is a quintic Hermite curve between its two ends' speeds
+// along it, with no acceleration at either end, so nothing ever jerks. With
+// both ends at rest the curve is smootherstep.
 (function (global) {
   "use strict";
 
@@ -93,9 +98,64 @@
     return { x: x[0], xLo: x[1], y: y[0], yLo: y[1] };
   }
 
-  function ease(t) {
+  // How far along a move at time t in [0, 1], setting off at speed m0 and
+  // arriving at m1 (1 is the move's average speed, 0 is at rest), with no
+  // acceleration at either end. Quintic Hermite; at rest both ends it is
+  // smootherstep, at 1 both ends it is a straight line. Monotone up to
+  // MAX_END_SPEED at both ends - faster is clamped.
+  var MAX_END_SPEED = 2.5;
+  function ease(t, m0, m1) {
     t = clamp(t, 0, 1);
-    return t * t * t * (t * (6 * t - 15) + 10);
+    m0 = clamp(m0 || 0, 0, MAX_END_SPEED);
+    m1 = clamp(m1 || 0, 0, MAX_END_SPEED);
+    var t2 = t * t, t3 = t2 * t, t4 = t3 * t, t5 = t4 * t;
+    return (6 * t5 - 15 * t4 + 10 * t3) + m0 * (t - 6 * t3 + 8 * t4 - 3 * t5) + m1 * (-4 * t3 + 7 * t4 - 3 * t5);
+  }
+
+  // The direction a move is going at one end - a unit vector in van Wijk &
+  // Nuij's own measure (pans in view heights at that end's zoom, the zoom
+  // logarithmically, weighted as their path length weights them), which is
+  // what lets the arriving and leaving directions at a keyframe be compared.
+  // `atStart` is the direction it sets off in, else the direction it
+  // arrives from.
+  function direction(route, key, atStart) {
+    var e = 1e-3;
+    var p = route.at(atStart ? 0 : 1 - e), q = route.at(atStart ? e : 1);
+    var v = [
+      RHO * ((q.center.x - p.center.x) + ((q.center.xLo || 0) - (p.center.xLo || 0))) / key.scale,
+      RHO * ((q.center.y - p.center.y) + ((q.center.yLo || 0) - (p.center.yLo || 0))) / key.scale,
+      Math.log(q.scale / p.scale) / RHO,
+    ];
+    var n = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    return n > 0 ? [v[0] / n, v[1] / n, v[2] / n] : [0, 0, 0];
+  }
+  function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+
+  // The speed each move leaves its start and arrives at its end, as a
+  // multiple of its own average speed (see ease): [{ m0, m1 }] for `list`
+  // from moves(), each move given its `route`. A keyframe's velocity is the
+  // mean of the velocity arriving and the velocity leaving; the first and
+  // last of a movie that doesn't loop, and any keyframe with a hold on one
+  // side of it, are at rest.
+  function endSpeeds(list, keyframes, loop) {
+    var n = keyframes.length;
+    var velocity = keyframes.map(function (key, i) {
+      var arriving = i > 0 ? list[i - 1] : (loop && n > 1 ? list[list.length - 1] : null);
+      var leaving = i < list.length ? list[i] : null;
+      if (!arriving || !leaving || !(arriving.route.length > 0) || !(leaving.route.length > 0)) return [0, 0, 0];
+      var vin = direction(arriving.route, key, false), vout = direction(leaving.route, key, true);
+      var sin = arriving.route.length / arriving.seconds, sout = leaving.route.length / leaving.seconds;
+      return [0, 1, 2].map(function (c) { return (vin[c] * sin + vout[c] * sout) / 2; });
+    });
+    return list.map(function (move, j) {
+      var length = move.route.length;
+      if (!(length > 0)) return { m0: 0, m1: 0 };
+      var perUnit = move.seconds / length; // seconds per unit of path: turns a speed into a multiple of this move's average
+      return {
+        m0: Math.max(0, dot(velocity[j], direction(move.route, move.from, true)) * perUnit),
+        m1: Math.max(0, dot(velocity[(j + 1) % n], direction(move.route, move.to, false)) * perUnit),
+      };
+    });
   }
 
   // The move from keyframe a to keyframe b: { length, at(u) } where u in
@@ -186,11 +246,14 @@
   // final keyframe as one last frame, where a looping one has frame 0.
   function frames(keyframes, loop) {
     var out = [];
-    moves(keyframes, loop).forEach(function (move) {
-      var route = path(move.from, move.to);
+    var list = moves(keyframes, loop);
+    list.forEach(function (move) { move.route = path(move.from, move.to); });
+    var speeds = endSpeeds(list, keyframes, loop);
+    list.forEach(function (move, j) {
+      var route = move.route;
       var count = Math.max(1, Math.round(move.seconds * FPS));
       for (var k = 0; k < count; k++) {
-        var u = ease(k / count);
+        var u = ease(k / count, speeds[j].m0, speeds[j].m1);
         var view = route.at(u);
         out.push({ center: view.center, scale: view.scale, step: Math.round(move.from.step + (move.to.step - move.from.step) * u) });
       }

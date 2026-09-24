@@ -5441,7 +5441,7 @@
 
   addTest(
     "A movie's frames: counted from its seconds, eased, looped without a jump, and the simulation rewinds as well as advances",
-    "movie-path.js's frames() - a keyframe holds the Map Evolution frame as well as the view, so a move can run the physics backwards; every move is eased (flat at both ends) so the camera never starts or stops with a jerk; and 'Return to First Keyframe' closes the movie with one more move so that played on a loop its last frame leads into its first",
+    "movie-path.js's frames() - a keyframe holds the Map Evolution frame as well as the view, so a move can run the physics backwards; a movie starts and ends at rest (and a keyframe with a hold beside it is at rest) so the camera never starts or stops with a jerk; and 'Return to First Keyframe' closes the movie with one more move so that played on a loop its last frame leads into its first",
     function () {
       var keys = [movieKeyframe(0, 0, 1000, 0), movieKeyframe(100, 50, 100, 500, 2), movieKeyframe(100, 50, 100, 200, 1)];
       var looped = MoviePath.frames(keys, true), open = MoviePath.frames(keys, false);
@@ -5465,6 +5465,42 @@
         detail: looped.length + " frames looped (closing move worked out at " + closing + "s), " + open.length + " open; ends on its last keyframe=" +
           endsOnKeyframe + "; last frame leads into the first=" + wraps + "; simulation frame at the 2nd keyframe " + open[60].step +
           " then mid-rewind " + open[75].step + "; ease flat at both ends=" + eased + "; biggest frame-to-frame hop " + smooth.toFixed(3) + " views",
+      };
+    }
+  );
+
+  addTest(
+    "A movie passes through a keyframe on its way at full speed, and comes to rest at one it turns round at",
+    "movie-path.js's frames() - a movie that stopped dead at every keyframe would make 1x -> 100x -> 10000x a zoom in two lurches. Each keyframe is given the mean of the velocities arriving and leaving, as vectors: on the way somewhere they agree and the camera sails through at speed, and where the camera turns round (in to 1e8x, back out to 1e4x) they cancel and it eases to a halt. The first and last keyframes of a movie that doesn't loop are always at rest",
+    function () {
+      function zoomKeyframe(zoom) { return movieKeyframe(0, 0, 1 / zoom, 0); }
+      // The zoom's slope, in decades per second, either side of each keyframe.
+      function slopes(keys, loop) {
+        var frames = MoviePath.frames(keys, loop), moves = MoviePath.moves(keys, loop);
+        var z = frames.map(function (f) { return Math.log10(1 / f.scale); });
+        var slope = function (i) { return (z[i + 1] - z[i]) * MoviePath.FPS; };
+        var at = 0, out = [];
+        moves.forEach(function (move) {
+          out.push({ before: at > 0 ? slope(at - 1) : 0, after: slope(at) });
+          at += Math.round(move.seconds * MoviePath.FPS);
+        });
+        out.push({ before: slope(z.length - 2), after: 0 });
+        return out;
+      }
+      var through = slopes([zoomKeyframe(1), zoomKeyframe(100), zoomKeyframe(10000)], false);
+      var turn = slopes([zoomKeyframe(1), zoomKeyframe(1e8), zoomKeyframe(1e4)], false);
+      var loop = slopes([zoomKeyframe(1), zoomKeyframe(100), zoomKeyframe(10000)], true);
+      var rest = function (s) { return Math.abs(s) < 0.01; };
+      var sails = through[1].before > 0.3 && Math.abs(through[1].after - through[1].before) < 0.01;
+      var endsAtRest = rest(through[0].after) && rest(through[2].before) && rest(turn[0].after) && rest(turn[2].before);
+      var halts = rest(turn[1].before) && rest(turn[1].after);
+      // Looped, the first keyframe is a turnaround too (out to 10000x, then back in to 1x) and rests; the middle one still sails.
+      var loopRests = rest(loop[0].after) && rest(loop[2].before) && rest(loop[2].after) && loop[1].before > 0.3 && Math.abs(loop[1].after - loop[1].before) < 0.01;
+      return {
+        pass: sails && endsAtRest && halts && loopRests,
+        detail: "1x->100x->10000x passes 100x at " + through[1].before.toFixed(2) + " -> " + through[1].after.toFixed(2) + " decades/s (ends " +
+          through[0].after.toFixed(3) + ", " + through[2].before.toFixed(3) + "); 1x->1e8x->1e4x turns at 1e8x at " +
+          turn[1].before.toFixed(3) + " -> " + turn[1].after.toFixed(3) + "; looped, the first keyframe rests=" + loopRests,
       };
     }
   );
