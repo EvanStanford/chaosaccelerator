@@ -1,0 +1,16 @@
+[
+  {
+    "scene": "scene1.jpg",
+    "map": "map1.jpg",
+    "name": "Spring Pendulum",
+    "creator": "Evan",
+    "url": "../chaos.html#map/body:ci:0:0:0:20,sprg:w:0:0:250:0:0:20000:150,xinp:0.x,yinp:0.y,outp:0.x,edge:infi,frmw:1192,frmh:809,ctry:150,zoom:1.5,disp:czom"
+  },
+  {
+    "scene": "scene2.jpg",
+    "map": "map2.jpg",
+    "name": "Double Spring Pendulum",
+    "creator": "Evan",
+    "url": "../chaos.html#map/body:ci:0:0:0:20;ci:120:-120:0:16,sprg:w:0:0:250:0:0:20000:150;0:1:0:0:0:0:15000:120,xinp:0.x,yinp:0.y,outp:1.x,edge:infi,frmw:1192,frmh:809"
+  }
+]

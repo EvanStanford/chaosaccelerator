@@ -72,6 +72,44 @@
     <a class="fractalize-btn large" href="chaos.html">Fractal-ize!</a>
   </div>
 
+  <section class="section" aria-labelledby="gallery-label">
+    <h2 class="section-lead" id="gallery-label">Gallery:</h2>
+    <!-- Filled by the script at the foot of the page from the gallery's own
+         list; every card leads to the gallery page. -->
+    <div class="gallery-strip" id="gallery-strip"></div>
+    <p class="gallery-more"><a href="gallery/gallery.html">Browse the gallery, or submit your own pattern &rarr;</a></p>
+  </section>
+
 </main>
+<script>
+  // The gallery's own list (gallery/gallery.json; gallery/gallery.html
+  // describes the format) fills the preview strip: one card per pattern,
+  // each a link to that pattern in the gallery. Without it (no script, or
+  // the file missing) the strip stays empty and the link under it still
+  // leads there.
+  (function () {
+    var strip = document.getElementById("gallery-strip");
+    var list = new URL("gallery/gallery.json", location.href);
+    fetch(list)
+      .then(function (res) { if (!res.ok) throw new Error("HTTP " + res.status); return res.json(); })
+      .then(function (entries) {
+        entries.forEach(function (entry, i) {
+          var card = document.createElement("a");
+          card.className = "gallery-card";
+          card.href = "gallery/gallery.html#" + (i + 1);
+          var img = document.createElement("img");
+          img.src = new URL(entry.map, list).href;
+          img.alt = entry.name + " by " + entry.creator;
+          img.loading = "lazy";
+          var name = document.createElement("span");
+          name.textContent = entry.name;
+          card.appendChild(img);
+          card.appendChild(name);
+          strip.appendChild(card);
+        });
+      })
+      .catch(function () { /* the link under the strip still leads there */ });
+  })();
+</script>
 </body>
 </html>
