@@ -8764,11 +8764,11 @@
 
   // ---- The longest ridge / longest valley overlay ----
   //
-  // Topography can draw the two paths it measured straight onto the
-  // map, which is the only way to tell "the longest valley is 0.8 screens"
-  // from a number that happens to be 0.8. Its own canvas over
-  // the grid rather than anything in the WebGL pipeline: this is an
-  // annotation that comes and goes with a switch on a card, and rebuilding
+  // Hovering either of Topography's two "longest" rows draws that path
+  // straight onto the map, which is the only way to tell "the longest
+  // valley is 0.8 screens" from a number that happens to be 0.8. Its own
+  // canvas over the grid rather than anything in the WebGL pipeline: this
+  // is an annotation that comes and goes with the pointer, and rebuilding
   // the render for it would tie a piece of UI to the thing the whole page
   // is otherwise built to keep fast.
   //
@@ -8776,7 +8776,16 @@
   // header), so the y mapping below flips - and the block is proportioned
   // to this same canvas area, which is what lets a sample index map to a
   // CSS pixel by simple ratio without going through world coordinates.
-  var featureOverlay = null;      // { width, height, ridge, valley } or null
+  var featureOverlay = null;      // { width, height, path } or null - the hovered longest ridge or valley
+  // Every sample of one of Topography's four classes, lit up while its
+  // slice of the pie or its legend line is hovered: { width, height, mask,
+  // cls } or null. Same canvas, same coordinates, same reason it goes away
+  // the moment the view moves.
+  var featureHighlight = null;
+  // The highlight rendered once as a tiny image (one texel per sample) and
+  // scaled onto the canvas by the GPU, rather than a rectangle per sample:
+  // at full resolution that would be a million fillRects per frame.
+  var featureHighlightImage = null;   // { mask, cls, canvas }
   var featureOverlayCanvas = null;
 
   function ensureFeatureOverlayCanvas() {
@@ -8796,11 +8805,12 @@
     var ctx = featureOverlayCanvas.getContext("2d");
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cw, ch);
+    if (featureHighlight) drawFeatureHighlight(ctx, cw, ch);
     if (!featureOverlay) return;
     var W = featureOverlay.width, H = featureOverlay.height;
     if (!(W > 0 && H > 0)) return;
 
-    function stroke(path, color) {
+    function stroke(path, color, casing) {
       if (!path || path.length < 4) return;
       ctx.beginPath();
       for (var i = 0; i < path.length; i += 2) {
@@ -8810,31 +8820,77 @@
       }
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
-      // Dark casing first: the fractal underneath is every color there is,
-      // and a single-colored line disappears into whichever part of it
-      // happens to match.
-      ctx.strokeStyle = "rgba(0, 0, 0, 0.75)";
-      ctx.lineWidth = 5;
+      // Casing first, in the opposite of the line's own colour: the
+      // fractal underneath is every colour there is, and a single-coloured
+      // line disappears into whichever part of it happens to match. White
+      // and black are the two colours no hue ramp contains, which is why
+      // the lines are those rather than a pair of hues.
+      // Wide on purpose: a 6px line at 3 points into the pane read as a
+      // hairline against a picture this busy.
+      ctx.strokeStyle = casing;
+      ctx.lineWidth = 12;
       ctx.stroke();
       ctx.strokeStyle = color;
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth = 6;
       ctx.stroke();
     }
-    stroke(featureOverlay.ridge, "#ffd479");   // crests, warm
-    stroke(featureOverlay.valley, "#7fd4ff");  // troughs, cool
+    // Only one is ever shown at a time (whichever row is hovered), so the
+    // two need no telling apart: black cased in white, the pair of colours
+    // no hue ramp contains.
+    stroke(featureOverlay.path, "#000000", "#ffffff");
   }
 
-  function setFeatureOverlay(data) {
-    featureOverlay = data || null;
-    if (!featureOverlay) {
+  // White at half strength over every sample of the hovered class. The
+  // image is nearest-neighbour scaled on purpose: each sample IS a block of
+  // the map, and smoothing the edges would blur which pixels are in and out.
+  function drawFeatureHighlight(ctx, cw, ch) {
+    var hl = featureHighlight;
+    var W = hl.width, H = hl.height;
+    if (!(W > 0 && H > 0) || !hl.mask) return;
+    if (!featureHighlightImage || featureHighlightImage.mask !== hl.mask || featureHighlightImage.cls !== hl.cls) {
+      var off = document.createElement("canvas");
+      off.width = W; off.height = H;
+      var octx = off.getContext("2d");
+      var img = octx.createImageData(W, H);
+      var px = img.data, mask = hl.mask, cls = hl.cls;
+      // Row 0 of the block is the BOTTOM of the map; row 0 of an image is
+      // its top.
+      for (var r = 0; r < H; r++) {
+        var src = r * W, dst = (H - 1 - r) * W * 4;
+        for (var c = 0; c < W; c++, dst += 4) {
+          if (mask[src + c] === cls) { px[dst] = 255; px[dst + 1] = 255; px[dst + 2] = 255; px[dst + 3] = 128; }
+        }
+      }
+      octx.putImageData(img, 0, 0);
+      featureHighlightImage = { mask: mask, cls: cls, canvas: off };
+    }
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(featureHighlightImage.canvas, 0, 0, cw, ch);
+  }
+
+  // Both layers share the one canvas, which exists only while either has
+  // something to show.
+  function syncFeatureOverlayCanvas() {
+    if (!featureOverlay && !featureHighlight) {
       if (featureOverlayCanvas) {
         featureOverlayCanvas.parentNode.removeChild(featureOverlayCanvas);
         featureOverlayCanvas = null;
       }
+      featureHighlightImage = null;
       return;
     }
     ensureFeatureOverlayCanvas();
     drawFeatureOverlay();
+  }
+
+  function setFeatureOverlay(data) {
+    featureOverlay = data || null;
+    syncFeatureOverlayCanvas();
+  }
+
+  function setFeatureHighlight(data) {
+    featureHighlight = data || null;
+    syncFeatureOverlayCanvas();
   }
 
   if (statsPanelBodyEl && statsSampleSlider && global.FractalStatsPanel && global.FractalStats) {
@@ -8855,6 +8911,7 @@
           return sampleCoordToWorld({ width: statsLastWidth, height: statsLastHeight }, col, row);
         },
         setFeatureOverlay: setFeatureOverlay,
+        setFeatureHighlight: setFeatureHighlight,
       },
       onSectionChange: function () {
         if (!statsWantsWork()) return;

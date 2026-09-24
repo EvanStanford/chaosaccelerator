@@ -453,6 +453,20 @@
       // "flat" means flat relative to how much this view varies at all
       // rather than against some absolute number of color units.
       var scaleSum = 0, scaleN = 0, flatCutoff = 0;
+      // The same idea for the ridge LINES below, against the picture's own
+      // curvature rather than its slope: a crest or trough has to curve at
+      // least this much across itself to count as relief at all. Two per
+      // cent of the mean second difference is far below any real crest -
+      // a smooth band a thousand samples wide still curves a few thousand
+      // times more than that at its top - and far above the rounding
+      // texture of a float32 plateau, whose one-bit staircases would
+      // otherwise read as perfectly straight, axis-aligned grooves running
+      // the whole width of a flat region. The absolute floor is for a view
+      // that is NOTHING but such a plateau, where two per cent of rounding
+      // is still rounding: t is a float32 in [0, 1], so a bit is under 1e-7
+      // and LINE_CUTOFF_FLOOR is a dozen of them.
+      var LINE_CUTOFF_FLOOR = 1e-6;
+      var curveSum = 0, curveN = 0, lineCutoff = LINE_CUTOFF_FLOOR;
       addRowPass(1, Math.max(1, H - 1), function measureScale(r0, r1) {
         if (out.empty) return;
         for (var r = r0; r < r1; r++) {
@@ -461,21 +475,92 @@
             if (!valid[i] || !valid[i + 1]) continue;
             scaleSum += Math.abs(delta(t[i], t[i + 1], circular));
             scaleN++;
+            if (valid[i - 1]) {
+              curveSum += Math.abs(delta(t[i], t[i + 1], circular) + delta(t[i], t[i - 1], circular));
+              curveN++;
+            }
+            if (valid[i + W] && valid[i - W]) {
+              curveSum += Math.abs(delta(t[i], t[i + W], circular) + delta(t[i], t[i - W], circular));
+              curveN++;
+            }
           }
         }
       }, function setCutoff() {
         flatCutoff = scaleN > 0 ? (scaleSum / scaleN) * 0.25 : 0;
+        lineCutoff = Math.max(LINE_CUTOFF_FLOOR, curveN > 0 ? (curveSum / curveN) * 0.02 : 0);
       });
 
       var ridges = 0, valleys = 0, saddles = 0, flats = 0, inspected = 0;
-      // Which way each sample curves, kept rather than only counted:
-      // the longest-ridge and longest-valley measurements below need
-      // to know WHICH samples were which, not just how many.
-      var RIDGE = 1, VALLEY = 2;
-      var shape = null;   // Uint8Array: 0 unclassified, RIDGE, or VALLEY
-      steps.push(function allocateShape() {
+      // Which samples lie ON a ridge line, a valley line or an edge, kept
+      // rather than counted: the longest-of-each measurements below need
+      // to know which samples those were, not how many.
+      var RIDGE = 1, VALLEY = 2, EDGE = 3;
+      var crest = null;   // Uint8Array: 0 none, RIDGE, VALLEY or EDGE
+      // For the edges: the Sobel gradient magnitude at every sample, and
+      // its direction as a byte (256 steps round the full circle), both
+      // filled by the census pass and read by the edge pass after it.
+      var grad = null, gradDir = null;
+      // Whether an edge sample's step clears the SEED threshold (below) or
+      // only the lower one it may be followed at.
+      var edgeStrong = null;
+      // And which of the pie's four classes each sample fell in, so the
+      // panel can light up every sample of one class on the map when its
+      // slice or legend line is hovered.
+      var SHAPE_RIDGE = 1, SHAPE_VALLEY = 2, SHAPE_SADDLE = 3, SHAPE_FLAT = 4;
+      var shapeMask = null;   // Uint8Array: 0 not inspected, else one of the four
+      // Per-sample scratch for the ridge-line test below, allocated once:
+      // for each of the four profiles through a sample (E-W, N-S, NE-SW,
+      // NW-SE) the wrapped offset to its two neighbours, and its second
+      // difference per unit length squared.
+      var side0 = new Float64Array(4), side1 = new Float64Array(4), prof = new Float64Array(4);
+      // The profile at right angles to each, and the two at 45 degrees.
+      var ALONG = [1, 0, 3, 2];
+      var DIAG = [[2, 3], [2, 3], [0, 1], [0, 1]];
+      // Each profile's step as a sample offset, and its length squared.
+      var STEP = [1, W, W + 1, W - 1];
+      var STEP_LEN2 = [1, 1, 2, 2];
+      // The second difference along profile `dir` through sample i, taken
+      // two samples out on each side rather than one, per unit length
+      // squared - or the one-sample figure when the wider one runs off the
+      // block or onto a sample that isn't valid.
+      //
+      // Needed because a crest rarely falls on a sample: when it lies
+      // between two, the sample nearest it has BOTH across-neighbours
+      // nearly as high as itself, and the one-sample second difference
+      // there says "barely curved" about the sharpest feature in the view.
+      // Two samples out reaches the flanks and gives the crest its true
+      // curvature, which is what the level-along-the-ridge test below has
+      // to be measured against; without it that test throws out one sample
+      // in every place a tilted crest shifts from one column to the next,
+      // and the crest comes out as a string of short pieces.
+      function curvatureWide(dir, i, c, r, fallback) {
+        var dc = dir === 0 ? 2 : dir === 1 ? 0 : dir === 2 ? 2 : -2;
+        var dr = dir === 0 ? 0 : 2;
+        if (c + dc < 0 || c + dc >= W || c - dc < 0 || c - dc >= W || r + dr >= H || r - dr < 0) return fallback;
+        var a = i + 2 * STEP[dir], b = i - 2 * STEP[dir];
+        if (!valid[a] || !valid[b]) return fallback;
+        return (delta(t[i], t[a], circular) + delta(t[i], t[b], circular)) / (4 * STEP_LEN2[dir]);
+      }
+      // Is the sample the extreme point (sign = -1 a maximum, +1 a minimum)
+      // of profile `dir` - both neighbours strictly on the far side of it -
+      // and of at least one of the two profiles 45 degrees off it? Strictly
+      // on both sides: allowing a tie on one would make the foot of every
+      // step a valley line and its top a ridge line, and a crest that falls
+      // exactly between two float32 samples with identical values is rare
+      // enough in real data to give up for that.
+      function extremeAlong(dir, sign) {
+        return side0[dir] * sign > 0 && side1[dir] * sign > 0;
+      }
+      function crestAcross(dir, sign) {
+        return extremeAlong(dir, sign) && (extremeAlong(DIAG[dir][0], sign) || extremeAlong(DIAG[dir][1], sign));
+      }
+      steps.push(function allocateCrest() {
         if (out.empty) return;
-        shape = new Uint8Array(W * H);
+        crest = new Uint8Array(W * H);
+        shapeMask = new Uint8Array(W * H);
+        grad = new Float32Array(W * H);
+        gradDir = new Uint8Array(W * H);
+        edgeStrong = new Uint8Array(W * H);
       });
       addRowPass(1, Math.max(1, H - 1), function census(r0, r1) {
         if (out.empty) return;
@@ -493,32 +578,192 @@
             if (!ok) continue;
             inspected++;
 
-            // Discrete Hessian, every term a wrapped offset from the
-            // center. Eigenvalue SIGNS are what classify the local shape:
-            // both negative is a ridge/peak, both positive a valley/pit,
-            // opposite signs a saddle - the pass where two basins meet.
-            var txx = delta(t[i], t[i + 1], circular) + delta(t[i], t[i - 1], circular);
-            var tyy = delta(t[i], t[i + W], circular) + delta(t[i], t[i - W], circular);
-            var txy = (delta(t[i], t[i + W + 1], circular) - delta(t[i], t[i + W - 1], circular) -
-                       delta(t[i], t[i - W + 1], circular) + delta(t[i], t[i - W - 1], circular)) / 4;
+            // All eight neighbours as wrapped offsets from the centre, so
+            // nothing below straddles a circular Output's seam.
+            var e = delta(t[i], t[i + 1], circular), w = delta(t[i], t[i - 1], circular);
+            var n = delta(t[i], t[i + W], circular), so = delta(t[i], t[i - W], circular);
+            var ne = delta(t[i], t[i + W + 1], circular), sw = delta(t[i], t[i - W - 1], circular);
+            var nw = delta(t[i], t[i + W - 1], circular), se = delta(t[i], t[i - W + 1], circular);
+
+            // Sobel gradient, for the edge pass below. Same stencil as the
+            // orientation rose's.
+            var gx = ((ne + 2 * e + se) - (nw + 2 * w + sw)) / 8;
+            var gy = ((nw + 2 * n + ne) - (sw + 2 * so + se)) / 8;
+            grad[i] = Math.sqrt(gx * gx + gy * gy);
+            gradDir[i] = Math.round(Math.atan2(gy, gx) / TAU * 256) & 255;
+
+            // ---- What shape the surface is here (the pie) ----
+            //
+            // Discrete Hessian. Eigenvalue SIGNS classify the local shape:
+            // both negative curves down every way (a crest or a peak), both
+            // positive curves up every way (a trough or a pit), opposite
+            // signs is a saddle - the pass where two basins meet.
+            var txx = e + w, tyy = n + so;
+            var txy = (ne - nw - se + sw) / 4;
             var trH = txx + tyy;
             var rad = Math.sqrt((txx - tyy) * (txx - tyy) + 4 * txy * txy);
             var e1 = (trH + rad) / 2, e2 = (trH - rad) / 2;
-            if (Math.abs(e1) < flatCutoff && Math.abs(e2) < flatCutoff) flats++;
-            else if (e1 < 0 && e2 < 0) { ridges++; if (shape) shape[i] = RIDGE; }
-            else if (e1 > 0 && e2 > 0) { valleys++; if (shape) shape[i] = VALLEY; }
-            else saddles++;
+            if (Math.abs(e1) < flatCutoff && Math.abs(e2) < flatCutoff) { flats++; shapeMask[i] = SHAPE_FLAT; }
+            else if (e1 < 0 && e2 < 0) { ridges++; shapeMask[i] = SHAPE_RIDGE; }
+            else if (e1 > 0 && e2 > 0) { valleys++; shapeMask[i] = SHAPE_VALLEY; }
+            else { saddles++; shapeMask[i] = SHAPE_SADDLE; }
+
+            // ---- Is this sample ON a ridge line, or a valley line? ----
+            //
+            // The pie's classes are about area, and a ridge LINE is not an
+            // area: the crest of a mountain range is one sample wide however
+            // broad its flanks, and only the samples right on it should
+            // count. So this is the topographer's definition instead: a
+            // sample is on a ridge if, looking ACROSS the ridge, it is the
+            // highest point - a local maximum along the direction the
+            // surface curves down most steeply - and the surface runs on
+            // roughly level ALONG the ridge, which is what tells a crest
+            // from an isolated bump.
+            //
+            // The four profiles through the sample - E-W, N-S and the two
+            // diagonals - each get their second difference, per unit length
+            // squared so the root-two diagonal steps compare with the axis
+            // ones. The most negative profile is the across-ridge one; the
+            // profile at right angles to it is the along-ridge one; the two
+            // at 45 degrees are the check against speckle below.
+            side0[0] = e; side1[0] = w; prof[0] = e + w;
+            side0[1] = n; side1[1] = so; prof[1] = n + so;
+            side0[2] = ne; side1[2] = sw; prof[2] = (ne + sw) / 2;
+            side0[3] = nw; side1[3] = se; prof[3] = (nw + se) / 2;
+            var lo = prof[0], hi = prof[0], loDir = 0, hiDir = 0, d;
+            for (d = 1; d < 4; d++) {
+              if (prof[d] < lo) { lo = prof[d]; loDir = d; }
+              if (prof[d] > hi) { hi = prof[d]; hiDir = d; }
+            }
+            // The 45-degree check is what stops the speckle of a chaotic
+            // region reading as ridges: there every other sample is a bump,
+            // a bump is a maximum across but rarely also along one of the
+            // diagonals, and without the check enough of them touch to chain
+            // into a false "ridge" right across the view. A real crest is a
+            // maximum along every profile that is not nearly parallel to it,
+            // and whichever way it runs at least one of the two 45-degree
+            // profiles is at least 67.5 degrees off it.
+            //
+            // The across curvature is the stronger of the one- and two-
+            // sample figures (see curvatureWide), so that the sample nearest
+            // a crest that falls between samples is judged by the flanks it
+            // actually has. The along curvature stays the one-sample figure:
+            // the wider one picks up the slow rise and fall of a real crest
+            // (and the height flicker of a thin line drifting between
+            // columns) and threw away most of the crest for it.
+            var acrossR;
+            if (-lo >= lineCutoff && lo < 0 && crestAcross(loDir, -1)) {
+              acrossR = Math.max(-lo, -curvatureWide(loDir, i, c, r, lo));
+              if (Math.abs(prof[ALONG[loDir]]) <= 0.5 * acrossR) { crest[i] = RIDGE; continue; }
+            }
+            if (hi >= lineCutoff && hi > 0 && crestAcross(hiDir, 1)) {
+              acrossR = Math.max(hi, curvatureWide(hiDir, i, c, r, hi));
+              if (Math.abs(prof[ALONG[hiDir]]) <= 0.5 * acrossR) crest[i] = VALLEY;
+            }
           }
         }
       }, function finishFeatures() {
         if (out.empty) return;
         out.groups.features = {
           inspected: inspected,
+          shapeMask: shapeMask,
+          shapeClasses: { ridge: SHAPE_RIDGE, valley: SHAPE_VALLEY, saddle: SHAPE_SADDLE, flat: SHAPE_FLAT },
           ridgeFraction: inspected > 0 ? ridges / inspected : 0,
           valleyFraction: inspected > 0 ? valleys / inspected : 0,
           saddleFraction: inspected > 0 ? saddles / inspected : 0,
           flatFraction: inspected > 0 ? flats / inspected : 0,
         };
+      });
+
+      // ---- Edges: where the picture jumps ----
+      //
+      // A ridge is where the value peaks; an edge is where it STEPS - one
+      // colour on this side, another on that, and each side keeping its
+      // colour. In these maps that is a basin boundary, and unlike a ridge
+      // it stays exactly as sharp however far you zoom in. The definition
+      // is Canny's, with one addition:
+      //
+      //  - the sample is the crest of the step: its gradient is the largest
+      //    of the three along the gradient's own direction (non-maximum
+      //    suppression, which thins a step to one sample);
+      //  - the step is big: the change across it, over the two samples
+      //    either side, is at least EDGE_STEP_FOLLOW of the colour range,
+      //    and a piece of edge only counts at all if somewhere along it the
+      //    step reaches EDGE_STEP_SEED (Canny's two thresholds, so a
+      //    boundary that fades for a stretch stays one edge);
+      //  - and it is a step, not a spike: the value keeps its new level on
+      //    both sides, so the change from one sample out to two is small
+      //    next to the change across the middle. This is what tells the
+      //    flank of a step from the flank of a one-sample line, whose two
+      //    flanks would otherwise be two edges.
+      //
+      // The second half of telling an edge from the speckle of a chaotic
+      // region is in labelPieces: two neighbouring edge samples join the
+      // same edge only if their gradients point nearly the same way. Along
+      // a real boundary they do; in speckle they point everywhere, and the
+      // chains that Canny alone would build across it fall apart.
+      //
+      // The two step thresholds are fractions of the colour range, not of
+      // the picture: a true discontinuity has the same step at every zoom,
+      // so a floor in range units means the same thing at every resolution,
+      // where anything relative to the picture's own gradients would drown
+      // real edges in a speckled view and promote faint ones in a smooth
+      // one. Five per cent is comfortably above anything a smooth band does
+      // between two samples and well below any boundary a reader would
+      // call sharp.
+      var EDGE_STEP_SEED = 0.05;
+      var EDGE_STEP_FOLLOW = 0.025;
+      // How much of the middle step the two outer steps may be, for the
+      // shape to count as a step rather than a spike.
+      var EDGE_PLATEAU_RATIO = 0.5;
+      // Which profile a gradient direction byte snaps to: E-W for the
+      // sectors round 0 and 180 degrees, N-S round 90 and 270, and the two
+      // diagonals between.
+      var SECTOR_PROFILE = [0, 2, 1, 3, 0, 2, 1, 3];
+      // Are the samples of profile `dir` through (c, r), `reach` out each
+      // way, all inside the block, all valid, and none of the steps between
+      // them across an input seam?
+      function profileClear(dir, i, c, r, reach) {
+        var dc = dir === 0 ? 1 : dir === 1 ? 0 : dir === 2 ? 1 : -1;
+        var dr = dir === 0 ? 0 : 1;
+        var k;
+        for (k = 1; k <= reach; k++) {
+          if (c + k * dc < 0 || c + k * dc >= W || c - k * dc < 0 || c - k * dc >= W) return false;
+          if (r + k * dr >= H || r - k * dr < 0) return false;
+          if (!valid[i + k * STEP[dir]] || !valid[i - k * STEP[dir]]) return false;
+        }
+        if (dc !== 0) for (k = -reach; k < reach; k++) if (xSeam(Math.min(c + k * Math.abs(dc), c + (k + 1) * Math.abs(dc)))) return false;
+        if (dr !== 0) for (k = -reach; k < reach; k++) if (ySeam(r + k)) return false;
+        return true;
+      }
+      addRowPass(1, Math.max(1, H - 1), function findEdges(r0, r1) {
+        if (out.empty) return;
+        for (var r = r0; r < r1; r++) {
+          for (var c = 1; c < W - 1; c++) {
+            var i = r * W + c;
+            if (crest[i] || !valid[i] || grad[i] <= 0) continue;
+            var dir = SECTOR_PROFILE[Math.round(gradDir[i] / 32) & 7];
+            var step = STEP[dir];
+            if (!profileClear(dir, i, c, r, 1)) continue;
+            // The crest of the step: largest gradient of the three along
+            // the gradient's own line. A step that falls exactly between
+            // two samples - which a discontinuity always does - puts the
+            // same gradient on both, so a tie is allowed on the one side
+            // only: of two tied samples the forward one is the edge, and
+            // the edge stays one sample wide.
+            if (!(grad[i] > grad[i + step] && grad[i] >= grad[i - step])) continue;
+            var inner = Math.abs(delta(t[i - step], t[i + step], circular));
+            if (inner < EDGE_STEP_FOLLOW) continue;
+            // A step and not a spike, where there is room to tell.
+            if (profileClear(dir, i, c, r, 2)) {
+              var outerA = Math.abs(delta(t[i + step], t[i + 2 * step], circular));
+              var outerB = Math.abs(delta(t[i - 2 * step], t[i - step], circular));
+              if (outerA > EDGE_PLATEAU_RATIO * inner || outerB > EDGE_PLATEAU_RATIO * inner) continue;
+            }
+            crest[i] = EDGE;
+            if (inner >= EDGE_STEP_SEED) edgeStrong[i] = 1;
+          }
+        }
       });
 
       // ---- The longest ridge, and the longest valley ----
@@ -527,17 +772,20 @@
       // say nothing about whether that curvature is organised. A picture
       // can be a third valley by area either as ten thousand unconnected
       // specks or as one canyon running corner to corner, and those are
-      // completely different pictures. So: take the ridge samples as one
-      // set and the valley samples as another, find their connected pieces,
-      // and measure the longest piece of each end to end.
+      // completely different pictures. So: take the ridge-line samples as
+      // one set and the valley-line samples as another, find their
+      // 8-connected pieces, and measure the longest piece of each end to
+      // end - the crest of the range, and the river's own course.
       //
       // "Length" here is the GEODESIC diameter - the distance from one end
       // of the piece to the other along the piece itself, not the straight
       // line between them - which is the honest answer for a feature that
-      // curves. It is found by the standard double sweep: breadth-first
-      // from any member reaches one true end, and breadth-first from THAT
-      // end reaches the other. Exact on a piece with no loops, and within a
-      // sample or two on one that has them.
+      // curves. The naive way is a depth-first search for the longest chain
+      // from every sample of the piece, which is quadratic in the piece;
+      // the standard double sweep gets the same answer in two passes:
+      // breadth-first from any member reaches one true end, and
+      // breadth-first from THAT end reaches the other. Exact on a piece
+      // with no loops, and within a sample or two on one that has them.
       //
       // Cost. Labelling is one union-find pass over the block, near linear.
       // The double sweep is quadratic in nothing - it is two passes over
@@ -547,8 +795,20 @@
       // covers the case where a long thin piece loses on area to a fat
       // round one. Everything else is left unmeasured, which is what keeps
       // this affordable on a multi-megasample block.
-      var parent = null;      // union-find, indexed by sample; only shaped samples take part
-      var comps = null;       // root -> { size, minC, maxC, minR, maxR, cls }
+      var parent = null;      // union-find, indexed by sample; only line samples take part
+      var comps = null;       // root -> { size, minC, maxC, minR, maxR, cls, strong }
+      // Two edge samples join the same edge only if their gradients agree
+      // to within this many direction bytes - 21 of 256 is 30 degrees.
+      var EDGE_TURN_MAX = 21;
+      function sameWay(a, b) {
+        var d = Math.abs(gradDir[a] - gradDir[b]);
+        return Math.min(d, 256 - d) <= EDGE_TURN_MAX;
+      }
+      // Do neighbouring line samples i and j belong to one line? Same class
+      // always; for edges, the same direction of step as well.
+      function joined(i, j, s) {
+        return crest[j] === s && (s !== EDGE || sameWay(i, j));
+      }
       var candidates = null;  // the few roots worth a double sweep
       var members = null;     // root -> array of sample indices
       // How many pieces of each class, by each measure, get measured
@@ -557,7 +817,7 @@
       var LONGEST_CANDIDATES = 4;
 
       steps.push(function allocateLabels() {
-        if (out.empty || !shape) return;
+        if (out.empty || !crest) return;
         parent = new Int32Array(W * H);
       });
 
@@ -566,37 +826,38 @@
       // goes in row order, and means a neighbour's own label is always set
       // by the time it is read.
       addRowPass(1, Math.max(1, H - 1), function labelPieces(r0, r1) {
-        if (out.empty || !shape || !parent) return;
+        if (out.empty || !crest || !parent) return;
         for (var r = r0; r < r1; r++) {
           for (var c = 1; c < W - 1; c++) {
-            var i = r * W + c, s = shape[i];
+            var i = r * W + c, s = crest[i];
             if (!s) continue;
             parent[i] = i;
-            if (c > 1 && shape[i - 1] === s) unite(i, i - 1);
+            if (c > 1 && joined(i, i - 1, s)) unite(i, i - 1);
             if (r > 1) {
-              if (shape[i - W] === s) unite(i, i - W);
-              if (c > 1 && shape[i - W - 1] === s) unite(i, i - W - 1);
-              if (c < W - 2 && shape[i - W + 1] === s) unite(i, i - W + 1);
+              if (joined(i, i - W, s)) unite(i, i - W);
+              if (c > 1 && joined(i, i - W - 1, s)) unite(i, i - W - 1);
+              if (c < W - 2 && joined(i, i - W + 1, s)) unite(i, i - W + 1);
             }
           }
         }
       });
 
       addRowPass(1, Math.max(1, H - 1), function measurePieces(r0, r1) {
-        if (out.empty || !shape || !parent) return;
+        if (out.empty || !crest || !parent) return;
         if (!comps) comps = new Map();
         for (var r = r0; r < r1; r++) {
           for (var c = 1; c < W - 1; c++) {
-            var i = r * W + c, s = shape[i];
+            var i = r * W + c, s = crest[i];
             if (!s) continue;
             var root = findRoot(i);
             var e = comps.get(root);
             if (!e) {
-              comps.set(root, { size: 1, minC: c, maxC: c, minR: r, maxR: r, cls: s });
+              comps.set(root, { size: 1, minC: c, maxC: c, minR: r, maxR: r, cls: s, strong: edgeStrong[i] === 1 });
             } else {
               e.size++;
               if (c < e.minC) e.minC = c; else if (c > e.maxC) e.maxC = c;
               if (r < e.minR) e.minR = r; else if (r > e.maxR) e.maxR = r;
+              if (edgeStrong[i]) e.strong = true;
             }
           }
         }
@@ -609,13 +870,17 @@
         var byClass = {};
         byClass[RIDGE] = [];
         byClass[VALLEY] = [];
+        byClass[EDGE] = [];
         comps.forEach(function (e, root) {
+          // An edge nowhere steeper than the follow threshold is not an
+          // edge, only the faint continuation of one that never came.
+          if (e.cls === EDGE && !e.strong) return;
           e.root = root;
           e.span = Math.sqrt((e.maxC - e.minC) * (e.maxC - e.minC) + (e.maxR - e.minR) * (e.maxR - e.minR));
           byClass[e.cls].push(e);
         });
         candidates = [];
-        [RIDGE, VALLEY].forEach(function (cls) {
+        [RIDGE, VALLEY, EDGE].forEach(function (cls) {
           var list = byClass[cls], picked = {};
           function take(key) {
             list.sort(function (a, b) { return b[key] - a[key]; });
@@ -635,7 +900,7 @@
         for (var r = r0; r < r1; r++) {
           for (var c = 1; c < W - 1; c++) {
             var i = r * W + c;
-            if (!shape[i]) continue;
+            if (!crest[i]) continue;
             var list = members.get(findRoot(i));
             if (list) list.push(i);
           }
@@ -645,6 +910,7 @@
         var best = {};
         best[RIDGE] = null;
         best[VALLEY] = null;
+        best[EDGE] = null;
         for (var k = 0; candidates && k < candidates.length; k++) {
           var comp = candidates[k];
           var found = geodesicDiameter(members.get(comp.root));
@@ -660,9 +926,12 @@
         // diagonal are counted in the same samples.
         f.longestRidgeDiagonals = best[RIDGE] ? best[RIDGE].length / diagonal : 0;
         f.longestValleyDiagonals = best[VALLEY] ? best[VALLEY].length / diagonal : 0;
+        f.longestEdge = best[EDGE];
+        f.longestEdgeDiagonals = best[EDGE] ? best[EDGE].length / diagonal : 0;
         // Nothing below needs the labels any more, and they are the largest
         // thing this group allocates.
         parent = null; comps = null; members = null; candidates = null;
+        grad = null; gradDir = null; edgeStrong = null;
       });
 
       function unite(a, b) {

@@ -76,6 +76,13 @@
   border-top: 1px solid var(--border);
   padding-top: 10px;
 }
+/* The first heading sits straight under the card's header (or the status
+   bar, when there is one): the rule and the gap above it only separate
+   sections from each other. */
+.stats-section:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
 .stats-section-head {
   display: flex;
   align-items: center;
@@ -170,6 +177,28 @@
   border: 1px solid var(--border);
   flex-shrink: 0;
 }
+/* A legend line lights up while it, or its slice of the pie, is hovered -
+   at the same moment every sample of its class lights up on the map. The
+   "Longest" rows use the same look while their path is drawn. */
+.stat-legend {
+  cursor: default;
+  border-radius: 4px;
+}
+/* Between the pie's legend and the "Longest" rows, which are a different
+   kind of statement about the picture. */
+.stat-divider {
+  border-top: 1px solid var(--border);
+  margin: 8px 0 6px 0;
+}
+.stat-row-hot .stat-label,
+.stat-row-hot .stat-value {
+  color: #ffffff;
+  font-weight: 600;
+}
+.stat-row-hot .stat-swatch {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 1px #ffffff;
+}
 
 /* Charts size themselves to this box's width (see prepareCanvas in
    fractal-stats-panel.js), so it must have a real width before they draw -
@@ -191,20 +220,4 @@
    an empty one, and the status line says so in words at the same time. */
 .stats-stale .stats-section {
   opacity: 0.45;
-}
-
-/* The switch under Topography that draws the longest ridge and valley
-   onto the map itself. A plain checkbox: it only decides whether something
-   already measured is also drawn, and costs nothing either way. */
-.stat-overlay-toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--text);
-}
-.stat-overlay-toggle input {
-  accent-color: var(--accent);
-  margin: 0;
 }

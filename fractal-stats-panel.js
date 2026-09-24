@@ -321,56 +321,77 @@
   // view made of", which is a question about proportions of a whole and
   // not about comparing four independent quantities.
   //
-  // Ridge and valley take the same two colours the map overlay draws them
-  // in, so the switch below this joins up with the chart above it without
-  // needing a sentence to say so.
-  var SHAPE_COLORS = {
-    ridge: "#ffd479",
-    valley: "#7fd4ff",
-    saddle: "#c58cff",
-    flat: "#6b7280",
-  };
+  // Warm for ridge, cool for valley. (The map overlay draws the longest of
+  // each in white and black instead - the two colours no hue ramp
+  // contains, so the lines stay visible over any part of the picture.)
+  var SHAPES = [
+    { key: "ridge", title: "Ridges", color: "#ffd479", fraction: "ridgeFraction",
+      note: "Curving down in every direction - the crests of the picture." },
+    { key: "valley", title: "Valleys", color: "#7fd4ff", fraction: "valleyFraction",
+      note: "Curving up in every direction - the troughs." },
+    { key: "saddle", title: "Saddles", color: "#c58cff", fraction: "saddleFraction",
+      note: "Curving up one way and down another - the passes between two basins. A high share means a tangled, interleaved structure." },
+    { key: "flat", title: "Flat", color: "#6b7280", fraction: "flatFraction",
+      note: "Curving negligibly compared with how much this view varies overall." },
+  ];
 
-  function drawShapePie(canvas, g) {
+  // Draws the pie and returns its geometry - centre, radius, and each
+  // slice's angular span - so the caller can tell which slice the pointer
+  // is over. `hot` is the key of the slice to draw raised and outlined.
+  function drawShapePie(canvas, g, hot) {
     var p = readPalette();
     var c = prepareCanvas(canvas, 150);
     var ctx = c.ctx;
     var cx = c.w / 2, cy = c.h / 2;
-    var radius = Math.min(cx, cy) - 6;
-    var slices = [
-      { f: g.ridgeFraction, color: SHAPE_COLORS.ridge },
-      { f: g.valleyFraction, color: SHAPE_COLORS.valley },
-      { f: g.saddleFraction, color: SHAPE_COLORS.saddle },
-      { f: g.flatFraction, color: SHAPE_COLORS.flat },
-    ];
+    var radius = Math.min(cx, cy) - 8;
+    var geom = { cx: cx, cy: cy, radius: radius, slices: [] };
     var total = 0, i;
-    for (i = 0; i < slices.length; i++) total += slices[i].f;
-    if (!(total > 0)) return;
+    for (i = 0; i < SHAPES.length; i++) total += g[SHAPES[i].fraction];
+    if (!(total > 0)) return geom;
     // From twelve o'clock, clockwise - where a reader's eye starts on a
     // pie whether or not the code agrees.
     var at = -Math.PI / 2;
-    for (i = 0; i < slices.length; i++) {
-      var sweep = (slices[i].f / total) * Math.PI * 2;
+    for (i = 0; i < SHAPES.length; i++) {
+      var sweep = (g[SHAPES[i].fraction] / total) * Math.PI * 2;
       if (sweep <= 0) continue;
+      geom.slices.push({ key: SHAPES[i].key, from: at, to: at + sweep });
+      var isHot = SHAPES[i].key === hot;
       ctx.beginPath();
       ctx.moveTo(cx, cy);
-      ctx.arc(cx, cy, radius, at, at + sweep);
+      ctx.arc(cx, cy, radius + (isHot ? 4 : 0), at, at + sweep);
       ctx.closePath();
-      ctx.fillStyle = slices[i].color;
+      ctx.fillStyle = SHAPES[i].color;
       ctx.fill();
       // A hairline between slices, in the card's own background: two
-      // adjacent slices of similar weight otherwise read as one.
-      ctx.strokeStyle = p.inputBg;
-      ctx.lineWidth = 1.5;
+      // adjacent slices of similar weight otherwise read as one. The hot
+      // slice is outlined in white instead, and the outline is what makes a
+      // sliver of a slice visible at all.
+      ctx.strokeStyle = isHot ? "#ffffff" : p.inputBg;
+      ctx.lineWidth = isHot ? 2 : 1.5;
       ctx.stroke();
       at += sweep;
     }
+    return geom;
+  }
+
+  // Which slice the point (x, y) on the pie canvas is over, or null.
+  function pieSliceAt(geom, x, y) {
+    if (!geom) return null;
+    var dx = x - geom.cx, dy = y - geom.cy;
+    if (dx * dx + dy * dy > (geom.radius + 4) * (geom.radius + 4)) return null;
+    var a = Math.atan2(dy, dx);
+    for (var i = 0; i < geom.slices.length; i++) {
+      var sl = geom.slices[i];
+      // Spans start at -pi/2 and run clockwise past +pi, where atan2 wraps.
+      if ((a >= sl.from && a < sl.to) || (a + 2 * Math.PI >= sl.from && a + 2 * Math.PI < sl.to)) return sl.key;
+    }
+    return null;
   }
 
   // One legend line: swatch, name, share. Reuses .stat-row so it lines up
   // with every other label/value pair on the card.
   function legendRow(parent, color, label, value, note) {
-    var r = el("div", "stat-row");
+    var r = el("div", "stat-row stat-legend");
     var swatch = el("span", "stat-swatch");
     swatch.style.background = color;
     r.appendChild(swatch);
@@ -381,73 +402,89 @@
     return r;
   }
 
-  function renderFeatures(body, g, host, info, state) {
+  function renderFeatures(body, g, host, info) {
     var holder = el("div", "stat-chart");
     var canvas = document.createElement("canvas");
     holder.appendChild(canvas);
     body.appendChild(holder);
-    legendRow(body, SHAPE_COLORS.ridge, "Ridges", percent(g.ridgeFraction, 1),
-      "Curving down in every direction - the crests of the picture.");
-    legendRow(body, SHAPE_COLORS.valley, "Valleys", percent(g.valleyFraction, 1),
-      "Curving up in every direction - the troughs.");
-    legendRow(body, SHAPE_COLORS.saddle, "Saddles", percent(g.saddleFraction, 1),
-      "Curving up one way and down another - the passes between two basins. A high share means a tangled, interleaved structure.");
-    legendRow(body, SHAPE_COLORS.flat, "Flat", percent(g.flatFraction, 1),
-      "Curving negligibly compared with how much this view varies overall.");
+    var legend = {};
+    SHAPES.forEach(function (shape) {
+      legend[shape.key] = legendRow(body, shape.color, shape.title, percent(g[shape.fraction], 1), shape.note);
+    });
 
-    // ---- How far the longest one of each actually runs ----
+    // ---- Hovering a class: its legend line, its slice, and its samples ----
+    //
+    // The pie says how much of the view is saddle; hovering says WHERE, by
+    // lighting every saddle sample on the map itself - the one way to check
+    // that the classification means what the reader thinks it means.
+    var geom = null, hot = null;
+    function setHot(key) {
+      if (key === hot) return;
+      hot = key;
+      SHAPES.forEach(function (shape) {
+        legend[shape.key].classList.toggle("stat-row-hot", shape.key === key);
+      });
+      geom = drawShapePie(canvas, g, hot);
+      if (!host.setFeatureHighlight) return;
+      host.setFeatureHighlight(key && g.shapeMask ? {
+        width: info.sampleWidth,
+        height: info.sampleHeight,
+        mask: g.shapeMask,
+        cls: g.shapeClasses[key],
+      } : null);
+    }
+    SHAPES.forEach(function (shape) {
+      legend[shape.key].addEventListener("mouseenter", function () { setHot(shape.key); });
+      legend[shape.key].addEventListener("mouseleave", function () { setHot(null); });
+    });
+    canvas.addEventListener("mousemove", function (ev) {
+      var box = canvas.getBoundingClientRect();
+      setHot(pieSliceAt(geom, ev.clientX - box.left, ev.clientY - box.top));
+    });
+    canvas.addEventListener("mouseleave", function () { setHot(null); });
+
+    // ---- How far the longest line of each kind actually runs ----
     //
     // The shares above say how much of the view curves each way and
     // nothing about whether it is organised: a third of the view can be
     // valley as ten thousand specks or as one canyon crossing it corner to
-    // corner. These two measure the biggest connected piece of each, end to
-    // end ALONG itself, and report it in screens - one screen being the
-    // view's own diagonal, corner to corner - so the number means the same
-    // thing at any sampling resolution or window size.
-    function longest(label, diagonals, piece, colorNote) {
-      row(body, label,
+    // corner. These measure the biggest connected line of each kind, end
+    // to end ALONG itself, in screens - one screen being the view's own
+    // diagonal, corner to corner - so the number means the same thing at
+    // any sampling resolution or window size. Ridge and valley share one
+    // row, whichever is longer: the reader wants the longest crest OR
+    // trough, not a comparison between them.
+    //
+    // Hovering a row lights it and draws its path over the fractal itself -
+    // the only way to tell "0.8 screens" from a number that happens to be
+    // 0.8. Nothing to switch on: a length is a claim about the picture, and
+    // the moment the reader looks at the claim they see it checked.
+    body.appendChild(el("div", "stat-divider"));
+    function longest(label, diagonals, piece, note) {
+      var r = row(body, label,
         piece && diagonals > 0 ? fixed(diagonals, 2) + " screens" : "none found",
-        "The longest unbroken " + colorNote + " in the view, measured along itself rather than end to end in a straight line. 1.00 would reach corner to corner of the screen.");
-    }
-    longest("Longest ridge", g.longestRidgeDiagonals, g.longestRidge, "crest");
-    longest("Longest valley", g.longestValleyDiagonals, g.longestValley, "trough");
-
-    // The switch that draws them. Worth having because a length in screen
-    // diagonals is a claim about the picture that a reader cannot check
-    // against the picture - until it is drawn on it.
-    var canOverlay = !!host.setFeatureOverlay && !!(g.longestRidge || g.longestValley);
-    if (canOverlay) {
-      var toggleRow = el("div", "stat-row");
-      var lab = el("label", "stat-overlay-toggle");
-      var box = document.createElement("input");
-      box.type = "checkbox";
-      box.checked = !!state.featureOverlay;
-      lab.appendChild(box);
-      lab.appendChild(el("span", null, "Draw them on the map"));
-      lab.title = "Draws the longest ridge and the longest valley over the fractal itself. Panning or zooming switches this back off - the paths are drawn in the coordinates of the block that was measured, so they stop meaning anything the moment the view moves.";
-      toggleRow.appendChild(lab);
-      body.appendChild(toggleRow);
-      box.addEventListener("change", function () {
-        state.featureOverlay = box.checked;
-        applyOverlay();
+        note + " Measured along itself rather than end to end in a straight line; 1.00 would reach corner to corner of the screen." +
+        (piece ? " Hover to see it drawn on the map." : ""));
+      if (!piece || !host.setFeatureOverlay) return;
+      r.classList.add("stat-legend");
+      r.addEventListener("mouseenter", function () {
+        r.classList.add("stat-row-hot");
+        host.setFeatureOverlay({ width: info.sampleWidth, height: info.sampleHeight, path: piece.path });
+      });
+      r.addEventListener("mouseleave", function () {
+        r.classList.remove("stat-row-hot");
+        host.setFeatureOverlay(null);
       });
     }
+    var ridgeWins = g.longestRidgeDiagonals >= g.longestValleyDiagonals;
+    longest("Longest Ridge/Valley",
+      ridgeWins ? g.longestRidgeDiagonals : g.longestValleyDiagonals,
+      ridgeWins ? g.longestRidge : g.longestValley,
+      "The longest unbroken crest or trough in the view" + (g.longestRidge || g.longestValley ? (ridgeWins ? " (a crest)." : " (a trough).") : "."));
+    longest("Longest Sharp Edge", g.longestEdgeDiagonals, g.longestEdge,
+      "The longest unbroken sharp boundary - a line along which the colour steps from one value to another and stays there, by at least 5% of the range somewhere along it.");
 
-    function applyOverlay() {
-      if (!host.setFeatureOverlay) return;
-      if (!state.featureOverlay) { host.setFeatureOverlay(null); return; }
-      host.setFeatureOverlay({
-        width: info.sampleWidth,
-        height: info.sampleHeight,
-        ridge: g.longestRidge ? g.longestRidge.path : null,
-        valley: g.longestValley ? g.longestValley.path : null,
-      });
-    }
-    // A fresh measurement means fresh paths, so a switch already on gets
-    // redrawn from the new ones rather than left pointing at the old.
-    applyOverlay();
-
-    return function () { drawShapePie(canvas, g); };
+    return function () { geom = drawShapePie(canvas, g, hot); };
   }
 
   var RENDERERS = {
@@ -467,23 +504,20 @@
     var sections = {};      // key -> { wrap, body, head }
     var lastResult = null;
     var lastInfo = null;
-    var uiState = { featureOverlay: false };
     // Chart draws deferred until after the whole body is in the DOM - a
     // canvas measures its parent to size itself, and a parent that hasn't
     // been laid out yet reports zero.
     var pendingDraws = [];
 
-    // Takes the map overlay off and puts its switch back, wherever the
-    // request came from: the section being closed, the card being cleared,
-    // or the grid telling us the view has moved out from under it.
+    // Takes Topography's drawings off the map - the hovered path and the
+    // hovered class - wherever the request came from: the section being
+    // closed, the card being cleared, or the grid telling us the view has
+    // moved out from under them. Both are drawn in the coordinates of the
+    // block that was measured, so they stop meaning anything the moment the
+    // view moves, however long the pointer stays where it is.
     function featureOverlayOff() {
-      if (!uiState.featureOverlay) return;
-      uiState.featureOverlay = false;
+      if (host.setFeatureHighlight) host.setFeatureHighlight(null);
       if (host.setFeatureOverlay) host.setFeatureOverlay(null);
-      var s = sections.features;
-      if (!s) return;
-      var box = s.body.querySelector(".stat-overlay-toggle input");
-      if (box) box.checked = false;
     }
 
     var statusEl = el("p", "stats-status", "");
@@ -525,8 +559,8 @@
         s.body.hidden = !open;
         if (!open) s.body.innerHTML = "";
       });
-      // Closing Topography takes its drawing off the map with it - the
-      // switch that turned it on has just gone away.
+      // Closing Topography takes its drawings off the map with it - the
+      // rows that were being hovered have just gone away.
       if (previous === "features") featureOverlayOff();
       renderSection(key);
       flushDraws();
@@ -553,7 +587,7 @@
         s.body.appendChild(wait);
         return;
       }
-      var draw = RENDERERS[key](s.body, g, host, lastInfo, uiState, function () { renderSection(key); });
+      var draw = RENDERERS[key](s.body, g, host, lastInfo);
       if (typeof draw === "function") pendingDraws.push(draw);
     }
 

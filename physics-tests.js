@@ -4763,26 +4763,23 @@
     "The longest ridge and the longest valley are found, and measured along themselves",
     "Topography reports these in screens, and the map overlay draws the very paths measured",
     function () {
-      // A separable field whose ridge and valley sets can be written down
+      // A separable field whose ridge and valley lines can be written down
       // exactly, so this tests the connected-piece labelling and the
       // geodesic sweep rather than agreeing with whatever they happen to
       // return:
       //
       //   t = 0.5 + 0.3 cos(pi c / 2) + 0.2 cos(pi r / H)
       //
-      // A SUM of a function of c and a function of r, so the mixed second
-      // difference is exactly zero and the Hessian is diagonal - its
-      // eigenvalues are the two axis second differences themselves.
-      //
-      //   d2/dc2 > 0 exactly where cos(pi c / 2) < 0, i.e. c = 2 (mod 4)
-      //   d2/dr2 > 0 exactly where cos(pi r / H) < 0, i.e. r > H/2
-      //
-      // Valley is both positive: single columns at c = 2 (mod 4), rows 33
-      // to 62 - thirty samples, twenty-nine unit steps. Ridge is both
-      // negative: columns c = 0 (mod 4), rows 1 to 31 - thirty-one samples,
-      // thirty steps. The columns either side (c odd) have zero curvature
-      // in x and read as flat, which is what keeps each column its own
-      // piece rather than one connected slab.
+      // Across the columns it is a cosine of period four, so every column
+      // c = 0 (mod 4) is a crest - the highest point looking east-west, with
+      // both neighbours 0.3 lower - and every column c = 2 (mod 4) a
+      // trough. Along the columns the surface only tilts gently (the
+      // second difference of the slow cosine is a few ten-thousandths, far
+      // inside the "level along the ridge" allowance), so each crest runs
+      // the full interior height: rows 1 to 62, sixty-two samples, sixty-one
+      // unit steps. The odd columns are monotone slopes across and along,
+      // maxima in no direction, and so belong to no line at all - which is
+      // what keeps every crest its own piece.
       var W = 64, H = 64;
       var f = statsField(W, H, function (c, r) {
         return 0.5 + 0.3 * Math.cos(Math.PI * c / 2) + 0.2 * Math.cos(Math.PI * r / H);
@@ -4798,16 +4795,16 @@
       if (g.longestRidge && g.longestValley) {
         // Every step is one row, so the length is a plain count - no
         // diagonal steps to weigh at root two.
-        check("ridge length", g.longestRidge.length, 30);
-        check("valley length", g.longestValley.length, 29);
-        check("ridge in diagonals", g.longestRidgeDiagonals, 30 / diag);
-        check("valley in diagonals", g.longestValleyDiagonals, 29 / diag);
+        check("ridge length", g.longestRidge.length, 61);
+        check("valley length", g.longestValley.length, 61);
+        check("ridge in screens", g.longestRidgeDiagonals, 61 / diag);
+        check("valley in screens", g.longestValleyDiagonals, 61 / diag);
         check("diagonal", g.diagonalSamples, diag);
         // The path is what the map overlay draws, so its SHAPE matters as
         // much as its length: one column, every row in it, no repeats.
         // The residue the path's column must have mod 4: ridge columns are
         // 0 (mod 4), valley columns 2 (mod 4).
-        [["ridge", g.longestRidge, 0, 1, 31], ["valley", g.longestValley, 2, 33, 62]].forEach(function (one) {
+        [["ridge", g.longestRidge, 0, 1, 62], ["valley", g.longestValley, 2, 1, 62]].forEach(function (one) {
           var name = one[0], path = one[1].path, rows = {};
           var col = path[0], minR = 1e9, maxR = -1e9, straight = true;
           for (var i = 0; i < path.length; i += 2) {
@@ -4836,6 +4833,128 @@
           : "ridge " + g.longestRidge.length + " samples (" + g.longestRidgeDiagonals.toFixed(4) +
             " screens), valley " + g.longestValley.length + " samples (" + g.longestValleyDiagonals.toFixed(4) + ")",
       };
+    }
+  );
+
+  addTest(
+    "A ridge line is followed the whole way across the view, and noise has no long one",
+    "The point of the measurement: the crest of a range that crosses the screen reads as about one screen, and a chaotic speckle reads as nothing",
+    function () {
+      var W = 64, H = 64, diag = Math.sqrt(W * W + H * H), problems = [], detail = [];
+      // Smooth bands running up to the left: crests along c + r = 64 (and
+      // every 32 either side). The middle one crosses the whole interior
+      // corner to corner as a chain of diagonal steps - 61 samples, 60 root-
+      // two steps, 94% of the block's own diagonal. Diagonal bands are the
+      // hard case: the across-ridge direction is not one of the two axes,
+      // and consecutive crest samples are diagonal neighbours.
+      // Then the same bands upside down, so the trough is the one that
+      // crosses the middle.
+      var want = 60 * Math.SQRT2 / diag;
+      [1, -1].forEach(function (sign) {
+        var bands = statsField(W, H, function (c, r) { return 0.5 + sign * 0.5 * Math.cos(2 * Math.PI * (c + r) / 32); });
+        var g = runStatsJob({ width: W, height: H, t: bands.t, circular: false, groups: { features: true } }).groups.features;
+        var name = sign > 0 ? "diagonal crest" : "diagonal trough";
+        var got = sign > 0 ? g.longestRidgeDiagonals : g.longestValleyDiagonals;
+        var found = sign > 0 ? g.longestRidge : g.longestValley;
+        if (!found || Math.abs(got - want) > 0.03) {
+          problems.push(name + " " + (found ? got.toFixed(3) : "missing") + " screens (expected " + want.toFixed(3) + ")");
+        }
+        detail.push(name + " " + (found ? got.toFixed(3) : "-") + " screens");
+      });
+
+      // Horizontal bands: the crest is a row, 62 samples and 61 unit steps
+      // - the interior width over the diagonal.
+      var rows = statsField(W, H, function (c, r) { return 0.5 + 0.5 * Math.cos(2 * Math.PI * r / 16); });
+      var h = runStatsJob({ width: W, height: H, t: rows.t, circular: false, groups: { features: true } }).groups.features;
+      if (!h.longestRidge || Math.abs(h.longestRidgeDiagonals - 61 / diag) > 1e-9) {
+        problems.push("horizontal crest " + (h.longestRidge ? h.longestRidgeDiagonals.toFixed(3) : "missing") + " screens (expected " + (61 / diag).toFixed(3) + ")");
+      }
+      detail.push("horizontal crest " + (h.longestRidge ? h.longestRidgeDiagonals.toFixed(3) : "-"));
+
+      // White noise: every other sample is a bump, and a definition that
+      // let bumps chain together would report a ridge crossing the view
+      // where there is no ridge at all. Twice, so this isn't one lucky seed.
+      var worst = 0;
+      [3, 5].forEach(function (seed) {
+        var rnd = mulberry32(seed), N = 128;
+        var noise = statsField(N, N, function () { return rnd(); });
+        var ng = runStatsJob({ width: N, height: N, t: noise.t, circular: false, groups: { features: true } }).groups.features;
+        worst = Math.max(worst, ng.longestRidgeDiagonals, ng.longestValleyDiagonals);
+        if (ng.longestRidgeDiagonals > 0.15 || ng.longestValleyDiagonals > 0.15) {
+          problems.push("noise (seed " + seed + ") ridge " + ng.longestRidgeDiagonals.toFixed(3) + ", valley " + ng.longestValleyDiagonals.toFixed(3) + " screens");
+        }
+      });
+      detail.push("longest line in noise " + worst.toFixed(3) + " screens");
+
+      // A float32 plateau is not flat to the last bit: its rounding is a
+      // staircase of one-bit steps, and a one-bit groove one column wide is
+      // a perfect valley by every geometric test above - straight, level
+      // along itself, lower than both neighbours. A view that is nothing
+      // but such a plateau, every other column two bits lower, must report
+      // no valley at all rather than sixty-two grooves the full height of
+      // the block.
+      var plateau = statsField(W, H, function (c) { return 0.9 + (c % 2 ? 0 : 1e-7); });
+      var pg = runStatsJob({ width: W, height: H, t: plateau.t, circular: false, groups: { features: true } }).groups.features;
+      if (pg.longestValley || pg.longestRidge) {
+        problems.push("rounding grooves on a plateau read as a " + (pg.longestValley ? "valley " + pg.longestValley.length : "ridge " + pg.longestRidge.length) + " samples long");
+      }
+      detail.push("plateau rounding ignored");
+      return { pass: problems.length === 0, detail: problems.length ? problems.join("; ") : detail.join(", ") };
+    }
+  );
+
+  addTest(
+    "An edge is a step that holds its new level, followed the whole way along, and speckle is not one",
+    "Longest Edge is a Canny edge with a plateau test and a direction test; each of those has a picture it exists for",
+    function () {
+      var W = 64, H = 64, diag = Math.sqrt(W * W + H * H), problems = [], detail = [];
+      function edgeOf(fn, w, h) {
+        return runStatsJob({ width: w || W, height: h || H, t: statsField(w || W, h || H, fn).t, circular: false, groups: { features: true } }).groups.features;
+      }
+      // A vertical step: the edge is one column, every interior row - 62
+      // samples, 61 unit steps.
+      var v = edgeOf(function (c) { return c < 32 ? 0.2 : 0.8; });
+      if (!v.longestEdge || Math.abs(v.longestEdgeDiagonals - 61 / diag) > 1e-9) {
+        problems.push("vertical step: " + (v.longestEdge ? v.longestEdgeDiagonals.toFixed(3) : "missing") + " screens (expected " + (61 / diag).toFixed(3) + ")");
+      }
+      // A diagonal step, corner to corner: the hard case for the direction
+      // snapping, and for consecutive edge samples being diagonal
+      // neighbours. About 94% of the diagonal, as for the diagonal crest.
+      var d = edgeOf(function (c, r) { return c + r < 64 ? 0.2 : 0.8; });
+      var wantDiag = 60 * Math.SQRT2 / diag;
+      if (!d.longestEdge || Math.abs(d.longestEdgeDiagonals - wantDiag) > 0.04) {
+        problems.push("diagonal step: " + (d.longestEdge ? d.longestEdgeDiagonals.toFixed(3) : "missing") + " screens (expected " + wantDiag.toFixed(3) + ")");
+      }
+      detail.push("vertical " + v.longestEdgeDiagonals.toFixed(3) + ", diagonal " + (d.longestEdge ? d.longestEdgeDiagonals.toFixed(3) : "-") + " screens");
+      // A one-sample line is a ridge, not an edge: its two flanks are steps
+      // that do NOT hold their level, and the plateau test is what says so.
+      var line = edgeOf(function (c) { return c === 32 ? 0.9 : 0.2; });
+      if (line.longestEdge) problems.push("a one-sample line read as an edge " + line.longestEdge.length + " samples long");
+      if (!line.longestRidge || line.longestRidge.length !== 61) problems.push("the same line was not found as a 61-sample ridge");
+      // A smooth ramp steps 2/63 of the range between two samples: over
+      // the follow threshold, under the seed one - so candidates everywhere
+      // and no edge anywhere, which is the hysteresis doing its job.
+      var ramp = edgeOf(function (c) { return c / (W - 1); });
+      if (ramp.longestEdge) problems.push("a smooth ramp read as an edge");
+      // A step that fades: 0.6 of the range at the bottom row, shrinking
+      // smoothly to 0.04 (under the seed, over the follow threshold) at the
+      // top. One edge the full height, followed through the faint rows from
+      // the strong ones - which is what the second threshold is for.
+      var fading = edgeOf(function (c, r) { return c < 32 ? 0.2 : 0.2 + 0.6 * (1 - (r / (H - 1)) * (14 / 15)); });
+      if (!fading.longestEdge || fading.longestEdge.length !== 61) {
+        problems.push("a fading edge came out " + (fading.longestEdge ? fading.longestEdge.length : 0) + " samples (expected 61)");
+      }
+      // Speckle: every neighbour differs, so the steps are everywhere;
+      // the direction test is what keeps them from chaining.
+      var worst = 0;
+      [3, 5].forEach(function (seed) {
+        var rnd = mulberry32(seed), N = 128;
+        var ng = edgeOf(function () { return rnd(); }, N, N);
+        worst = Math.max(worst, ng.longestEdgeDiagonals);
+        if (ng.longestEdgeDiagonals > 0.15) problems.push("noise (seed " + seed + ") edge " + ng.longestEdgeDiagonals.toFixed(3) + " screens");
+      });
+      detail.push("longest edge in noise " + worst.toFixed(3) + " screens");
+      return { pass: problems.length === 0, detail: problems.length ? problems.join("; ") : detail.join(", ") };
     }
   );
 
