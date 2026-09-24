@@ -678,6 +678,13 @@
   function computeMass(body) {
     if (body.isAnchored) {
       body.mass = 0; body.invMass = 0; body.inertia = 0; body.invInertia = 0;
+      // An anchored body never integrates, but the contact solver still
+      // reads its vx/vy/w (velocityAt) to work out the relative velocity of
+      // whatever hits it. A starting velocity left over from before the
+      // body was anchored therefore made it act like a moving wall: balls
+      // bounced off it far too hard, or stuck to it. Every path that
+      // anchors a body already calls this, so it is THE place to clear it.
+      body.vx = 0; body.vy = 0; body.w = 0;
       return;
     }
     if (body.type === "circle") {

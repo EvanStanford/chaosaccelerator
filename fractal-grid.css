@@ -18,6 +18,15 @@
      reads as sitting ON the fractal rather than being cut out of it. */
   --panel-inset: 14px;
   --bg-panel-float: rgba(27, 30, 39, 0.86);
+  /* How far a floating button's or card's box-shadow reaches past its own
+     box (see .menu-toggle / .menu-card: the wide 10px-down, 30px-blur
+     shadow reaches 40px below and 30px to either side). Both menu columns
+     are scroll containers, and a scroll container clips everything past its
+     padding edge - so each pads itself by this much and pulls that padding
+     back out with a matching negative margin (see #grid-menu-stack and
+     #grid-right-menu-column): the shadows get room to fade out, and nothing
+     on screen moves. */
+  --menu-shadow-room: 40px;
   /* What the menu column keeps clear for the back link and the four menu
      buttons, so an open card can never push the other menus off the bottom
      of the screen. Named because two rules have to agree on it - the card's
@@ -114,6 +123,20 @@ html, body {
      #grid-view #hover-readout below) was enough to grow a horizontal
      scrollbar this never needs. */
   overflow-x: hidden;
+  /* Being a scroll container, this clips its children's shadows at its own
+     edge - the buttons' and cards' shadows used to end in a hard line down
+     the left and along the bottom. So: room for them as padding, and the
+     same amounts as negative margin so the column's box (and everything in
+     it) stays exactly where it was. Up and left only the viewport inset is
+     available, which is all a shadow there can be seen in anyway; right and
+     down the full reach. content-box, so that the max-height rules for this
+     element - here, in responsive-layout.css and in mobile.css - go on
+     measuring the content, not the content plus this padding. The column's
+     pointer-events: none is inherited, so the padded band stays
+     click-through to the map. */
+  box-sizing: content-box;
+  padding: var(--panel-inset) var(--menu-shadow-room) var(--menu-shadow-room) var(--panel-inset);
+  margin: calc(-1 * var(--panel-inset)) calc(-1 * var(--menu-shadow-room)) calc(-1 * var(--menu-shadow-room)) calc(-1 * var(--panel-inset));
 }
 #grid-menu-stack > * {
   pointer-events: auto;
@@ -798,10 +821,23 @@ input[type="range"] {
      laptop screen. overflow-x for #grid-menu-stack's reason too. */
   overflow-y: auto;
   overflow-x: hidden;
+  /* Same shadow room as #grid-menu-stack, mirrored: the full reach left
+     and down, the viewport inset up and right. Negative margins on an
+     absolutely positioned box shift it from its top/right offsets, so the
+     buttons and cards stay put while the box grows around them; content-
+     box keeps every max-width/max-height rule for this id measuring the
+     content. This column never had pointer-events: none of its own, and
+     its padded band now reaches 40px onto the map, so it gets the same
+     none-then-auto-per-item arrangement as the left column. */
+  box-sizing: content-box;
+  padding: var(--panel-inset) var(--panel-inset) var(--menu-shadow-room) var(--menu-shadow-room);
+  margin: calc(-1 * var(--panel-inset)) calc(-1 * var(--panel-inset)) calc(-1 * var(--menu-shadow-room)) calc(-1 * var(--menu-shadow-room));
+  pointer-events: none;
 }
 #grid-right-menu-column > .menu-item {
   max-width: 100%;
   flex-shrink: 0;
+  pointer-events: auto;
 }
 /* A card is what its button turned into, so - unlike the left column's
    menus, which grow from their own top-left corner - these grow from top

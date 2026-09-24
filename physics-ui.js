@@ -2899,9 +2899,15 @@
       } else {
         throw new Error('bodies[' + i + "]: type must be \"circle\", \"line\", \"funnel\", or \"splitter\"");
       }
-      if (b.vx !== undefined) body.vx = Number(b.vx);
-      if (b.vy !== undefined) body.vy = Number(b.vy);
-      if (b.w !== undefined) body.w = Number(b.w);
+      // An anchored body's velocity is never used and, left in place, makes
+      // it act like a moving wall in the contact solver (see computeMass).
+      // The builder can't author one, but an older link or hand-edited
+      // JSON can still carry it.
+      if (!body.isAnchored) {
+        if (b.vx !== undefined) body.vx = Number(b.vx);
+        if (b.vy !== undefined) body.vy = Number(b.vy);
+        if (b.w !== undefined) body.w = Number(b.w);
+      }
       return body;
     });
 

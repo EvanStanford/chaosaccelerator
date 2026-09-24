@@ -33,14 +33,16 @@
   // User-facing volume, 0-1 - the single source of truth both the mute
   // button and the settings slider read and write (see setVolume/isMuted
   // below); there is no separate "muted" flag; muted just means this is 0.
-  // Defaults to full, matching the fixed loudness this mixer always played
-  // at before a volume control existed at all.
-  var volume = 1;
+  // Starts MUTED on every page: sound is opt-in, so nothing plays until
+  // the mute button (or a settings slider) is used. Each page's own
+  // updateVolumeUI reads this at load, so the icons show muted from the
+  // first frame rather than after the first change.
+  var volume = 0;
   // What to restore to on unmute (or on dragging the slider back up from
   // 0) - the last value volume held while still audible, so muting never
-  // loses "how loud it was," only silences it. 1 here is only ever reached
-  // if the whole session starts muted somehow; it's a floor of last
-  // resort, not a value setVolume itself ever assigns to volume.
+  // loses "how loud it was," only silences it. Since every session starts
+  // muted, this 1 is what the first unmute lands on: full, the loudness
+  // the mix below was tuned at.
   var lastAudibleVolume = 1;
   // Callbacks registered via onVolumeChange, fired after every real change
   // - see setVolume. Each page's own JS registers exactly one, to keep its

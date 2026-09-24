@@ -119,6 +119,35 @@
   );
 
   addTest(
+    "Anchoring a body clears its starting velocity, so nothing bounces off it like a moving wall",
+    "computeMass left vx/vy/w on a body anchored after Set Velocity; velocityAt still read them in the contact solver",
+    function () {
+      // Give the line a big upward velocity FIRST, then anchor it - the exact
+      // order the builder produces when Set Velocity is followed by Anchor.
+      var line = PhysicsEngine.createLine(400, 600, 700, 0, false);
+      line.vx = 300; line.vy = -PhysicsEngine.MAX_SPEED; line.w = 2;
+      line.isAnchored = true;
+      PhysicsEngine.computeMass(line);
+      var cleared = line.vx === 0 && line.vy === 0 && line.w === 0;
+
+      // A ball dropped onto a truly static wall can never rise back above
+      // where it started; off a wall that still "moves" upward at the speed
+      // cap it would be launched clean off the top of the scene.
+      var startY = 400;
+      var ball = PhysicsEngine.createCircle(400, startY, 20, false);
+      var scene = { bodies: [line, ball], hinges: [] };
+      var highestY = Infinity;
+      for (var i = 0; i < 400; i++) {
+        PhysicsEngine.step(scene, DT);
+        highestY = Math.min(highestY, ball.y);
+      }
+      var detail = "after anchoring: vx=" + line.vx + " vy=" + line.vy + " w=" + line.w +
+        "; ball dropped from y=" + startY + " rose back to y=" + highestY.toFixed(2) + " at highest";
+      return { pass: cleared && highestY >= startY - 1, detail: detail };
+    }
+  );
+
+  addTest(
     "A fast circle no longer tunnels through a smaller circle it's aimed straight at",
     "collideCircleCircle had no continuous collision detection: a same-step start/end sample (dist=10, then dist=6.67) can both read as 'not touching' (rsum=6) even though the straight path passes through dist=0 in between",
     function () {

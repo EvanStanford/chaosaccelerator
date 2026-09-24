@@ -103,7 +103,7 @@
     }
     function readPrecision(ladder) {
       var v = el.precision.value;
-      return v === "auto" || ladder.indexOf(v) !== -1 ? v : "f32";
+      return v === "auto" || ladder.indexOf(v) !== -1 ? v : "auto";
     }
     function writePreset(name) {
       var p = PERF_PRESETS[name];
@@ -209,14 +209,14 @@
       global.location.reload();
     });
 
-    // The page as it loads: the device's preset, float32 (explicitly -
-    // browsers restore form controls across a reload), and the builder's
+    // The page as it loads: the device's preset, Auto precision (explicitly
+    // - browsers restore form controls across a reload), and the builder's
     // panel as the body's home, since the builder is the page that is up.
     // An Apple GPU holds the draw length at its first stop (boot's
     // drawLengthLocked, which also knows the GPU's name, says why); by
     // platform alone is as much as can be known before there is a context.
     if (/Mac|iPhone|iPad|iPod/.test((global.navigator && (global.navigator.platform || global.navigator.userAgent)) || "")) el.draw.disabled = true;
-    el.precision.value = "f32";
+    el.precision.value = "auto";
     writePreset(perfDefaultPreset);
     syncReadouts();
     syncPreset();
@@ -488,17 +488,12 @@
   // What OK does for the tip currently showing, when "just close it" isn't
   // the whole story - see showTip's own comment.
   var activeTipOnOk = null;
-  // Which step of the deep-zoom precision tip is showing: 0 none, 1 pointing
-  // at the Settings gear, 2 pointing at the precision dropdown inside the
-  // panel. See maybeShowDeepZoomPrecisionTip, far below, for the sequence.
-  var deepZoomTipStage = 0;
 
   function hideTip() {
     tipPopover.hidden = true;
     activeTipId = null;
     activeTipAnchor = null;
     activeTipOnOk = null;
-    deepZoomTipStage = 0;
   }
 
   // Below anchorEl's bottom-left corner, clamped so it doesn't run off the
@@ -557,8 +552,8 @@
   //
   // opts.onOk (optional): what the OK button does, for a tip that walks the
   // user somewhere instead of only telling them something. It takes over
-  // completely - whatever it does next (retargetTip to a further step, or
-  // hideTip to finish) is its own job. Without it, OK just closes.
+  // completely - closing the tip afterwards (hideTip) is its own job.
+  // Without it, OK just closes.
   function showTip(id, anchorEl, text, opts) {
     if (isTipDismissed(id) || activeTipId === id) return false;
     // Nothing to point at - don't burn the tip's one showing on a card the
@@ -586,14 +581,9 @@
     return true;
   }
 
-  // Moves the tip already showing onto a different control, with new text,
-  // skipping showTip's "already showing / already dismissed" guards. This is
-  // what lets a multi-step tip keep ONE dismissal id across all its steps, so
-  // "Don't tell me again" means the whole sequence rather than just the step
-  // the user happened to be looking at.
   // Scrolls an anchor back into the menu column if it has drifted out of
   // it, and reports whether it is pointable-at afterwards. Only called when
-  // a tip first appears or changes target - NOT from repositionActiveTip,
+  // a tip first appears - NOT from repositionActiveTip,
   // which runs on every panel resize and would otherwise yank the column's
   // scroll out from under the user while they read.
   function bringTipAnchorIntoView(anchorEl) {
@@ -605,25 +595,6 @@
       anchorEl.scrollIntoView({ block: "nearest" });
     }
     return tipAnchorVisible(anchorEl);
-  }
-
-  function retargetTip(anchorEl, text, opts) {
-    if (!activeTipId) return;
-    // The new target is somewhere else in the column and may need scrolling
-    // to - step 2 of the deep-zoom sequence points at a dropdown inside a
-    // card that was shut a moment ago.
-    bringTipAnchorIntoView(anchorEl);
-    activeTipAnchor = anchorEl;
-    activeTipNoArrowAbove = !!(opts && opts.noArrowAbove);
-    activeTipOnOk = (opts && opts.onOk) || null;
-    // "OK" is right for a tip that suggests doing something; a tip that only
-    // explains what the user is already looking at has nothing to agree to,
-    // so it can ask for "Dismiss" instead. Assigned every time rather than
-    // only when overridden, or one relabelling tip would rename the button
-    // for every tip shown after it.
-    tipPopoverOk.textContent = (opts && opts.okLabel) || "OK";
-    tipPopoverText.textContent = text;
-    positionTip(anchorEl);
   }
 
   // Called from anything that can move an anchor without the anchor itself
@@ -751,24 +722,7 @@
     return api;
   }
 
-  var settingsMenu = makeMenu("menu-settings", "grid-btn-settings", "right",
-    function (open) {
-      // Opening Settings IS the "yes, show me" that the deep-zoom tip's
-      // step 1 asks for, so getting there by hand skips straight ahead
-      // rather than leaving the tip pointing at a button the user has
-      // already pressed.
-      if (open && deepZoomTipStage === 1) showDeepZoomPrecisionStep2();
-      // Step 2 points at a control that has just left the layout - there's
-      // nothing to point at any more, so end the sequence rather than leave
-      // the popover stranded.
-      else if (!open && deepZoomTipStage === 2) hideTip();
-    });
-
-  // Kept as a named function because the deep-zoom tip sequence above opens
-  // Settings on the user's behalf.
-  function setSettingsPanelOpen(open) {
-    settingsMenu.set(open);
-  }
+  var settingsMenu = makeMenu("menu-settings", "grid-btn-settings", "right");
 
   // Inspect holds the hover preview, its transport, the view controls and
   // the locked-point list - the workspace for reading the fractal rather
@@ -2698,15 +2652,17 @@
   // "auto" or one of PRECISION_LADDER - the latter being the Settings
   // panel's manual override, for comparing two passes at the same view.
   //
-  // Starts at f32, and (being page state, never persisted) is back at f32
-  // every time this page is opened - including on the way back from the
-  // physics editor. The df pass costs many times the render time, so a
-  // session that doesn't need it shouldn't quietly inherit it from an
-  // earlier one; the deep-zoom tip below is what offers Auto at the point
-  // where it actually starts to buy something.
+  // Starts at Auto, and (being page state, never persisted) is back at
+  // Auto every time this page is opened - including on the way back from
+  // the physics editor. Auto only reaches for the costlier df/tf/qf passes
+  // once the zoom is deep enough that float32 visibly falls apart (see
+  // precisionForSpacing), so a shallow session pays nothing for it; the
+  // Force rungs remain for comparing two passes at the same view. The
+  // deep-zoom tip below offers Auto to whoever has forced float32 and then
+  // zoomed past where it holds up.
   // ...unless it was changed on the builder page first - it is the same
-  // dropdown there (see "One settings body"), which was put at Force float32
-  // when the page loaded.
+  // dropdown there (see "One settings body"), which was put at Auto when
+  // the page loaded.
   var precisionMode = sharedSettings.readPrecision(PRECISION_LADDER);
 
   function float32UlpAt(magnitude) {
@@ -2767,7 +2723,7 @@
     // Explicit, rather than trusting the markup's own `selected`: browsers
     // restore form-control values across a reload or a Back navigation, which
     // would otherwise leave the dropdown showing whatever it was set to last
-    // visit while precisionMode had genuinely reset to f32.
+    // visit while precisionMode had genuinely reset to Auto.
     precisionSelect.value = precisionMode;
     // A rung this browser cannot build (see PRECISION_LADDER) is not offered.
     Array.prototype.slice.call(precisionSelect.options).forEach(function (option) {
@@ -2815,40 +2771,6 @@
     });
   }
 
-  // ---- Deep-zoom tip: offer double precision at the point it starts to pay
-  // for itself ----
-  //
-  // Precision now starts at Force float32 every visit, which is right for
-  // ordinary zooms and wrong past the float32 wall - where neighbouring
-  // pixels begin rounding onto identical starting scenes and the image goes
-  // flat. Rather than silently switching (df costs several times the render
-  // time), this points the user at the setting in two steps: first at the
-  // gear that hides it, then - once they're in there - at the dropdown
-  // itself, where OK makes the change for them. Both steps share one
-  // dismissal id, so "Don't tell me again" retires the whole sequence and
-  // Settings > Reset Tool Tips brings it back.
-  var DEEP_ZOOM_TIP_ID = "deep-zoom-precision";
-  // An absolute view.scale, NOT a number on the zoom readout. This tip
-  // points at the float32 wall, which sits at a fixed world-units-per-pixel
-  // whatever the readout happens to call 1.00x - so writing it as a zoom
-  // ratio meant rebasing DEFAULT_SCALE silently moved where it fired. 2e-3
-  // is exactly where the old ratio (1e5x, back when 1.00x meant a 200-unit
-  // span) landed.
-  var DEEP_ZOOM_TIP_MAX_SCALE = 2e-3;
-
-  function showDeepZoomPrecisionStep2() {
-    deepZoomTipStage = 2;
-    settingsMenu.set(true);
-    retargetTip(precisionSelect,
-      "Set this to Auto and the grid uses higher precision only where the zoom needs it. Click OK to switch it.",
-      { onOk: function () {
-          precisionMode = "auto";
-          precisionSelect.value = "auto";
-          markDirty();
-          hideTip();
-        } });
-  }
-
   // ---- "Those radial lines aren't real" ----
   //
   // Zoomed far enough out with BOTH axes driven by one body's starting
@@ -2893,22 +2815,6 @@
       { okLabel: "Dismiss", noArrowAbove: true });
   }
 
-  // Returns true if this tip is showing (or just appeared), so the caller can
-  // leave the one shared popover alone instead of talking over it.
-  function maybeShowDeepZoomPrecisionTip() {
-    if (activeTipId === DEEP_ZOOM_TIP_ID) return true; // mid-sequence - don't restart it
-    if (!precisionSelect) return false;
-    // Nothing to offer once precision is already Auto or forced to df: this
-    // tip exists only to get the user off the fixed-float32 default, so this
-    // is also what stops it reappearing after they've accepted it.
-    if (precisionMode !== "f32") return false;
-    if (view.scale >= DEEP_ZOOM_TIP_MAX_SCALE) return false;
-    var shown = showTip(DEEP_ZOOM_TIP_ID, settingsMenu.anchor(),
-      "Try enabling higher precision to unlock more zoom, but at slower render speed",
-      { onOk: showDeepZoomPrecisionStep2 });
-    if (shown) deepZoomTipStage = 1;
-    return shown;
-  }
   // Which of a scene's two programs the display mode calls for.
   function wantedVariant() {
     return displayMode && displayMode.id !== 0 ? "derived" : "standard";
@@ -3461,15 +3367,10 @@
 
   // Everything worth offering the user once the view stops moving. There is
   // only one popover, so these run in priority order and the first one to
-  // take it wins: past the float32 wall the precision limit is the thing
-  // actually flattening the image, which makes a Color Zoom suggestion about
-  // that same flatness misleading. The speed cap goes ahead of it for the
-  // same reason - a picture whose color spread has collapsed into a fan of
-  // rays has a cause, and "try Color Zoom" is not it. It cannot compete with
-  // the precision tip either way: that one needs a deep zoom IN, this one a
-  // zoom OUT.
+  // take it wins: the speed cap goes ahead of Color Zoom because a picture
+  // whose color spread has collapsed into a fan of rays has a cause, and
+  // "try Color Zoom" is not it.
   function checkSettledViewTips() {
-    if (maybeShowDeepZoomPrecisionTip()) return;
     if (maybeShowVelocityCapTip()) return;
     checkColorSpreadAndMaybeSuggestColorZoom();
   }
@@ -3917,6 +3818,10 @@
         if (slot === -1) return;
         removeInspectedGroup(inspectMarkerGroupIndex[slot]);
       });
+      // The dot sits on top of the canvas, so the canvas's own wheel
+      // listener never sees a scroll made while hovering it - zoom from
+      // here too, or a marker under the cursor blocks zooming entirely.
+      el.addEventListener("wheel", onWheelZoom, { passive: false });
       canvasArea.appendChild(el);
       inspectMarkerEls.push(el);
     }
@@ -6147,13 +6052,20 @@
     gl.flush();
   }
 
-  canvas.addEventListener("wheel", function (e) {
+  // A named function rather than an inline one because it is registered
+  // twice: here on the canvas, and on every .inspect-marker dot as it is
+  // created (see updateInspectMarkers). The dots are siblings of the canvas
+  // stacked on top of it, so a wheel over one never reaches this listener
+  // through the canvas - without their own registration, hovering a marker
+  // silently blocked zooming.
+  function onWheelZoom(e) {
     e.preventDefault();
     gesture.wheelAt = performance.now();
     zoomAtClientPoint(e.clientX, e.clientY, Math.pow(1.0016, e.deltaY));
     updateZoomReadout();
     markDirty();
-  }, { passive: false });
+  }
+  canvas.addEventListener("wheel", onWheelZoom, { passive: false });
 
   // Pans the view by a raw pixel delta in CLIENT (CSS) pixels - "drag the
   // content by this many screen pixels." Shared by the mouse-drag pan below
@@ -9091,7 +9003,10 @@
     }
     panelResizer.addEventListener("mousedown", function (e) {
       dragStartX = e.clientX;
-      dragStartWidth = menuStack.getBoundingClientRect().width;
+      // The column, not the stack: the stack's box is wider than the cards
+      // by its shadow-room padding (see fractal-grid.css), the column's is
+      // exactly --panel-width.
+      dragStartWidth = menuColumn.getBoundingClientRect().width;
       panelResizer.classList.add("dragging");
       document.body.style.cursor = "col-resize";
       document.body.style.userSelect = "none";
