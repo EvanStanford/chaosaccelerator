@@ -2,15 +2,13 @@
 // Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in the project
 // root, or https://chaosaccelerator.com/license for a hosted copy.
 
-// ---- 8-bit-style sound effects: a bounce "piano" note and a sticky-
-// edge "xylophone" blip ----
+// ---- Sound effects: a bounce "clave" tick and a sticky-edge "palm-muted
+// string" pluck ----
 //
-// Synthesized with plain Web Audio oscillators rather than sample files:
-// authentic period 8-bit game audio WAS simple square/triangle waveforms
-// straight off the sound chip, so generating it procedurally is the
-// accurate approach, not an approximation of one. It also means every voice
-// can be pitched exactly, which sampled audio would need real-time
-// pitch-shifting to do cleanly across the wide chord ranges below.
+// Synthesized with plain Web Audio oscillators rather than sample files, so
+// every voice can be pitched exactly, which sampled audio would need
+// real-time pitch-shifting to do cleanly across the wide chord ranges
+// below. Both were picked from a set of twenty auditioned candidates.
 //
 // Shared between physics-ui.js and fractal-grid.js (both load this file),
 // unlike the rest of this project's page-specific UI code, this has no
@@ -169,59 +167,80 @@
     return semitones.map(function (s) { return midiToFreq(60 + s); });
   }
 
-  // One oscillator (plus an optional second, higher-pitched layer for body/
-  // attack character) with a linear attack into an exponential decay: the
-  // plain envelope shape any simple sound chip could produce, and all
-  // that's needed for a percussive blip. exponentialRampToValueAtTime can't
-  // target exactly 0 (it's a multiplicative curve), hence the 0.001 floor;
-  // the oscillators are stopped shortly after regardless, so nothing lingers
-  // audibly.
-  function playVoice(freq, opts) {
-    if (volume <= 0) return;
-    var c = resumedContext();
+  // ---- Building blocks ----
+  //
+  // Every layer is a source through its own gain envelope, a linear attack
+  // into an exponential decay: the plain shape any simple sound chip could
+  // produce, and all a percussive blip needs. exponentialRampToValueAtTime
+  // can't target exactly 0 (it's a multiplicative curve), hence the 0.001
+  // floor; the sources are stopped shortly after regardless, so nothing
+  // lingers audibly.
+  function envGain(c, now, attack, decay, peak) {
+    var g = c.createGain();
+    g.gain.setValueAtTime(0, now);
+    g.gain.linearRampToValueAtTime(peak, now + attack);
+    g.gain.exponentialRampToValueAtTime(0.001, now + attack + decay);
+    return g;
+  }
+  // One oscillator through its envelope into the master mixer, optionally
+  // by way of a filter node.
+  function tone(c, now, type, freq, attack, decay, peak, via) {
+    var osc = c.createOscillator();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, now);
+    var g = envGain(c, now, attack, decay, peak);
+    if (via) { osc.connect(via); via.connect(g); } else osc.connect(g);
+    g.connect(masterGain);
+    osc.start(now);
+    osc.stop(now + attack + decay + 0.02);
+  }
+  // A burst of white noise through a lowpass and its envelope: the "knock"
+  // of something being struck. One second of noise is generated once and
+  // shared; every burst only ever plays its first few milliseconds.
+  var noiseBuffer = null;
+  function noise(c, now, attack, decay, peak, lowpassHz) {
+    if (!noiseBuffer) {
+      noiseBuffer = c.createBuffer(1, c.sampleRate, c.sampleRate);
+      var d = noiseBuffer.getChannelData(0);
+      for (var i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+    var src = c.createBufferSource();
+    src.buffer = noiseBuffer;
+    var f = c.createBiquadFilter();
+    f.type = "lowpass";
+    f.frequency.value = lowpassHz;
+    var g = envGain(c, now, attack, decay, peak);
+    src.connect(f); f.connect(g); g.connect(masterGain);
+    src.start(now);
+    src.stop(now + attack + decay + 0.02);
+  }
+  function startVoice() {
+    if (volume <= 0) return null;
+    return resumedContext();
+  }
+
+  // Clave-ish: a very short, bright sine pitched well above the voice's
+  // note (2.5x, so middle C lands around 650 Hz) snapped on in half a
+  // millisecond, with an even briefer 6x ping for the click of the strike.
+  function playBounce(freq) {
+    var c = startVoice();
     if (!c) return;
     var now = c.currentTime;
-    var end = now + opts.attack + opts.decay + 0.02;
-    function layer(f, peak, decay) {
-      var osc = c.createOscillator();
-      osc.type = opts.wave;
-      osc.frequency.setValueAtTime(f, now);
-      var gain = c.createGain();
-      gain.gain.setValueAtTime(0, now);
-      gain.gain.linearRampToValueAtTime(peak, now + opts.attack);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + opts.attack + decay);
-      osc.connect(gain);
-      gain.connect(masterGain);
-      osc.start(now);
-      osc.stop(end);
-    }
-    layer(freq, opts.peak, opts.decay);
-    if (opts.overtoneRatio) {
-      layer(freq * opts.overtoneRatio, opts.peak * opts.overtoneGain, opts.decay * opts.overtoneDecayScale);
-    }
+    tone(c, now, "sine", freq * 2.5, 0.0005, 0.16, 0.45);
+    tone(c, now, "sine", freq * 6, 0.0005, 0.03, 0.12);
   }
 
-  // Piano-ish: a square wave (one of the two classic chip-tune timbres)
-  // with an octave-up layer underneath for body, a softer attack and a
-  // longer decay than the edge sound's blip, read as sustained rather
-  // than percussive.
-  function playBounce(freq) {
-    playVoice(freq, {
-      wave: "square", peak: 0.22,
-      attack: 0.006, decay: 0.55,
-      overtoneRatio: 2, overtoneGain: 0.35, overtoneDecayScale: 0.7,
-    });
-  }
-
-  // Xylophone-ish: a bright triangle wave, snapped on almost instantly and
-  // decaying quickly, plus a brief two-octave-up "tick" layer standing in
-  // for the mallet's own attack transient.
+  // Palm-muted string: a sawtooth through a fixed 900 Hz lowpass, dull and
+  // stringy, over a few milliseconds of filtered noise for the pick.
   function playEdge(freq) {
-    playVoice(freq, {
-      wave: "triangle", peak: 0.35,
-      attack: 0.002, decay: 0.22,
-      overtoneRatio: 4, overtoneGain: 0.18, overtoneDecayScale: 0.15,
-    });
+    var c = startVoice();
+    if (!c) return;
+    var now = c.currentTime;
+    var lp = c.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = 900;
+    tone(c, now, "sawtooth", freq, 0.002, 0.18, 0.5, lp);
+    noise(c, now, 0.001, 0.008, 0.2, 4000);
   }
 
   global.PhysicsSound = {
