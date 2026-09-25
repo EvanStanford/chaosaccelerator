@@ -6,7 +6,10 @@
      Public Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in
      the project root, or https://chaosaccelerator.com/license for a
      hosted copy. -->
-<!-- The landing page. The app itself, the scene builder and the map, one
+<!-- The landing page: one screen, never taller than the window. The title
+     and the button at the top, a sideways carousel (the "tour": the video,
+     the two steps, the gallery) filling the middle, the dots and the
+     credits at the foot. The app itself, the scene builder and the map, one
      document, is chaos.html, which is where this file's name used to lead;
      see the script just below for the links that still do. -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -24,69 +27,204 @@
 </script>
 <link rel="stylesheet" href="landing.css?v=m70">
 </head>
-<body>
-<main class="page flush-top">
+<body class="landing">
+<main class="screen">
+
+  <!-- The corner menu: everything about the site that is not the site,
+       behind one button at the top right. Each entry's icon is a plain
+       one-color drawing, so the menu reads as a list rather than a row of
+       logos. -->
+  <nav class="corner-menu" id="corner-menu" aria-label="About this site">
+    <button class="corner-menu-btn" id="corner-menu-btn" type="button" aria-label="Menu" aria-expanded="false" aria-controls="corner-menu-list">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+    </button>
+    <ul class="corner-menu-list" id="corner-menu-list" hidden>
+      <li><a href="readme.html">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9.25" fill="none" stroke="currentColor" stroke-width="1.5"></circle><path d="M12 10.75v6.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path><circle cx="12" cy="7.5" r="1.25" fill="currentColor"></circle></svg>
+        About</a></li>
+      <li><a href="other.html">
+        <svg class="wide" viewBox="0 7.75 24 8.5" aria-hidden="true"><path fill="currentColor" d="M0 8.23H8.24A1.66 1.66 0 0 0 11.19 9.61L11.43 8.62 11.66 9.49A0.65 0.65 0 0 1 12.34 9.49L12.57 8.62 12.81 9.61A1.66 1.66 0 0 0 15.76 8.23H24Q21.69 8.97 19.73 12.7Q16.38 13.23 12 15.77Q7.62 13.23 4.27 12.7Q2.31 8.97 0 8.23Z"></path></svg>
+        Other Projects by Me</a></li>
+      <li><a href="https://github.com/EvanStanford/chaosaccelerator">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"></path></svg>
+        Source Code</a></li>
+      <li><a href="license.html">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8.8 22A10.5 10.5 0 1 1 15.2 22L13.6 13.72A3.6 3.6 0 1 0 10.4 13.72Z"></path></svg>
+        CPAL-1.0 Open Source License</a></li>
+    </ul>
+  </nav>
 
   <header class="masthead">
     <h1><a href="chaos.html">Chaos Accelerator</a></h1>
     <p class="tagline">Create your own hardware accelerated fractals from physics simulations!</p>
-    <div class="launch launch-top">
+    <div class="launch">
       <a class="fractalize-btn large" href="chaos.html">Fractal-ize!</a>
-    </div>
-    <div class="credits">
-      <p>Created by Evan in 2026.</p>
-      <p><a href="https://github.com/EvanStanford/chaosaccelerator">Open source</a>, <a href="license.html">CPAL-1.0 license</a>, Free, No ads, No login</p>
-      <p><a href="other.html">Other projects by me</a></p>
     </div>
   </header>
 
-  <section class="section" aria-labelledby="tutorial-label">
-    <h2 class="section-lead" id="tutorial-label">In depth video tutorial: [TODO: Replace with real video once ready]</h2>
-    <!-- PLACEHOLDER VIDEO: the tutorial has not been recorded yet, and this is
-         the cams video standing in for it. Swap the id in the src below. -->
-    <div class="video video-narrow">
-      <iframe src="https://www.youtube-nocookie.com/embed/_dtBUiaAqRE" title="Chaos Accelerator video tutorial (placeholder)" loading="lazy" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
-    </div>
-  </section>
+  <section class="tour" id="tour" aria-roledescription="carousel" aria-label="Tour">
+    <div class="tour-track" id="tour-track" tabindex="0">
 
-  <section class="section" aria-labelledby="howto-label">
-    <h2 class="section-lead" id="howto-label">How to:</h2>
-    <div class="steps">
-      <div class="step">
-        <img src="assets/builder.jpg?v=m70" width="896" height="782" alt="The scene builder: a ball above two tilted rods on a dark grid" loading="lazy">
-        <div class="step-body">
-          <h3>Step 1: Build a physics simulation scene</h3>
+      <article class="tour-slide is-current" aria-label="Video tutorial">
+        <div class="tour-media video">
+          <!-- PLACEHOLDER VIDEO: the tutorial has not been recorded yet, and
+               this is the cams video standing in for it. Swap the id in the
+               src below. -->
+          <iframe src="https://www.youtube-nocookie.com/embed/_dtBUiaAqRE" title="Chaos Accelerator video tutorial (placeholder)" loading="lazy" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+        </div>
+        <div class="tour-caption">
+          <h2>In depth video tutorial</h2>
+          <p>[TODO: Replace with real video once ready]</p>
+        </div>
+      </article>
+
+      <article class="tour-slide" aria-label="Step 1">
+        <div class="tour-media">
+          <img src="assets/builder.png?v=m70" width="1556" height="874" alt="The scene builder, with a scene laid out on its dark grid">
+        </div>
+        <div class="tour-caption">
+          <h2>Step 1: Build a physics simulation scene</h2>
           <p>Add balls, rods, springs, hinges, and much more to create a scene.</p>
         </div>
-      </div>
-      <div class="step">
-        <img src="assets/map.jpg?v=m70" width="896" height="782" alt="The map that scene makes: bands and folds of rainbow color, each pixel one run of the scene from a slightly different start" loading="lazy">
-        <div class="step-body">
-          <h3>Step 2: Explore the resulting fractal your scene creates!</h3>
+      </article>
+
+      <article class="tour-slide" aria-label="Step 2">
+        <div class="tour-media">
+          <img src="assets/map.jpg?v=m70" width="1556" height="874" alt="The map a scene makes: bands and folds of rainbow color, each pixel one run of the scene from a slightly different start">
         </div>
-      </div>
+        <div class="tour-caption">
+          <h2>Step 2: Explore the resulting fractal your scene creates!</h2>
+        </div>
+      </article>
+
+      <article class="tour-slide" aria-label="Gallery">
+        <!-- Filled by the script at the foot of the page from the gallery's
+             own list; every card leads to the gallery page. -->
+        <div class="tour-media gallery-strip" id="gallery-strip"></div>
+        <div class="tour-caption">
+          <h2>Gallery</h2>
+          <p><a href="gallery/gallery.html">Browse the gallery, or submit your own pattern &rarr;</a></p>
+        </div>
+      </article>
+
     </div>
+    <button class="carousel-arrow prev" id="tour-prev" type="button" aria-label="Previous">&#8249;</button>
+    <button class="carousel-arrow next" id="tour-next" type="button" aria-label="Next">&#8250;</button>
   </section>
 
-  <div class="launch">
-    <a class="fractalize-btn large" href="chaos.html">Fractal-ize!</a>
-  </div>
-
-  <section class="section" aria-labelledby="gallery-label">
-    <h2 class="section-lead" id="gallery-label">Gallery:</h2>
-    <!-- Filled by the script at the foot of the page from the gallery's own
-         list; every card leads to the gallery page. -->
-    <div class="gallery-strip" id="gallery-strip"></div>
-    <p class="gallery-more"><a href="gallery/gallery.html">Browse the gallery, or submit your own pattern &rarr;</a></p>
-  </section>
+  <footer class="foot">
+    <div class="carousel-dots" id="tour-dots"></div>
+    <p class="credits">Created by Evan in 2026 &middot; Free, no ads, no login, all client side</p>
+  </footer>
 
 </main>
 <script>
+  // ---- The corner menu ----
+  //
+  // Open and shut by its button; shut again by a click anywhere else, or
+  // Escape. The entries are ordinary links, so choosing one just leaves.
+  (function () {
+    var btn = document.getElementById("corner-menu-btn");
+    var list = document.getElementById("corner-menu-list");
+    function setOpen(open) {
+      list.hidden = !open;
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+    btn.addEventListener("click", function (e) { e.stopPropagation(); setOpen(list.hidden); });
+    document.addEventListener("click", function (e) {
+      if (!list.hidden && !list.contains(e.target)) setOpen(false);
+    });
+    window.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && !list.hidden) { setOpen(false); btn.focus(); }
+    });
+  })();
+
+  // ---- The tour ----
+  //
+  // A scroll container with snapping (see .tour-track in landing.css), so a
+  // swipe and a sideways trackpad scroll work with no help from here: the
+  // arrows, the dots and the arrow keys only scroll it. The page itself
+  // never scrolls up or down, so a vertical wheel steps the tour instead,
+  // one slide per flick. The slides are narrower than the track on a wide
+  // window, with the ends padded so the first and last can sit centered
+  // too, so "which one is showing" is whichever is nearest the middle.
+  (function () {
+    var track = document.getElementById("tour-track");
+    var dots = document.getElementById("tour-dots");
+    var prev = document.getElementById("tour-prev");
+    var next = document.getElementById("tour-next");
+    var slides = Array.prototype.slice.call(track.querySelectorAll(".tour-slide"));
+    var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    function current() {
+      var mid = track.scrollLeft + track.clientWidth / 2;
+      var best = 0, bestDist = Infinity;
+      slides.forEach(function (s, i) {
+        var d = Math.abs(s.offsetLeft + s.offsetWidth / 2 - mid);
+        if (d < bestDist) { bestDist = d; best = i; }
+      });
+      return best;
+    }
+    function goTo(i) {
+      i = Math.max(0, Math.min(slides.length - 1, i));
+      var s = slides[i];
+      track.scrollTo({
+        left: s.offsetLeft - (track.clientWidth - s.offsetWidth) / 2,
+        behavior: reduced ? "auto" : "smooth",
+      });
+    }
+    function update() {
+      var i = current();
+      prev.disabled = i <= 0;
+      next.disabled = i >= slides.length - 1;
+      Array.prototype.forEach.call(dots.children, function (dot, j) {
+        if (j === i) dot.setAttribute("aria-current", "true");
+        else dot.removeAttribute("aria-current");
+      });
+      slides.forEach(function (s, j) { s.classList.toggle("is-current", j === i); });
+    }
+
+    slides.forEach(function (s, i) {
+      var dot = document.createElement("button");
+      dot.type = "button";
+      dot.setAttribute("aria-label", (s.getAttribute("aria-label") || "Slide " + (i + 1)) + ", " + (i + 1) + " of " + slides.length);
+      dot.addEventListener("click", function () { goTo(i); });
+      dots.appendChild(dot);
+    });
+    prev.addEventListener("click", function () { goTo(current() - 1); });
+    next.addEventListener("click", function () { goTo(current() + 1); });
+    window.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowLeft") { e.preventDefault(); goTo(current() - 1); }
+      if (e.key === "ArrowRight") { e.preventDefault(); goTo(current() + 1); }
+    });
+    // One step per flick, not per event: a trackpad or a free-spinning
+    // wheel sends a stream of them for one gesture, so after a step the
+    // rest of that stream is ignored for a moment. A sideways gesture is
+    // left to the track's own scrolling.
+    var wheelHoldUntil = 0;
+    window.addEventListener("wheel", function (e) {
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      e.preventDefault();
+      var now = Date.now();
+      if (now < wheelHoldUntil || Math.abs(e.deltaY) < 10) return;
+      wheelHoldUntil = now + 700;
+      goTo(current() + (e.deltaY > 0 ? 1 : -1));
+    }, { passive: false });
+    var scrollFrame = null;
+    track.addEventListener("scroll", function () {
+      if (scrollFrame) return;
+      scrollFrame = requestAnimationFrame(function () { scrollFrame = null; update(); });
+    });
+    update();
+  })();
+
+  // ---- The gallery slide ----
+  //
   // The gallery's own list (gallery/gallery.json; gallery/gallery.html
-  // describes the format) fills the preview strip: one card per pattern,
-  // each a link to that pattern in the gallery. Without it (no script, or
-  // the file missing) the strip stays empty and the link under it still
-  // leads there.
+  // describes the format) fills the last slide: one card per pattern, each
+  // a link to that pattern in the gallery. Without it (no script, or the
+  // file missing) the slide stays empty and the link under it still leads
+  // there.
   (function () {
     var strip = document.getElementById("gallery-strip");
     var list = new URL("gallery/gallery.json", location.href);

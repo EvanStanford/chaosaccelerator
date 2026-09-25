@@ -58,12 +58,42 @@
 
   <section class="section submit" aria-labelledby="submit-label">
     <h2 class="section-lead" id="submit-label">Submit your own:</h2>
-    <!-- The draft this opens is filled in by the script below, which puts
-         the moment of the click in the subject so every submission is its
-         own conversation in the inbox. This static address is the same
-         draft without that, for a browser that runs no script. -->
-    <p>If you find a cool pattern, <a id="submit-link" href="mailto:evan.chaosaccelerator@gmail.com?subject=Gallery%20submission&amp;body=Evan%2C%0D%0AI%20would%20like%20to%20submit%20my%20pattern%20for%20the%20gallery.%0D%0AMap%20screenshot%3A%20%3CPlease%20attach%3E%0D%0AScene%20screenshot%3A%20%3COptionally%20attach%3E%0D%0AUrl%3A%20%3CRequired%20to%20attach%3E">email me (evan.chaosaccelerator@gmail.com)</a> and I will put it in the gallery page.</p>
+    <!-- A click opens the dialog below, a sample of the email to send,
+         which works whatever the reader uses for mail. The link's own
+         address is the same email as a mailto: draft, for a browser that
+         runs no script (and the dialog offers it again, for whoever does
+         have a mail app wired up). -->
+    <p>If you find a cool pattern, <a id="submit-link" href="mailto:evan.chaosaccelerator@gmail.com?subject=Gallery%20submission&amp;body=Evan%2C%0D%0AI%20would%20like%20to%20submit%20my%20pattern%20for%20the%20gallery.%0D%0AUrl%3A%20%3CRequired%20to%20attach%3E%0D%0AMap%20screenshot%3A%20%3CPlease%20attach%3E%0D%0AScene%20screenshot%3A%20%3COptionally%20attach%3E%0D%0AMy%20name%20for%20attribution%3A%20%3CPreferred%2FOptional%3E%0D%0AScene%20name%3A%20%3CPreferred%2FOptional%3E">email me (evan.chaosaccelerator@gmail.com)</a> and I will put it in the gallery page.</p>
   </section>
+
+  <!-- The sample email. Each field has its own Copy, and the whole thing
+       is filled in by the script below (the subject carries the moment it
+       was opened; see there). -->
+  <dialog class="mail-dialog" id="mail-dialog" aria-labelledby="mail-dialog-title">
+    <div class="mail-dialog-head">
+      <h2 id="mail-dialog-title">Send me an email like this</h2>
+      <button class="mail-dialog-close" id="mail-dialog-close" type="button" aria-label="Close">&times;</button>
+    </div>
+    <p class="mail-dialog-note">From whatever you use for mail: copy the pieces across, attach your screenshots, and send.</p>
+    <div class="mail-field">
+      <div class="mail-field-label">To</div>
+      <div class="mail-field-value" id="mail-to">evan.chaosaccelerator@gmail.com</div>
+      <button class="mail-copy" type="button" data-copy="mail-to">Copy</button>
+    </div>
+    <div class="mail-field">
+      <div class="mail-field-label">Subject</div>
+      <div class="mail-field-value" id="mail-subject"></div>
+      <button class="mail-copy" type="button" data-copy="mail-subject">Copy</button>
+    </div>
+    <div class="mail-field">
+      <div class="mail-field-label">Body</div>
+      <pre class="mail-field-value" id="mail-body"></pre>
+      <button class="mail-copy" type="button" data-copy="mail-body">Copy</button>
+    </div>
+    <div class="mail-dialog-actions">
+      <a class="mail-open" id="mail-open" href="mailto:evan.chaosaccelerator@gmail.com">Or open it in your mail app &rarr;</a>
+    </div>
+  </dialog>
 
 </main>
 <script>
@@ -172,22 +202,34 @@
 
   // ---- The submission email ----
   //
-  // The link opens a draft, and the draft's subject carries the moment it
-  // was opened, to the second: mail clients thread messages by subject, and
-  // a dozen submissions all titled "Gallery submission" would land in the
-  // inbox as one conversation. Set now, so the address is right when it is
-  // copied or previewed, and again on the click, so it is the click's own
-  // time and not the page's.
+  // A click on the link opens the dialog rather than a mailto: draft: a
+  // mailto: only works where the browser has a mail app to hand it to,
+  // and on a machine where mail is a web page it does nothing at all. The
+  // dialog shows the email to send instead, To, Subject and Body, each
+  // with its own Copy, and offers the mailto: draft as well for whoever
+  // does have the app.
+  //
+  // The subject carries the moment the dialog was opened, to the second:
+  // mail clients thread messages by subject, and a dozen submissions all
+  // titled "Gallery submission" would land in the inbox as one
+  // conversation. The link's own address is refreshed the same way, so a
+  // reader with no script gets the same subject.
   (function () {
     var link = document.getElementById("submit-link");
+    var dialog = document.getElementById("mail-dialog");
+    var subjectEl = document.getElementById("mail-subject");
+    var bodyEl = document.getElementById("mail-body");
+    var openLink = document.getElementById("mail-open");
     var ADDRESS = "evan.chaosaccelerator@gmail.com";
     var BODY = [
       "Evan,",
       "I would like to submit my pattern for the gallery.",
+      "Url: <Required to attach>",
       "Map screenshot: <Please attach>",
       "Scene screenshot: <Optionally attach>",
-      "Url: <Required to attach>",
-    ].join("\r\n");
+      "My name for attribution: <Preferred/Optional>",
+      "Scene name: <Preferred/Optional>",
+    ].join("\n");
     function pad(n) { return (n < 10 ? "0" : "") + n; }
     function stamp() {
       var d = new Date();
@@ -195,12 +237,54 @@
         " " + pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
     }
     function refresh() {
-      link.href = "mailto:" + ADDRESS +
-        "?subject=" + encodeURIComponent("Gallery submission " + stamp()) +
-        "&body=" + encodeURIComponent(BODY);
+      var subject = "Gallery submission " + stamp();
+      var href = "mailto:" + ADDRESS +
+        "?subject=" + encodeURIComponent(subject) +
+        "&body=" + encodeURIComponent(BODY.replace(/\n/g, "\r\n"));
+      link.href = href;
+      openLink.href = href;
+      subjectEl.textContent = subject;
+      bodyEl.textContent = BODY;
     }
     refresh();
-    link.addEventListener("click", refresh);
+
+    // No <dialog> (an old browser): the link stays the mailto: draft.
+    if (!dialog.showModal) return;
+    link.addEventListener("click", function (e) {
+      e.preventDefault();
+      refresh();
+      dialog.showModal();
+    });
+    document.getElementById("mail-dialog-close").addEventListener("click", function () { dialog.close(); });
+    // A click on the backdrop, which is the dialog element itself outside
+    // its box, shuts it; Escape already does.
+    dialog.addEventListener("click", function (e) { if (e.target === dialog) dialog.close(); });
+
+    // Copy: the clipboard API where the page is allowed it, and selecting
+    // the text where it is not, so a manual copy is one keystroke away.
+    // The button says "Copied" for a moment either way it managed it.
+    Array.prototype.forEach.call(dialog.querySelectorAll(".mail-copy"), function (button) {
+      var target = document.getElementById(button.getAttribute("data-copy"));
+      button.addEventListener("click", function () {
+        var text = target.textContent;
+        var done = function () {
+          button.textContent = "Copied";
+          setTimeout(function () { button.textContent = "Copy"; }, 1500);
+        };
+        var select = function () {
+          var range = document.createRange();
+          range.selectNodeContents(target);
+          var sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(done, select);
+        } else {
+          select();
+        }
+      });
+    });
   })();
 </script>
 </body>

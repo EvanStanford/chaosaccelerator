@@ -3,13 +3,14 @@
    root, or https://chaosaccelerator.com/license for a hosted copy. */
 
 /* The pages that are documents rather than the app: index.html (the
-   landing page), gallery/gallery.html, other.html (other projects), and the
-   license and error pages. They share the app's
+   landing page), gallery/gallery.html, other.html (other projects),
+   readme.html (the README, as a page), and the license and error pages. They share the app's
    palette, the same custom properties physics.css declares, copied rather
    than imported so that neither page has to load the app's stylesheet for
    six colors, and its system font stack, and nothing else: the app's own
    sheets pin html/body to the window's height for a full-bleed canvas, which
-   is exactly wrong for a page that scrolls. */
+   is exactly wrong for a page that scrolls. (The landing page pins itself to
+   one screen too, its own way: see the end of this file.) */
 :root {
   --bg: #14161c;
   --bg-panel: #1b1e27;
@@ -42,11 +43,6 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
      chaos.html's viewport-fit=cover), and these keep the same meta tag. */
   padding: 56px max(20px, env(safe-area-inset-right)) 72px max(20px, env(safe-area-inset-left));
 }
-
-/* The landing page starts with its title hard against the top of the window
-   (only a notch's own inset is kept). other.html keeps the padding: it opens
-   with a small back link, which should not touch the edge. */
-.page.flush-top { padding-top: env(safe-area-inset-top); }
 
 /* ---- Masthead ---- */
 
@@ -98,11 +94,11 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   color: var(--text);
 }
 
-/* A 16:9 box the iframe fills. By aspect-ratio, NOT the old padding-top
-   trick: a percentage padding is a percentage of the PARENT's width, so the
-   moment this box is narrower than its parent (.video-narrow's max-width) the
-   trick makes it 16:9 of the wrong width, which is exactly what it did, a
-   532px-wide video 9/16ths of 940px tall. */
+/* A 16:9 box the iframe fills (other.html; the landing page's video slide
+   reuses it). By aspect-ratio, NOT the old padding-top trick: a percentage
+   padding is a percentage of the PARENT's width, so the moment this box is
+   narrower than its parent the trick makes it 16:9 of the wrong width,
+   which is exactly what it did, a 532px-wide video 9/16ths of 940px tall. */
 .video {
   position: relative;
   width: 100%;
@@ -119,56 +115,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   height: 100%;
   border: 0;
 }
-.video-narrow { max-width: 532px; margin: 0 auto; }
-
-/* ---- The two steps ---- */
-
-.steps {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 20px;
-}
-/* Stacked on a phone: the same 640px the app's own small-window layout
-   switches at is a little early for two cards of text, so this goes first. */
-@media (max-width: 720px) {
-  .steps { grid-template-columns: minmax(0, 1fr); }
-}
-
-.step {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--bg-panel);
-  color: var(--text);
-}
-
-/* Both screenshots are the same 896 x 782 and shown whole, at their own
-   shape: the card is the picture with its caption under it, which is what
-   makes the tile "squareish". The <img> tags carry those dimensions, so the
-   browser holds the right space before a (lazy) image has loaded and the page
-   does not jump; height: auto lets the width drive it. If the pictures are
-   ever replaced by ones of another shape, change the numbers there, nothing
-   here crops. */
-.step img {
-  display: block;
-  width: 100%;
-  height: auto;
-  background: #0c0d11;
-  border-bottom: 1px solid var(--border);
-}
-.step-body { padding: 16px 18px 20px; }
-.step h3 { margin: 0 0 6px; font-size: 18px; line-height: 1.3; }
-.step p { margin: 0; font-size: 15px; color: var(--text-dim); }
-
 /* ---- The way in ---- */
-
-.launch { margin-top: 56px; text-align: center; }
-/* The same button again, straight under the tagline: for whoever needs no
-   more convincing than that. Closer to what it follows than the one at the
-   foot of the page, and with room under it for the pulse's glow. */
-.launch-top { margin: 26px 0 30px; }
 
 /* The Fractal-ize button, exactly: every declaration below is .fractalize-btn's
    own (physics.css), here on a link. Copied because this page does not load
@@ -237,61 +184,6 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 }
 
 /* ---- The gallery ---- */
-
-/* The landing page's preview of it: the gallery's map pictures in a strip
-   that scrolls sideways (snapping card by card, a swipe on a phone), every
-   card a link to the gallery page. Centered while the cards fit, scrolling
-   from the first once they don't: the auto margins on the two end cards do
-   that, where justify-content: center would push the first card out of
-   reach off the left edge. */
-.gallery-strip {
-  display: flex;
-  gap: 14px;
-  overflow-x: auto;
-  scroll-snap-type: x proximity;
-  padding: 6px 0 14px;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
-}
-.gallery-card:first-child { margin-left: auto; }
-.gallery-card:last-child { margin-right: auto; }
-.gallery-card {
-  flex: 0 0 260px;
-  scroll-snap-align: start;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--bg-panel);
-  color: var(--text);
-  text-decoration: none;
-  transition: transform 0.12s ease, border-color 0.12s ease;
-}
-.gallery-card:hover {
-  color: var(--text);
-  text-decoration: none;
-  border-color: var(--accent);
-  transform: translateY(-2px);
-}
-.gallery-card img {
-  display: block;
-  width: 100%;
-  aspect-ratio: 16 / 10;
-  object-fit: cover;
-  background: #0c0d11;
-  border-bottom: 1px solid var(--border);
-}
-.gallery-card span {
-  display: block;
-  padding: 8px 12px 10px;
-  font-size: 14px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-@media (max-width: 720px) {
-  .gallery-card { flex-basis: 220px; }
-}
-.gallery-more { margin: 4px 0 0; text-align: center; font-size: 15px; }
 
 /* The gallery page's carousel: one pattern at a time, the full width of
    the page, swiped or stepped through with the arrows. It is a scroll
@@ -418,3 +310,363 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 }
 
 .submit p { margin: 0; text-align: center; font-size: 17px; }
+
+/* The sample email (gallery.html): a dialog over the page, the three
+   fields of the message each with a Copy button beside it. */
+.mail-dialog {
+  width: min(92vw, 560px);
+  margin: auto;
+  padding: 18px 22px 20px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-panel);
+  color: var(--text);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+}
+.mail-dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+.mail-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.mail-dialog-head h2 { margin: 0; font-size: 20px; line-height: 1.3; }
+.mail-dialog-close {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 0 0 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+.mail-dialog-close:hover { background: var(--bg); color: var(--text); }
+.mail-dialog-note { margin: 8px 0 16px; font-size: 14px; color: var(--text-dim); }
+.mail-field {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+.mail-field-label {
+  padding-top: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+.mail-field-value {
+  margin: 0;
+  padding: 7px 10px;
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  user-select: all;
+}
+.mail-copy {
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.mail-copy:hover { background: var(--bg); border-color: var(--accent); }
+.mail-dialog-actions { margin-top: 14px; text-align: right; font-size: 14px; }
+/* The dialog focuses its first control as it opens, so the ring shows at
+   once: in the page's own accent rather than the browser's. */
+.mail-dialog :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 480px) {
+  .mail-field { grid-template-columns: minmax(0, 1fr) auto; }
+  .mail-field-label { grid-column: 1 / -1; padding-top: 0; }
+}
+
+/* ---- The landing page: one screen ---- */
+
+/* index.html is a single screen, never taller than the window: the title
+   and the button at the top, the tour (a sideways carousel: the video, the
+   two steps, the gallery) filling whatever is left in the middle, the dots
+   and the credits at the foot. Nothing scrolls up or down; the wheel, the
+   arrow keys and a swipe step the tour instead (the script in index.html).
+   Everything that has a size in the vertical is given it in vh, so a short
+   window shrinks the type and the gaps rather than losing the foot. */
+body.landing {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+.screen {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: env(safe-area-inset-top) max(16px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+}
+.landing .masthead { flex: none; margin: 0; padding-top: clamp(8px, 2vh, 20px); }
+/* Under the corner menu's button, where the title would otherwise run into
+   it: a phone's width leaves no room beside a 30px title for a button. */
+@media (max-width: 640px) {
+  .landing .masthead { padding-top: 48px; }
+}
+.landing .masthead h1 { font-size: clamp(30px, min(7vw, 8.5vh), 60px); }
+.landing .tagline {
+  margin-top: clamp(6px, 1.2vh, 12px);
+  font-size: clamp(14px, min(2.2vw, 2.4vh), 19px);
+  line-height: 1.35;
+}
+.landing .launch { margin: clamp(10px, 2vh, 20px) 0 clamp(12px, 2.4vh, 24px); }
+.landing .fractalize-btn.large {
+  font-size: clamp(16px, 2.6vh, 22px);
+  padding: clamp(11px, 2vh, 18px) clamp(30px, 5.5vh, 48px);
+}
+
+/* The tour. Its height is what the masthead and the foot leave, and its
+   slides are sized from that: as wide as the window allows, but no wider
+   than lets a 16:9 picture over a caption fit that height, so the
+   screenshots (16:9 themselves) show whole. cqh is the tour's own height
+   (container-type: size); a browser without it keeps the width-only rule
+   and crops instead. The same width, as --slide-w, is what pads the
+   track's ends so the first and last slides can sit centered, and what
+   puts the arrows just outside the slide. */
+.tour {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  container-type: size;
+  --slide-w: min(100%, 780px);
+}
+@supports (width: 1cqh) {
+  .tour { --slide-w: min(100%, 780px, calc((100cqh - 84px) * 16 / 9)); }
+}
+.tour-track {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  height: 100%;
+  padding-inline: calc((100% - var(--slide-w)) / 2);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  outline: none;
+}
+.tour-track::-webkit-scrollbar { display: none; }
+/* A slide is as tall as its content, a 16:9 picture over its caption, and
+   sits centered in the track: on a wide window --slide-w was chosen so
+   that just fits, and on a narrow one, where the width is the window's,
+   the card is shorter than the track and floats in the middle. The slides
+   not in the middle are dimmed a little, so the one that is reads as the
+   one to look at. */
+.tour-slide {
+  display: flex;
+  flex: 0 0 var(--slide-w);
+  flex-direction: column;
+  max-height: 100%;
+  scroll-snap-align: center;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-panel);
+  color: var(--text);
+  opacity: 0.55;
+  transition: opacity 0.25s ease;
+}
+.tour-slide.is-current { opacity: 1; }
+.tour-track:focus-visible .tour-slide.is-current { box-shadow: 0 0 0 2px var(--accent); }
+/* The picture: 16:9, shrinking (the caption never does) only when even
+   the narrowest fit leaves the slide taller than the track. */
+.tour-media {
+  position: relative;
+  flex: 0 1 auto;
+  min-height: 0;
+  aspect-ratio: 16 / 9;
+  background: #0c0d11;
+  border-bottom: 1px solid var(--border);
+}
+.tour-media.video { border-radius: 0; border-width: 0 0 1px; }
+.tour-media > img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.tour-caption { flex: none; padding: 11px 16px 13px; }
+.tour-caption h2 {
+  margin: 0;
+  font-size: clamp(15px, 2.2vh, 18px);
+  font-weight: 600;
+  line-height: 1.3;
+}
+.tour-caption p {
+  margin: 3px 0 0;
+  font-size: clamp(13px, 1.9vh, 15px);
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+/* The gallery slide: the gallery's map pictures side by side, filling the
+   same frame the screenshots do, every card a link to the gallery page. */
+.gallery-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-auto-rows: minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px;
+}
+.gallery-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  text-decoration: none;
+  transition: border-color 0.12s ease;
+}
+.gallery-card:hover { color: var(--text); text-decoration: none; border-color: var(--accent); }
+.gallery-card img {
+  display: block;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  object-fit: cover;
+  background: #0c0d11;
+  border-bottom: 1px solid var(--border);
+}
+.gallery-card span {
+  display: block;
+  padding: 7px 10px 8px;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The arrows, halfway down the track and just outside the slide, or over
+   its edges once the slide is the whole width. */
+.tour .carousel-arrow { top: 50%; transform: translateY(-50%); }
+.tour .carousel-arrow.prev { left: max(0px, calc(50% - var(--slide-w) / 2 - 56px)); }
+.tour .carousel-arrow.next { right: max(0px, calc(50% - var(--slide-w) / 2 - 56px)); }
+
+.foot { flex: none; padding-top: clamp(4px, 1vh, 10px); text-align: center; }
+.landing .carousel-dots { margin: 0; }
+.landing .credits {
+  margin: 2px 0 0;
+  font-size: clamp(11px, 1.6vh, 13px);
+  line-height: 1.5;
+}
+
+/* ---- The corner menu ---- */
+
+/* One button at the top right of the landing page, and the list it drops
+   down: About, other projects, the source, the license. (This sheet has no
+   general button style: each button here says everything about itself.) */
+.corner-menu {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  right: max(12px, env(safe-area-inset-right));
+  z-index: 5;
+}
+.corner-menu-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(27, 30, 39, 0.85);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.corner-menu-btn:hover,
+.corner-menu-btn[aria-expanded="true"] { background: var(--bg-panel); border-color: var(--accent); }
+.corner-menu-list {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  min-width: 250px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-panel);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+.corner-menu-list a {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  white-space: nowrap;
+  color: var(--text);
+  text-decoration: none;
+}
+.corner-menu-list a:hover { background: var(--bg); color: var(--text); text-decoration: none; }
+/* The icons: one color, the text's, so they read as marks in a list rather
+   than as four logos in their brand colors. */
+.corner-menu-list svg { flex: none; width: 18px; height: 18px; color: var(--text); }
+/* The bat is three times as wide as it is tall, so it gets more width
+   than the others, taken from the margins so the labels still line up. */
+.corner-menu-list svg.wide { width: 24px; margin: 0 -3px; }
+
+/* ---- The readme page ---- */
+
+/* README.md rendered as a page (readme.html): the document's own
+   headings, so no masthead; the first one is the title. */
+.readme h1 {
+  margin: 0 0 12px;
+  font-size: clamp(34px, 6vw, 52px);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  font-weight: 800;
+}
+.readme h2 { margin: 36px 0 10px; font-size: 24px; line-height: 1.2; }
+.readme h3 { margin: 28px 0 8px; font-size: 19px; line-height: 1.3; }
+.readme h4, .readme h5, .readme h6 { margin: 22px 0 6px; font-size: 16px; }
+.readme p, .readme ul, .readme ol, .readme blockquote { margin: 0 0 16px; }
+.readme li { margin: 4px 0; }
+.readme blockquote {
+  padding: 2px 16px;
+  border-left: 3px solid var(--border);
+  color: var(--text-dim);
+}
+.readme hr { margin: 28px 0; border: 0; border-top: 1px solid var(--border); }
+.readme img { max-width: 100%; height: auto; border-radius: 8px; }
+.readme code {
+  padding: 2px 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+.readme pre {
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.readme pre code { padding: 0; border: 0; background: none; font-size: 13px; }
+.readme .readme-note { color: var(--text-dim); }
