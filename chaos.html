@@ -806,19 +806,49 @@
                opening it closes whichever of those was open and vice versa,
                without touching Settings or Map Evolution on the right; it
                just lives down here instead of in that stack. The card
-               has no body, only a header: that single line IS the whole
-               card, so, unlike the others, where only the header line
-               collapses it and the body stays interactive, a click
-               anywhere on it collapses it. The ring is duplicated between
+               has no body, only a header: those two lines (progress, and
+               the precision under it) ARE the whole card, so, unlike the
+               others, where only the header line collapses it and the body
+               stays interactive, a click anywhere on it collapses it. The ring is duplicated between
                the collapsed toggle and the open card's own icon slot since
                exactly one of the two is ever in the layout at a time (see
                .menu-item.is-open > .menu-toggle); both copies are kept in
                sync every frame. -->
           <section class="menu-item" id="menu-render-progress">
+            <!-- The three precision glyphs, drawn once here and reused by
+                 <use> from both copies of the ring and from the card's
+                 precision line (see updateRenderProgressPrecision in
+                 fractal-grid.js): the double dagger of typography for two
+                 float32 words per number, a "triple dagger" (a small
+                 triangle, point down, whose three sides each run well past
+                 the corners: point down and tight so it does not read as
+                 the App Store's "A") for three, and a "quad dagger" (the
+                 number sign, turned 45 degrees so its middle is a diamond)
+                 for four.
+                 Nothing for float32, which is the ordinary case and needs
+                 no badge. Plain strokes in the ring's own 40x40 space so
+                 they sit inside it and match its weight. A zero-size SVG
+                 of their own rather than <defs> inside one of the rings,
+                 since whichever ring holds them is display: none half the
+                 time (see .menu-item.is-open > .render-progress-toggle). -->
+            <svg class="precision-glyph-defs" width="0" height="0" aria-hidden="true" focusable="false">
+              <defs>
+                <g id="precision-glyph-df" class="precision-glyph">
+                  <path d="M20 11.5V28.5M14.5 15.5H25.5M14.5 24.5H25.5"></path>
+                </g>
+                <g id="precision-glyph-tf" class="precision-glyph">
+                  <path d="M22.25 27.6L13.75 12.9M17.75 27.6L26.25 12.9M11.5 16.8H28.5"></path>
+                </g>
+                <g id="precision-glyph-qf" class="precision-glyph">
+                  <path transform="rotate(45 20 20)" d="M17.3 12V28M22.7 12V28M12 17.3H28M12 22.7H28"></path>
+                </g>
+              </defs>
+            </svg>
             <button class="render-progress-toggle" id="grid-btn-render-progress" type="button" title="Rendering progress" aria-label="Rendering progress" aria-expanded="false">
               <svg id="render-progress-ring" viewBox="0 0 40 40" aria-hidden="true">
                 <circle id="render-progress-ring-coarse" class="render-progress-ring-track" cx="20" cy="20" r="17"></circle>
                 <circle id="render-progress-ring-aa" class="render-progress-ring-track" cx="20" cy="20" r="17"></circle>
+                <use class="render-progress-glyph"></use>
               </svg>
             </button>
             <div class="menu-card render-progress-card" id="render-progress-panel" hidden>
@@ -827,9 +857,20 @@
                   <svg viewBox="0 0 40 40">
                     <circle id="render-progress-ring-coarse-open" class="render-progress-ring-track" cx="20" cy="20" r="17"></circle>
                     <circle id="render-progress-ring-aa-open" class="render-progress-ring-track" cx="20" cy="20" r="17"></circle>
+                    <use class="render-progress-glyph"></use>
                   </svg>
                 </span>
-                <span id="render-progress-label" class="render-progress-label">Rendering Progress: 1 sim/px</span>
+                <!-- Two lines: the progress readout, and under it which
+                     precision the picture is being drawn at, with the same
+                     glyph the ring carries (none for float32) and what that
+                     precision costs, see updateRenderProgressPrecision. -->
+                <span class="render-progress-lines">
+                  <span id="render-progress-label" class="render-progress-label">Rendering Progress: 1 sim/px</span>
+                  <span id="render-progress-precision" class="render-progress-precision">
+                    <svg class="render-progress-precision-glyph" viewBox="10 10 20 20" aria-hidden="true" hidden><use class="render-progress-glyph"></use></svg>
+                    <span id="render-progress-precision-text">Single Precision</span>
+                  </span>
+                </span>
               </div>
             </div>
           </section>

@@ -301,6 +301,12 @@
   var renderProgressRingCoarseOpen = document.getElementById("render-progress-ring-coarse-open");
   var renderProgressRingAaOpen = document.getElementById("render-progress-ring-aa-open");
   var renderProgressLabel = document.getElementById("render-progress-label");
+  // The precision badge: one <use> in each copy of the ring and a third
+  // beside the precision line, all pointed at the same glyph (see
+  // updateRenderProgressPrecision).
+  var renderProgressGlyphs = Array.prototype.slice.call(document.querySelectorAll(".render-progress-glyph"));
+  var renderProgressPrecisionGlyph = document.querySelector(".render-progress-precision-glyph");
+  var renderProgressPrecisionText = document.getElementById("render-progress-precision-text");
   var colorZoomCheckbox = document.getElementById("color-zoom-checkbox");
   var colorZoomField = document.getElementById("color-zoom-field");
   var lowSaturationCheckbox = document.getElementById("low-saturation-checkbox");
@@ -2723,6 +2729,15 @@
     tf: "triple-float (~21 digits)",
     qf: "quad-float (~28 digits)",
   };
+  // The same rungs as the rendering-progress gauge names them (see
+  // updateRenderProgressPrecision), with how much slower than float32 each
+  // one draws, as a single round figure: measured, a df pixel costs 5x to
+  // 60x a float32 one depending on the scene (see DF_COST_PRIOR), with the
+  // common hinged and sprung scenes around 10x; three words cost 3.4x to
+  // 5.0x what two do and four words 6.5x to 7.9x (see
+  // PRECISION_COST_PRIOR), so 4x and 7x of that.
+  var PRECISION_TITLES = { f32: "Single Precision", df: "Double Precision", tf: "Triple Precision", qf: "Quadruple Precision" };
+  var PRECISION_SLOWDOWN = { df: 10, tf: 40, qf: 70 };
   // Per scene, per precision, filled in by calibrateSliceSteps: how many
   // steps one sliced draw runs, and which precisions turned out to need
   // longer for a single step than the GPU will allow a draw at all.
@@ -5211,11 +5226,14 @@
   }
 
   // The same numbers the ring draws, spelled out for the open menu's own
-  // one-line readout: "1 sim per Npx" while the ladder is running, then
-  // antialiasing's own count once that phase starts (see finishRun for why
-  // aaSample is already MAX_AA_SAMPLES, not one short of it, by the time
-  // the run is complete).
+  // readout: "1 sim per Npx" while the ladder is running, then
+  // antialiasing's own count once that phase starts, then, once there is
+  // nothing left to refine, plainly that it is done (rather than
+  // "4 of 4 samples", which read as one more step still to come; see
+  // finishRun for why aaSample is already MAX_AA_SAMPLES, not one short of
+  // it, by the time the run is complete).
   function renderProgressLabelText() {
+    if (progressive.complete) return "Rendering Complete";
     if (progressive.aaSample > 0) {
       return "Antialiasing Progress: " + Math.min(progressive.aaSample, MAX_AA_SAMPLES) +
         " of " + MAX_AA_SAMPLES + " samples per pixel";
@@ -5258,6 +5276,41 @@
     setRenderRingFraction(renderProgressRingCoarseOpen, gray);
     setRenderRingFraction(renderProgressRingAaOpen, aa);
     renderProgressLabel.textContent = playback ? playbackProgressLabelText() : renderProgressLabelText();
+    updateRenderProgressPrecision();
+  }
+
+  // The gauge's precision badge: the glyph in the middle of the ring (both
+  // copies) and the line under the progress readout in the open card, both
+  // following the precision the picture is ACTUALLY drawn at
+  // (effectivePrecision, not the one the zoom asks for, which may still be
+  // compiling). float32 is the ordinary case and gets no glyph, only the
+  // line; the three multi-float rungs get their glyph (see the <defs> in
+  // chaos.html) and what they cost (PRECISION_SLOWDOWN). Called every
+  // frame with the ring; the writes are skipped while nothing changed,
+  // since swapping a <use>'s href is not free the way a dashoffset is.
+  var renderProgressPrecisionShown = null;
+  function updateRenderProgressPrecision() {
+    // Reachable from setup (resetProgressive via markDirty) before the
+    // precision machinery below has been declared.
+    if (!PRECISION_LADDER || !precisionMode) return;
+    var precision = effectivePrecision();
+    if (precision === renderProgressPrecisionShown) return;
+    renderProgressPrecisionShown = precision;
+    var extended = precision !== "f32";
+    // Attributes, not the .hidden property: SVG elements have none.
+    renderProgressGlyphs.forEach(function (use) {
+      if (extended) use.setAttribute("href", "#precision-glyph-" + precision);
+      else use.removeAttribute("href");
+      if (extended) use.removeAttribute("hidden"); else use.setAttribute("hidden", "");
+    });
+    if (renderProgressPrecisionGlyph) {
+      if (extended) renderProgressPrecisionGlyph.removeAttribute("hidden");
+      else renderProgressPrecisionGlyph.setAttribute("hidden", "");
+    }
+    if (renderProgressPrecisionText) {
+      renderProgressPrecisionText.textContent = PRECISION_TITLES[precision] +
+        (extended ? ": Enables high zoom but loads " + PRECISION_SLOWDOWN[precision] + "X slower" : "");
+    }
   }
 
   // Abandon whatever refinement is in flight. Deliberately does NOT touch
