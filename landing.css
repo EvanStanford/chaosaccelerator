@@ -41,8 +41,41 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   margin: 0 auto;
   /* The safe-area insets: the app's pages run edge to edge on a phone (see
      chaos.html's viewport-fit=cover), and these keep the same meta tag. */
-  padding: 56px max(20px, env(safe-area-inset-right)) 72px max(20px, env(safe-area-inset-left));
+  padding: max(10px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) 72px max(20px, env(safe-area-inset-left));
 }
+
+/* A page whose middle runs the whole width of the window (the gallery,
+   whose carousel is the window's width the way the landing page's tour
+   is); only what is read, the section under it, keeps the page's width. */
+.page-wide {
+  max-width: none;
+  padding-left: max(16px, env(safe-area-inset-left));
+  padding-right: max(16px, env(safe-area-inset-right));
+}
+.page-wide .section { max-width: 980px; margin-left: auto; margin-right: auto; }
+
+/* ---- The page head ----
+   On a page with a title (the gallery, other projects): the back link, the
+   title and the corner menu share one row, the title centered between the
+   other two. The menu, normally pinned to the page's corner, sits in the
+   row here; its list still drops from it. */
+.page-head {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 28px;
+}
+.page-head .back-link { margin: 0; justify-self: start; }
+.page-head h1 {
+  margin: 0;
+  font-size: clamp(24px, 4vw, 34px);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  font-weight: 800;
+  text-align: center;
+}
+.page-head .corner-menu { position: relative; top: auto; right: auto; justify-self: end; }
 
 /* ---- Masthead ---- */
 
@@ -157,7 +190,9 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 
 /* ---- Other projects ---- */
 
-.back-link { display: inline-block; margin-bottom: 28px; font-size: 14px; }
+/* Level with the corner menu's button (40px tall, 10px down), and clear of
+   it on the right. */
+.back-link { display: inline-block; margin: 0 56px 28px 0; padding: 12px 0; font-size: 14px; line-height: 16px; }
 
 .project + .project { margin-top: 48px; }
 .project h2 { margin: 0 0 4px; font-size: 22px; }
@@ -185,24 +220,32 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 
 /* ---- The gallery ---- */
 
-/* The gallery page's carousel: one pattern at a time, the full width of
-   the page, swiped or stepped through with the arrows. It is a scroll
-   container with snapping rather than anything animated by hand, so a
-   swipe, the scroll wheel and the keyboard all just work; the arrows and
-   the dots only scroll it (gallery/gallery.html). Every slide is exactly
-   the track's width, which is what lets the script read which one is
-   showing straight off the scroll position. */
+/* The gallery page's carousel, built like the landing page's tour: the
+   current pattern front and center, its neighbors showing at the edges
+   (the next one about half in view on a wide window), swiped or stepped
+   through with the arrows. It is a scroll container with snapping rather
+   than anything animated by hand, so a swipe, the scroll wheel and the
+   keyboard all just work; the arrows and the dots only scroll it
+   (gallery/gallery.html). The slides are narrower than the track, which
+   is padded at both ends by the difference, so the first and the last can
+   sit centered too. The pattern is square, so the slide is kept narrow
+   enough that it is not taller than most windows. */
+/* In px and vw, not %: a % here would be of the track's content box, which
+   is itself the track less the padding this sets, a circle. */
+.carousel { --slide-w: min(520px, 82vw); }
 .carousel-window { position: relative; }
 .carousel-track {
   display: flex;
+  align-items: flex-start;
+  gap: 24px;
+  padding-inline: calc((100% - var(--slide-w)) / 2);
   overflow-x: auto;
   scroll-snap-type: x mandatory;
   scrollbar-width: none;
-  border-radius: 14px;
   outline: none;
 }
 .carousel-track::-webkit-scrollbar { display: none; }
-.carousel-track:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.carousel-track:focus-visible .slide.is-current { box-shadow: 0 0 0 2px var(--accent); }
 .carousel-note {
   flex: 0 0 100%;
   margin: 0;
@@ -210,9 +253,11 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   text-align: center;
   color: var(--text-dim);
 }
+/* The ones not in the middle are dimmed a little, so the one that is
+   reads as the one to look at. */
 .slide {
-  flex: 0 0 100%;
-  scroll-snap-align: start;
+  flex: 0 0 var(--slide-w);
+  scroll-snap-align: center;
   display: block;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -220,11 +265,14 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   background: var(--bg-panel);
   color: var(--text);
   text-decoration: none;
+  opacity: 0.55;
+  transition: opacity 0.25s ease;
 }
+.slide.is-current { opacity: 1; }
 .slide:hover { color: var(--text); text-decoration: none; }
-/* The map, whole, in a fixed 16:10 frame: a submitted screenshot can be
+/* The map, whole, in a fixed square frame: a submitted screenshot can be
    any shape, and a pattern someone found is not something to crop. */
-.slide-frame { position: relative; aspect-ratio: 16 / 10; background: #0c0d11; }
+.slide-frame { position: relative; aspect-ratio: 1 / 1; background: #0c0d11; }
 .slide-map {
   position: absolute;
   inset: 0;
@@ -239,7 +287,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   left: 12px;
   bottom: 12px;
   width: 24%;
-  aspect-ratio: 16 / 10;
+  aspect-ratio: 1 / 1;
   object-fit: cover;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -254,7 +302,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   padding: 12px 16px 14px;
 }
 .slide-name { font-size: 17px; font-weight: 600; }
-.slide-by { font-size: 14px; color: var(--text-dim); white-space: nowrap; }
+.slide-by { font-size: 17px; color: #fff; white-space: nowrap; }
 
 /* The arrows sit on the picture, halfway down it: half the caption's height
    above the window's own middle. */
@@ -277,8 +325,10 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease;
 }
-.carousel-arrow.prev { left: 12px; }
-.carousel-arrow.next { right: 12px; }
+/* Just outside the slide in the middle, or over its edges once the slide
+   is most of the width. */
+.carousel-arrow.prev { left: max(0px, calc(50% - var(--slide-w) / 2 - 56px)); }
+.carousel-arrow.next { right: max(0px, calc(50% - var(--slide-w) / 2 - 56px)); }
 .carousel-arrow:hover { background: rgba(20, 22, 28, 0.95); border-color: var(--accent); }
 .carousel-arrow:disabled { opacity: 0.3; cursor: default; }
 .carousel-dots { display: flex; justify-content: center; margin: 12px 0 0; }
@@ -341,15 +391,6 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   cursor: pointer;
 }
 .mail-dialog-close:hover { background: var(--bg); color: var(--text); }
-.mail-dialog-note { margin: 8px 0 16px; font-size: 14px; color: var(--text-dim); }
-.mail-field {
-  display: grid;
-  grid-template-columns: 64px minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: start;
-  padding: 10px 0;
-  border-top: 1px solid var(--border);
-}
 .mail-field-label {
   padding-top: 7px;
   font-size: 12px;
@@ -396,7 +437,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 
 /* index.html is a single screen, never taller than the window: the title
    and the button at the top, the tour (a sideways carousel: the video, the
-   two steps, the gallery) filling whatever is left in the middle, the dots
+   two steps, the gallery, other projects) filling whatever is left in the middle, the dots
    and the credits at the foot. Nothing scrolls up or down; the wheel, the
    arrow keys and a swipe step the tour instead (the script in index.html).
    Everything that has a size in the vertical is given it in vh, so a short
@@ -504,6 +545,32 @@ body.landing {
   height: 100%;
   object-fit: cover;
 }
+/* The step slides are links to the app: the anchor lays out exactly like
+   the slide it fills, so the picture still shrinks when it has to. */
+.tour-link {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  color: inherit;
+  text-decoration: none;
+}
+.tour-link:hover { color: inherit; text-decoration: none; }
+.tour-link:hover .tour-caption h2 { text-decoration: underline; }
+/* "Step 1:" / "Step 2:", a badge in the top left corner of the picture,
+   close to three times the caption's size. */
+.tour-step {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  padding: 8px 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(12, 13, 17, 0.82);
+  color: var(--text);
+  font-size: clamp(42px, 6.2vh, 50px);
+  font-weight: 600;
+  line-height: 1.3;
+}
 .tour-caption { flex: none; padding: 11px 16px 13px; }
 .tour-caption h2 {
   margin: 0;
@@ -539,14 +606,31 @@ body.landing {
   transition: border-color 0.12s ease;
 }
 .gallery-card:hover { color: var(--text); text-decoration: none; border-color: var(--accent); }
-.gallery-card img {
-  display: block;
+/* The map fills the card above the name, with the scene it came from in
+   the bottom left corner, a smaller copy of the gallery page's own inset. */
+.gallery-card-frame {
+  position: relative;
   flex: 1;
   min-height: 0;
-  width: 100%;
-  object-fit: cover;
   background: #0c0d11;
   border-bottom: 1px solid var(--border);
+}
+.gallery-card-frame img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.gallery-card-scene.gallery-card-scene {
+  inset: auto auto 8px 8px;
+  width: 26%;
+  height: auto;
+  aspect-ratio: 1 / 1;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #0c0d11;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.55);
 }
 .gallery-card span {
   display: block;

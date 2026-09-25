@@ -36,13 +36,14 @@
 <link rel="stylesheet" href="../landing.css?v=m70">
 </head>
 <body>
-<main class="page">
+<main class="page page-wide">
 
-  <a class="back-link" href="../index.html">&larr; Chaos Accelerator</a>
-
-  <header class="masthead">
+  <!-- One row: the way back, the title, and the corner menu (which the
+       script puts in the page where its tag is). -->
+  <header class="page-head">
+    <a class="back-link" href="../index.html">&larr; Chaos Accelerator</a>
     <h1>Gallery</h1>
-    <p class="tagline">Patterns people have found. Click one to explore its map.</p>
+    <script src="../corner-menu.js?v=m70"></script>
   </header>
 
   <section class="carousel" id="carousel" aria-roledescription="carousel" aria-label="Gallery">
@@ -74,7 +75,6 @@
       <h2 id="mail-dialog-title">Send me an email like this</h2>
       <button class="mail-dialog-close" id="mail-dialog-close" type="button" aria-label="Close">&times;</button>
     </div>
-    <p class="mail-dialog-note">From whatever you use for mail: copy the pieces across, attach your screenshots, and send.</p>
     <div class="mail-field">
       <div class="mail-field-label">To</div>
       <div class="mail-field-value" id="mail-to">evan.chaosaccelerator@gmail.com</div>
@@ -102,8 +102,10 @@
   // A scroll container with snapping (see .carousel-track in landing.css),
   // so a swipe, the scroll wheel and a drag of the scrollbar all work with
   // no help from here: the arrows, the dots and the arrow keys only scroll
-  // it. Every slide is exactly the track's width, so which one is showing
-  // is the scroll position in slide widths.
+  // it. Like the landing page's tour: the slides are narrower than the
+  // track, with the ends padded so the first and last can sit centered
+  // too, and the neighbors show at the edges. Which one is showing is
+  // whichever is nearest the middle.
   (function () {
     var carousel = document.getElementById("carousel");
     var track = document.getElementById("carousel-track");
@@ -113,12 +115,26 @@
     var next = document.getElementById("carousel-next");
     var count = 0;
 
+    var slides = [];
+    var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
     function current() {
-      return track.clientWidth ? Math.round(track.scrollLeft / track.clientWidth) : 0;
+      var mid = track.scrollLeft + track.clientWidth / 2;
+      var best = 0, bestDist = Infinity;
+      slides.forEach(function (s, i) {
+        var d = Math.abs(s.offsetLeft + s.offsetWidth / 2 - mid);
+        if (d < bestDist) { bestDist = d; best = i; }
+      });
+      return best;
     }
     function goTo(i, instant) {
       i = Math.max(0, Math.min(count - 1, i));
-      track.scrollTo({ left: i * track.clientWidth, behavior: instant ? "auto" : "smooth" });
+      var s = slides[i];
+      if (!s) return;
+      track.scrollTo({
+        left: s.offsetLeft - (track.clientWidth - s.offsetWidth) / 2,
+        behavior: instant || reduced ? "auto" : "smooth",
+      });
     }
     function update() {
       var i = current();
@@ -128,6 +144,7 @@
         if (j === i) dot.setAttribute("aria-current", "true");
         else dot.removeAttribute("aria-current");
       });
+      slides.forEach(function (s, j) { s.classList.toggle("is-current", j === i); });
     }
 
     function el(tag, className, textContent) {
@@ -158,6 +175,12 @@
       caption.appendChild(el("span", "slide-name", entry.name));
       caption.appendChild(el("span", "slide-by", "by " + entry.creator));
       a.appendChild(caption);
+      // A click on a neighbor showing at the edge brings it to the middle;
+      // only the one in the middle is the link.
+      a.addEventListener("click", function (e) {
+        var i = slides.indexOf(a);
+        if (i !== current()) { e.preventDefault(); goTo(i); }
+      });
       return a;
     }
 
@@ -179,7 +202,9 @@
         var base = new URL("gallery.json", location.href);
         note.remove();
         entries.forEach(function (entry, i) {
-          track.appendChild(slide(entry, base));
+          var s = slide(entry, base);
+          slides.push(s);
+          track.appendChild(s);
           var dot = document.createElement("button");
           dot.type = "button";
           dot.setAttribute("aria-label", "Pattern " + (i + 1) + " of " + entries.length);
