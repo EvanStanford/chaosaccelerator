@@ -151,6 +151,27 @@ button.bar-link:disabled {
   display: none;
 }
 
+/* End Early and its Yes / No (see chaosplayback.html): a row under the
+   detail line, one or the other on show at a time. */
+#render-actions,
+.end-early-choices {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+#render-actions[hidden],
+#end-early-confirm[hidden] {
+  display: none;
+}
+#end-early-question {
+  margin: 12px 0 0 0;
+  font-size: 13px;
+}
+/* The choice that throws work away is the one to look before pressing. */
+#end-early-yes {
+  border-color: var(--accent);
+}
+
 .progress {
   height: 8px;
   border-radius: 4px;

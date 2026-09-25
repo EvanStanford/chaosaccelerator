@@ -41,6 +41,8 @@
   var btnPlayPause = $("play-pause"), scrubber = $("scrubber"), timeReadout = $("time-readout");
   var btnSpeed = $("speed"), btnLoop = $("loop"), btnRestart = $("restart");
   var movieFacts = $("movie-facts"), btnDownload = $("download");
+  var renderActions = $("render-actions"), btnEndEarly = $("end-early");
+  var endEarlyConfirm = $("end-early-confirm"), btnEndEarlyYes = $("end-early-yes"), btnEndEarlyNo = $("end-early-no");
   var screenCtx = screen.getContext("2d");
 
   function fail(message) {
@@ -131,6 +133,14 @@
     return (u === 0 || bytes >= 100 ? Math.round(bytes) : bytes.toFixed(1)) + " " + units[u];
   }
   var renderStartedAt = 0, frameStartedAt = 0;
+  // How many frames, from the first, are finished pictures: what End Early
+  // keeps. Counted where progress is reported, since that is called once
+  // per finished frame, whether drawn or shared with the one before.
+  var renderedCount = 0;
+  // Set by End Early: the frame in flight is abandoned rather than waited
+  // for (its renderer goes with the engine, see finishRender), and its
+  // callback, should it land first, must do nothing.
+  var endedEarly = false;
 
   // The app's own watermark (see #watermark in app-shell.css), drawn INTO
   // every frame rather than laid over the player, so it is still there in a
@@ -160,6 +170,8 @@
   }
 
   function reportProgress(done) {
+    renderedCount = done;
+    btnEndEarly.disabled = done < 1;
     var fraction = frames.length ? done / frames.length : 0;
     renderStatus.textContent = "Rendering frame " + Math.min(done + 1, frames.length).toLocaleString() + " of " + frames.length.toLocaleString();
     renderBar.style.width = (fraction * 100).toFixed(1) + "%";
@@ -180,18 +192,53 @@
     return [f.center.x, f.center.xLo, f.center.y, f.center.yLo, f.scale, f.step].join(" ");
   }
 
+  // Every frame in `frames` has its picture on the way: wait for the
+  // packing, then play. Also the end End Early jumps to, with `frames` cut
+  // down to the finished ones.
+  function finishRender() {
+    renderStatus.textContent = "Finishing\u2026";
+    Promise.all(blobPromises).then(function (all) {
+      if (all.some(function (blob) { return !blob; })) {
+        fail("This browser couldn't store a frame that size. Try a lower resolution in the Movie card.");
+        return;
+      }
+      blobs = all;
+      // The renderer has done its work (or, ended early, is abandoned
+      // mid-frame); its GPU memory is wanted back.
+      engine.remove();
+      beginPlayback();
+    });
+  }
+
+  // End Early, confirmed: the movie is the frames finished so far. Nothing
+  // asks the renderer to stop; the frame it is on simply never gets
+  // collected, and the engine is removed once the finished frames are
+  // packed.
+  function endEarly() {
+    if (endedEarly || renderedCount < 1) return;
+    endedEarly = true;
+    frames = frames.slice(0, renderedCount);
+    blobPromises = blobPromises.slice(0, renderedCount);
+    renderActions.hidden = true;
+    endEarlyConfirm.hidden = true;
+    finishRender();
+  }
+  btnEndEarly.addEventListener("click", function () {
+    renderActions.hidden = true;
+    endEarlyConfirm.hidden = false;
+    btnEndEarlyNo.focus();
+  });
+  btnEndEarlyNo.addEventListener("click", function () {
+    endEarlyConfirm.hidden = true;
+    renderActions.hidden = false;
+    btnEndEarly.focus();
+  });
+  btnEndEarlyYes.addEventListener("click", endEarly);
+
   function renderFrame(grid, i) {
+    if (endedEarly) return;
     if (i >= frames.length) {
-      Promise.all(blobPromises).then(function (all) {
-        if (all.some(function (blob) { return !blob; })) {
-          fail("This browser couldn't store a frame that size. Try a lower resolution in the Movie card.");
-          return;
-        }
-        blobs = all;
-        // The renderer has done its work; its GPU memory is wanted back.
-        engine.remove();
-        beginPlayback();
-      });
+      finishRender();
       return;
     }
     if (i > 0 && frameKey(frames[i]) === frameKey(frames[i - 1])) {
@@ -205,6 +252,7 @@
     grid.renderStill({ center: spec.center, scale: spec.scale, step: spec.step, antialias: quality.antialias }, function (canvas) {
       // Called from inside the renderer's own frame: anything thrown here
       // would be thrown THERE, and end its render loop for good.
+      if (endedEarly) return; // this frame was given up on
       try {
         if (copy.width !== canvas.width || copy.height !== canvas.height) {
           copy.width = frameWidth = canvas.width;
@@ -486,7 +534,8 @@
     maxDecoded = Math.min(90, Math.max(8, Math.floor(DECODED_BUDGET_BYTES / (frameWidth * frameHeight * 4))));
     movieFacts.textContent = frames.length.toLocaleString() + " frames  \u00b7  " + (frames.length / FPS).toFixed(1) + " s  \u00b7  " +
       frameWidth + " \u00d7 " + frameHeight + "  \u00b7  " +
-      formatBytes(blobs.reduce(function (sum, blob) { return sum + blob.size; }, 0)) + "  \u00b7  rendered in " + formatDuration((performance.now() - renderStartedAt) / 1000);
+      formatBytes(blobs.reduce(function (sum, blob) { return sum + blob.size; }, 0)) + "  \u00b7  rendered in " + formatDuration((performance.now() - renderStartedAt) / 1000) +
+      (endedEarly ? "  \u00b7  ended early" : "");
     scrubber.max = String(frames.length - 1);
     [btnPlayPause, scrubber, btnSpeed, btnLoop, btnRestart, btnSound].forEach(function (control) { control.disabled = false; });
 

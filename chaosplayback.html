@@ -44,6 +44,21 @@
       <div id="render-bar"></div>
     </div>
     <p id="render-detail"></p>
+    <!-- End Early: stop here and make the movie out of the frames finished
+         so far (see endEarly in chaosplayback.js). Asked twice, since it
+         throws away whatever the rest would have been: the button gives way
+         to the question and its Yes / No. Off until a first frame exists,
+         a movie of no frames being nothing to play. -->
+    <div id="render-actions">
+      <button id="end-early" class="bar-link" type="button" disabled title="Stop rendering here and make the movie out of the frames finished so far.">End Early</button>
+    </div>
+    <div id="end-early-confirm" hidden>
+      <p id="end-early-question">Do you want to end the rendering now and create a video only with the frames rendered so far?</p>
+      <div class="end-early-choices">
+        <button id="end-early-yes" class="bar-link" type="button">Yes</button>
+        <button id="end-early-no" class="bar-link" type="button">No</button>
+      </div>
+    </div>
   </div>
 
   <div id="player-message" hidden>
