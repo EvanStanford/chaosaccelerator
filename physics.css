@@ -411,7 +411,10 @@ select:disabled { opacity: 0.5; }
   animation: fractalizePulse 2.2s ease-in-out infinite;
   transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
 }
+/* The gradient again: the plain button:hover rule above outranks the
+   class alone on hover, and would paint this one the app's blue. */
 .fractalize-btn:hover {
+  background: linear-gradient(135deg, #ffd23f, #ff6b35 55%, #ff2e63);
   transform: translateY(-2px) scale(1.05);
   filter: brightness(1.08);
   box-shadow: 0 6px 26px rgba(255, 46, 99, 0.8);
