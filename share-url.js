@@ -386,6 +386,7 @@
   //
   //   { center: { x, xLo, y, yLo }, scale, zoom,
   //     display: "standard" | "colorzoom" | "gradient" | "laplacian" | "contours",
+  //     lowSaturation: bool,
   //     precision, speed, volume,
   //     inspect: [ { type: "point", a: [u, v] },
   //                { type: "line", a: [u, v], b: [u, v], count: n },
@@ -484,6 +485,10 @@
       if (zoom !== "1") fields.push("zoom:" + zoom);
     }
     if (view.display && view.display !== "standard") fields.push("disp:" + DISPLAY_CODES[view.display]);
+    // Standard's other switch, independent of the mode word above: it is
+    // off by default and only ever recolors Standard, so it rides along on
+    // its own rather than multiplying DISPLAY_CODES.
+    if (view.lowSaturation === true) fields.push("lsat:t");
     if (view.precision && view.precision !== "f32") fields.push("prec:" + view.precision);
     if (view.speed !== undefined && num(view.speed) !== "1") fields.push("sped:" + num(view.speed));
     if (view.volume !== undefined && num(view.volume) !== "1") fields.push("snd:" + num(view.volume));
@@ -512,6 +517,7 @@
       center: { x: cx[0], xLo: cx[1], y: cy[0], yLo: cy[1] },
       zoom: attempt("zoom", function (t) { return parseZoom(t, "zoom"); }, 1),
       display: attempt("disp", function (t) { return DISPLAYS_BY_CODE[t] || "standard"; }, "standard"),
+      lowSaturation: attempt("lsat", function (t) { return parseBool(t, "lsat"); }, false),
       precision: attempt("prec", function (t) { return PRECISIONS.indexOf(t) === -1 ? "f32" : t; }, "f32"),
       speed: attempt("sped", function (t) { return parseNum(t, "sped"); }, 1),
       volume: attempt("snd", function (t) { return Math.min(1, Math.max(0, parseNum(t, "snd"))); }, 1),

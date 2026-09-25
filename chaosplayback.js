@@ -72,7 +72,7 @@
   $("back-to-map").href = "chaos.html#" + ShareUrl.encode({
     page: ShareUrl.PAGE_MAP,
     scene: link.scene,
-    view: { center: first.center, zoom: first.zoom, display: link.view.display, precision: link.view.precision, movie: movie },
+    view: { center: first.center, zoom: first.zoom, display: link.view.display, lowSaturation: link.view.lowSaturation, precision: link.view.precision, movie: movie },
   });
   // A different movie pasted over this one's address: the simple, certain way
   // to get from one to the other is to start over.
@@ -276,7 +276,7 @@
     engine.src = "chaos.html#" + ShareUrl.encode({
       page: ShareUrl.PAGE_MAP,
       scene: link.scene,
-      view: { display: link.view.display, precision: link.view.precision },
+      view: { display: link.view.display, lowSaturation: link.view.lowSaturation, precision: link.view.precision },
     });
   }
 

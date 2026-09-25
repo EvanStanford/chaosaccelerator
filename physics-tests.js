@@ -5384,13 +5384,13 @@
 
   addTest(
     "A map link carries its view, and nothing at all for a view left at its defaults",
-    "share-url.js's view fields: zoom, display mode (Color Zoom counted as one), precision, speed, volume and the three kinds of inspection, each written only when it differs from its default so an untouched map's link is just its scene",
+    "share-url.js's view fields: zoom, display mode (Color Zoom counted as one), Low Saturation, precision, speed, volume and the three kinds of inspection, each written only when it differs from its default so an untouched map's link is just its scene",
     function () {
       var scene = everythingScene();
       var center = PhysicsDF.twoSum64(213.41826094537, 3.1e-15);
       var view = {
         center: { x: center[0], xLo: center[1], y: -88.0421795513, yLo: 0 }, scale: 1e-5, zoom: (200 / 0.17) / 1e-5,
-        display: "colorzoom", precision: "tf", speed: 4, volume: 0.35,
+        display: "colorzoom", lowSaturation: true, precision: "tf", speed: 4, volume: 0.35,
         inspect: [
           { type: "point", a: [0.0115, -0.0075] },
           { type: "line", a: [-0.2875, -0.1018], b: [0.2973, 0.143], count: 45 },
@@ -5400,13 +5400,13 @@
       };
       var fragment = ShareUrl.encode({ page: "map", scene: scene, view: view });
       var back = ShareUrl.decode(fragment).view;
-      var viewOk = back.display === "colorzoom" && back.precision === "tf" && back.speed === 4 && back.volume === 0.35 &&
+      var viewOk = back.display === "colorzoom" && back.lowSaturation === true && back.precision === "tf" && back.speed === 4 && back.volume === 0.35 &&
         Math.abs(back.zoom / view.zoom - 1) < 1e-9 && back.center.y === view.center.y &&
         Math.abs((back.center.x - view.center.x) + (back.center.xLo - view.center.xLo)) < 1e-14 &&
         canonicalJSON(back.inspect) === canonicalJSON(view.inspect);
       var untouched = ShareUrl.encode({
         page: "map", scene: scene,
-        view: { center: { x: 0, xLo: 0, y: 0, yLo: 0 }, scale: 200 / 0.17, zoom: 1, display: "standard", precision: "f32", speed: 1, volume: 1, inspect: [] },
+        view: { center: { x: 0, xLo: 0, y: 0, yLo: 0 }, scale: 200 / 0.17, zoom: 1, display: "standard", lowSaturation: false, precision: "f32", speed: 1, volume: 1, inspect: [] },
       });
       var bare = untouched === "map/" + ShareUrl.encodeScene(scene).join(",");
       return {
@@ -5564,7 +5564,7 @@
 
   addTest(
     "A movie's link carries its keyframes, each with the digits its own zoom can use",
-    "share-url.js's kfrm/qual/loop - the player renders from its address alone, so the keyframes are the movie. A keyframe's center is written to the precision of THAT keyframe's zoom, which is what keeps a movie that dives to 1e8x from costing thirty digits on its wide shots; and a movie link has no view of its own, so none of the map's view fields belong in it",
+    "share-url.js's kfrm/qual/loop - the player renders from its address alone, so the keyframes are the movie, and how the map is drawn (display mode, Low Saturation) rides along with them. A keyframe's center is written to the precision of THAT keyframe's zoom, which is what keeps a movie that dives to 1e8x from costing thirty digits on its wide shots; and a movie link has no view of its own, so none of the map's view fields belong in it",
     function () {
       var deep = PhysicsDF.twoSum64(213.41826094537, 3.1e-15);
       var movie = { quality: 2, loop: false, keyframes: [
@@ -5572,14 +5572,14 @@
         { center: { x: deep[0], xLo: deep[1], y: -88.0421795513, yLo: 0 }, scale: 1e-5, zoom: (200 / 0.17) / 1e-5, step: 500, seconds: 4.26 },
       ] };
       var scene = everythingScene();
-      var fragment = ShareUrl.encode({ page: "movi", scene: scene, view: { display: "laplacian", precision: "auto", movie: movie } });
+      var fragment = ShareUrl.encode({ page: "movi", scene: scene, view: { display: "laplacian", lowSaturation: true, precision: "auto", movie: movie } });
       var back = ShareUrl.decode(fragment);
       var k = back.view.movie.keyframes;
       var keyframesOk = k.length === 2 && k[0].zoom === 1 && k[0].step === 1000 && k[0].seconds === null &&
         k[1].step === 500 && k[1].seconds === 4.3 && Math.abs(k[1].zoom / movie.keyframes[1].zoom - 1) < 1e-9 &&
         Math.abs((k[1].center.x - deep[0]) + (k[1].center.xLo - deep[1])) < 1e-14;
       var settingsOk = back.page === "movi" && back.view.movie.quality === 2 && back.view.movie.loop === false &&
-        back.view.display === "laplacian" && back.view.precision === "auto" && canonicalJSON(back.scene) === canonicalJSON(scene);
+        back.view.display === "laplacian" && back.view.lowSaturation === true && back.view.precision === "auto" && canonicalJSON(back.scene) === canonicalJSON(scene);
       var noViewFields = !/ctrx|ctry|zoom:|insp/.test(fragment);
       // The map's own link keeps the keyframes (Back from the player returns
       // to them), and says nothing about movies while there are none.

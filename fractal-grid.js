@@ -303,6 +303,8 @@
   var renderProgressLabel = document.getElementById("render-progress-label");
   var colorZoomCheckbox = document.getElementById("color-zoom-checkbox");
   var colorZoomField = document.getElementById("color-zoom-field");
+  var lowSaturationCheckbox = document.getElementById("low-saturation-checkbox");
+  var lowSaturationField = document.getElementById("low-saturation-field");
   var displayModePanelBody = document.getElementById("grid-display-mode-list");
   var btnInspectPoint = document.getElementById("btn-inspect-point");
   var btnInspectLine = document.getElementById("btn-inspect-line");
@@ -1479,6 +1481,7 @@
     ].concat(PhysicsDF.wordUniformDecls("u_center"), [
       "uniform float u_scale;",
       "uniform bool u_colorZoom;",
+      "uniform bool u_lowSaturation;",
       // How many steps each pixel runs. A uniform rather than a baked
       // constant so the Settings slider doesn't recompile four programs per
       // notch: GLSL ES 3.00 allows a non-constant loop bound (ES 1.00
@@ -1530,6 +1533,72 @@
       "  return rgb + vec3(l - c * 0.5);",
       "}",
       "",
+      // ---- Low Saturation: sRGB <-> OKLab, for lowSaturate below ----
+      // Matrices from Ottosson's OKLab definition; the sRGB transfer
+      // curves are the standard ones. The JS lowSaturate is a
+      // line-for-line copy of all of this, clamp included, so the hover
+      // panel's frozen frame and the Analysis swatches are the pixel's
+      // exact bytes rather than the browser's own gamut-mapped reading of
+      // an oklab() color (which differs from a plain clamp exactly where
+      // the result is out of gamut, and the blend's blues and greens are,
+      // a little).
+      "vec3 srgb2linear(vec3 c) {",
+      "  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));",
+      "}",
+      "vec3 linear2srgb(vec3 c) {",
+      "  c = clamp(c, 0.0, 1.0);",
+      "  return mix(12.92 * c, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));",
+      "}",
+      "vec3 linear2oklab(vec3 c) {",
+      "  vec3 lms = vec3(",
+      "    0.4122214708 * c.r + 0.5363325363 * c.g + 0.0514459929 * c.b,",
+      "    0.2119034982 * c.r + 0.6806995451 * c.g + 0.1073969566 * c.b,",
+      "    0.0883024619 * c.r + 0.2817188376 * c.g + 0.6299787005 * c.b);",
+      // max() before the cube root: a linear channel is never negative
+      // here, but pow() is undefined below zero and a driver that returns
+      // NaN for it would carry that all the way out to the pixel.
+      "  lms = pow(max(lms, vec3(0.0)), vec3(1.0 / 3.0));",
+      "  return vec3(",
+      "    0.2104542553 * lms.x + 0.7936177850 * lms.y - 0.0040720468 * lms.z,",
+      "    1.9779984951 * lms.x - 2.4285922050 * lms.y + 0.4505937099 * lms.z,",
+      "    0.0259040371 * lms.x + 0.7827717662 * lms.y - 0.8086757660 * lms.z);",
+      "}",
+      "vec3 oklab2linear(vec3 lab) {",
+      "  float l_ = lab.x + 0.3963377774 * lab.y + 0.2158037573 * lab.z;",
+      "  float m_ = lab.x - 0.1055613458 * lab.y - 0.0638541728 * lab.z;",
+      "  float s_ = lab.x - 0.0894841775 * lab.y - 1.2914855480 * lab.z;",
+      "  float l = l_ * l_ * l_, m = m_ * m_ * m_, s = s_ * s_ * s_;",
+      "  return vec3(",
+      "    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,",
+      "    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,",
+      "    -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s);",
+      "}",
+      // What Low Saturation does to a color Standard would otherwise paint
+      // (the full rainbow, or Color Zoom's repeats of it): keep its hue,
+      // and pull its OKLab lightness and chroma LOW_SAT_KEEP of the way
+      // back from an even-brightness ramp (LOW_SAT_L / LOW_SAT_C, the same
+      // construction as the Inspect replay's animating background,
+      // hoverOutputColor, only brighter and more vivid) toward the
+      // original. At 0 this IS that even ramp, every hue at one apparent
+      // brightness; at 1 it is the untouched rainbow; 0.5 is what "half
+      // way between" that even ramp and full saturation came out as, by
+      // eye, against strips of both. Blending in OKLab rather than sRGB
+      // keeps the hue exactly where the rainbow put it (so the map's
+      // hues line up with the default picture's) and keeps the midpoint
+      // from going muddy. The JS lowSaturate mirrors these constants.
+      "const float LOW_SAT_L = 0.70;",
+      "const float LOW_SAT_C = 0.20;",
+      "const float LOW_SAT_KEEP = 0.5;",
+      "vec3 lowSaturate(vec3 srgb) {",
+      "  vec3 lab = linear2oklab(srgb2linear(srgb));",
+      "  float C = length(lab.yz);",
+      // The rainbow is never gray, but a zero chroma would divide by zero.
+      "  vec2 dir = C > 1e-6 ? lab.yz / C : vec2(1.0, 0.0);",
+      "  float L2 = mix(LOW_SAT_L, lab.x, LOW_SAT_KEEP);",
+      "  float C2 = mix(LOW_SAT_C, C, LOW_SAT_KEEP);",
+      "  return linear2srgb(oklab2linear(vec3(L2, dir * C2)));",
+      "}",
+      "",
       // t is guaranteed in [0, 1) by construction below (mod() always
       // returns a result in [0, RANGE_MAX) for the positive RANGE_MAX this
       // project always uses). HUE_RANGE_MAX is 360° when outputValue is a
@@ -1577,22 +1646,32 @@
       "  return hsl2rgb(hue, 1.0, 0.5);",
       "}",
       "",
-      // Standard mode's ramp, and the ONLY place u_colorZoom is read. Color
-      // Zoom exists to tell nearby values apart in one sweep of the plain
-      // rainbow, which is a question only Standard's filled picture poses:
-      // Contours already separates its values into discrete lines, and the
-      // other two modes are not coloring the value at all. Toggling it
-      // also switches the display back to Standard (see its change handler)
-      // so that flipping it always does something visible.
+      // Standard mode's ramp, and the ONLY place u_colorZoom and
+      // u_lowSaturation are read. Color Zoom exists to tell nearby values
+      // apart in one sweep of the plain rainbow, which is a question only
+      // Standard's filled picture poses: Contours already separates its
+      // values into discrete lines, and the other two modes are not
+      // coloring the value at all. Toggling it also switches the display
+      // back to Standard (see its change handler) so that flipping it
+      // always does something visible.
+      //
+      // Low Saturation (off by default, u_lowSaturation, same footing as
+      // Color Zoom and living right under it in Standard's row) is a
+      // post-process on whatever the two branches above it would have
+      // painted, Color Zoom's saturation ramp included: see lowSaturate
+      // for what it does and why.
       "vec3 colorMap(float t) {",
+      "  t = clamp(t, 0.0, 1.0);",
+      "  vec3 color;",
       "  if (u_colorZoom) {",
-      "    t = clamp(t, 0.0, 1.0);",
       "    float tZoom = mod(t * 10.0, 1.0);",
       "    float hue = HUE_RANGE_MAX * (1.0 - tZoom);",
       "    float sat = t * 0.6 + 0.4;",
-      "    return hsl2rgb(hue, sat, 0.5);",
+      "    color = hsl2rgb(hue, sat, 0.5);",
+      "  } else {",
+      "    color = rainbow(t);",
       "  }",
-      "  return rainbow(t);",
+      "  return u_lowSaturation ? lowSaturate(color) : color;",
       "}",
       "",
 
@@ -2139,6 +2218,7 @@
       centerLo3: gl.getUniformLocation(prog, "u_centerLo3"),
       scale: gl.getUniformLocation(prog, "u_scale"),
       colorZoom: gl.getUniformLocation(prog, "u_colorZoom"),
+      lowSaturation: gl.getUniformLocation(prog, "u_lowSaturation"),
       maxSteps: gl.getUniformLocation(prog, "u_maxSteps"),
       durationSteps: gl.getUniformLocation(prog, "u_durationSteps"),
       bounceMax: gl.getUniformLocation(prog, "u_bounceMax"),
@@ -2904,6 +2984,8 @@
   // not part of the scene, never saved/serialized, just a uniform flipped and
   // redrawn, not something that needs the shader itself recompiled.
   var colorZoomEnabled = false;
+  // Same footing, same row: see colorMap's u_lowSaturation branch.
+  var lowSaturationEnabled = false;
 
   // ---- Display mode ----
   //
@@ -3505,6 +3587,7 @@
     setCenterUniforms(pass.uniforms);
     gl.uniform1f(pass.uniforms.scale, view.scale);
     gl.uniform1i(pass.uniforms.colorZoom, colorZoomEnabled ? 1 : 0);
+    gl.uniform1i(pass.uniforms.lowSaturation, lowSaturationEnabled ? 1 : 0);
     gl.uniform1i(pass.uniforms.maxSteps, steps === undefined ? renderedSteps() : steps);
     gl.uniform1i(pass.uniforms.durationSteps, simulationSteps);
     gl.uniform1f(pass.uniforms.bounceMax, bounceMaxValue);
@@ -5261,7 +5344,7 @@
   // drawn. Two pictures with the same key are pictures of the same thing.
   function reuseLookKey() {
     return [sceneGeneration, renderedSteps(), simulationSteps, displayMode ? displayMode.id : 0,
-      colorZoomEnabled ? 1 : 0, bounceMaxValue, canvas.width, canvas.height].join(" ");
+      colorZoomEnabled ? 1 : 0, lowSaturationEnabled ? 1 : 0, bounceMaxValue, canvas.width, canvas.height].join(" ");
   }
 
   function reuseDropSource() {
@@ -6383,6 +6466,8 @@
     view.scale = DEFAULT_SCALE;
     colorZoomEnabled = false;
     colorZoomCheckbox.checked = false;
+    lowSaturationEnabled = false;
+    lowSaturationCheckbox.checked = false;
     setDisplayMode(DISPLAY_MODES[0]);
     updateZoomReadout();
     markDirty();
@@ -6558,6 +6643,14 @@
     markDirty();
   });
 
+  // Low Saturation is read in the same one place as Color Zoom (colorMap)
+  // and lives in the same row, so it lands on Standard for the same reason.
+  lowSaturationCheckbox.addEventListener("change", function () {
+    lowSaturationEnabled = lowSaturationCheckbox.checked;
+    setDisplayMode(DISPLAY_MODES[0]);
+    markDirty();
+  });
+
   // ---- The Display Mode menu's rows ----
   //
   // Built from DISPLAY_MODES rather than written out in chaos.html, so the
@@ -6608,8 +6701,12 @@
     // colorZoomField is the exact <input id="color-zoom-checkbox"> element
     // from chaos.html, moved here (not cloned), so every existing
     // change-event/tip listener on it keeps working untouched.
-    if (isStandard) text.appendChild(colorZoomField);
-    else text.appendChild(document.createTextNode(mode.blurb));
+    if (isStandard) {
+      text.appendChild(colorZoomField);
+      // Low Saturation goes right under it, moved the same way for the
+      // same reason: it only ever recolors Standard's own ramp.
+      text.appendChild(lowSaturationField);
+    } else text.appendChild(document.createTextNode(mode.blurb));
     var cost = document.createElement("span");
     cost.className = "display-mode-cost";
     cost.textContent = mode.samples === 1
@@ -7021,8 +7118,10 @@
   // edge) so its two different ends don't also read as identical, see
   // buildFragmentShader's own comment for exactly which cases get which.
   // OKLCH, not HSL, for this animated hover-replay window (unlike the main
-  // grid's static per-pixel image, colorMap below, which stays HSL since
-  // nothing there changes over time): HSL's lightness isn't perceptually
+  // grid's static per-pixel image, colorMap below, which stays HSL by
+  // default since nothing there changes over time; its Low Saturation
+  // switch pulls the grid halfway toward a brighter, more vivid ramp of
+  // the same construction, see lowSaturate): HSL's lightness isn't perceptually
   // uniform, so a value changing quickly reads as flashing light/dark as
   // the hue sweeps. Fixed lightness/chroma keeps every hue the same
   // apparent brightness; only the hue carries the value, same as before.
@@ -7049,13 +7148,70 @@
   // is what the panel around it is about (the value, its trajectory, its
   // place in the range) rather than the derivative on screen.
   function hoverOutputColorFinal(t) {
+    var hue, sat;
     if (colorZoomEnabled) {
-      var hueZoom = hueRangeMaxValue * (1 - (t * 10 % 1));
-      var sat = t * 60 + 40;
-      return "hsl(" + hueZoom.toFixed(2) + ", " + sat.toFixed(2) + "%, 50%)";
+      hue = hueRangeMaxValue * (1 - (t * 10 % 1));
+      sat = t * 0.6 + 0.4;
+    } else {
+      hue = hueRangeMaxValue * (1 - t);
+      sat = 1;
     }
-    var hue = hueRangeMaxValue * (1 - t);
-    return "hsl(" + hue.toFixed(2) + ", 100%, 50%)";
+    // Low Saturation post-processes that HSL color exactly as the shader
+    // does (lowSaturate), so this stays the pixel's own bytes.
+    if (lowSaturationEnabled) return lowSaturate(hslToRgb(hue, sat, 0.5));
+    return "hsl(" + hue.toFixed(2) + ", " + (sat * 100).toFixed(2) + "%, 50%)";
+  }
+
+  // The shader's hsl2rgb, for the same (hue in degrees, s, l) -> [r, g, b]
+  // in 0..1, so lowSaturate below starts from the very bytes the grid does.
+  function hslToRgb(h, s, l) {
+    var c = (1 - Math.abs(2 * l - 1)) * s;
+    var hp = h / 60;
+    var x = c * (1 - Math.abs(hp % 2 - 1));
+    var rgb;
+    if (hp < 1) rgb = [c, x, 0];
+    else if (hp < 2) rgb = [x, c, 0];
+    else if (hp < 3) rgb = [0, c, x];
+    else if (hp < 4) rgb = [0, x, c];
+    else if (hp < 5) rgb = [x, 0, c];
+    else rgb = [c, 0, x];
+    var m = l - c * 0.5;
+    return [rgb[0] + m, rgb[1] + m, rgb[2] + m];
+  }
+
+  // The shader's lowSaturate, line for line (its LOW_SAT_* constants, its
+  // sRGB <-> OKLab round trip, its clamp), as a CSS rgb() of the exact
+  // bytes: see the GLSL for what it does and why the browser's own
+  // oklab() is not used for this.
+  var LOW_SAT_L = 0.70, LOW_SAT_C = 0.20, LOW_SAT_KEEP = 0.5;
+  function lowSaturate(srgb) {
+    var lin = srgb.map(function (v) { return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+    var lms = [
+      0.4122214708 * lin[0] + 0.5363325363 * lin[1] + 0.0514459929 * lin[2],
+      0.2119034982 * lin[0] + 0.6806995451 * lin[1] + 0.1073969566 * lin[2],
+      0.0883024619 * lin[0] + 0.2817188376 * lin[1] + 0.6299787005 * lin[2],
+    ].map(function (v) { return Math.cbrt(Math.max(v, 0)); });
+    var L = 0.2104542553 * lms[0] + 0.7936177850 * lms[1] - 0.0040720468 * lms[2];
+    var a = 1.9779984951 * lms[0] - 2.4285922050 * lms[1] + 0.4505937099 * lms[2];
+    var b = 0.0259040371 * lms[0] + 0.7827717662 * lms[1] - 0.8086757660 * lms[2];
+    var C = Math.sqrt(a * a + b * b);
+    var dirA = C > 1e-6 ? a / C : 1, dirB = C > 1e-6 ? b / C : 0;
+    var L2 = LOW_SAT_L + (L - LOW_SAT_L) * LOW_SAT_KEEP;
+    var C2 = LOW_SAT_C + (C - LOW_SAT_C) * LOW_SAT_KEEP;
+    var a2 = dirA * C2, b2 = dirB * C2;
+    var l_ = L2 + 0.3963377774 * a2 + 0.2158037573 * b2;
+    var m_ = L2 - 0.1055613458 * a2 - 0.0638541728 * b2;
+    var s_ = L2 - 0.0894841775 * a2 - 1.2914855480 * b2;
+    var l = l_ * l_ * l_, m = m_ * m_ * m_, s = s_ * s_ * s_;
+    var out = [
+      4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+      -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+      -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s,
+    ].map(function (v) {
+      v = Math.min(1, Math.max(0, v));
+      return Math.round(255 * (v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055));
+    });
+    return "rgb(" + out.join(", ") + ")";
   }
 
   // Mirrors buildFragmentShader's own "mod(outputValue, OUTPUT_RANGE_MAX) /
@@ -9301,6 +9457,7 @@
       "uniform float u_gridStride;",
       // The grid program's own coloring uniforms: see its header.
       "uniform bool u_colorZoom;",
+      "uniform bool u_lowSaturation;",
       "uniform int u_durationSteps;",
       "uniform float u_bounceMax;",
       "uniform int u_displayMode;",
@@ -9386,7 +9543,7 @@
   }
 
   var PLAYBACK_STEP_UNIFORMS = ["resolution", "gridStride", "gridOrigin", "centerHi", "centerLo", "centerLo2", "centerLo3", "scale", "state", "init", "baseStep", "steps", "group", "tileOrigin", "stencil"];
-  var PLAYBACK_COLOR_UNIFORMS = ["state", "stateSize", "stateSteps", "gridStride", "colorZoom", "durationSteps", "bounceMax", "displayMode", "targetOrigin", "stencil", "sampleField"];
+  var PLAYBACK_COLOR_UNIFORMS = ["state", "stateSize", "stateSteps", "gridStride", "colorZoom", "lowSaturation", "durationSteps", "bounceMax", "displayMode", "targetOrigin", "stencil", "sampleField"];
 
   function finishedPlaybackProgram(build, uniformNames) {
     var prog = build.program;
@@ -9823,6 +9980,7 @@
     gl.uniform1i(u.stateSteps, spec.totalSteps);
     gl.uniform1f(u.gridStride, spec.stride);
     gl.uniform1i(u.colorZoom, colorZoomEnabled ? 1 : 0);
+    gl.uniform1i(u.lowSaturation, lowSaturationEnabled ? 1 : 0);
     gl.uniform1i(u.durationSteps, simulationSteps);
     gl.uniform1f(u.bounceMax, opts.bounceMax === undefined ? bounceMaxValue : opts.bounceMax);
     gl.uniform1i(u.displayMode, displayMode.id);
@@ -10221,7 +10379,7 @@
   // Everything the color pass's picture depends on besides the state
   // itself, if any of it changes, the same state has to be painted again.
   function playbackLookKey(res) {
-    return [res.key, timeline.stateStep, displayMode.id, colorZoomEnabled, simulationSteps, bounceMaxValue].join(" ");
+    return [res.key, timeline.stateStep, displayMode.id, colorZoomEnabled, lowSaturationEnabled, simulationSteps, bounceMaxValue].join(" ");
   }
 
   // Rows [band, band + rows) of one step pass, into the texture that isn't
@@ -10287,6 +10445,7 @@
     gl.uniform1i(u.stateSteps, timeline.stateStep);
     gl.uniform1f(u.gridStride, res.stride);
     gl.uniform1i(u.colorZoom, colorZoomEnabled ? 1 : 0);
+    gl.uniform1i(u.lowSaturation, lowSaturationEnabled ? 1 : 0);
     gl.uniform1i(u.durationSteps, simulationSteps);
     gl.uniform1f(u.bounceMax, bounceMaxValue);
     gl.uniform1i(u.displayMode, displayMode.id);
@@ -10944,6 +11103,8 @@
     // on every re-entry.
     colorZoomEnabled = false;
     colorZoomCheckbox.checked = false;
+    lowSaturationEnabled = false;
+    lowSaturationCheckbox.checked = false;
     setDisplayMode(DISPLAY_MODES[0]);
     // And Inspect open, for the same reason boot() opens it on the first
     // visit (see its comment there). Needed separately here because the
@@ -11223,8 +11384,11 @@
     var link = "chaosplayback.html#" + ShareUrl.encode({
       page: ShareUrl.PAGE_MOVIE,
       scene: PhysicsCoords.toAuthoredJSON(shared.scene),
-      // A movie has no view of its own: its keyframes are its views.
-      view: { display: shared.view.display, precision: shared.view.precision, movie: shared.view.movie },
+      // A movie has no view of its own: its keyframes are its views. How
+      // the map is drawn (mode, Color Zoom, Low Saturation) is not a view,
+      // and does ride along: the player draws every frame the way the map
+      // looked when Done was pressed.
+      view: { display: shared.view.display, lowSaturation: shared.view.lowSaturation, precision: shared.view.precision, movie: shared.view.movie },
     });
     // The address this page leaves behind has to say what is in the card,
     // or Back from the player would return to a map with no keyframes.
@@ -11336,7 +11500,11 @@
         center: { x: view.center.x, xLo: view.center.xLo, y: view.center.y, yLo: view.center.yLo },
         scale: view.scale,
         zoom: DEFAULT_SCALE / view.scale,
-        display: colorZoomEnabled ? "colorzoom" : displayMode.value,
+        // Color Zoom only shows in Standard (see colorMap), so a link says
+        // "colorzoom" only when that is the picture on screen: a derived
+        // mode with the toggle still checked underneath is that mode.
+        display: colorZoomEnabled && displayMode.value === "standard" ? "colorzoom" : displayMode.value,
+        lowSaturation: lowSaturationEnabled,
         precision: precisionMode,
         speed: playbackSpeed,
         volume: PhysicsSound.getVolume(),
@@ -11367,6 +11535,8 @@
 
     colorZoomEnabled = shared.display === "colorzoom";
     colorZoomCheckbox.checked = colorZoomEnabled;
+    lowSaturationEnabled = shared.lowSaturation === true;
+    lowSaturationCheckbox.checked = lowSaturationEnabled;
     setDisplayMode(colorZoomEnabled ? DISPLAY_MODES[0] : displayModeByValue(shared.display));
 
     // A rung this browser can't build (see PRECISION_LADDER) becomes Auto:

@@ -1293,6 +1293,13 @@ input[type="range"] {
 .display-mode-text .toggle-field {
   margin-top: 6px;
 }
+/* Standard's row now stacks two of them (Color Zoom, then Low Saturation):
+   the first one's 14px margin-bottom is the "before the cost line" gap,
+   too much between two switches of the same row, so pull the second one
+   up to sit 8px under the first. */
+.display-mode-text .toggle-field + .toggle-field {
+  margin-top: -6px;
+}
 /* The sample cost, on its own last line: the one number that says what
    choosing this row will cost, so it is set apart from the sentence rather
    than buried at the end of it. */
