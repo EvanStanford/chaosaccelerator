@@ -37,7 +37,7 @@
     max-height: calc(100dvh - var(--panel-inset) * 2);
   }
   #grid-right-menu-column .menu-card {
-    max-height: calc(100dvh - var(--panel-inset) * 2 - (var(--settings-btn-size) + 8px) * 2);
+    max-height: calc(100dvh - var(--panel-inset) * 2 - (var(--settings-btn-size) + 8px) * 3);
   }
   .render-progress-card {
     max-height: none;

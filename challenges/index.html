@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<!-- CPAL-1.0 License. See chaosaccelerator.com/license.html -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#14161c">
+<title>Challenges: Chaos Accelerator</title>
+<link rel="stylesheet" href="../scripts/landing.css?v=m70">
+<link rel="stylesheet" href="challenges.css?v=m70">
+</head>
+<body>
+
+<!-- The challenge list, then one challenge at a time: the app itself in a frame (chaos.html, with ?goal=
+     so it plays the goal), and this page's own bar, target panel and win screen over it. -->
+
+<main class="page" id="list-page">
+  <header class="page-head">
+    <a class="back-link" href="../index.html">&larr; Chaos Accelerator</a>
+    <h1>Challenges</h1>
+    <script src="../scripts/corner-menu.js?v=m70"></script>
+  </header>
+
+  <section class="challenge-intro">
+    <h2>Trick Shot</h2>
+    <p>Each trick shot is a scene where, at one very particular starting point, the ball bounces off the
+      other objects in a set order. On the map that order shows up as a region painted <b>GOAL!</b>.
+      Zoom in until you find it, then click it. The Inspect card is your friend: hover the map to watch
+      any starting point play out.</p>
+  </section>
+
+  <section id="challenge-list" class="challenge-list" aria-live="polite">
+    <p class="readout">Loading challenges&hellip;</p>
+  </section>
+</main>
+
+<section id="play-page" class="play-page" hidden>
+  <header class="play-bar">
+    <button id="btn-back" class="bar-btn" type="button">&larr; All challenges</button>
+    <span id="play-title" class="play-title"></span>
+    <button id="btn-target" class="bar-btn" type="button" aria-pressed="true">Hide target</button>
+  </header>
+
+  <div class="play-stage">
+    <iframe id="engine" title="The map"></iframe>
+
+    <aside id="target-panel" class="target-panel">
+      <video id="target-video" muted loop autoplay playsinline></video>
+      <p id="target-order" class="target-order"></p>
+      <p class="target-help">Find the starting point where the ball bounces in this order. Zoom in on the map
+        until a <b>GOAL!</b> patch appears, then click it.</p>
+    </aside>
+
+    <div id="toast" class="toast" hidden></div>
+
+    <div id="win-panel" class="win-panel" hidden>
+      <div class="win-card">
+        <h2>GOAL!</h2>
+        <p id="win-text">You found it.</p>
+        <p class="win-actions">
+          <a id="win-link" class="bar-btn" target="_blank" rel="noopener">Open this view in a new tab</a>
+          <button id="win-next" class="bar-btn" type="button">Next challenge</button>
+          <button id="win-list" class="bar-btn" type="button">All challenges</button>
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script src="challenges.js?v=m70"></script>
+</body>
+</html>

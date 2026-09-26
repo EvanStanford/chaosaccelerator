@@ -39,6 +39,22 @@
     }
   })();
 
+  // Trick Shot (challenges/): "?goal=1.0.2" names the bounce order the goal region starts with. The class
+  // trims the map's cards (challenges/challenge-frame.css); fractal-grid.js paints goal pixels clear.
+  var challengeGoal = (function () {
+    var m = /[?&]goal=([0-9.]+)/.exec(global.location.search || "");
+    if (!m) return null;
+    var order = m[1].split(".").filter(function (t) { return t !== ""; }).map(Number);
+    return order.length ? order : null;
+  })();
+  if (challengeGoal) {
+    root.classList.add("challenge");
+    var challengeSheet = document.createElement("link");
+    challengeSheet.rel = "stylesheet";
+    challengeSheet.href = "challenges/challenge-frame.css";
+    document.head.appendChild(challengeSheet);
+  }
+
   function computeConstrained() {
     if (forcedProfile) return forcedProfile === "mobile";
     if (coarseQuery.matches) return true;
@@ -85,6 +101,7 @@
     hasTouch: function () { return !!anyCoarseQuery.matches; },
     canHover: function () { return !noHoverQuery.matches; },
     isConstrained: function () { return constrained; },
+    challengeGoal: function () { return challengeGoal; },
     onChange: function (fn) { listeners.push(fn); },
     refresh: refresh,
   };

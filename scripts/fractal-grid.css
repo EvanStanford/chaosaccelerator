@@ -625,11 +625,22 @@ input[type="range"] {
   flex-shrink: 0;
   pointer-events: auto;
 }
-/* Cards grow from top right and leave room for the other two collapsed buttons plus gaps. */
+/* Cards grow from top right and leave room for the other three collapsed buttons plus gaps. */
 #grid-right-menu-column .menu-card {
   transform-origin: top right;
-  max-height: calc(100vh - var(--panel-inset) * 2 - (var(--settings-btn-size) + 8px) * 2);
+  max-height: calc(100vh - var(--panel-inset) * 2 - (var(--settings-btn-size) + 8px) * 3);
 }
+/* The Challenges card's one link, dressed as a button. */
+.challenges-link {
+  display: inline-block;
+  font-size: 13px;
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: white;
+  text-decoration: none;
+}
+.challenges-link:hover { background: var(--accent-hover); color: white; text-decoration: none; }
 /* The collapsed gauge: no button chrome, just the ring at three-quarter size and half opacity; drop-shadow follows the stroke, box-shadow would be square. */
 /* Not .menu-toggle (that carries a square button's chrome), so it needs its own copy of the is-open rule. */
 .menu-item.is-open > .render-progress-toggle {

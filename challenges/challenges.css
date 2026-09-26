@@ -1,0 +1,124 @@
+/* CPAL-1.0 License. See chaosaccelerator.com/license.html */
+
+/* On top of landing.css: the list borrows its page styles; play mode covers the window. */
+
+[hidden] { display: none !important; }
+
+.challenge-intro p { color: var(--text-dim); line-height: 1.55; max-width: 640px; }
+.challenge-intro b { color: var(--text); }
+
+.challenge-list { display: grid; gap: 18px; margin-top: 20px; }
+.challenge-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: 18px;
+  padding: 16px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.challenge-card h3 { margin: 0 0 6px; font-size: 20px; }
+.challenge-card .solved { font-size: 13px; color: #c9a227; margin-left: 8px; }
+.challenge-card p { margin: 0 0 12px; color: var(--text-dim); line-height: 1.5; }
+.challenge-card video { width: 100%; border-radius: 6px; background: #0c0d11; display: block; }
+.challenge-card .order { font-size: 13px; color: var(--text); font-variant-numeric: tabular-nums; }
+.challenge-card button {
+  font: inherit;
+  padding: 8px 14px;
+  color: #fff;
+  background: var(--accent);
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.challenge-card button:hover { background: var(--accent-hover); }
+
+/* ---- Play mode ---- */
+.play-page {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  z-index: 10;
+}
+.play-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  padding-top: max(6px, env(safe-area-inset-top));
+}
+.play-title { flex: 1; text-align: center; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bar-btn {
+  font: inherit;
+  font-size: 14px;
+  padding: 6px 10px;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  text-decoration: none;
+}
+.bar-btn:hover { background: var(--bg-input, #232735); color: var(--text); text-decoration: none; }
+
+.play-stage { position: relative; flex: 1; min-height: 0; }
+#engine { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #0c0d11; }
+
+.target-panel {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  width: 260px;
+  padding: 10px;
+  background: rgba(27, 30, 39, 0.94);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+}
+.target-panel video { width: 100%; border-radius: 6px; background: #0c0d11; display: block; }
+.target-order { margin: 8px 0 4px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.target-help { margin: 0; font-size: 12px; color: var(--text-dim); line-height: 1.45; }
+.target-help b { color: var(--text); }
+
+.toast {
+  position: absolute;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  padding: 8px 14px;
+  background: rgba(27, 30, 39, 0.94);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.win-panel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(12, 13, 17, 0.6);
+}
+.win-card {
+  padding: 24px 28px;
+  text-align: center;
+  background: var(--bg-panel);
+  border: 1px solid #c9a227;
+  border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+  max-width: 420px;
+}
+.win-card h2 { margin: 0 0 8px; font-size: 40px; color: #c9a227; letter-spacing: 0.04em; }
+.win-card p { margin: 0 0 14px; color: var(--text-dim); }
+.win-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+
+@media (max-width: 760px) {
+  .challenge-card { grid-template-columns: 1fr; }
+  .target-panel { width: min(260px, calc(100vw - 24px)); bottom: auto; top: 12px; }
+}

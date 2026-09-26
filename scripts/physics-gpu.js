@@ -770,7 +770,7 @@
   // precision: "f32" or "df"/"tf"/"qf" (see PhysicsDF). mutualGravity: n-body pull.
   // collisions: only Mutual Gravity's accel loop needs it (touching-bodies rule).
   // spawnBase: see padSceneForSplitting. springs: see the Springs section above.
-  function generateStepOnceGLSL(n, consts, pairs, hingeAnchors, frame, precision, mutualGravity, collisions, spawnBase, springs) {
+  function generateStepOnceGLSL(n, consts, pairs, hingeAnchors, frame, precision, mutualGravity, collisions, spawnBase, springs, touchFlagsFor) {
     var df = global.PhysicsDF.isExtended(precision);
     if (df) global.PhysicsDF.usePrecision(precision);
     var collisionsOn = collisions !== false;
@@ -883,6 +883,9 @@
 
     var lines = [];
     for (var cd = 0; cd < n; cd++) lines.push("bool g_contact" + cd + " = false;");
+    // touchFlagsFor: one body whose partners are told apart, g_touchK per other body (the map's goal order).
+    var touchBody = typeof touchFlagsFor === "number" ? touchFlagsFor : -1;
+    for (var td = 0; td < n; td++) if (touchBody >= 0 && td !== touchBody) lines.push("bool g_touch" + td + " = false;");
 
     // ---- df only: segment geometry, built as seldom as possible ----
     // A df sin/cos is the dearest thing in that library. A movable line or trapezoid
@@ -1250,6 +1253,16 @@
       });
       lines.push("  g_contact" + cf + " = " + (touching.length ? touching.join(" || ") : "false") + ";");
     }
+    for (var tk = 0; touchBody >= 0 && tk < n; tk++) {
+      if (tk === touchBody) continue;
+      var touchHits = [];
+      ordinaryPairs.forEach(function (pair) {
+        if (!((pair[0] === touchBody && pair[1] === tk) || (pair[0] === tk && pair[1] === touchBody))) return;
+        var vn = "pair_" + pair[0] + "_" + pair[1];
+        touchHits.push("(" + pairSlots(pair).map(function (slot) { return vn + "." + slot + ".hit"; }).join(" || ") + ")");
+      });
+      lines.push("  g_touch" + tk + " = " + (touchHits.length ? touchHits.join(" || ") : "false") + ";");
+    }
     lines.push("");
 
     // Per-body earliest contact tHit, default DT; folded only when a slot hit (a miss carries 0.0).
@@ -1358,6 +1371,8 @@
         var anyHit = "(" + fp.walls.map(function (w) { return vn + "_" + w[0] + ".hit"; }).join(" || ") + ")";
         lines.push("  g_contact" + fi + " = g_contact" + fi + " || (!" + excluded + " && " + anyHit + ");");
         lines.push("  g_contact" + ci + " = g_contact" + ci + " || (!" + excluded + " && " + anyHit + ");");
+        if (touchBody === ci) lines.push("  g_touch" + fi + " = g_touch" + fi + " || (!" + excluded + " && " + anyHit + ");");
+        if (touchBody === fi) lines.push("  g_touch" + ci + " = g_touch" + ci + " || (!" + excluded + " && " + anyHit + ");");
       });
       lines.push("");
     }

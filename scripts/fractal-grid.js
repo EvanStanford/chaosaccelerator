@@ -538,6 +538,39 @@
     return variant === "derived" ? pieces.derivedSource : pieces.gridSource;
   }
 
+  // Trick Shot (challenges/): the bounce order a pixel's Output body must start with to be in the goal
+  // region, from the page's ?goal= (layout-mode.js). Null unless the scene can play it.
+  function challengeGoalOrder(sceneToCompile, outputBodies) {
+    var order = global.LayoutMode && global.LayoutMode.challengeGoal();
+    if (!order || outputBodies.length !== 1 || !PhysicsEngine.collisionsEnabled(sceneToCompile)) return null;
+    for (var i = 0; i < order.length; i++) {
+      if (!(order[i] >= 0 && order[i] < sceneToCompile.bodies.length) || order[i] === outputBodies[0]) return null;
+    }
+    return order;
+  }
+  function goalDeclarationLines(order) {
+    var lines = ["const float GOAL_LENGTH = " + PhysicsGPU.fnum(order.length) + ";", "int goalWant(int i) {"];
+    order.forEach(function (body, i) { lines.push("  if (i == " + i + ") return " + body + ";"); });
+    lines.push("  return -1;", "}");
+    return lines;
+  }
+  // Per step: a partner touched now and not last step is a bounce; each must be the next one wanted.
+  // goalNext counts the matches, -1 once the order is broken; goalMask is last step's partners as bits.
+  function goalStepLines(order, outputBody, n) {
+    var lines = ["    {", "      int goalHits = 0;"];
+    for (var k = 0; k < n; k++) {
+      if (k !== outputBody) lines.push("      if (g_touch" + k + ") goalHits |= " + (1 << k) + ";");
+    }
+    lines.push("      int goalNew = goalHits & ~int(goalMask);", "      goalMask = float(goalHits);");
+    for (var j = 0; j < n; j++) {
+      if (j === outputBody) continue;
+      lines.push("      if ((goalNew & " + (1 << j) + ") != 0 && goalNext >= 0.0 && goalNext < GOAL_LENGTH) " +
+        "goalNext = goalWant(int(goalNext)) == " + j + " ? goalNext + 1.0 : -1.0;");
+    }
+    lines.push("    }");
+    return lines;
+  }
+
   function compileScenePieces(sceneToCompile, precision) {
     // "df" means any multi-float precision (two, three or four words).
     var df = PhysicsDF.isExtended(precision);
@@ -549,6 +582,8 @@
     var outputBodies = PhysicsEngine.outputBodyIndices(sceneToCompile.output);
     var isBounces = outProp === "bounces";
     var isRunTally = isLifespan || isBounces;
+    var goalOrder = challengeGoalOrder(sceneToCompile, outputBodies);
+    var goalLines = goalOrder ? goalDeclarationLines(goalOrder) : [];
     var isInfinitePosition = sceneToCompile.edgeMode === "infinite" && (outProp === "x" || outProp === "y" || isDistance);
     var rangeMax = outputRangeMax(sceneToCompile, outProp);
     // Circular outputs use the full 360; capped ranges stop at 300 so the ends differ.
@@ -602,7 +637,7 @@
     }
     var frame = PhysicsEngine.wrapsAtEdges(sceneToCompile)
       ? { width: sceneToCompile.frameWidth, height: sceneToCompile.frameHeight } : undefined;
-    var stepOnceSource = PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, sceneToCompile.mutualGravity, PhysicsEngine.collisionsEnabled(sceneToCompile), initial.spawnBase, initial.springs);
+    var stepOnceSource = PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, sceneToCompile.mutualGravity, PhysicsEngine.collisionsEnabled(sceneToCompile), initial.spawnBase, initial.springs, goalOrder ? outputBodies[0] : null);
     var stepOnceCall = "stepOnce(" + PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, precision, initial.spawnBase, initial.springs) + ");";
 
     // "Stop on wrap": each pixel freezes the first step ANY watched body would cross
@@ -618,6 +653,10 @@
       "    if (bounceNow && !bounceTouching) bounceCount += 1.0;",
       "    bounceTouching = bounceNow;",
     ] : [];
+    if (goalOrder) {
+      bounceInitLines.push("  float goalNext = 0.0;", "  float goalMask = 0.0;");
+      bounceStepLines = bounceStepLines.concat(goalStepLines(goalOrder, outputBodies[0], initial.n));
+    }
     var trackedIndices = watchedIndices.slice();
     outputIndices.forEach(function (idx) {
       if (trackedIndices.indexOf(idx) === -1) trackedIndices.push(idx);
@@ -738,6 +777,7 @@
     if (isBounces) {
       loopStateVariables.push({ name: "bounceCount", type: "float" }, { name: "bounceTouching", type: "bool" });
     }
+    if (goalOrder) loopStateVariables.push({ name: "goalNext", type: "float" }, { name: "goalMask", type: "float" });
     PhysicsGridCodegen.withWords(loopStateVariables, precision);
 
     // ---- Derived display modes ----
@@ -957,6 +997,7 @@
 
     var gridPhysicsLines = [
       isRunTally ? "" : "const float OUTPUT_RANGE_MAX = " + PhysicsGPU.fnum(rangeMax) + ";",
+      goalLines.join("\n"),
       "",
       stepOnceSource,
       "",
@@ -1031,17 +1072,22 @@
       "  " + outScalar + " outputValue = " + outZero + ";",
       outputLines.join("\n"),
       tLine,
+      // A goal pixel's t is -1: read back as such, and drawn clear so the page behind shows.
+      goalOrder ? "  if (goalNext >= GOAL_LENGTH) t = -1.0;" : "",
     ];
+    var goalTailLine = goalOrder ? "  if (t < 0.0) { fragColor = vec4(0.0); return; }" : "";
 
     // ---- Two programs from the same pieces ----
     // STANDARD: with u_sampleField it writes raw t to a float target, so every
     // measurement reads the program that drew. DERIVED is built only when picked.
     var standardTailLines = [
       "  if (u_sampleField) { fragColor = vec4(t, 0.0, 0.0, 1.0); return; }",
+      goalTailLine,
       "  fragColor = vec4(colorMap(t), 1.0);",
       "}",
     ];
     var derivedTailLines = [
+      goalTailLine,
       "  if (u_displayMode != MODE_STANDARD) {",
       "    fragColor = vec4(shadeDerived(worldX, worldY, outputValue, t), 1.0);",
       "    return;",
@@ -1074,7 +1120,9 @@
       libraryLines: [PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(sceneToCompile))],
       constantLines: [
         isRunTally ? "" : "const float OUTPUT_RANGE_MAX = " + PhysicsGPU.fnum(rangeMax) + ";",
+        goalLines.join("\n"),
       ],
+      hasGoal: !!goalOrder,
     };
   }
 
@@ -1795,6 +1843,26 @@
     freeSampleTarget(target);
     return { width: w, height: h, values: values };
   }
+
+  // Trick Shot: whether the rendered pixel under (clientX, clientY) is in the goal region, by sampling the
+  // field at that pixel's own world point. Null while nothing can measure (or without a goal).
+  function goalAtPixel(clientX, clientY) {
+    if (!challengeGoalOrder(scene, PhysicsEngine.outputBodyIndices(scene.output))) return null;
+    var rect = canvas.getBoundingClientRect();
+    var col = Math.floor((clientX - rect.left) * (canvas.width / rect.width));
+    var row = Math.floor((rect.bottom - clientY) * (canvas.height / rect.height));
+    var point = worldPointAtUV((col + 0.5 - 0.5 * canvas.width) / canvas.height, (row + 0.5 - 0.5 * canvas.height) / canvas.height);
+    var saved = { x: view.center.x, xLo: view.center.xLo, y: view.center.y, yLo: view.center.yLo };
+    var sample = null;
+    view.center.x = point.x; view.center.xLo = point.xLo; view.center.y = point.y; view.center.yLo = point.yLo;
+    try {
+      sample = sampleValueGrid(1, 1, false);
+    } finally {
+      view.center.x = saved.x; view.center.xLo = saved.xLo; view.center.y = saved.y; view.center.yLo = saved.yLo;
+    }
+    return sample ? sample.values[0] < 0 : null;
+  }
+  global.FractalGrid.goalAt = goalAtPixel;
 
   // ---- Superlatives: largest/smallest/rarest/sharpest-edge point in the view, locked as Inspect points ----
   var SUPERLATIVE_SAMPLE_LONG_SIDE = 200;
@@ -2954,7 +3022,10 @@
     "uniform sampler2D u_src;",
     "out vec4 fragColor;",
     "void main() {",
-    "  fragColor = vec4(texelFetch(u_src, ivec2(gl_FragCoord.xy), 0).rgb, 1.0);",
+    // A goal pixel (challengeGoalOrder) is clear; any sample of one clears the whole pixel, or a sliver of goal
+    // would average away under the antialiasing.
+    "  vec4 p = texelFetch(u_src, ivec2(gl_FragCoord.xy), 0);",
+    "  fragColor = p.a < 0.999 ? vec4(0.0) : p;",
     "}",
   ].join("\n");
 
@@ -3381,9 +3452,9 @@
     "void main() {",
     "  ivec2 q = ivec2(floor(u_a * gl_FragCoord.xy + u_b));",
     "  if (all(greaterThanEqual(q, ivec2(0))) && all(lessThan(q, u_sourceSize))) {",
-    "    fragColor = vec4(texelFetch(u_source, q, 0).rgb, 1.0);",
+    "    fragColor = texelFetch(u_source, q, 0);",
     "  } else if (u_ladderStride > 0) {",
-    "    fragColor = vec4(texelFetch(u_ladder, ivec2(gl_FragCoord.xy) / u_ladderStride, 0).rgb, 1.0);",
+    "    fragColor = texelFetch(u_ladder, ivec2(gl_FragCoord.xy) / u_ladderStride, 0);",
     "  } else {",
     // Neither has this pixel yet (a strip a drag just exposed): the source's dimmed edge; black read as tearing.
     "    ivec2 edge = clamp(q, ivec2(0), u_sourceSize - 1);",
@@ -6065,6 +6136,10 @@
         "",
       ],
       pieces.deltaTLines,
+      pieces.hasGoal ? ["float goalNextAt(ivec2 texel) {"].concat(
+        indentLines(PhysicsGridCodegen.generatePlaybackStateDeclarationsGLSL(vars), "  "),
+        indentLines(PhysicsGridCodegen.generatePlaybackStateLoadGLSL(vars, "u_state", "texel"), "  "),
+        ["  return goalNext;", "}", ""]) : [],
       [
         "const ivec2 PLAYBACK_STENCIL[4] = ivec2[4](ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1));",
         "",
@@ -6098,7 +6173,9 @@
         "  ivec2 texel = ivec2(targetPixel.x * u_stencil, targetPixel.y);",
         "  " + outScalar + " outputValue = outputAt(texel);",
         pieces.tLine,
+        pieces.hasGoal ? "  if (goalNextAt(texel) >= GOAL_LENGTH) t = -1.0;" : "",
         "  if (u_sampleField) { fragColor = vec4(t, 0.0, 0.0, 1.0); return; }",
+        pieces.hasGoal ? "  if (t < 0.0) { fragColor = vec4(0.0); return; }" : "",
         "  if (u_displayMode != MODE_STANDARD) {",
         "    fragColor = vec4(u_stencil == 5 ? shadeStencilDerived(texel, outputValue, t)",
         "                                    : shadePlaybackDerived(texel, outputValue, t), 1.0);",
@@ -7256,6 +7333,7 @@
   var movie = { keyframes: [], quality: MOVIE_QUALITIES.length - 1, loop: true };
 
   var movieMenu = makeMenu("menu-movie", "grid-btn-movie", "movie");
+  var challengesMenu = makeMenu("menu-challenges", "grid-btn-challenges", "movie");
   var movieHint = document.getElementById("movie-hint");
   var btnMovieAddKeyframe = document.getElementById("movie-add-keyframe");
   var movieKeyframeList = document.getElementById("movie-keyframe-list");
@@ -7966,6 +8044,7 @@
     dockActive = active;
     gridViewEl.classList.toggle("dock-active", active);
     if (active && movieMenu.isOpen()) movieMenu.set(false);
+    if (active && challengesMenu.isOpen()) challengesMenu.set(false);
     if (active) {
       var keep = null;
       dockMenus.forEach(function (menu) {

@@ -1,0 +1,26 @@
+/* CPAL-1.0 License. See chaosaccelerator.com/license.html */
+
+/* Loaded into chaos.html by layout-mode.js when the address carries ?goal= (a Trick Shot frame).
+   The map keeps Inspect and Settings; goal pixels are drawn clear, so the tile behind shows. */
+
+html.challenge #back-link,
+html.challenge #corner-menu,
+html.challenge #menu-stats,
+html.challenge #grid-btn-stats,
+html.challenge #menu-display,
+html.challenge #grid-btn-display,
+html.challenge #menu-playback,
+html.challenge #grid-btn-playback,
+html.challenge #menu-movie,
+html.challenge #grid-btn-movie,
+html.challenge #menu-challenges,
+html.challenge #grid-btn-challenges {
+  display: none !important;
+}
+
+/* Two rows per tile, the second shifted half a tile: a brick pattern. */
+html.challenge #grid-canvas-area {
+  background-color: #ffffff;
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='180'%20height='220'%3E%3Crect%20width='100%'%20height='100%'%20fill='%23ffffff'/%3E%3Ctext%20x='90'%20y='64'%20text-anchor='middle'%20font-family='Helvetica,Arial,sans-serif'%20font-weight='700'%20font-size='34'%20fill='%23c9a227'%3EGOAL!%3C/text%3E%3Ctext%20x='0'%20y='174'%20text-anchor='middle'%20font-family='Helvetica,Arial,sans-serif'%20font-weight='700'%20font-size='34'%20fill='%23c9a227'%3EGOAL!%3C/text%3E%3Ctext%20x='180'%20y='174'%20text-anchor='middle'%20font-family='Helvetica,Arial,sans-serif'%20font-weight='700'%20font-size='34'%20fill='%23c9a227'%3EGOAL!%3C/text%3E%3C/svg%3E");
+  background-size: 180px 220px;
+}
