@@ -160,6 +160,10 @@
     }
   }
 
+  // Analysis Maxing (challenges/): { target, onResult }. target is a share of the rose's weight per equal
+  // slice of the 180 degrees, in percent; it is drawn as an outline over the rose, on the same radial scale.
+  var roseChallenge = null;
+
   // ---- The orientation rose ----
   // 180 bins drawn twice (theta and theta + 180): a line has no direction. Screen orientation: right 0, up 90.
   function drawRose(canvas, orient) {
@@ -180,6 +184,21 @@
     }
     var max = 0;
     for (var m = 0; m < n; m++) max = Math.max(max, smooth[m]);
+    // With a target both are shares of the whole per bin, and the larger of the two sets the radius.
+    var target = roseChallenge ? roseChallenge.target : null;
+    var targetFine = null;
+    if (target) {
+      var total = 0;
+      for (var q = 0; q < n; q++) total += bins[q];
+      targetFine = new Float64Array(n);
+      var fineMax = 0;
+      for (var f = 0; f < n; f++) {
+        targetFine[f] = target[Math.floor(f * target.length / n)] / 100 * (target.length / n);
+        fineMax = Math.max(fineMax, targetFine[f]);
+      }
+      for (var s2 = 0; s2 < n; s2++) smooth[s2] = total > 0 ? smooth[s2] / total : 0;
+      max = Math.max(fineMax, total > 0 ? max / total : 0);
+    }
 
     ctx.strokeStyle = p.border;
     ctx.lineWidth = 1;
@@ -198,7 +217,7 @@
 
     if (max > 0) {
       ctx.beginPath();
-      for (var s = 0; s <= n * 2; s++) {
+      for (var s = 0; s < n * 2; s++) {
         var bin = s % n;
         var ang = (bin + 0.5) * Math.PI / n;   // radians, screen orientation
         if (s >= n) ang += Math.PI;            // the mirrored half
@@ -212,6 +231,20 @@
       ctx.fill();
       ctx.strokeStyle = p.accent;
       ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+    if (targetFine && max > 0) {
+      ctx.beginPath();
+      for (var ts = 0; ts < n * 2; ts++) {
+        var tb = ts % n;
+        var ta = (tb + 0.5) * Math.PI / n + (ts >= n ? Math.PI : 0);
+        var tr = (targetFine[tb] / max) * radius;
+        var tx = cx + Math.cos(ta) * tr, ty = cy - Math.sin(ta) * tr;
+        if (ts === 0) ctx.moveTo(tx, ty); else ctx.lineTo(tx, ty);
+      }
+      ctx.closePath();
+      ctx.strokeStyle = "#c9a227";
+      ctx.lineWidth = 2;
       ctx.stroke();
     }
 
@@ -591,6 +624,9 @@
         }
         lastInfo = info;
         redrawCharts();
+        if (roseChallenge && roseChallenge.onResult && lastResult.groups.orientation) {
+          try { roseChallenge.onResult(lastResult.groups.orientation); } catch (err) { /* the page's problem */ }
+        }
       },
       // The view moved: dim rather than clear, since a blank panel mid-pan is worse.
       markStale: function () {
@@ -621,5 +657,9 @@
     };
   }
 
-  global.FractalStatsPanel = { create: create, SECTIONS: SECTIONS };
+  global.FractalStatsPanel = {
+    create: create,
+    SECTIONS: SECTIONS,
+    setRoseChallenge: function (challenge) { roseChallenge = challenge || null; },
+  };
 })(window);

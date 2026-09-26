@@ -39,16 +39,18 @@
     }
   })();
 
-  // Trick Shot (challenges/): "?goal=1.0.2" names the bounce order the goal region starts with. The class
-  // trims the map's cards (challenges/challenge-frame.css); fractal-grid.js paints goal pixels clear.
+  // Inside a challenge frame (challenges/): "?goal=1.0.2" is a Trick Shot, the bounce order the goal region
+  // starts with (fractal-grid.js paints goal pixels clear); "?rose=1" is Analysis Maxing. The classes trim
+  // the map's cards (challenges/challenge-frame.css).
   var challengeGoal = (function () {
     var m = /[?&]goal=([0-9.]+)/.exec(global.location.search || "");
     if (!m) return null;
     var order = m[1].split(".").filter(function (t) { return t !== ""; }).map(Number);
     return order.length ? order : null;
   })();
-  if (challengeGoal) {
-    root.classList.add("challenge");
+  var challengeKind = challengeGoal ? "trick" : (/[?&]rose=1\b/.test(global.location.search || "") ? "rose" : null);
+  if (challengeKind) {
+    root.classList.add("challenge", "challenge-" + challengeKind);
     var challengeSheet = document.createElement("link");
     challengeSheet.rel = "stylesheet";
     challengeSheet.href = "challenges/challenge-frame.css";
@@ -102,6 +104,7 @@
     canHover: function () { return !noHoverQuery.matches; },
     isConstrained: function () { return constrained; },
     challengeGoal: function () { return challengeGoal; },
+    challengeKind: function () { return challengeKind; },
     onChange: function (fn) { listeners.push(fn); },
     refresh: refresh,
   };

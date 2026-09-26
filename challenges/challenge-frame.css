@@ -1,16 +1,9 @@
 /* CPAL-1.0 License. See chaosaccelerator.com/license.html */
 
-/* Loaded into chaos.html by layout-mode.js when the address carries ?goal= (a Trick Shot frame).
-   The map keeps Inspect and Settings; goal pixels are drawn clear, so the tile behind shows. */
+/* Loaded into chaos.html by layout-mode.js inside a challenge frame (?goal= is a Trick Shot, ?rose=1 is
+   Analysis Maxing). A frame has no use for the site menu, the Movie card or the Challenges card. */
 
-html.challenge #back-link,
 html.challenge #corner-menu,
-html.challenge #menu-stats,
-html.challenge #grid-btn-stats,
-html.challenge #menu-display,
-html.challenge #grid-btn-display,
-html.challenge #menu-playback,
-html.challenge #grid-btn-playback,
 html.challenge #menu-movie,
 html.challenge #grid-btn-movie,
 html.challenge #menu-challenges,
@@ -18,9 +11,24 @@ html.challenge #grid-btn-challenges {
   display: none !important;
 }
 
-/* Two rows per tile, the second shifted half a tile: a brick pattern. */
-html.challenge #grid-canvas-area {
+/* Trick Shot: the map only, with Inspect and Settings. Goal pixels are drawn clear, so the tile behind
+   shows: two rows per tile, the second shifted half a tile, a brick pattern. */
+html.challenge-trick #back-link,
+html.challenge-trick #menu-stats,
+html.challenge-trick #grid-btn-stats,
+html.challenge-trick #menu-display,
+html.challenge-trick #grid-btn-display,
+html.challenge-trick #menu-playback,
+html.challenge-trick #grid-btn-playback {
+  display: none !important;
+}
+html.challenge-trick #grid-canvas-area {
   background-color: #ffffff;
   background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='180'%20height='220'%3E%3Crect%20width='100%'%20height='100%'%20fill='%23ffffff'/%3E%3Ctext%20x='90'%20y='64'%20text-anchor='middle'%20font-family='Helvetica,Arial,sans-serif'%20font-weight='700'%20font-size='34'%20fill='%23c9a227'%3EGOAL!%3C/text%3E%3Ctext%20x='0'%20y='174'%20text-anchor='middle'%20font-family='Helvetica,Arial,sans-serif'%20font-weight='700'%20font-size='34'%20fill='%23c9a227'%3EGOAL!%3C/text%3E%3Ctext%20x='180'%20y='174'%20text-anchor='middle'%20font-family='Helvetica,Arial,sans-serif'%20font-weight='700'%20font-size='34'%20fill='%23c9a227'%3EGOAL!%3C/text%3E%3C/svg%3E");
   background-size: 180px 220px;
+}
+
+/* Analysis Maxing: the builder stays, the Analysis card keeps only its Rose Plot section. */
+html.challenge-rose .stats-section:not(:first-of-type) {
+  display: none !important;
 }
