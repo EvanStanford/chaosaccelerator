@@ -412,7 +412,8 @@
                   </label>
 
                   <!-- Performance settings; "Performance settings" in fractal-grid.js owns the presets. Low and High SET every control
-                       under Advanced; Custom is where the slider goes when they match neither. Precision sits above: no preset touches it. -->
+                       under Advanced; Custom is where the slider goes when they match neither. Precision sits above: presets set it
+                       (Low forces float32) but an explicit choice there never moves the slider. -->
                   <label class="field">
                     <span>Numeric precision: <b id="precision-readout">float32</b></span>
                     <select id="precision-select">
@@ -466,6 +467,14 @@
                       <span>Prioritize panning and zooming</span>
                       <span class="toggle-switch">
                         <input type="checkbox" id="perf-gesture-checkbox">
+                        <span class="toggle-slider"></span>
+                      </span>
+                    </label>
+                    <label class="toggle-field" id="perf-transitions-field"
+                           title="Skip the zoom animation between the builder and the map. The animation renders the map at every zoom level on the way in, which is heavy work for a phone GPU.">
+                      <span>Disable transitions</span>
+                      <span class="toggle-switch">
+                        <input type="checkbox" id="perf-transitions-checkbox">
                         <span class="toggle-slider"></span>
                       </span>
                     </label>
@@ -651,6 +660,9 @@
           </section>
           <!-- Nerd Performance Stats readout (updatePerfReadout). No pointer events: the map still pans through it. -->
           <pre id="perf-readout" hidden></pre>
+          <!-- Plain-DOM copy of the context-loss record: readable when the canvas is blank or there is no context at all. -->
+          <pre id="grid-debug-log" hidden></pre>
+          <button id="grid-debug-copy" class="secondary" type="button" hidden>Copy stats</button>
           <div id="empty-state" hidden>
             <p>No scene has been sent from the Physics Simulator yet.</p>
             <a id="empty-state-link" href="#bldr/">Go map X / Y / Output and send one &rarr;</a>
@@ -697,6 +709,7 @@
 
   </section>
 
+  <div id="perf-lowered-toast" class="perf-lowered-toast" role="status"></div>
   <div id="transition-layer" hidden>
     <canvas id="transition-canvas"></canvas>
     <button id="transition-skip" class="secondary">Skip</button>

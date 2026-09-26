@@ -25,10 +25,32 @@
   // One Settings body (#shared-settings-body) is MOVED between the builder's panel
   // and the map's card (placeSettings). Until the map starts, the controls hold the state.
   var PERF_PRESETS = {
-    low: { endStride: 2, antialias: false, reuse: true, maxDpr: 2, frameMs: 50, drawMs: 20, playbackMB: 96, gestureFirst: true },
-    high: { endStride: 1, antialias: true, reuse: true, maxDpr: 0, frameMs: 0, drawMs: 5, playbackMB: 256, gestureFirst: false },
+    low: { endStride: 2, antialias: false, reuse: true, maxDpr: 2, frameMs: 50, drawMs: 20, playbackMB: 96, gestureFirst: true, noTransitions: true, precision: "f32" },
+    high: { endStride: 1, antialias: true, reuse: true, maxDpr: 0, frameMs: 0, drawMs: 5, playbackMB: 256, gestureFirst: false, noTransitions: false, precision: "auto" },
   };
   var perfDefaultPreset = global.LayoutMode && global.LayoutMode.isConstrained() ? "low" : "high";
+  // Each control at the Low preset or wherever it already sits below it. 0 for maxDpr and frameMs means uncapped.
+  function lowerPerfValues(cur) {
+    var low = PERF_PRESETS.low;
+    return {
+      endStride: Math.max(cur.endStride, low.endStride),
+      antialias: cur.antialias && low.antialias,
+      reuse: low.reuse,
+      maxDpr: cur.maxDpr === 0 ? low.maxDpr : Math.min(cur.maxDpr, low.maxDpr),
+      frameMs: cur.frameMs === 0 ? low.frameMs : Math.max(cur.frameMs, low.frameMs),
+      drawMs: Math.max(cur.drawMs, low.drawMs),
+      playbackMB: Math.min(cur.playbackMB, low.playbackMB),
+      gestureFirst: cur.gestureFirst || low.gestureFirst,
+      noTransitions: cur.noTransitions || low.noTransitions,
+      precision: cur.precision, // left alone after a crash: the record has to say what was being compiled
+    };
+  }
+  function samePerfValues(a, b) {
+    return Object.keys(a).every(function (k) { return a[k] === b[k]; });
+  }
+  // Written by the context-loss handler for the reload that follows it; read once, at load.
+  var PERF_LOWERED_KEY = "fractalGridPerfLowered";
+  var PERF_LOWERED_MAX_STEPS = 300;
 
   var sharedSettings = (function () {
     function $(id) { return document.getElementById(id); }
@@ -38,6 +60,7 @@
       resMin: $("resolution-min-slider"), resMax: $("resolution-max-slider"),
       resFill: $("resolution-range-fill"), resReadout: $("resolution-bounds-readout"),
       antialias: $("antialias-checkbox"), reuse: $("reuse-picture-checkbox"), gesture: $("perf-gesture-checkbox"),
+      transitions: $("perf-transitions-checkbox"),
       dpr: $("perf-dpr-select"), frame: $("perf-frame-select"), draw: $("perf-draw-select"), memory: $("perf-playback-memory-select"),
       lineCount: $("inspect-line-sample-count-slider"), lineCountReadout: $("inspect-line-sample-count-readout"),
       gridSize: $("inspect-grid-size-slider"), gridSizeReadout: $("inspect-grid-size-readout"),
@@ -51,8 +74,10 @@
 
     function readPerf() {
       return {
+        endStride: el.resMax.value === RES_MAX[2] ? 2 : 1,
         antialias: el.antialias.checked, maxDpr: Number(el.dpr.value), frameMs: Number(el.frame.value),
         drawMs: Number(el.draw.value), playbackMB: Number(el.memory.value), gestureFirst: el.gesture.checked,
+        noTransitions: el.transitions.checked,
       };
     }
     function readPrecision(ladder) {
@@ -60,12 +85,14 @@
       return v === "auto" || ladder.indexOf(v) !== -1 ? v : "auto";
     }
     function writePreset(name) {
-      var p = PERF_PRESETS[name];
+      var p = typeof name === "string" ? PERF_PRESETS[name] : name;
       el.resMin.value = "0";
       el.resMax.value = RES_MAX[p.endStride];
       el.antialias.checked = p.antialias;
       el.reuse.checked = p.reuse;
       el.gesture.checked = p.gestureFirst;
+      el.transitions.checked = p.noTransitions;
+      el.precision.value = p.precision;
       el.dpr.value = String(p.maxDpr);
       el.frame.value = String(p.frameMs);
       if (!el.draw.disabled) el.draw.value = String(p.drawMs);
@@ -76,7 +103,8 @@
       for (var i = 0; i < names.length; i++) {
         var p = PERF_PRESETS[names[i]];
         if (el.resMin.value === "0" && el.resMax.value === RES_MAX[p.endStride] && el.antialias.checked === p.antialias &&
-            el.reuse.checked === p.reuse && el.gesture.checked === p.gestureFirst && Number(el.dpr.value) === p.maxDpr &&
+            el.reuse.checked === p.reuse && el.gesture.checked === p.gestureFirst &&
+            el.transitions.checked === p.noTransitions && Number(el.dpr.value) === p.maxDpr &&
             Number(el.frame.value) === p.frameMs && Number(el.memory.value) === p.playbackMB &&
             (el.draw.disabled || Number(el.draw.value) === p.drawMs)) return names[i];
       }
@@ -123,6 +151,15 @@
     }));
     body.addEventListener("change", early(function (e) { if (e.target !== el.preset) syncPreset(); }));
 
+    var PERF_LOWERED_TOAST_MS = 4000;
+    function showPerfLoweredToast() {
+      var toast = $("perf-lowered-toast");
+      if (!toast) return;
+      toast.textContent = "Performance settings lowered to avoid crashing";
+      toast.classList.add("visible");
+      setTimeout(function () { toast.classList.remove("visible"); }, PERF_LOWERED_TOAST_MS);
+    }
+
     function volumeIcon(volume) {
       var muted = volume <= 0;
       el.volumeIcon.querySelector(".vol-arc-1").style.display = muted ? "none" : "inline";
@@ -155,8 +192,19 @@
     });
 
     if (/Mac|iPhone|iPad|iPod/.test((global.navigator && (global.navigator.platform || global.navigator.userAgent)) || "")) el.draw.disabled = true;
-    el.precision.value = "auto";
     writePreset(perfDefaultPreset);
+    var lowered = null;
+    try {
+      lowered = JSON.parse(global.sessionStorage.getItem(PERF_LOWERED_KEY));
+      global.sessionStorage.removeItem(PERF_LOWERED_KEY);
+    } catch (err) {
+      // No storage: the reload comes up on the device default instead.
+    }
+    if (lowered && lowered.perf) {
+      writePreset(lowered.perf);
+      if (lowered.readout) $("perf-readout-checkbox").checked = true;
+      if (lowered.toast) showPerfLoweredToast();
+    }
     syncReadouts();
     syncPreset();
 
@@ -283,6 +331,144 @@
     presentOnlyAt: -1e9,   // when a frame last only moved the picture (see "Gestures first")
     busyWaits: 0,          // frames that sat out because the GPU had not finished the last one
   };
+
+  // ---- Context-loss forensics ----
+  // The last GPU-heavy thing this page asked for, main-thread stalls, visibility and battery, all
+  // for the record taken when the context goes. The record outlives the reload (sessionStorage).
+  var gpuActivity = { what: "idle", at: 0 };
+  function noteGpuActivity(what) { gpuActivity.what = what; gpuActivity.at = performance.now(); }
+  var programSizes = {}; // label -> fragment source length, for the record
+  var CONTEXT_LOSS_LOG_KEY = "fractalGridContextLosses";
+  var contextLossLog = (function () {
+    try { return JSON.parse(global.sessionStorage.getItem(CONTEXT_LOSS_LOG_KEY)) || []; } catch (err) { return []; }
+  })();
+  function saveContextLossLog() {
+    try { global.sessionStorage.setItem(CONTEXT_LOSS_LOG_KEY, JSON.stringify(contextLossLog)); } catch (err) { /* no storage: the readout still has it */ }
+  }
+  var debugLogEl = document.getElementById("grid-debug-log");
+  var debugCopyBtn = document.getElementById("grid-debug-copy");
+  function showDebugLog(text) {
+    if (!debugLogEl) return;
+    debugLogEl.textContent = text;
+    debugLogEl.hidden = false;
+    debugCopyBtn.hidden = false;
+  }
+  // Report, live readout when there is one, and the raw records: pasteable from a phone.
+  function debugCopyText() {
+    var readout = "";
+    try { readout = perfReadoutText(performance.now()); } catch (err) { /* no context: the report is all there is */ }
+    return contextLossReportText() + (readout ? "\n\nreadout\n" + readout : "") + "\n\nrecords\n" + JSON.stringify(contextLossLog, null, 1);
+  }
+  function copyDebugText() {
+    var text = debugCopyText();
+    function done(ok) {
+      debugCopyBtn.textContent = ok ? "Copied" : "Copy failed";
+      setTimeout(function () { debugCopyBtn.textContent = "Copy stats"; }, 1500);
+    }
+    function fallback() {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed"; ta.style.left = "-9999px";
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = false;
+      try { ok = document.execCommand("copy"); } catch (err) { ok = false; }
+      document.body.removeChild(ta);
+      done(ok);
+    }
+    if (global.navigator.clipboard && global.navigator.clipboard.writeText) {
+      // A write can hang on a permission prompt; the old command still works while the tap's activation lasts.
+      var settled = false;
+      function once(fn) { return function () { if (!settled) { settled = true; fn(); } }; }
+      setTimeout(once(fallback), 800);
+      global.navigator.clipboard.writeText(text).then(once(function () { done(true); }), once(fallback));
+    } else fallback();
+  }
+  debugCopyBtn.addEventListener("click", copyDebugText);
+  // The map's gesture handlers must not see a tap on these, and a long press on the log should select text.
+  [debugCopyBtn, debugLogEl].forEach(function (el) {
+    ["pointerdown", "touchstart", "mousedown", "wheel"].forEach(function (type) {
+      el.addEventListener(type, function (e) { e.stopPropagation(); });
+    });
+  });
+
+  var CONTEXT_LOSS_KEY = "fractalGridContextLoss";
+  // Losses closer together than this are the same trouble, not a new one.
+  var CONTEXT_LOSS_WINDOW_MS = 90 * 1000;
+  var CONTEXT_LOSS_MAX_AUTO_RELOADS = 2;
+  function readContextLossRecord() {
+    try {
+      var rec = JSON.parse(global.sessionStorage.getItem(CONTEXT_LOSS_KEY));
+      if (rec && typeof rec.t === "number" && typeof rec.n === "number") return rec;
+    } catch (err) {
+      // Unreadable or unreachable storage: no history, which is the safe read.
+    }
+    return { t: 0, n: 0 };
+  }
+  function noteContextLoss() {
+    var rec = readContextLossRecord();
+    var now = Date.now();
+    rec = { t: now, n: now - rec.t < CONTEXT_LOSS_WINDOW_MS ? rec.n + 1 : 1 };
+    try { global.sessionStorage.setItem(CONTEXT_LOSS_KEY, JSON.stringify(rec)); } catch (err) { /* see above */ }
+    return rec;
+  }
+
+  // Main-thread stalls (a blocking compile or readback shows here), Chrome only.
+  var longTask = { longestMs: 0, lastMs: 0, lastAt: 0 };
+  try {
+    new PerformanceObserver(function (list) {
+      list.getEntries().forEach(function (t) {
+        longTask.lastMs = t.duration; longTask.lastAt = t.startTime + t.duration;
+        if (t.duration > longTask.longestMs) longTask.longestMs = t.duration;
+      });
+    }).observe({ entryTypes: ["longtask"] });
+  } catch (err) { /* not supported */ }
+  var visibleSince = document.hidden ? 0 : performance.now();
+  document.addEventListener("visibilitychange", function () { visibleSince = document.hidden ? 0 : performance.now(); });
+  var battery = null;
+  if (global.navigator.getBattery) {
+    global.navigator.getBattery().then(function (b) {
+      battery = b;
+    }).catch(function () { battery = null; });
+  }
+
+  function msText(ms) { return ms >= 9950 ? Math.round(ms / 1000) + "s" : (ms / 1000).toFixed(ms < 995 ? 2 : 1) + "s"; }
+  // The lines the readout and the fallback log both print for one record.
+  function describeContextLoss(loss, count) {
+    var lines = [];
+    if (loss.kind === "creation") {
+      lines.push("no ctx " + msText(Date.now() - loss.t) + " ago \u00b7 \"" + (loss.reason || "no reason given") + "\"" +
+        (loss.sinceLossMs >= 0 ? " \u00b7 " + msText(loss.sinceLossMs) + " after the loss" : ""));
+      return lines;
+    }
+    lines.push("lost   " + msText(Date.now() - loss.t) + " ago \u00b7 \"" + (loss.reason || "no reason given") + "\"" +
+      " \u00b7 loss " + loss.n + (count > 1 ? " (" + count + " logged)" : "") +
+      " \u00b7 hidden " + (loss.hidden ? "yes" : "no") + " \u00b7 lowered " + (loss.lowered ? "yes" : "no") +
+      (loss.restoredAfterMs > 0 ? " \u00b7 restored after " + msText(loss.restoredAfterMs) : " \u00b7 never restored"));
+    lines.push("       doing " + loss.doing + (loss.doingAgoMs >= 0 ? " (" + loss.doingAgoMs + "ms before)" : "") +
+      " \u00b7 last frame " + (loss.lastFrameAgoMs >= 0 ? loss.lastFrameAgoMs + "ms before" : "never"));
+    lines.push("       prec " + loss.precisionMode + " \u2192 " + loss.effective + " (wanted " + loss.wanted + ")" +
+      " \u00b7 pass " + loss.passStatus + " \u00b7 sliced " + loss.slicedStatus + (loss.sliceSteps ? " " + loss.sliceSteps + "/draw" : "") +
+      " \u00b7 " + loss.buildsInFlight + " building");
+    lines.push("       " + loss.steps + " steps \u00b7 zoom " + formatZoom(loss.zoom) + " \u00b7 " + loss.canvas + " \u00b7 draw \u2264" + loss.drawMs + "ms \u00b7 frame " +
+      (loss.frameMs > 0 ? loss.frameMs + "ms" : "1 refresh") + (loss.gpuMs > 0 ? " \u00b7 gpu " + loss.gpuMs.toFixed(1) + "ms" : "") +
+      " \u00b7 max work " + Math.round(loss.workFrameMaxMs) + "ms");
+    lines.push("       build last " + Math.round(loss.lastBuildMs) + "ms" + (loss.sliceStepMs > 0 ? " \u00b7 slice step " + loss.sliceStepMs.toFixed(4) + "ms" : "") +
+      " \u00b7 long task max " + Math.round(loss.longestTaskMs) + "ms" +
+      (loss.lastTaskMs > 0 ? ", last " + Math.round(loss.lastTaskMs) + "ms " + Math.round(loss.lastTaskAgoMs) + "ms before" : ""));
+    lines.push("       up " + msText(loss.sinceLoadMs) + " \u00b7 visible " + (loss.visibleForMs >= 0 ? msText(loss.visibleForMs) : "no") +
+      (loss.heapMB ? " \u00b7 heap " + loss.heapMB + "MB" : "") + (loss.deviceMemoryGB ? " \u00b7 device " + loss.deviceMemoryGB + "GB" : "") +
+      " \u00b7 " + loss.cores + " cores" + (loss.battery ? " \u00b7 battery " + loss.battery : ""));
+    if (loss.sizes) lines.push("       sizes " + loss.sizes);
+    return lines;
+  }
+  function contextLossReportText() {
+    var lines = ["gpu    " + (gpuRendererName || "?"), "ua     " + global.navigator.userAgent];
+    contextLossLog.forEach(function (loss) { lines = lines.concat(describeContextLoss(loss, 1)); });
+    if (!contextLossLog.length) lines.push("no context loss recorded this session");
+    return lines.join("\n");
+  }
 
   // Canvas pixels per CSS pixel, capped by perf.maxDpr; not window.devicePixelRatio.
   function gridDpr() {
@@ -1128,10 +1314,30 @@
 
   // antialias:false is load-bearing: blitFramebuffer into a multisampled draw
   // framebuffer is INVALID_OPERATION in ES 3.0, and every frame blits the accumulator.
+  var gpuRendererName = "";
+  var contextCreationError = "";
+  canvas.addEventListener("webglcontextcreationerror", function (e) { contextCreationError = e.statusMessage || ""; });
   var gl = canvas.getContext("webgl2", { antialias: false });
   if (!gl) {
     setStatus(false, "WebGL2 unavailable");
-    showEmptyState("This browser/device doesn't support WebGL2, which the physics grid needs.");
+    var lossRec = readContextLossRecord();
+    var afterLoss = lossRec.n > 0 && Date.now() - lossRec.t < CONTEXT_LOSS_WINDOW_MS;
+    contextLossLog = contextLossLog.concat([{ kind: "creation", t: Date.now(), reason: contextCreationError, sinceLossMs: afterLoss ? Date.now() - lossRec.t : -1 }]).slice(-4);
+    saveContextLossLog();
+    // Chrome refuses 3D contexts to every page for a while after a GPU reset: try again once that has passed.
+    var CONTEXT_CREATION_RETRY_MS = 12000;
+    var retrying = afterLoss && lossRec.n <= CONTEXT_LOSS_MAX_AUTO_RELOADS;
+    showEmptyState(retrying ? "The browser refused a WebGL2 context after resetting the page's graphics. Trying again shortly."
+      : "This browser/device doesn't support WebGL2, which the physics grid needs.");
+    var retryAt = performance.now() + CONTEXT_CREATION_RETRY_MS;
+    function paintDebugLog() {
+      showDebugLog(contextLossReportText() + (retrying ? "\nretry  in " + Math.max(0, Math.ceil((retryAt - performance.now()) / 1000)) + "s" : ""));
+    }
+    paintDebugLog();
+    if (retrying) {
+      var tick = setInterval(paintDebugLog, 1000);
+      setTimeout(function () { clearInterval(tick); global.location.reload(); }, CONTEXT_CREATION_RETRY_MS);
+    }
     return;
   }
 
@@ -1150,7 +1356,9 @@
   // KHR_parallel_shader_compile) -> warming (1x1 draw per format + fence) -> ready/failed.
   var parallelCompileExt = gl.getExtension("KHR_parallel_shader_compile");
 
-  function startProgramBuild(fragmentSource) {
+  function startProgramBuild(fragmentSource, label) {
+    noteGpuActivity("compile " + label);
+    programSizes[label] = fragmentSource.length;
     var shader = gl.createShader(gl.FRAGMENT_SHADER);
     gl.shaderSource(shader, fragmentSource);
     gl.compileShader(shader);
@@ -1158,7 +1366,7 @@
     gl.attachShader(program, vs);
     gl.attachShader(program, shader);
     gl.linkProgram(program);
-    return { status: "linking", program: program, shader: shader, sync: null, error: null, startedAt: performance.now() };
+    return { status: "linking", program: program, shader: shader, sync: null, error: null, startedAt: performance.now(), label: label };
   }
 
   function discardProgramBuild(build) {
@@ -1221,6 +1429,7 @@
       gl.deleteShader(build.shader);
       build.shader = null;
       if (wait) { build.status = "ready"; noteBuildDone(build); return build.status; }
+      noteGpuActivity("warm " + build.label);
       warmUpProgram(build.program, warmFormats);
       build.sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
       gl.flush();
@@ -1301,7 +1510,7 @@
       var pass = { key: key, precision: precision, variant: variant, status: "building", build: null,
         program: null, posLoc: -1, uniforms: null, error: null };
       try {
-        pass.build = startProgramBuild(buildFragmentShader(scene, precision, variant));
+        pass.build = startProgramBuild(buildFragmentShader(scene, precision, variant), precision + " " + variant + " grid program");
       } catch (err) {
         pass.status = "failed";
         pass.error = err.message || String(err);
@@ -1621,6 +1830,12 @@
       precisionMode = precisionSelect.value;
       markDirty();
     });
+  }
+  // Presets set the precision too; a rung this browser can't build becomes Auto.
+  function setPrecisionMode(mode) {
+    precisionMode = mode === "auto" || PRECISION_LADDER.indexOf(mode) !== -1 ? mode : "auto";
+    if (precisionSelect) precisionSelect.value = precisionMode;
+    markDirty();
   }
 
   // Shared by the checkbox and the presets; switched on at the end of boot (applyPerfValues).
@@ -2152,6 +2367,7 @@
     gl.uniform1i(pass.uniforms.durationSteps, simulationSteps);
     gl.uniform1f(pass.uniforms.bounceMax, bounceMaxValue);
     gl.uniform1i(pass.uniforms.displayMode, displayMode.id);
+    noteGpuActivity("grid draw " + pass.precision + " stride " + stride + ", " + (steps === undefined ? renderedSteps() : steps) + " steps");
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   }
 
@@ -6208,8 +6424,8 @@
       programs: null,
       layers: layers,
       groups: Math.ceil(layers / MAX_STATE_ATTACHMENTS),
-      stepBuild: startProgramBuild(buildPlaybackStepShader(pieces, vars, MAX_STATE_ATTACHMENTS)),
-      colorBuild: startProgramBuild(buildPlaybackColorShader(pieces, vars)),
+      stepBuild: startProgramBuild(buildPlaybackStepShader(pieces, vars, MAX_STATE_ATTACHMENTS), precision + " step program"),
+      colorBuild: startProgramBuild(buildPlaybackColorShader(pieces, vars), precision + " color program"),
     };
   }
 
@@ -6279,7 +6495,7 @@
   // slowest pixel. 5ms is the Longest single GPU draw setting's safest stop and
   // is held there on an Apple GPU; elsewhere watchdogs allow seconds and a longer draw is cheaper.
   var SLICE_TARGET_BASE_MS = 5;
-  var gpuRendererName = (function () {
+  gpuRendererName = (function () {
     try {
       var info = gl.getExtension("WEBGL_debug_renderer_info");
       return String((info && gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) || gl.getParameter(gl.RENDERER) || "");
@@ -6426,6 +6642,7 @@
     var resuming = job.nextGroup > 0;
     var k = resuming ? job.sliceSteps : Math.max(0, Math.min(steps, spec.totalSteps - job.done));
     if (k === 0 && job.started) return 0;
+    noteGpuActivity("slice draw " + k + " steps, " + spec.cols + "\u00d7" + spec.rows + " tile, " + job.programs.groups + " group(s)");
     var target = st.textures[1 - st.current];
     gl.useProgram(prog.program);
     bindQuad(prog.posLoc);
@@ -6522,6 +6739,7 @@
     var texel = new Float32Array(4);
     function timedSlice(k) {
       var startedAt = performance.now();
+      noteGpuActivity("calibrate " + precision + " " + k + " steps (blocking readback)");
       advanceSliceJob(job, k);
       gl.bindFramebuffer(gl.FRAMEBUFFER, job.state.fbo);
       gl.readBuffer(gl.COLOR_ATTACHMENT0);
@@ -6789,6 +7007,7 @@
 
   // Rows [band, band + rows) of one step pass into the non-current texture, one group per draw.
   function drawPlaybackBand(res, pass, rows) {
+    noteGpuActivity("playback band " + rows + " rows, " + res.programs.groups + " group(s)");
     var prog = res.programs.step, u = prog.uniforms;
     var layers = res.programs.layers;
     var target = playbackGpu.textures[1 - playbackGpu.current];
@@ -7672,7 +7891,6 @@
 
     // A rung this browser can't build (PRECISION_LADDER) becomes Auto.
     precisionMode = (shared.precision === "auto" || PRECISION_LADDER.indexOf(shared.precision) !== -1) ? shared.precision : "auto";
-    if (contextLossForcesFloat32()) precisionMode = "f32";
     if (precisionSelect) precisionSelect.value = precisionMode;
 
     setPlaybackSpeed(shared.speed);
@@ -7721,6 +7939,7 @@
   var perfDrawSelect = document.getElementById("perf-draw-select");
   var perfPlaybackMemorySelect = document.getElementById("perf-playback-memory-select");
   var perfGestureCheckbox = document.getElementById("perf-gesture-checkbox");
+  var perfTransitionsCheckbox = document.getElementById("perf-transitions-checkbox");
   var perfReadoutCheckbox = document.getElementById("perf-readout-checkbox");
   var perfReadoutEl = document.getElementById("perf-readout");
   var PERF_PRESET_STOPS = { low: 0, custom: 1, high: 2 };
@@ -7740,6 +7959,7 @@
       drawMs: perf.drawMs,
       playbackMB: perf.playbackMB,
       gestureFirst: perf.gestureFirst,
+      noTransitions: perf.noTransitions,
     };
   }
   function perfPresetNow() {
@@ -7750,6 +7970,7 @@
       if (now.startAtCoarsest && now.endStride === p.endStride &&
           now.antialias === p.antialias && now.reuse === p.reuse && now.maxDpr === p.maxDpr &&
           now.frameMs === p.frameMs && now.playbackMB === p.playbackMB && now.gestureFirst === p.gestureFirst &&
+          now.noTransitions === p.noTransitions &&
           // A control this GPU can't use (drawLengthLocked) can't keep the slider off a preset.
           (drawLengthLocked || now.drawMs === p.drawMs)) return names[i];
     }
@@ -7764,6 +7985,7 @@
     perfDrawSelect.value = String(drawLengthLocked ? SLICE_TARGET_BASE_MS : perf.drawMs);
     perfPlaybackMemorySelect.value = String(perf.playbackMB);
     perfGestureCheckbox.checked = perf.gestureFirst;
+    perfTransitionsCheckbox.checked = perf.noTransitions;
     var devDpr = window.devicePixelRatio || 1, dpr = gridDpr();
     perfDprReadout.textContent = (Math.round(dpr * 100) / 100) + "×" + (dpr < devDpr ? " of " + (Math.round(devDpr * 100) / 100) + "×" : "");
     var preset = perfPresetNow();
@@ -7822,13 +8044,15 @@
     setPerfDrawMs(p.drawMs);
     setPerfPlaybackMB(p.playbackMB);
     perf.gestureFirst = !!p.gestureFirst; // read fresh every frame; nothing to set in motion
+    perf.noTransitions = !!p.noTransitions;
+    setPrecisionMode(p.precision);
     markDirty();
     updateResolutionBoundsUI();
     syncPerfPresetUI();
   }
   function applyPerfPreset(name) {
-    if (!PERF_PRESETS[name] || perfPresetNow() === name) { syncPerfPresetUI(); return; }
-    applyPerfValues(PERF_PRESETS[name]);
+    if (!PERF_PRESETS[name]) { syncPerfPresetUI(); return; }
+    applyPerfValues(PERF_PRESETS[name]); // even when the slider already reads it: precision is outside the match
   }
 
   // The middle is fine to drag through but not to stop on: released there, it goes back to where the controls put it.
@@ -7857,6 +8081,7 @@
   perfDrawSelect.addEventListener("change", function () { setPerfDrawMs(Number(perfDrawSelect.value)); syncPerfPresetUI(); });
   perfPlaybackMemorySelect.addEventListener("change", function () { setPerfPlaybackMB(Number(perfPlaybackMemorySelect.value)); syncPerfPresetUI(); });
   perfGestureCheckbox.addEventListener("change", function () { perf.gestureFirst = perfGestureCheckbox.checked; syncPerfPresetUI(); });
+  perfTransitionsCheckbox.addEventListener("change", function () { perf.noTransitions = perfTransitionsCheckbox.checked; syncPerfPresetUI(); });
   // Held at its first stop on an Apple GPU (sliceTargetMs): shown, not offered.
   if (drawLengthLocked) perfDrawSelect.disabled = true;
 
@@ -7963,6 +8188,10 @@
     }
     lines.push("build  " + perfStats.builds + " programs " + Math.round(perfStats.buildMs) + "ms (last " + Math.round(perfStats.lastBuildMs) + ")" +
       " · calibrate " + Math.round(perfStats.calibrationMs) + "ms");
+    lines.push("doing  " + gpuActivity.what + (gpuActivity.at ? " (" + Math.round(performance.now() - gpuActivity.at) + "ms ago)" : ""));
+    lines.push("stall  long task max " + Math.round(longTask.longestMs) + "ms" + (longTask.lastMs > 0 ? " · last " + Math.round(longTask.lastMs) + "ms " + msText(performance.now() - longTask.lastAt) + " ago" : ""));
+    var loss = contextLossLog[contextLossLog.length - 1];
+    if (loss) lines = lines.concat(describeContextLoss(loss, contextLossLog.length));
     return lines.join("\n");
   }
   function updatePerfReadout(now) {
@@ -7984,6 +8213,7 @@
     perfReadoutShown = !!on;
     perfReadoutCheckbox.checked = perfReadoutShown;
     perfReadoutEl.hidden = !perfReadoutShown;
+    debugCopyBtn.hidden = !perfReadoutShown && debugLogEl.hidden;
     perfReadoutAt = 0;
   }
   perfReadoutCheckbox.addEventListener("change", function () { setPerfReadoutShown(perfReadoutCheckbox.checked); });
@@ -8102,33 +8332,7 @@
   var contextLostEl = document.getElementById("grid-context-lost");
   var contextLostText = document.getElementById("grid-context-lost-text");
   var contextLostReloadBtn = document.getElementById("grid-context-lost-reload");
-  var CONTEXT_LOSS_KEY = "fractalGridContextLoss";
-  // Losses closer together than this are the same trouble, not a new one.
-  var CONTEXT_LOSS_WINDOW_MS = 90 * 1000;
-  var CONTEXT_LOSS_MAX_AUTO_RELOADS = 2;
   var CONTEXT_RESTORE_GRACE_MS = 2000;
-
-  function readContextLossRecord() {
-    try {
-      var rec = JSON.parse(global.sessionStorage.getItem(CONTEXT_LOSS_KEY));
-      if (rec && typeof rec.t === "number" && typeof rec.n === "number") return rec;
-    } catch (err) {
-      // Unreadable or unreachable storage: no history, which is the safe read.
-    }
-    return { t: 0, n: 0 };
-  }
-  function noteContextLoss() {
-    var rec = readContextLossRecord();
-    var now = Date.now();
-    rec = { t: now, n: now - rec.t < CONTEXT_LOSS_WINDOW_MS ? rec.n + 1 : 1 };
-    try { global.sessionStorage.setItem(CONTEXT_LOSS_KEY, JSON.stringify(rec)); } catch (err) { /* see above */ }
-    return rec;
-  }
-  // One loss is weather (a backgrounded tab); two in a row says the multi-float programs are what the device can't hold.
-  function contextLossForcesFloat32() {
-    var rec = readContextLossRecord();
-    return rec.n >= 2 && Date.now() - rec.t < CONTEXT_LOSS_WINDOW_MS;
-  }
 
   function reloadToCurrentAddress() {
     if (global.AppShell && global.AppShell.syncAddress) global.AppShell.syncAddress();
@@ -8155,11 +8359,79 @@
     contextRecoveryTimer = setTimeout(reloadToCurrentAddress, CONTEXT_RESTORE_GRACE_MS);
   }
 
+  // The reload lands on Low or lower, float32, and a short duration, or the same loss repeats and the browser
+  // stops handing out contexts. Precision and duration travel in the address; the rest waits in sessionStorage.
+  function lowerSettingsForReload() {
+    var cur = perfValuesNow();
+    delete cur.startAtCoarsest;
+    cur.precision = precisionMode;
+    var lowered = lowerPerfValues(cur);
+    if (drawLengthLocked) lowered.drawMs = cur.drawMs; // held at its first stop: not a change
+    var changed = !samePerfValues(cur, lowered) || simulationSteps > PERF_LOWERED_MAX_STEPS;
+    precisionMode = lowered.precision;
+    if (simulationSteps > PERF_LOWERED_MAX_STEPS) {
+      simulationSteps = scene.simulationSteps = PERF_LOWERED_MAX_STEPS;
+      if (global.PhysicsUI && global.PhysicsUI.setSimulationSteps) global.PhysicsUI.setSimulationSteps(PERF_LOWERED_MAX_STEPS);
+    }
+    try { global.sessionStorage.setItem(PERF_LOWERED_KEY, JSON.stringify({ perf: lowered, toast: changed, readout: perfReadoutShown })); } catch (err) { /* see above */ }
+    return changed;
+  }
+
+  // Everything the readout can say about a loss, kept across the reload (three most recent).
+  function recordContextLoss(e, rec) {
+    var wanted = pickPrecision(), pass = passes[passKey(wanted, wantedVariant())], slicedEntry = playbackGpu.programs[wanted];
+    var mem = global.performance && global.performance.memory;
+    var entry = {
+      t: Date.now(),
+      reason: (e && e.statusMessage) || "",
+      hidden: !!document.hidden,
+      n: rec.n,
+      lowered: false,
+      doing: gpuActivity.what,
+      doingAgoMs: gpuActivity.at ? Math.round(performance.now() - gpuActivity.at) : -1,
+      precisionMode: precisionMode,
+      effective: effectivePrecision(),
+      wanted: wanted,
+      passStatus: pass ? pass.status : "none",
+      slicedStatus: slicedEntry ? slicedEntry.status : "none",
+      sliceSteps: sliceSteps[wanted] || 0,
+      sliceStepMs: perfStats.sliceStepMs,
+      steps: simulationSteps,
+      zoom: DEFAULT_SCALE / view.scale,
+      canvas: canvas.width + "\u00d7" + canvas.height,
+      drawMs: sliceTargetMs(),
+      frameMs: perf.frameMs,
+      gpuMs: perfStats.gpuMs,
+      workFrameMaxMs: perfStats.workFrameMaxMs,
+      lastBuildMs: perfStats.lastBuildMs,
+      buildsInFlight: Object.keys(passes).filter(function (k) { return passes[k].status === "building"; }).length,
+      heapMB: mem && mem.usedJSHeapSize ? Math.round(mem.usedJSHeapSize / 1048576) : 0,
+      deviceMemoryGB: global.navigator.deviceMemory || 0,
+      cores: global.navigator.hardwareConcurrency || 0,
+      battery: battery ? Math.round(battery.level * 100) + "%" + (battery.charging ? " charging" : "") : "",
+      sinceLoadMs: Math.round(performance.now()),
+      lastFrameAgoMs: perfFrame.lastAt > 0 ? Math.round(performance.now() - perfFrame.lastAt) : -1,
+      visibleForMs: visibleSince > 0 ? Math.round(performance.now() - visibleSince) : -1,
+      longestTaskMs: longTask.longestMs,
+      lastTaskMs: longTask.lastMs,
+      lastTaskAgoMs: longTask.lastAt > 0 ? performance.now() - longTask.lastAt : 0,
+      restoredAfterMs: 0,
+      lostAtMs: performance.now(),
+      sizes: Object.keys(programSizes).map(function (k) { return k + " " + Math.round(programSizes[k] / 1000) + "k"; }).join(", "),
+    };
+    contextLossLog = contextLossLog.concat([entry]).slice(-3);
+    return entry;
+  }
+
   canvas.addEventListener("webglcontextlost", function (e) {
     // Without this the browser never offers the context back at all.
     e.preventDefault();
     contextLost = true;
     var rec = noteContextLoss();
+    var entry = recordContextLoss(e, rec); // before the lowering: the record is what the page was doing
+    entry.lowered = lowerSettingsForReload();
+    saveContextLossLog();
+    showDebugLog(contextLossReportText());
     contextLostEl.hidden = false;
     if (rec.n > CONTEXT_LOSS_MAX_AUTO_RELOADS) {
       contextLostText.textContent = "The browser keeps resetting this page\u2019s graphics, which usually means the device is out of graphics memory. Closing other tabs or apps may help.";
@@ -8169,6 +8441,8 @@
   });
   canvas.addEventListener("webglcontextrestored", function () {
     if (!contextLost) return;
+    var last = contextLossLog[contextLossLog.length - 1];
+    if (last && last.lostAtMs) { last.restoredAfterMs = Math.round(performance.now() - last.lostAtMs); saveContextLossLog(); showDebugLog(contextLossReportText()); }
     if (readContextLossRecord().n > CONTEXT_LOSS_MAX_AUTO_RELOADS) return;
     if (document.hidden || (global.AppShell && global.AppShell.currentView() !== "grid")) return;
     if (contextRecoveryTimer) clearTimeout(contextRecoveryTimer);

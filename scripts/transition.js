@@ -59,6 +59,12 @@
     return global.matchMedia && global.matchMedia("(prefers-reduced-motion: reduce)").matches;
   }
 
+  // Settings > Performance Settings > Disable transitions. The control holds the value whether or not the map has started.
+  var transitionsCheckbox = document.getElementById("perf-transitions-checkbox");
+  function transitionsDisabled() {
+    return !!(transitionsCheckbox && transitionsCheckbox.checked);
+  }
+
   function ease(u) {
     return u * u * (3 - 2 * u);
   }
@@ -280,7 +286,7 @@
     // A navigation: the page being left writes itself down, then gets a new history entry.
     syncAddress();
     pushPending = true;
-    var instant = prefersReducedMotion();
+    var instant = prefersReducedMotion() || transitionsDisabled();
     var direction = which === "grid" ? "forward" : "reverse";
     var full = !introSeen(direction);
     if (which === "grid") {
