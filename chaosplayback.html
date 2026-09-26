@@ -2,31 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<!-- This file is part of Chaos Accelerator, licensed under the Common
-     Public Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in
-     the project root, or https://chaosaccelerator.com/license for a
-     hosted copy. -->
-<!-- viewport-fit=cover and theme-color: see chaos.html's own copies. The
-     bars at the top and bottom pad themselves clear of a phone's notch and
-     home indicator (see chaosplayback.css). -->
+<!-- CPAL-1.0 License. See chaosaccelerator.com/license.html -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#1b1e27">
 <title>Physics Fractal: Movie</title>
-<link rel="stylesheet" href="chaosplayback.css?v=m70">
+<link rel="stylesheet" href="scripts/chaosplayback.css?v=m70">
 </head>
 <body>
 
-<!-- The movie player. Everything it shows comes out of its own address (see
-     share-url.js): the scene, how the map is to be drawn, and the keyframes
-     the Movie card collected. It renders every frame first, however long
-     that takes, and only then plays, so playback never waits on a render.
-
-     It has no renderer of its own. #engine is the app itself, in a frame,
-     opened on the map of this movie's scene; chaosplayback.js asks it for one
-     finished picture per frame of the movie (FractalGrid.renderStill) and
-     keeps them. The frame sits UNDER #screen rather than hidden: a frame that
-     isn't being painted gets no animation frames, and the map only renders
-     inside those. -->
+<!-- The movie player: scene, map settings and keyframes all come from its address (share-url.js). #engine is
+     the app in a frame, asked for one finished picture per frame (FractalGrid.renderStill) before playback
+     starts. It sits UNDER #screen, not hidden: a frame that is not painted gets no animation frames. -->
 
 <header id="player-bar">
   <a id="back-to-map" class="bar-link" href="chaos.html">&larr; Back to map</a>
@@ -44,11 +30,6 @@
       <div id="render-bar"></div>
     </div>
     <p id="render-detail"></p>
-    <!-- End Early: stop here and make the movie out of the frames finished
-         so far (see endEarly in chaosplayback.js). Asked twice, since it
-         throws away whatever the rest would have been: the button gives way
-         to the question and its Yes / No. Off until a first frame exists,
-         a movie of no frames being nothing to play. -->
     <div id="render-actions">
       <button id="end-early" class="bar-link" type="button" disabled title="Stop rendering here and make the movie out of the frames finished so far.">End Early</button>
     </div>
@@ -78,16 +59,14 @@
   <button id="restart" class="transport-button" type="button" title="Back to the start" aria-label="Back to the start" disabled>
     <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="2.5" height="14" rx="1"></rect><path d="M19 6.1v11.8a.6.6 0 0 1-.94.5L9.6 12.5a.6.6 0 0 1 0-1l8.46-5.9a.6.6 0 0 1 .94.5z"></path></svg>
   </button>
-  <!-- The Shepard tone that follows the zoom (see chaosplayback.js). Off until
-       asked for; lit while it is on, like Loop. -->
   <button id="sound" class="transport-button" type="button" title="Sound off" aria-label="Sound off" aria-pressed="false" disabled>
     <svg class="when-off" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5L6 9H2v6h4l5 4z"></path><path d="M23 9l-6 6"></path><path d="M17 9l6 6"></path></svg>
     <svg class="when-on" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5L6 9H2v6h4l5 4z"></path><path d="M15.5 8.5a5 5 0 0 1 0 7"></path><path d="M19 5a10 10 0 0 1 0 14"></path></svg>
   </button>
 </footer>
 
-<script src="share-url.js?v=m70"></script>
-<script src="movie-path.js?v=m70"></script>
-<script src="chaosplayback.js?v=m70"></script>
+<script src="scripts/share-url.js?v=m70"></script>
+<script src="scripts/movie-path.js?v=m70"></script>
+<script src="scripts/chaosplayback.js?v=m70"></script>
 </body>
 </html>

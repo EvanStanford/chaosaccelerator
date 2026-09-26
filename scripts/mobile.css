@@ -1,38 +1,16 @@
-/* This file is part of Chaos Accelerator, licensed under the Common Public
-   Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in the project
-   root, or https://chaosaccelerator.com/license for a hosted copy. */
+/* CPAL-1.0 License. See chaosaccelerator.com/license.html */
 
-/* Phones, and fingers.
-
-   Three separate questions are answered here, by three separate sets of
-   classes that layout-mode.js keeps on <html> (see its header for why they
-   are separate: a touch laptop and a phone with a mouse are both real):
-
-     html.layout-mobile              the window is small: the grid's menus
-     html.layout-mobile-portrait     dock along the bottom edge, or, a phone
-     html.layout-mobile-landscape    on its side, along the right one.
-     html.input-touch                a touchscreen exists (maybe beside a mouse)
-     html.input-coarse               ...and is the PRIMARY pointer: bigger
-                                     targets, no text selection, 16px fields.
-
-   Loaded last (see chaos.html), so a rule here beats the same selector in
-   any of the view stylesheets without !important. Nothing outside a class
-   above changes the desktop layout, with four deliberate exceptions, all at
-   the top: the viewport-height unit, overscroll, and the two new elements
-   (the dock, the touch-only Inspect (Point) button) that have to be HIDDEN
-   there. */
+/* Phones, and fingers. Classes layout-mode.js keeps on <html>: layout-mobile(-portrait/
+   -landscape) = small window, menus dock bottom or right; input-touch = a touchscreen
+   exists; input-coarse = it is the PRIMARY pointer. Loaded last, so it beats every view sheet. */
 
 :root {
-  /* A phone's notch, status bar and home indicator, which viewport-fit=cover
-     (see chaos.html) lets the canvas run underneath. Zero everywhere else.
-     Named once because nearly every floating control needs one of them. */
+  /* Notch, status bar and home indicator (viewport-fit=cover); zero elsewhere. */
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
-  /* How much of the window's bottom/right edge the editor's panel or the
-     grid's dock is covering right now: measured and kept up to date by
-     layout-mode.js, read by the watermark below. */
+  /* How much of the bottom/right edge the panel or dock covers; kept by layout-mode.js. */
   --chrome-bottom: 0px;
   --chrome-right: 0px;
   --dock-tab-size: 56px;
@@ -40,23 +18,14 @@
 
 /* ---- Every layout ---- */
 
-/* 100vh on a phone is the viewport with the browser's toolbars RETRACTED:
-   taller than what is actually showing, so the bottom of the app (which on a
-   phone is where all of its controls are) sits under the toolbar. dvh is the
-   part you can see. Identical on a desktop; the vh line is for browsers from
-   before the unit existed. */
+/* 100vh on a phone includes the retracted toolbars; dvh is what shows. vh is the fallback. */
 #app {
   height: 100vh;
   height: 100dvh;
 }
 
-/* The same correction for the grid's floating menus, whose height caps are
-   spelled in vh for a reason of their own (see #grid-menu-stack in
-   fractal-grid.css): on a tablet, desktop layout, mobile browser, a cap
-   measured against the taller viewport lets a card run under the browser's
-   toolbar. Same selectors as the rules they correct, so the portrait
-   overrides in responsive-layout.css still outrank these exactly as they
-   outrank those. */
+/* The same correction for the grid's menu height caps (#grid-menu-stack in
+   fractal-grid.css); same selectors, so responsive-layout.css's overrides still win. */
 @supports (height: 100dvh) {
   #grid-menu-stack {
     max-height: calc(100dvh - var(--panel-inset) * 2);
@@ -76,57 +45,41 @@
 }
 
 html {
-  /* iOS inflates text it judges too small when a phone is turned on its
-     side, which here means every label in a layout sized to the pixel. */
+  /* Stops iOS inflating text in landscape. */
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
-  /* Double-tap is not zoom anywhere in this app: it is two taps, on
-     controls that are routinely pressed twice (a speed step, a keyframe
-     nudge). Pinch-zoom of the page itself is left alone. */
+  /* Double-tap is two taps here, not zoom; pinch-zoom is left alone. */
   touch-action: manipulation;
 }
 html, body {
-  /* No pull-to-refresh and no rubber-band: a drag that starts on the map and
-     runs off its edge must not take the page with it. */
+  /* No pull-to-refresh or rubber-band from a drag off the map's edge. */
   overscroll-behavior: none;
 }
 body {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* The app is exactly one screen; only its panels scroll. Without this a
-   phone will still drag the whole page by a few pixels whenever anything
-   in it measures a hair larger than the viewport. */
+/* One screen; only panels scroll. Stops a phone dragging the page by a few px. */
 html.layout-mobile,
 html.layout-mobile body {
   overflow: hidden;
 }
 
-/* The editor's canvas handles its own pointers (see "Canvas interaction" in
-   physics-ui.js): every drag on it is a shape, a move or a handle, never a
-   scroll. The grid's canvas already says the same (see fractal-grid.css). */
 #physics-canvas {
   touch-action: none;
 }
 
-/* A backing store capped below the display's own density (see gridDpr in
-   fractal-grid.js) is stretched by a ratio that is not a whole number, where
-   the pixelated rendering fractal-grid.css asks for turns into uneven
-   stripes. Smooth scaling is the lesser evil there. */
+/* Non-integer scaling of a DPR-capped backing store (gridDpr) turns pixelated rendering into stripes. */
 #grid-canvas.is-upscaled {
   image-rendering: auto;
 }
 
-/* The back link's phone face (see #back-link in chaos.html), not shown
-   anywhere else. */
 .menu-back-chevron {
   display: none;
 }
 
-/* Touch only: see its comment in chaos.html. */
 #btn-inspect-point {
   display: none;
-  /* The same idle/armed pair Line and Grid have in fractal-grid.css. */
   background: transparent;
   border-color: var(--border);
   color: var(--text);
@@ -140,8 +93,6 @@ html.input-touch #btn-inspect-point,
 html.layout-mobile #btn-inspect-point {
   display: inline-block;
 }
-/* Three buttons where the card was laid out for two: they share the row
-   evenly and may break their label across two lines to do it. */
 html.input-touch #inspect-arm-row,
 html.layout-mobile #inspect-arm-row {
   gap: 6px;
@@ -156,14 +107,11 @@ html.layout-mobile #inspect-arm-row > button {
   line-height: 1.2;
 }
 
-/* Empty and out of the layout until the small-window layout fills it (see
-   "The dock" in fractal-grid.js). */
 #grid-dock {
   display: none;
 }
 
-/* See "Losing the WebGL context" in fractal-grid.js. Over the map and
-   everything floating on it, since none of that works until the reload. */
+/* See "Losing the WebGL context" in fractal-grid.js. */
 #grid-context-lost {
   position: absolute;
   inset: 0;
@@ -188,10 +136,8 @@ html.layout-mobile #inspect-arm-row > button {
   max-width: 340px;
 }
 
-/* The editor's counterpart to the grid's .inspect-toast, and built the same
-   way (opacity, never [hidden]) for the same reason. Under the Play
-   transport rather than at the bottom: the bottom of the editor's canvas is
-   where the Fractal-ize button lives. */
+/* Editor counterpart of the grid's .inspect-toast (opacity, never [hidden]);
+   under the Play transport, since the Fractal-ize button owns the bottom. */
 .editor-hint-toast {
   position: absolute;
   left: 50%;
@@ -216,35 +162,24 @@ html.layout-mobile #inspect-arm-row > button {
   opacity: 1;
 }
 
-/* An absolutely positioned box at left:50% is laid out in the half of its
-   container to the right of that line, so on a narrow screen the toast
-   wrapped at half the width it had to itself. */
+/* left:50% lays the box out in the right half, so it wrapped at half width. */
 .inspect-toast {
   width: max-content;
   max-width: min(320px, calc(100% - 24px));
 }
 
-/* A tip that had no room under its anchor sits above it instead (see
-   positionTip in fractal-grid.js), with its arrow on the bottom edge
-   pointing down. */
 .tip-popover.tip-above::before {
   top: auto;
   bottom: -6px;
   transform: rotate(225deg);
 }
-/* ...unless the tip asked to go without (showTip's noArrowAbove): one that
-   explains the picture has nothing below it to point at. */
 .tip-popover.tip-no-arrow::before {
   display: none;
 }
 
 /* ---- A finger as the primary pointer ---- */
 
-/* Hover styles that STICK after a tap, on a device that cannot hover: the
-   tapped control keeps its hover look until something else is tapped. Only
-   the ones where that misleads, a marker that stays showing its "click to
-   remove" X, a Fractal-ize button frozen mid-leap, are put back; a button
-   that stays a shade darker is harmless. */
+/* Hover styles stick after a tap on a device that cannot hover; only the misleading ones are put back. */
 @media (hover: none) {
   .fractalize-btn:hover {
     transform: none;
@@ -259,16 +194,13 @@ html.layout-mobile #inspect-arm-row > button {
   .inspect-marker:hover::after {
     content: none;
   }
-  /* In the dock a tab stays where it was tapped, so its hover fill would
-     stay too, reading as a second lit tab next to the one that is. */
   #grid-dock-tabs > .menu-toggle:hover {
     background: transparent;
   }
 }
 
 html.input-coarse #app {
-  /* A long press on a label or a button otherwise starts a text selection
-     (and on iOS a callout), which is never what it was for. */
+  /* A long press otherwise starts a text selection (and an iOS callout). */
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
@@ -277,15 +209,11 @@ html.input-coarse #app textarea,
 html.input-coarse #app input,
 html.input-coarse #app .inspect-coords,
 html.input-coarse #app .inspect-coords-group {
-  /* ...except where selecting text is the point: the scene JSON, a number
-     field, an inspected point's coordinates. */
   -webkit-user-select: text;
   user-select: text;
 }
 
-/* iOS zooms the whole page in when a field with text smaller than 16px takes
-   focus, and never zooms back out: in a layout pinned to the viewport that
-   leaves half the app off screen. 16px is the documented threshold. */
+/* Fields under 16px make iOS zoom the page on focus, and never back out. */
 html.input-coarse select,
 html.input-coarse textarea,
 html.input-coarse input[type="number"],
@@ -308,9 +236,7 @@ html.input-coarse .movie-field-arrows button {
   font-size: 10px;
 }
 
-/* Targets. 44px is Apple's minimum and 48dp Android's; the desktop sizes
-   (32px icon buttons, 26x24 keyframe buttons, a 14px slider thumb) were
-   chosen for a cursor. */
+/* Targets: 44px is Apple's minimum, 48dp Android's. */
 html.input-coarse button {
   min-height: 40px;
 }
@@ -351,22 +277,15 @@ html.input-coarse .collapsible > summary {
   padding: 8px 0;
 }
 html.input-coarse .collapsible[open] > summary {
-  /* Still the legend sitting on the dashed border, just with the taller
-     hit area above pulled back up by as much. */
   top: -17px;
 }
-/* A range input's whole box is its hit area, so a taller box is a bigger
-   target without a custom thumb (which would mean restyling every slider in
-   both views for every engine). */
 html.input-coarse input[type="range"] {
   min-height: 32px;
 }
 html.input-coarse .toggle-field {
   min-height: 36px;
 }
-/* The two-handled slider DOES draw its own thumbs, and only the thumbs take
-   pointer events (see .dual-range in fractal-grid.css), so they are the
-   target, and 14px of target is a coin toss between the two handles. */
+/* .dual-range draws its own thumbs and only they take pointer events (fractal-grid.css). */
 html.input-coarse .dual-range {
   height: 40px;
 }
@@ -382,8 +301,6 @@ html.input-coarse .dual-range input[type="range"]::-moz-range-thumb {
   width: 26px;
   height: 26px;
 }
-/* The speed popup's slider is a horizontal one turned on its side (see
-   app-shell.css): wider here is the column a thumb has to land in. */
 html.input-coarse .speed-slider-track {
   width: 44px;
   height: 160px;
@@ -402,10 +319,6 @@ html.layout-mobile #watermark {
   opacity: 0.85;
 }
 
-/* Above the bottom chrome rather than on top of it: upright, the strip it
-   sits over on a desktop is the editor's panel fading into the grid's tab
-   bar, and a button floating over a row of other buttons reads as one of
-   them. */
 html.layout-mobile #transition-skip {
   bottom: calc(max(var(--chrome-bottom), var(--safe-bottom)) + 16px);
 }
@@ -415,16 +328,11 @@ html.layout-mobile .modal {
   max-height: calc(100dvh - 24px - var(--safe-top) - var(--safe-bottom));
 }
 html.layout-mobile .modal-textarea {
-  /* 260px is most of a phone on its side. */
   height: min(260px, 38dvh);
 }
 
 /* ---- The small-window layout: the editor ---- */
 
-/* The top bar: the Play transport and the settings button, which float over
-   the scene on a desktop, locked to the top of the screen instead, both are
-   moved into #editor-topbar by physics-ui.js (see "The top bar" there), and
-   the canvas starts below it. Out of the layout until then. */
 #editor-topbar {
   display: none;
 }
@@ -437,8 +345,6 @@ html.layout-mobile #editor-topbar {
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
 }
-/* In the bar, neither is a floating card any more: no position of its own,
-   no fill, no shadow. The transport takes the width the button leaves. */
 #editor-topbar #playback-toolbar {
   position: static;
   transform: none;
@@ -469,9 +375,6 @@ html.layout-mobile #editor-topbar {
   backdrop-filter: none;
   background: transparent;
 }
-/* The panel that button opens takes the whole screen here, not a corner of
-   it: a 280px card is most of a phone's width anyway, and what it left
-   showing around its edges was only clutter. Above both views' own chrome. */
 html.layout-mobile .settings-panel {
   top: 0;
   right: 0;
@@ -505,17 +408,12 @@ html.layout-mobile .fractalize-btn {
   padding: 12px 28px;
 }
 
-/* Upright, responsive-layout.css has already moved #panel under the canvas.
-   dvh for the reason #app uses it, and the home indicator's strip added to
-   the bottom padding so the last control can be scrolled clear of it. */
 html.layout-mobile-portrait #panel {
   max-height: 45dvh;
   padding: 14px 14px calc(14px + var(--safe-bottom)) 14px;
   gap: 16px;
   overscroll-behavior: contain;
 }
-/* On its side the panel stays docked left, a little narrower, and clear of
-   the notch, which on a phone held this way is on the left or right edge. */
 html.layout-mobile-landscape #panel {
   width: calc(268px + var(--safe-left));
   padding: 12px 12px 12px calc(12px + var(--safe-left));
@@ -525,17 +423,12 @@ html.layout-mobile-landscape #panel {
 
 /* ---- The small-window layout: the grid ---- */
 
-/* What is left floating over the map: the way back (upper left), the
-   rendering-progress ring (lower left), the toast. Everything else has moved
-   into the dock. */
 html.layout-mobile #grid-menu-column {
   top: calc(var(--panel-inset) + var(--safe-top));
   left: calc(var(--panel-inset) + var(--safe-left));
   width: auto;
   max-width: calc(100% - var(--panel-inset) * 2 - var(--safe-left) - var(--safe-right));
 }
-/* Just the chevron: a square button the size of the desktop's menu buttons,
-   no words. */
 html.layout-mobile .menu-back {
   width: var(--settings-btn-size);
   height: var(--settings-btn-size);
@@ -547,20 +440,14 @@ html.layout-mobile .menu-back-label {
 }
 html.layout-mobile .menu-back-chevron {
   display: block;
-  /* The chevron's own point sits left of its box's middle. */
   margin-right: 2px;
 }
 html.layout-mobile #menu-render-progress {
   left: calc(var(--panel-inset) + var(--safe-left));
   bottom: var(--panel-inset);
 }
-/* Nothing in the left column but the back link: the menus it held are in
-   the dock. The right one is hidden whole, what is left in it is the Movie
-   menu, which this layout deliberately does without (see "The dock" in
-   fractal-grid.js). (.dock-active, not just the layout class: the column
-   only gives up its other menus once the dock has actually taken them, see
-   setDockActive, which a grid that never got a readable scene never
-   reaches.) */
+/* Left column keeps only the back link; the right (the Movie menu) is hidden whole.
+   .dock-active, not the layout class alone: menus leave only once the dock has them (setDockActive). */
 #grid-view.dock-active #grid-right-menu-column {
   display: none;
 }
@@ -577,11 +464,7 @@ html.layout-mobile #grid-dock {
   display: flex;
   flex-shrink: 0;
   position: relative;
-  /* Below the 4 that app-shell.css gives the editor's #panel for the length
-     of a transition: upright, that panel and this dock occupy the same strip
-     of the window, and the panel is supposed to be seen fading away over the
-     grid rather than be covered by it from the first frame. (Neither .view
-     is a stacking context, so the two numbers really do compete.) */
+  /* Below the editor #panel's transitional z-index 4 (app-shell.css) so it fades over the grid. */
   z-index: 2;
   min-width: 0;
   min-height: 0;
@@ -598,9 +481,7 @@ html.layout-mobile-landscape #grid-dock {
   border-left: 1px solid var(--border);
 }
 
-/* The sheet: the one open card, scrolling if it is taller. Out of the layout
-   entirely while nothing is open (.dock-sheet-open is kept by
-   layoutDock in fractal-grid.js, which also sets the upright height). */
+/* The sheet: the one open card. Out of the layout while nothing is open (layoutDock in fractal-grid.js). */
 #grid-dock-sheet {
   display: none;
   min-width: 0;
@@ -625,14 +506,8 @@ html.layout-mobile-landscape #grid-dock-sheet {
   border-right: 1px solid var(--border);
 }
 
-/* A card in the sheet is a section of it, not a floating panel: full width,
-   no chrome of its own, as tall as its content, the SHEET is what scrolls,
-   so a card's body must not also.
-
-   And no title line. On a desktop that line is how a card is named and put
-   away; here the lit tab directly underneath does both, same icon, same
-   name, press it to shut the card, so the line was a fifth of the sheet
-   spent saying it twice. */
+/* A card in the sheet is a section: full width, no chrome, no title line (the lit
+   tab beneath names and closes it). The SHEET scrolls, so a card's body must not. */
 #grid-dock-sheet > .menu-card {
   width: 100%;
   max-width: none;
@@ -656,20 +531,13 @@ html.layout-mobile-landscape #grid-dock-sheet {
 #grid-dock-sheet > #grid-display-panel > .menu-card-body {
   padding: 12px 6px 8px 6px;
 }
-/* The display-mode thumbnails were sized as a share of a 320px card; at a
-   phone's full width the same share is a picture twice the height of the
-   sentence beside it. */
 #grid-dock-sheet .display-mode-row img {
   width: 34%;
   max-width: 150px;
 }
 
-/* Inspect, re-ordered. Upright, the sheet shows about 300px of a card before
-   it scrolls, and as laid out for the desktop that is the preview and its
-   transport, with the buttons that ARE how a finger inspects anything
-   (there is no hover) below the fold. So the card's two sections are
-   dissolved (display: contents) and their children re-ordered as one column:
-   the arm buttons first, then the preview they fill, then the rest. */
+/* Inspect, re-ordered: sections dissolved (display: contents) so the arm buttons
+   come first, then the preview, then the rest; a finger has no hover. */
 #grid-dock-sheet > #grid-inspect-panel > .menu-card-body > .panel-section {
   display: contents;
 }
@@ -682,15 +550,11 @@ html.layout-mobile-landscape #grid-dock-sheet {
 #grid-dock-sheet #btn-inspect-clear-all { order: 7; margin-top: 0; }
 #grid-dock-sheet #inspect-list { order: 8; margin-top: 0; }
 #grid-dock-sheet #inspect-list:empty { display: none; }
-/* Full width would make the preview taller than the sheet it is in. */
 #grid-dock-sheet #hover-preview {
   width: min(100%, 230px);
   align-self: center;
 }
 
-/* The tab bar. Every menu's own button, restyled: no card chrome, the icon
-   over a short label (a finger gets no tooltip to learn an icon from), and
-   lit while its card is open. */
 #grid-dock-tabs {
   display: flex;
   flex-shrink: 0;
@@ -749,7 +613,6 @@ html.layout-mobile-landscape #grid-dock-tabs > .menu-toggle {
 #grid-dock-tabs > .menu-toggle[aria-expanded="true"] {
   color: var(--accent);
 }
-/* A rule along the edge the tab shares with its sheet. */
 #grid-dock-tabs > .menu-toggle[aria-expanded="true"]::before {
   content: "";
   position: absolute;
@@ -769,8 +632,6 @@ html.layout-mobile-landscape #grid-dock-tabs > .menu-toggle[aria-expanded="true"
   width: 2px;
 }
 
-/* The shared settings body in the builder's full-screen panel: clear of the
-   home indicator, which the mount's own padding (now zero) used to see to. */
 html.layout-mobile #editor-settings-mount > .menu-card-body {
   padding: 16px calc(16px + var(--safe-right)) calc(16px + var(--safe-bottom)) calc(16px + var(--safe-left));
 }

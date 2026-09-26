@@ -2,13 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<!-- This file is part of Chaos Accelerator, licensed under the Common
-     Public Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in
-     the project root, or https://chaosaccelerator.com/license for a
-     hosted copy. -->
+<!-- CPAL-1.0 License. See chaosaccelerator.com/license.html -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Physics Regression Tests</title>
-<link rel="stylesheet" href="physics.css">
+<link rel="stylesheet" href="scripts/physics.css">
 <style>
   body { display: block; height: auto; min-height: 100%; }
   #app { height: auto; display: block; max-width: 900px; margin: 0 auto; padding: 24px; }
@@ -104,22 +101,18 @@
   </div>
 </div>
 
-<script src="physics-engine.js"></script>
-<script src="physics-coords.js"></script>
-<script src="share-url.js"></script>
-<script src="movie-path.js"></script>
-<script src="physics-hinge-geometry.js"></script>
-<script src="physics-df.js"></script>
-<script src="physics-gpu.js"></script>
-<script src="physics-gpu-df.js"></script>
-<script src="physics-grid-codegen.js"></script>
-<script src="fractal-stats.js"></script>
-<script src="physics-tests.js"></script>
+<script src="scripts/physics-engine.js"></script>
+<script src="scripts/physics-coords.js"></script>
+<script src="scripts/share-url.js"></script>
+<script src="scripts/movie-path.js"></script>
+<script src="scripts/physics-hinge-geometry.js"></script>
+<script src="scripts/physics-df.js"></script>
+<script src="scripts/physics-gpu.js"></script>
+<script src="scripts/physics-gpu-df.js"></script>
+<script src="scripts/physics-grid-codegen.js"></script>
+<script src="scripts/fractal-stats.js"></script>
+<script src="scripts/physics-tests.js"></script>
 <script>
-  // physics-hinge-geometry.js is plain scene math with no DOM dependency,
-  // so (unlike when this logic lived inside physics-ui.js) there's no need
-  // to load a whole hidden copy of #editor-view in an iframe just to reach
-  // it: a direct <script> tag above is enough.
   // ?only=<text> runs just the tests whose name contains it: see runAll.
   var only = new URLSearchParams(location.search).get("only");
   window.__physicsTests.runAll(only);

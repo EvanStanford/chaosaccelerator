@@ -1,9 +1,6 @@
-/* This file is part of Chaos Accelerator, licensed under the Common Public
-   Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in the project
-   root, or https://chaosaccelerator.com/license for a hosted copy. */
+/* CPAL-1.0 License. See chaosaccelerator.com/license.html */
 
-/* The movie player (chaosplayback.html). Same palette as the app it came
-   from: see :root in physics.css. */
+/* The movie player (chaosplayback.html). Same palette as the app: see :root in physics.css. */
 :root {
   --bg: #14161c;
   --bg-panel: #1b1e27;
@@ -87,10 +84,8 @@ button.bar-link:disabled {
   overflow: hidden;
 }
 
-/* The renderer: the app itself, sized in pixels by chaosplayback.js to the
-   resolution the movie is rendered at. In the layout and painted, it only
-   renders inside animation frames, which a frame that isn't painted doesn't
-   get, but underneath #screen, and out of reach of the pointer and Tab. */
+/* The renderer: the app itself, sized in px by chaosplayback.js to the movie's resolution.
+   Painted (it only renders inside animation frames) but under #screen, out of reach of pointer and Tab. */
 #engine {
   position: absolute;
   left: 0;
@@ -151,8 +146,7 @@ button.bar-link:disabled {
   display: none;
 }
 
-/* End Early and its Yes / No (see chaosplayback.html): a row under the
-   detail line, one or the other on show at a time. */
+/* End Early and its Yes / No: a row under the detail line, one or the other on show. */
 #render-actions,
 .end-early-choices {
   display: flex;
@@ -253,11 +247,7 @@ button.bar-link:disabled {
 }
 
 /* ---- Phones, and fingers ----
-   The same adjustments mobile.css makes for the app itself, in miniature:
-   this page is one bar, one picture and one row of buttons, and needs no
-   layout of its own for a small window, only to keep clear of the notch and
-   the home indicator (viewport-fit=cover, see chaosplayback.html), not to
-   bounce or zoom, and to give a finger targets it can hit. */
+   mobile.css in miniature: keep clear of the notch and home indicator, no bounce or zoom, finger-sized targets. */
 
 html {
   -webkit-text-size-adjust: 100%;
@@ -283,8 +273,7 @@ body {
 }
 
 @media (max-width: 560px) {
-  /* Two links, the facts and Download do not fit one line of a phone; the
-     facts are the part that can go to a line of their own. */
+  /* Two links, the facts and Download do not fit one phone line; the facts get their own. */
   #player-bar {
     flex-wrap: wrap;
     row-gap: 6px;

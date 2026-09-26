@@ -2,43 +2,22 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<!-- This file is part of Chaos Accelerator, licensed under the Common
-     Public Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in
-     the project root, or https://chaosaccelerator.com/license for a
-     hosted copy. -->
-<!-- viewport-fit=cover: on a phone with a notch or a home indicator the page
-     otherwise gets letterboxed inside the safe area, leaving dead bars beside
-     a canvas whose whole point is running edge to edge. The controls that
-     must stay clear of those areas pad themselves with env(safe-area-inset-*)
-     instead (see mobile.css). -->
+<!-- CPAL-1.0 License. See chaosaccelerator.com/license.html -->
+<!-- viewport-fit=cover: no letterbox on a notched phone; controls pad clear of the notch with env(safe-area-inset-*) (mobile.css). -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<!-- The browser's own chrome (the status bar, Android's address bar) in the
-     app's background color rather than white. -->
 <meta name="theme-color" content="#14161c">
 <title>Chaos Accelerator</title>
-<!-- Both views live in this one document so the transition between them can
-     show them at once (see transition.js). physics.css styles the editor
-     view and fractal-grid.css the grid view; the handful of rules that
-     would otherwise collide are scoped to #grid-view inside the latter. -->
-<link rel="stylesheet" href="physics.css?v=m70">
-<link rel="stylesheet" href="fractal-grid.css?v=m70">
-<link rel="stylesheet" href="app-shell.css?v=m70">
-<link rel="stylesheet" href="fractal-stats.css?v=m70">
-<link rel="stylesheet" href="responsive-layout.css?v=m70">
-<!-- The small-window (phone) layout and the touch-input adjustments. Last, so
-     it wins the cascade over everything above without needing !important;
-     every rule in it is scoped to a class layout-mode.js puts on <html>. -->
-<link rel="stylesheet" href="mobile.css?v=m70">
-<!-- In <head>, ahead of any layout: decides which layout/input/performance
-     classes <html> carries, and both views measure their canvas area as they
-     start, so the answer has to be in place before they do. -->
-<script src="layout-mode.js?v=m70"></script>
-<!-- A link to the map (see share-url.js) should open ON the map. The editor
-     is the view the markup starts with, and everything that would swap them
-     is a script at the end of the body: by which time the editor has been
-     on screen for as long as those scripts took to arrive. This keeps it out
-     of sight (not out of layout: it still has to measure itself) until
-     transition.js has decided which view this visit is for. -->
+<!-- Both views share this document so transition.js can show them at once. -->
+<link rel="stylesheet" href="scripts/physics.css?v=m70">
+<link rel="stylesheet" href="scripts/fractal-grid.css?v=m70">
+<link rel="stylesheet" href="scripts/app-shell.css?v=m70">
+<link rel="stylesheet" href="scripts/fractal-stats.css?v=m70">
+<link rel="stylesheet" href="scripts/responsive-layout.css?v=m70">
+<!-- mobile.css last: it must win the cascade without !important. -->
+<link rel="stylesheet" href="scripts/mobile.css?v=m70">
+<!-- In <head> on purpose: both views measure their canvas area as they start. -->
+<script src="scripts/layout-mode.js?v=m70"></script>
+<!-- A #map/ link should open on the map: hide the editor (still laid out) until transition.js picks the view. -->
 <script>
   if (/^#map\//.test(location.hash)) document.documentElement.classList.add("opening-map");
 </script>
@@ -48,22 +27,13 @@
 
   <section id="editor-view" class="view">
 
-      <!-- Small-window layout only, and empty until then (see "The top bar"
-           in physics-ui.js): a bar locked to the top of the screen that the
-           Play transport and the settings button are MOVED into, where in
-           the desktop layout both float over the scene. A phone's scene is
-           small enough already without controls sitting on it. -->
+      <!-- Small-window layout only: physics-ui.js moves the Play transport, home and settings buttons in here. -->
       <div id="editor-topbar"></div>
 
       <div id="main">
 
         <aside id="panel">
-          <!-- The app's only chrome. The old #topbar (title + status chip +
-               settings) is gone; what survived of it lives here, so the canvas
-               is full-bleed on both pages. #status is kept for ERRORS only:
-               it is display:none unless it carries .status-error, so "Editing"
-               and "Playing" no longer occupy any space, but a compile failure
-               still has somewhere to be seen. -->
+          <!-- #status shows errors only (display:none unless .status-error). -->
           <div class="panel-head">
             <div id="status" class="status-ok">Editing</div>
           </div>
@@ -101,10 +71,7 @@
             </details>
           </section>
 
-          <!-- Only while a spring is selected: shown, filled in and hidden
-               again by refreshSpringPanel in physics-ui.js. The stiffness
-               slider is a position on a LOG scale (see springSliderToStiffness),
-               so its min/max here are just its resolution. -->
+          <!-- Only while a spring is selected (refreshSpringPanel). The stiffness slider is a LOG-scale position; min/max are just its resolution. -->
           <section class="panel-section" id="spring-section" hidden>
             <h2>Spring</h2>
             <label class="field">
@@ -209,24 +176,10 @@
 
         <main id="canvas-area">
           <canvas id="physics-canvas"></canvas>
-          <!-- Back to the landing page (index.html). A bare chevron, the same
-               one the map's own back link wears on a phone, floating in the
-               scene's top-left corner, the mirror of the settings button in
-               the top-right, so it costs the layout no height at all. In the
-               small-window layout physics-ui.js moves it into #editor-topbar
-               with the transport and the settings button (see "The top bar"
-               there), where the bar already exists. -->
           <a id="btn-home" class="floating-home-btn" href="index.html" title="Back to the home page" aria-label="Back to the home page">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 5 8 12 15 19"></polyline></svg>
           </a>
-          <!-- Floats over the scene, top center, moved out of #panel so the
-               transport survives (and stays reachable at a glance) no matter
-               which layout #panel is currently in (docked left, or the
-               bottom panel of the portrait layout, see
-               responsive-layout.css). Positioned against #canvas-area, same
-               as #fractalize-wrap below, so it stays centered over the scene
-               specifically rather than the full window (which the docked
-               left panel would otherwise skew off-center). -->
+          <!-- Positioned against #canvas-area, not #panel, so it stays centered over the scene in every layout. -->
           <div id="playback-toolbar" class="playback-toolbar">
             <div class="playback-controls">
               <button id="btn-play-pause" class="icon-button" type="button" title="Play" aria-label="Play"><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72a.6.6 0 0 0 .92.5l10.55-6.86a.6.6 0 0 0 0-1L8.92 4.64a.6.6 0 0 0-.92.5z"></path></svg></button>
@@ -243,59 +196,32 @@
             <p class="readout" id="send-to-grid-error"></p>
             <button id="btn-send-to-grid" class="fractalize-btn">Fractal-ize!</button>
           </div>
-          <!-- What the tool just picked wants done, for a finger: every tool
-               button explains itself in a title tooltip, and a touchscreen
-               never shows one. Filled from that same title attribute by
-               physics-ui.js (see showToolHint) when a tool is chosen by
-               touch, so there is still only one copy of each instruction.
-               Opacity-toggled rather than [hidden], like #inspect-toast. -->
+          <!-- Touch shows no title tooltips, so showToolHint (physics-ui.js) shows the picked tool's title here. -->
           <div id="editor-hint-toast" class="editor-hint-toast" role="status"></div>
         </main>
 
       </div>
 
-      <!-- Fixed-position, not nested in #panel: same reason as
-           #grid-view's #tip-popover: a scrollable ancestor would
-           otherwise clip it. Shown, measured and placed by JS against
-           #btn-speed (see positionSpeedPopup in physics-ui.js) whenever
-           it's open. The grid view keeps its own separate instance
-           (#hover-speed-popup) below, since each page tracks its own
-           playbackSpeed, and #grid-view's is in turn shared between ITS
-           two speed buttons (see #grid-speed-popup). -->
+      <!-- Fixed-position outside #panel so no scrollable ancestor clips it; placed by positionSpeedPopup (physics-ui.js). -->
       <div id="speed-popup" class="speed-popup" hidden>
-        <!-- Moves in log2(speed) space, not speed itself, see
-             sliderValueToSpeed/speedToSliderValue in physics-ui.js, so
-             min/max/value here are log2(0.5)/log2(16)/log2(1), not 0.5/16/1.
-             step="1" in this space is what actually limits the control to
-             whole-power-of-two speeds (0.5x/1x/2x/4x/8x/16x) and nothing
-             between. -->
+        <!-- min/max/value are log2(speed): -1..4 is 0.5x..16x, step 1 keeps it to powers of two. -->
         <div class="speed-slider-track">
           <input type="range" id="speed-slider" min="-1" max="4" step="1" value="0" aria-label="Playback speed" aria-orientation="vertical">
         </div>
         <div class="speed-value" id="speed-value">1.0x</div>
       </div>
 
-      <!-- Floats above #panel rather than living in its header row (see
-           .floating-settings-btn in app-shell.css): same top-left corner on
-           both views, independent of whichever one is docked vs floating. -->
       <button id="btn-settings" class="floating-settings-btn" title="Settings" aria-label="Settings">&#9881;</button>
       <aside id="settings-panel" class="settings-panel">
         <div class="settings-panel-header">
           <h2>Settings</h2>
           <button id="btn-settings-close" class="icon-button" title="Close" aria-label="Close">&times;</button>
         </div>
-        <!-- Empty in the markup. There is ONE settings body in this document
-             (#shared-settings-body, written out inside the map's Settings
-             card below) and it is physically moved to whichever page is on
-             screen, here while the builder is, so the two pages' settings
-             cannot drift apart: they are the same elements. See "One
-             settings body" in fractal-grid.js. -->
+        <!-- Empty on purpose: the ONE #shared-settings-body is moved here while the builder is on screen (fractal-grid.js). -->
         <div class="settings-panel-body" id="editor-settings-mount"></div>
       </aside>
 
-      <!-- Reusable modal shell: one instance, its title/body swapped per use
-           (see openModal in physics-ui.js). Export and Import each keep their
-           own content div here, toggled by which one is currently open. -->
+      <!-- One modal shell, retitled and refilled per use (openModal in physics-ui.js). -->
       <div id="modal-backdrop" class="modal-backdrop" hidden>
         <div class="modal" role="dialog" aria-modal="true">
           <div class="modal-header">
@@ -323,54 +249,18 @@
 
       <div id="grid-main">
 
-        <!-- ---- The menu column ----
-             One stack of controls in the upper-left corner, over a fractal
-             that runs edge to edge behind it. Everything on this page that
-             is not the grid itself lives here: the way back, and four
-             menus that are a square icon button until they are opened, at
-             which point that button becomes the card. An open card pushes
-             the ones below it down rather than covering them, so the column
-             is a flow, never a stack of overlapping panels, which is also
-             what lets more than one be open at a time.
-
-             pointer-events is off on the column itself and back on for each
-             child (see #grid-menu-column in fractal-grid.css): the column
-             is as wide as its widest open card even when every card is
-             shut, and that width must not swallow drags and wheel-zooms
-             aimed at the fractal beside the buttons. -->
+        <!-- The menu column: buttons that become cards; an open card pushes the ones below it down. pointer-events
+             is off on the column itself (fractal-grid.css) so its width does not swallow drags aimed at the fractal. -->
         <div id="grid-menu-column">
-          <!-- Scrolls; the resize handle beside it does not, which is
-               the whole reason these are two elements rather than one. -->
+          <!-- Scrolls; the resize handle beside it must not, hence two elements. -->
           <div id="grid-menu-stack">
 
-            <!-- Two faces, one of which shows (see .menu-back-chevron in
-                 mobile.css): the words on a desktop, and in the small-window
-                 layout the bare back chevron every phone app uses, which
-                 there needs no words and has no room for them. -->
             <a id="back-link" class="menu-back" href="#bldr/" title="Back to scene editor" aria-label="Back to scene editor">
               <svg class="menu-back-chevron" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 5 8 12 15 19"></polyline></svg>
               <span class="menu-back-label">&larr; Back to scene editor</span>
             </a>
-            <!-- Errors only. "Ready" and "Loading" told nobody anything they
-                 couldn't see; an unreadable scene or a compile failure very
-                 much does, so this stays and only shows for those. Outside
-                 the three menus deliberately: it is about the page, not
-                 about any one of them, and has to be visible whichever are
-                 open. -->
             <div id="grid-status" class="status-ok">Loading&hellip;</div>
 
-            <!-- Each menu is one <section>: the collapsed icon button, and
-                 the card it becomes. Exactly one of the two is ever in the
-                 layout (see .menu-card[hidden]); JS only flips that and the
-                 button's aria-expanded. Settings itself no longer lives in
-                 this stack: see #menu-settings further down, floated in
-                 the top-right corner instead. -->
-
-            <!-- The hover/Inspect workspace: the preview canvas, its
-                 transport, the view controls and the locked-point list. Open
-                 on arrival (see setInspectOpen's call at the end of
-                 fractal-grid.js): it is the one menu that is part of reading
-                 the fractal rather than configuring it. -->
             <section class="menu-item" id="menu-inspect">
               <button class="menu-toggle" id="grid-btn-inspect" data-tab-label="Inspect" type="button" title="Inspect" aria-label="Inspect" aria-expanded="false">
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="16.2" y1="16.2" x2="21" y2="21"></line></svg>
@@ -399,21 +289,11 @@
                   <button id="hover-reset" class="icon-button" type="button" title="Reset" aria-label="Reset" disabled>&#8634;</button>
                 </div>
                 <p class="readout" id="hover-readout"></p>
-                <!-- No "Play back in map" toggle here any more: having the
-                     Map Evolution card (top right) open IS that setting now:
-                     see followInspection in fractal-grid.js. -->
               </section>
 
               <section class="panel-section">
                 <div class="field-row" id="inspect-arm-row">
-                  <!-- Touch only (hidden by mobile.css wherever there is no
-                       touchscreen): a mouse previews a point by hovering and
-                       locks it with a click, but a finger has no hover, and
-                       its taps share the map with one-finger pans and
-                       pinches. So a tap only locks a point once this has
-                       been pressed first: the same arm-then-act shape Line
-                       and Grid already have (see armInspect in
-                       fractal-grid.js). -->
+                  <!-- Touch only (mobile.css): a tap locks a point only after this is pressed, like Line and Grid (armInspect). -->
                   <button id="btn-inspect-point" title="Then tap the map to inspect that point">Inspect (Point)</button>
                   <button id="btn-inspect-line" title="Drag the grid to inspect an evenly-spaced line of points">Inspect (Line)</button>
                   <button id="btn-inspect-grid" title="Drag the grid to inspect a 3&times;3 grid of points">Inspect (Grid)</button>
@@ -432,11 +312,7 @@
               </div>
             </section>
 
-            <!-- Measures the fractal currently on screen, which is why it
-                 lives on this page and has no counterpart in the editor. The
-                 body is empty in the markup on purpose: every section, switch
-                 and chart in it is built by fractal-stats-panel.js, which
-                 also owns the list of what those sections are. -->
+            <!-- Body empty on purpose: fractal-stats-panel.js builds every section in it. -->
             <section class="menu-item" id="menu-stats">
               <button class="menu-toggle" id="grid-btn-stats" data-tab-label="Analysis" type="button" title="Analysis" aria-label="Analysis" aria-expanded="false">
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="20" x2="6" y2="13"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="18" y1="20" x2="18" y2="9"></line></svg>
@@ -453,13 +329,7 @@
               </div>
             </section>
 
-            <!-- What to draw from the Output field: the field itself, or one
-                 of three derivatives of it, plus the view controls (Reset
-                 View, zoom) that make most sense next to it. #grid-display-
-                 mode-list starts empty on purpose: every row in it is built
-                 by fractal-grid.js from DISPLAY_MODES, so the GLSL MODE_*
-                 constants, the sample counts, the thumbnails and this list
-                 cannot drift apart. -->
+            <!-- #grid-display-mode-list is empty on purpose: fractal-grid.js builds it from DISPLAY_MODES. -->
             <section class="menu-item" id="menu-display">
               <button class="menu-toggle" id="grid-btn-display" data-tab-label="Display" type="button" title="Display" aria-label="Display" aria-expanded="false">
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
@@ -477,13 +347,7 @@
                     <button id="btn-reset-view" class="secondary">Reset View</button>
                     <span id="zoom-readout" class="readout">Zoom: 1.00&times;</span>
                   </div>
-                  <!-- Color Zoom is moved into the Standard row below (see
-                       fractal-grid.js's DISPLAY_MODES loop) in place of
-                       Standard's own blurb sentence, it only ever affects
-                       the plain rainbow ramp, so it reads as part of that
-                       row rather than as a control of its own. This label
-                       is where it starts out in the markup; JS relocates it
-                       on load, so its position here doesn't matter. -->
+                  <!-- This switch and the next are relocated into the Standard row by fractal-grid.js on load; their place here does not matter. -->
                   <label class="toggle-field" id="color-zoom-field">
                     <span>Color Zoom</span>
                     <span class="toggle-switch">
@@ -491,11 +355,6 @@
                       <span class="toggle-slider"></span>
                     </span>
                   </label>
-                  <!-- Standard's second switch, relocated the same way, right
-                       under Color Zoom: pulls the map's colors halfway from
-                       the full-saturation HSL rainbow toward an
-                       even-brightness OKLCH ramp (the construction the
-                       Inspect replay's background uses). -->
                   <label class="toggle-field" id="low-saturation-field">
                     <span>Low Saturation</span>
                     <span class="toggle-switch">
@@ -509,41 +368,16 @@
             </section>
           </div>
 
-          <!-- Drag to set the width every open card shares. Lives on the
-               column's own right edge rather than inside any one card, so
-               it tracks whichever are open; hidden entirely when none are,
-               since there is nothing to resize. -->
           <div id="panel-resizer" title="Drag to resize"></div>
         </div>
 
         <main id="grid-canvas-area">
           <canvas id="grid-canvas"></canvas>
-          <!-- Never [hidden] itself: besides the line/grid drag-preview
-               elements (each hidden/shown on its own, see
-               hideInspectLinePreview/hideInspectGridPreview in
-               fractal-grid.js), this SVG also permanently hosts every
-               completed grid's mesh lines, which must stay visible with no
-               drag in progress at all. -->
+          <!-- Never [hidden]: besides the drag previews it hosts every completed grid's mesh lines. -->
           <svg id="inspect-preview"></svg>
-          <!-- "Drag to inspect a line/grid": shown when Inspect (Line) or
-               Inspect (Grid) is armed and the grid gets a plain click
-               instead of the drag it's waiting for (see endDrag in
-               fractal-grid.js). Never [hidden] (see showInspectToast and
-               .inspect-toast's own comments for why): its resting state is
-               just opacity:0, pointer-events:none, toggled by the .visible
-               class alone. -->
+          <!-- Never [hidden] (see showInspectToast): rests at opacity:0, toggled by .visible alone. -->
           <div id="inspect-toast" class="inspect-toast"></div>
-          <!-- The right-hand menu column: Settings, then Map Evolution.
-               Same is-open/toggle-vs-card machinery as the menus in the
-               left column (see makeMenu in fractal-grid.js), but its own
-               accordion group: opening one of these two closes the other,
-               without touching whatever is open on the left (Inspect,
-               Analysis, Display Mode or the render-progress gauge), so
-               e.g. Settings and Inspect can be open together. A column
-               rather than two separately-positioned corners because an open
-               card takes its own button's place in the layout, so whichever
-               of these two is open has to push the other one's button down
-               instead of covering it. -->
+          <!-- Settings and Map Evolution: an accordion group of their own (menuGroups in fractal-grid.js), separate from the left column's. -->
           <div id="grid-right-menu-column">
             <section class="menu-item" id="menu-settings">
               <button class="menu-toggle" id="grid-btn-settings" data-tab-label="Settings" type="button" title="Settings" aria-label="Settings" aria-expanded="false">&#9881;</button>
@@ -577,25 +411,8 @@
                     </span>
                   </label>
 
-                  <!-- Everything that trades the picture's quality (or the
-                       page's smoothness) against how fast it renders, in one
-                       place: see "Performance settings" in fractal-grid.js,
-                       which owns what the two presets set each control to.
-
-                       The slider at the top has three stops and only the
-                       outer two can be chosen: Low and High each SET every
-                       control below them, and Custom is where the slider
-                       takes itself whenever those controls match neither
-                       (its name only appears under the slider while it is
-                       there). A phone or tablet starts at Low, everything
-                       else at High.
-
-                       The slider is all most people need, so it is all that
-                       shows: the controls it sets are folded away under
-                       Advanced. Numeric precision sits just ABOVE the
-                       section rather than in it: it is about how deep a
-                       zoom stays sharp, not about the device, and neither
-                       preset touches it. -->
+                  <!-- Performance settings; "Performance settings" in fractal-grid.js owns the presets. Low and High SET every control
+                       under Advanced; Custom is where the slider goes when they match neither. Precision sits above: no preset touches it. -->
                   <label class="field">
                     <span>Numeric precision: <b id="precision-readout">float32</b></span>
                     <select id="precision-select">
@@ -685,18 +502,10 @@
                         <option value="256">Up to 256 MB</option>
                       </select>
                     </label>
-                    <!-- How finely the Analysis card samples the view, as a
-                         fraction of the rendered picture's own resolution.
-                         Not one the presets above touch: it costs nothing
-                         unless the Analysis card is open. Wired in the Global
-                         Stats section of fractal-grid.js. -->
                     <label class="field" id="stats-sample-field">
                       <span>Analysis Sampling Resolution: <b id="stats-sample-readout">&hellip;</b></span>
                       <input type="range" id="stats-sample-slider" min="0" max="3" step="1" value="3" aria-label="Analysis sampling resolution" title="How finely the Analysis card measures the view: one simulation per rendered pixel at Full, or one per 2, 4 or 8 pixels each way. Coarser is quicker; Full measures exactly what is on screen.">
                     </label>
-                    <!-- Not a performance setting, so not one the presets
-                         above touch: a live readout of what the renderer is
-                         doing, drawn over the map (#perf-readout). -->
                     <label class="toggle-field" id="perf-readout-field">
                       <span>Nerd Performance Stats</span>
                       <span class="toggle-switch">
@@ -715,14 +524,7 @@
               </div>
             </section>
 
-            <!-- The grid's own timeline (see the Playback section of
-                 fractal-grid.js): which step every pixel is shown at, and the
-                 transport that plays it forward to the Simulation Duration,
-                 which is why that slider lives in here with it rather than in
-                 Settings, where it used to sit: it sets the end of the very
-                 timeline this card scrubs. Same row shape as the editor's
-                 Play transport and the Inspect preview's (.playback-controls
-                 in app-shell.css). -->
+            <!-- The grid's timeline (Playback section of fractal-grid.js). Simulation Duration lives here: it sets the timeline's end. -->
             <section class="menu-item" id="menu-playback">
               <button class="menu-toggle" id="grid-btn-playback" data-tab-label="Evolution" type="button" title="Map Evolution" aria-label="Map Evolution" aria-expanded="false">&#9655;</button>
               <div class="menu-card" id="grid-playback-panel" hidden>
@@ -749,15 +551,8 @@
               </div>
             </section>
 
-            <!-- A movie is a list of keyframes, a view of the map AND the
-                 Map Evolution frame it was showing, that the camera then
-                 travels between (see movie-path.js). This card only collects
-                 them; Done hands the list to chaosplayback.html, which
-                 renders every frame and plays the result. It is NOT part of
-                 the accordion the two cards above it share (see menuGroups
-                 in fractal-grid.js): a keyframe is taken at whatever frame
-                 Map Evolution is showing, and that card puts the map back to
-                 its last frame the moment it is closed. -->
+            <!-- Collects movie keyframes (movie-path.js); Done hands them to chaosplayback.html. Not in the accordion
+                 above: closing Map Evolution would reset the frame a keyframe is taken at. -->
             <section class="menu-item" id="menu-movie">
               <button class="menu-toggle" id="grid-btn-movie" data-tab-label="Movie" type="button" title="Movie" aria-label="Movie" aria-expanded="false">
                 <svg class="clapperboard" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="10.5" width="18" height="10" rx="1.5"></rect><path d="M3.4 10.2 2.6 6.7 19.2 2.9l.8 3.5z"></path><path d="m7.4 5.6 2.2 3.2"></path><path d="m12.8 4.4 2.2 3.2"></path></svg>
@@ -791,46 +586,11 @@
               </div>
             </section>
           </div>
-          <!-- A car-gauge-style ring in the lower left, tracking the
-               progressive render (see updateRenderProgressRing in
-               fractal-grid.js): a gray outline sweeps clockwise from the
-               bottom as the resolution ladder refines, then a white outline
-               sweeps the same path on top of it once antialiasing starts.
-               Both circles share one path so the ring reads as one control
-               changing color, not two concentric rings.
-
-               A menu in its own right, same is-open/toggle-vs-card
-               machinery as the others (see makeMenu in fractal-grid.js):
-               it joins the LEFT accordion group (Inspect, Analysis, Display
-               Mode), since that's the corner it actually sits in, so
-               opening it closes whichever of those was open and vice versa,
-               without touching Settings or Map Evolution on the right; it
-               just lives down here instead of in that stack. The card
-               has no body, only a header: those two lines (progress, and
-               the precision under it) ARE the whole card, so, unlike the
-               others, where only the header line collapses it and the body
-               stays interactive, a click anywhere on it collapses it. The ring is duplicated between
-               the collapsed toggle and the open card's own icon slot since
-               exactly one of the two is ever in the layout at a time (see
-               .menu-item.is-open > .menu-toggle); both copies are kept in
-               sync every frame. -->
+          <!-- Render-progress ring (updateRenderProgressRing): gray sweep for the resolution ladder, white on top once antialiasing
+               starts. In the LEFT accordion group; header only, so a click anywhere collapses it; ring duplicated in toggle and card. -->
           <section class="menu-item" id="menu-render-progress">
-            <!-- The three precision glyphs, drawn once here and reused by
-                 <use> from both copies of the ring and from the card's
-                 precision line (see updateRenderProgressPrecision in
-                 fractal-grid.js): the double dagger of typography for two
-                 float32 words per number, a "triple dagger" (a small
-                 triangle, point down, whose three sides each run well past
-                 the corners: point down and tight so it does not read as
-                 the App Store's "A") for three, and a "quad dagger" (the
-                 number sign, turned 45 degrees so its middle is a diamond)
-                 for four.
-                 Nothing for float32, which is the ordinary case and needs
-                 no badge. Plain strokes in the ring's own 40x40 space so
-                 they sit inside it and match its weight. A zero-size SVG
-                 of their own rather than <defs> inside one of the rings,
-                 since whichever ring holds them is display: none half the
-                 time (see .menu-item.is-open > .render-progress-toggle). -->
+            <!-- Precision glyphs, reused by <use> from both rings and the card: two, three and four float32 words, none for
+                 float32. A separate zero-size SVG because whichever ring held them would be display:none half the time. -->
             <svg class="precision-glyph-defs" width="0" height="0" aria-hidden="true" focusable="false">
               <defs>
                 <g id="precision-glyph-df" class="precision-glyph">
@@ -860,10 +620,6 @@
                     <use class="render-progress-glyph"></use>
                   </svg>
                 </span>
-                <!-- Two lines: the progress readout, and under it which
-                     precision the picture is being drawn at, with the same
-                     glyph the ring carries (none for float32) and what that
-                     precision costs, see updateRenderProgressPrecision. -->
                 <span class="render-progress-lines">
                   <span id="render-progress-label" class="render-progress-label">Rendering Progress: 1 sim/px</span>
                   <span id="render-progress-precision" class="render-progress-precision">
@@ -874,23 +630,13 @@
               </div>
             </div>
           </section>
-          <!-- Settings > Performance Settings > Nerd Performance Stats:
-               what the renderer is doing right now, as text, which GPU,
-               how big a frame's work is and how long it takes, how far the
-               picture has got and how fast. Filled by updatePerfReadout in
-               fractal-grid.js. Takes no pointer events: the map underneath
-               still pans and zooms through it. -->
+          <!-- Nerd Performance Stats readout (updatePerfReadout). No pointer events: the map still pans through it. -->
           <pre id="perf-readout" hidden></pre>
           <div id="empty-state" hidden>
             <p>No scene has been sent from the Physics Simulator yet.</p>
             <a id="empty-state-link" href="#bldr/">Go map X / Y / Output and send one &rarr;</a>
           </div>
-          <!-- Shown if the browser takes the WebGL context away (see "Losing
-               the WebGL context" in fractal-grid.js): routine on a phone,
-               where backgrounding the tab or a spike in memory pressure is
-               enough. Recovery is a reload back to this same view, which the
-               address already describes; the button is for the case where
-               the browser never hands a context back on its own. -->
+          <!-- Shown when the WebGL context is lost, routine on phones; see "Losing the WebGL context" in fractal-grid.js. -->
           <div id="grid-context-lost" hidden>
             <p id="grid-context-lost-text">The browser reset this page's graphics. Restoring your view&hellip;</p>
             <button id="grid-context-lost-reload" type="button">Reload now</button>
@@ -899,51 +645,21 @@
 
       </div>
 
-      <!-- The small-window layout's home for the menus (see "The dock" in
-           fractal-grid.js, and mobile.css). Empty, and display:none, in the
-           desktop layout. In the small-window one every menu's button
-           (but Movie's, there is no Movie tab on a phone) is
-           moved into #grid-dock-tabs, a tab bar along the bottom edge, or
-           the right edge of a phone on its side, and every menu's card into
-           #grid-dock-sheet beside it, so the map gets an area of its own
-           instead of sitting under floating cards. Moved rather than
-           duplicated: every listener and every id stays on the one element
-           it was bound to. -->
+      <!-- Small-window layout only ("The dock" in fractal-grid.js): every menu button but Movie's is MOVED into the tabs, every card into the sheet. -->
       <div id="grid-dock">
         <div id="grid-dock-sheet"></div>
         <nav id="grid-dock-tabs" aria-label="Map menus"></nav>
       </div>
 
-      <!-- Fixed-position, outside the menu column: same reason as
-           #tip-popover just below: the column scrolls (both the stack and
-           each card's body), which would clip this, and the cards'
-           backdrop-filter would otherwise hijack fixed positioning into
-           being relative to the card instead of the viewport (see
-           .floating-settings-btn's own comment on that exact quirk).
-           Shown, measured and placed by JS against #hover-speed-btn (see
-           positionSpeedPopup in fractal-grid.js) whenever it's open. -->
+      <!-- Fixed-position outside the column: it scrolls, and its cards' backdrop-filter would re-root fixed positioning (see positionSpeedPopup). -->
       <div id="hover-speed-popup" class="speed-popup" hidden>
-        <!-- Moves in log2(speed) space, not speed itself, see
-             sliderValueToSpeed/speedToSliderValue in fractal-grid.js, so
-             min/max/value here are log2(0.5)/log2(16)/log2(1), not 0.5/16/1.
-             step="1" in this space is what actually limits the control to
-             whole-power-of-two speeds (0.5x/1x/2x/4x/8x/16x) and nothing
-             between. -->
+        <!-- min/max/value are log2(speed): -1..4 is 0.5x..16x, step 1 keeps it to powers of two. -->
         <div class="speed-slider-track">
           <input type="range" id="hover-speed-slider" min="-1" max="4" step="1" value="0" aria-label="Playback speed" aria-orientation="vertical">
         </div>
         <div class="speed-value" id="hover-speed-value">1.0x</div>
       </div>
-      <!-- The timeline transport's own speed popup: same shape and same
-           log2(speed) slider as #hover-speed-popup above, and the same
-           value behind it: one playbackSpeed drives both buttons (see the
-           Playback speed section of fractal-grid.js), so this is a second
-           VIEW of that setting, not a second setting. Two elements rather
-           than one only because each popup is positioned against its own
-           button. The multiplier is against this transport's own base
-           rate, so the shared default of 1x is real time here (see
-           PLAYBACK_STEPS_PER_SECOND in fractal-grid.js), while the same 1x in
-           the preview is that transport's own base rate. -->
+      <!-- Same log2 slider and the same playbackSpeed as #hover-speed-popup (a second VIEW, not a second setting); its own element only to sit by its own button. -->
       <div id="grid-speed-popup" class="speed-popup" hidden>
         <div class="speed-slider-track">
           <input type="range" id="grid-speed-slider" min="-1" max="4" step="1" value="0" aria-label="Timeline playback speed" aria-orientation="vertical">
@@ -951,9 +667,7 @@
         <div class="speed-value" id="grid-speed-value">1.0x</div>
       </div>
 
-      <!-- Reusable tip popover: a single shared instance, repositioned and
-           reworded by JS (see showTip in fractal-grid.js) for whichever element
-           it's currently pointing at. Not specific to any one tip. -->
+      <!-- One shared tip popover, reworded and moved by showTip (fractal-grid.js). -->
       <div id="tip-popover" class="tip-popover" role="tooltip" hidden>
         <p id="tip-popover-text"></p>
         <div class="tip-popover-actions">
@@ -964,8 +678,6 @@
 
   </section>
 
-  <!-- The zoom-out/zoom-in explainer that runs between the two views. Sits
-       above both; see transition.js. -->
   <div id="transition-layer" hidden>
     <canvas id="transition-canvas"></canvas>
     <button id="transition-skip" class="secondary">Skip</button>
@@ -975,20 +687,20 @@
 
 </div>
 
-<script src="physics-engine.js?v=m70"></script>
-<script src="physics-coords.js?v=m70"></script>
-<script src="share-url.js?v=m70"></script>
-<script src="movie-path.js?v=m70"></script>
-<script src="physics-sound.js?v=m70"></script>
-<script src="physics-hinge-geometry.js?v=m70"></script>
-<script src="physics-df.js?v=m70"></script>
-<script src="physics-gpu.js?v=m70"></script>
-<script src="physics-gpu-df.js?v=m70"></script>
-<script src="physics-grid-codegen.js?v=m70"></script>
-<script src="physics-ui.js?v=m70"></script>
-<script src="fractal-stats.js?v=m70"></script>
-<script src="fractal-stats-panel.js?v=m70"></script>
-<script src="fractal-grid.js?v=m70"></script>
-<script src="transition.js?v=m70"></script>
+<script src="scripts/physics-engine.js?v=m70"></script>
+<script src="scripts/physics-coords.js?v=m70"></script>
+<script src="scripts/share-url.js?v=m70"></script>
+<script src="scripts/movie-path.js?v=m70"></script>
+<script src="scripts/physics-sound.js?v=m70"></script>
+<script src="scripts/physics-hinge-geometry.js?v=m70"></script>
+<script src="scripts/physics-df.js?v=m70"></script>
+<script src="scripts/physics-gpu.js?v=m70"></script>
+<script src="scripts/physics-gpu-df.js?v=m70"></script>
+<script src="scripts/physics-grid-codegen.js?v=m70"></script>
+<script src="scripts/physics-ui.js?v=m70"></script>
+<script src="scripts/fractal-stats.js?v=m70"></script>
+<script src="scripts/fractal-stats-panel.js?v=m70"></script>
+<script src="scripts/fractal-grid.js?v=m70"></script>
+<script src="scripts/transition.js?v=m70"></script>
 </body>
 </html>

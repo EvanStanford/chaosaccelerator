@@ -1,0 +1,40 @@
+/* CPAL-1.0 License. See chaosaccelerator.com/license.html */
+
+/* Portrait (tall viewport) layout for both views; loaded after their own stylesheets so it wins the cascade. */
+@media (orientation: portrait) {
+  #main,
+  #grid-main {
+    flex-direction: column;
+  }
+  #panel {
+    order: 2;
+    width: 100%;
+    max-height: 45vh;
+    border: 0;
+    border-top: 1px solid var(--border);
+  }
+  #canvas-area,
+  #grid-canvas-area {
+    order: 1;
+    min-height: 0;
+  }
+  #panel-resizer {
+    display: none !important;
+  }
+
+  .page-grid #grid-menu-column {
+    width: calc(100% - var(--panel-inset) * 2);
+  }
+  .page-grid #grid-menu-stack {
+    max-height: 60vh;
+  }
+  .page-grid .menu-card {
+    max-height: calc(60vh - var(--menu-reserved));
+  }
+  .page-grid #grid-right-menu-column {
+    max-height: 60vh;
+  }
+  .page-grid #grid-right-menu-column .menu-card {
+    max-height: calc(60vh - var(--settings-btn-size) - 8px);
+  }
+}

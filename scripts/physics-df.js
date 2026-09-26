@@ -1,124 +1,33 @@
-// This file is part of Chaos Accelerator, licensed under the Common Public
-// Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in the project
-// root, or https://chaosaccelerator.com/license for a hosted copy.
+// CPAL-1.0 License. See chaosaccelerator.com/license.html
 
-// Multi-float arithmetic for WebGL2 / GLSL ES 3.00: double-float ("df", two
-// float32 words), triple-float ("tf", three) and quad-float ("qf", four).
-//
-// WHY THIS EXISTS
-// ---------------
-// Every pixel of the fractal grid is an independent simulation whose only
-// difference from its neighbour is a tiny offset in the linked body
-// property. GLSL's highp float is IEEE binary32: ~7 decimal digits, so at
-// scene coordinates of order 10^3 the smallest distinguishable difference
-// is ~10^-4 world units. Zoom the grid past that and neighbouring pixels
-// round to the SAME float, so the image flattens into blocks. That is the
-// 32-bit wall.
-//
-// A df value is an unevaluated sum of two float32s (hi + lo) with
-// non-overlapping mantissas: ~48 significand bits (~14-15 decimal digits)
-// for ~5-10x the ALU of a plain float. It is not float64, the exponent
-// range is still float32's, but the mantissa is what this project is
-// short of, not the range.
-//
-// HOW IT WORKS
-// ------------
-// Everything is built from "error-free transformations": the float32
-// result of an operation, plus the round-off that operation discarded,
-// which is itself exactly representable. twoSum recovers the round-off of
-// an add; twoProd does the same for a multiply, using a 12-bit/12-bit
-// split of each operand so the partial products are exact (GLSL ES 3.00
-// has no fma()).
-//
-// THE VEIL, AND WHY IT IS NOT OPTIONAL
-// ------------------------------------
-// twoSum's `(a - (s - bb)) + (b - bb)` is algebraically zero. It recovers
-// anything at all only because IEEE rounding makes it NOT algebraically
-// equivalent to its simplified form. A compiler that reassociates float
-// arithmetic is free to fold it to nothing, and GLSL ES 3.00 has no
-// `precise` qualifier to forbid that (it arrived in ES 3.20).
-//
-// This is not hypothetical. Measured on ANGLE's Metal backend (Apple
-// silicon, the default for Chrome on macOS): `(a + b) - a` returns `b`,
-// i.e. fast-math reassociation is on, and every unprotected EFT above
-// returns an error term of exactly 0.0: silently, with no warning, and
-// with results that look plausible right up until you zoom in.
-//
-// dfv() is the fix: a bitcast to uint, an XOR against a uniform that
-// happens to hold 0, and a bitcast back. It is the identity at runtime,
-// but the optimizer cannot see through the uniform, so every expression
-// it wraps becomes an opaque symbol that no algebraic rewrite applies to.
-// Costs about one integer op (the bitcasts are register reinterpretation,
-// not work). Every shader including this library must therefore declare
-// `uniform uint u_dfVeil;` (DF_UNIFORM_DECL below), and leave it at its
-// default of 0. df-probe.html measures all of this directly on whatever
-// machine it is opened on, and physics-tests.js carries the same check as
-// a regression test, because the failure mode is invisible otherwise.
-//
-// MORE THAN TWO WORDS
-// -------------------
-// The same idea carried further: a value is the unevaluated sum of N
-// float32 words, each below the rounding error of the one before it, for
-// ~24 bits of significand per word less a few lost to the algorithms,
-// about 14 digits at two words, 21 at three, 28 at four. One library serves
-// all of them. Every function keeps its "df" name whatever N is, and the
-// scalar type is spelled MF, a macro this file defines as vec2, vec3 or
-// vec4: a shader is only ever built for one precision, so there is nothing
-// for the names to collide with, and the physics port and the code
-// generators are written once against MF.
-//
-// Two words is the hand-tuned case and its text is exactly what it was
-// before the others existed. Three and four are GENERATED (see genAdd,
-// genMul and friends): the structure is the same at every N, an error-free
-// sum or product per pair of words, the errors cascaded down one level at a
-// time, a renormalization at the end, so it is written as a loop here and
-// unrolled into the GLSL. The algorithms are the quad-double library's
-// "sloppy" forms (Hida, Li & Bailey), chosen for the same reason the
-// two-word add is: what this project needs is absolute precision at the
-// scale of the scene's coordinates, not a correctly rounded last bit.
-//
-// That far is as far as float32 words go. A fifth word of a coordinate of
-// order 10^3 sits around 10^-33, a sixth around 10^-41: below float32's
-// smallest normal number, where GPUs are not obliged to keep anything.
-//
-// Constants past two words cannot come from a JS number, which only has 53
-// bits to give: pi and the Taylor coefficients are generated from exact
-// BigInt rationals (rationalWords). A value the scene itself supplies, an
-// authored coordinate, is a float64 and simply has zeros in its low words.
+// Multi-float arithmetic for GLSL ES 3.00: two, three or four float32 words per
+// value (~14, 21, 28 digits), built from error-free transformations. dfv() veils
+// each one behind a zero uniform, since ANGLE/Metal reassociates and folds them.
 (function (global) {
   "use strict";
 
   var f32 = Math.fround;
 
-  // ---- Precisions ----
-  //
-  // The names the rest of the project passes around, and how many float32
-  // words each carries. "f32" is here so that one table answers every
-  // "which precision is this" question; nothing in this file is used for it.
+  // ---- Precisions: name -> float32 word count ----
   var WORDS = { f32: 1, df: 2, tf: 3, qf: 4 };
   var ORDER = ["f32", "df", "tf", "qf"];
   function wordsFor(precision) { return WORDS[precision] || 1; }
   function isExtended(precision) { return wordsFor(precision) > 1; }
-  // float32 words can carry a value no further than this: see the header.
-  // BigInt is what the constants past two words are generated with.
+  // Three or four words need BigInt for their constants.
   function isSupported(precision) {
     return wordsFor(precision) <= 2 || typeof BigInt === "function";
   }
 
-  // How many words num() writes, and buildLibrary() builds for by default.
-  // Code generation for one shader runs start to finish without yielding,
-  // so whoever starts one says which precision it is for (usePrecision) and
-  // everything it calls, here and in physics-gpu-df.js, agrees.
+  // Word count num() and buildLibrary() default to; codegen for one shader sets
+  // it once (usePrecision) and everything, physics-gpu-df.js included, agrees.
   var currentWords = 2;
   function usePrecision(precision) {
     currentWords = Math.max(2, wordsFor(precision));
     return currentWords;
   }
 
-  // Split a JS number (already float64) into the two float32s whose sum
-  // reproduces it to ~48 bits. This is the ONLY place the extra precision
-  // enters the GPU: JS has had it all along, uploading a single float32
-  // uniform is what was throwing it away.
+  // A float64 as two float32s summing to it (~48 bits): the only place the
+  // extra precision enters the GPU.
   function split(x) {
     var hi = f32(x);
     if (!isFinite(hi)) return [isFinite(x) ? 0 : hi, 0];
@@ -130,11 +39,7 @@
     return [s, (a - (s - bb)) + (b - bb)];
   }
 
-  // [p, e] with p + e = a * b EXACTLY, p the rounded product: Dekker's
-  // split, since JavaScript has no fused multiply-add to get the error term
-  // from. (2^27 + 1 splits a float64's 53 bits into halves whose products
-  // are exact. Fine for anything within 2^970 or so of overflow, which a
-  // view's scale is.)
+  // [p, e] with p + e = a * b exactly (Dekker split; JS has no fma).
   function twoProd64(a, b) {
     var p = a * b;
     var t = 134217729 * a, ah = t - (t - a), al = a - ah;
@@ -143,12 +48,8 @@
     return [p, ((ah * bh - p) + ah * bl + al * bh) + al * bl];
   }
 
-  // The same for a DOUBLE-DOUBLE, hi + lo, both float64, ~106 bits, which
-  // is how the grid holds its view centre once a float64 alone can no longer
-  // tell two pixels apart, into `count` float32 words. Each word is the
-  // remainder rounded to float32, and `remainder - word` is exact in
-  // float64 (the word agrees with the remainder's leading 24 bits), so
-  // nothing is lost on the way down.
+  // A double-double (hi + lo, both float64) into `count` float32 words; each
+  // `remainder - word` is exact in float64.
   function splitWords(hi, lo, count) {
     var words = [], rh = hi, rl = lo || 0;
     for (var i = 0; i < count; i++) {
@@ -161,9 +62,8 @@
     return words;
   }
 
-  // A GLSL float literal that survives a round trip. Same idea as
-  // physics-gpu.js's fnum, duplicated so this file has no load-order
-  // dependency on it.
+  // A GLSL float literal that round-trips. Duplicates physics-gpu.js's fnum so
+  // this file has no load-order dependency on it.
   function fnum(n) {
     if (!isFinite(n)) n = 0;
     if (Object.is(n, -0)) n = 0;
@@ -179,9 +79,9 @@
 
   var TWO_PI = split(Math.PI * 2);
 
-  // Must appear in every shader that includes GLSL_LIBRARY. Never assigned
-  // - a uniform's default value is 0 by spec, which is exactly the identity
-  // dfv() needs, and leaving it unset is what keeps it opaque.
+  // Every shader including GLSL_LIBRARY must declare this and never assign it:
+  // the default 0 is the identity dfv() needs, and the optimizer cannot see
+  // through a uniform (measured on ANGLE/Metal: without it every EFT error is 0.0).
   var UNIFORM_DECL = "uniform uint u_dfVeil;";
 
   // ---- Exact constants, for more words than a float64 has bits ----
@@ -189,8 +89,7 @@
   function big(n) { return BigInt(n); }
   function bitLength(v) { return (v < big(0) ? -v : v).toString(2).length; }
 
-  // p/q as a float64, to float64's own accuracy, for BigInts far outside
-  // float64's exact range.
+  // p/q as a float64, for BigInts far outside float64's exact range.
   function ratioToNumber(p, q) {
     if (p === big(0)) return 0;
     var shift = 80 - (bitLength(p) - bitLength(q));
@@ -234,13 +133,10 @@
   var PI_DIGITS = "314159265358979323846264338327950288419716939937510582097494459230781640628620899";
   function piRational() { return [big(PI_DIGITS), big(10) ** big(PI_DIGITS.length - 1)]; }
 
-  // ---- Constants for the df sin/cos below, generated rather than
-  // transcribed (a mistyped digit in a 17-digit constant is exactly the
-  // kind of bug this whole file exists to avoid). ----
+  // ---- Constants for df sin/cos, generated rather than transcribed ----
 
-  // Round x to 12 significand bits. A float carrying only 12 bits
-  // multiplies EXACTLY by any integer up to 2^12, which is what makes
-  // Cody-Waite range reduction work.
+  // Round to 12 significand bits: multiplies exactly by integers up to 2^12
+  // (Cody-Waite range reduction).
   function trimTo12Bits(x) {
     var v = f32(x);
     if (v === 0 || !isFinite(v)) return 0;
@@ -248,9 +144,7 @@
     return f32(Math.round(v / q) * q);
   }
 
-  // Split `value` into `count` floats summing to it, all but the last
-  // trimmed to 12 bits. Four 12-bit pieces plus a 24-bit tail carries
-  // pi/2 to ~72 bits: far past df's own 48.
+  // `count` floats summing to `value`, all but the last trimmed to 12 bits.
   function codyWaitePieces(value, count) {
     var pieces = [], rest = value;
     for (var i = 0; i < count - 1; i++) {
@@ -262,8 +156,7 @@
     return pieces;
   }
 
-  // The same from an exact rational, for as many pieces as it takes: 12 bits
-  // each and a 24-bit tail has to reach past the last word of the result.
+  // The same from an exact rational.
   function codyWaitePiecesExact(p, q, count) {
     var pieces = [];
     for (var i = 0; i < count - 1; i++) {
@@ -278,8 +171,7 @@
 
   function factorial(n) { var r = 1; for (var i = 2; i <= n; i++) r *= i; return r; }
 
-  // Horner in df: c[0] + u*(c[1] + u*(c[2] + ...)), optionally times x.
-  // `literals` are GLSL text already, one per coefficient.
+  // Horner in df: c[0] + u*(c[1] + ...), optionally times x; `literals` are GLSL text.
   function hornerGLSL(name, literals, multiplyByX, square) {
     var lines = ["MF " + name + "(MF x) {", "  MF u = " + square + ";",
       "  MF p = " + literals[literals.length - 1] + ";"];
@@ -290,16 +182,13 @@
     return lines.join("\n");
   }
 
-  // sin(x)/x and cos(x) as series in u = x^2. Enough terms that the first
-  // DROPPED one is below 1e-16 at |x| = pi/4, i.e. under df's resolution.
+  // sin(x)/x and cos(x) series in u = x^2; first dropped term < 1e-16 at |x| = pi/4.
   var SIN_COEFFS = [], COS_COEFFS = [];
   for (var si = 0; si <= 8; si++) SIN_COEFFS.push((si % 2 ? -1 : 1) / factorial(2 * si + 1));
   for (var cj = 0; cj <= 9; cj++) COS_COEFFS.push((cj % 2 ? -1 : 1) / factorial(2 * cj));
 
-  // The same two series for N words: as many terms as it takes for the first
-  // dropped one to fall below the last word at |x| = pi/4, each coefficient
-  // an exact +-1/k! carried to N words. `offset` is 1 for sin(x)/x (odd
-  // factorials) and 0 for cos (even).
+  // Same for N words: terms until the first dropped one falls below the last
+  // word at pi/4; `offset` is 1 for sin(x)/x, 0 for cos.
   function taylorLiterals(words, offset) {
     var bound = Math.pow(2, -(24 * words + 8)), lits = [], x = Math.PI / 4;
     for (var k = 0; k < 40; k++) {
@@ -310,45 +199,21 @@
     return lits;
   }
 
-  // ---- Kernel options ----
-  //
-  // Three of the two-word kernels below exist in two forms, because which
-  // one is right is a measurement rather than an argument: df-probe.html
-  // and physics-tests.js both render with either and compare. The defaults
-  // are what that measurement chose; the alternatives stay buildable so the
-  // comparison can be re-run on a new GPU or driver.
-  //
-  //   sloppyAdd  Dekker's add (11 float ops) in place of the IEEE-style one
-  //              (20). Both carry ~48 bits of the OPERANDS; they differ only
-  //              under heavy cancellation, where the accurate form returns
-  //              the small result to 48 of ITS OWN bits and the sloppy one
-  //              to 48 bits of the operands' magnitude. Every coordinate
-  //              here is already rounded to the operands' magnitude, so the
-  //              extra digits the accurate form keeps describe rounding
-  //              noise, not the scene. Measured: about one bit at the very
-  //              edge of df's range, for about a fifth off every df pixel.
-  //   fastDiv    Two quotient words instead of three. The third is the
-  //              correctly-rounded-last-bit word (~2^-48 of the quotient);
-  //              dropping it costs at most about one df ulp. Measured: no
-  //              visible difference.
-  //   fastSqrt   s + (a - s*s) / 2s with the correction taken in float32,
-  //              instead of a full df division. The correction is at most
-  //              ~2^-23 of the root, so float32's 24 bits place it to ~2^-47.
-  //              Measured: no visible difference.
-  //
-  //   words      2, 3 or 4: defaults to whatever usePrecision() last set.
-  //              The three options above only apply at 2; past that there
-  //              is one form of each kernel, the generated one.
+  // ---- Kernel options (two-word forms only; df-probe.html and physics-tests.js
+  // compare them; the defaults are what that measurement chose) ----
+  //   sloppyAdd  Dekker's 11-op add instead of the 20-op IEEE-style one; differs
+  //              only under heavy cancellation, ~one bit at df's edge, ~1/5 faster.
+  //   fastDiv    Two quotient words instead of three (drops the last-bit word).
+  //   fastSqrt   Newton correction in float32 instead of a df division (~2^-47).
+  //   words      2, 3 or 4; defaults to what usePrecision() last set.
   var DEFAULT_OPTIONS = { sloppyAdd: true, fastDiv: true, fastSqrt: true };
 
   // ---- The generated kernels, for three and four words ----
 
   var COMP = ["x", "y", "z", "w"];
 
-  // Sums `terms` (GLSL float expressions, all of one level of the cascade)
-  // into `into`. While `exact`, every rounding error is captured by a
-  // dfTwoSum and returned, to be added one level down; at the last level
-  // they are simply let go, which is what bounds the result at N words.
+  // Sums `terms` (one cascade level) into `into`; while `exact`, each rounding
+  // error is captured by dfTwoSum and returned for the level below.
   function genAccumulate(lines, into, terms, exact, tag) {
     var carries = [];
     if (!exact) {
@@ -366,8 +231,7 @@
     return carries;
   }
 
-  // The tail every generated kernel shares: `levels[k]` holds the terms of
-  // magnitude ~2^(-24k) relative to the result.
+  // Shared tail: `levels[k]` holds the terms of magnitude ~2^(-24k) of the result.
   function genCascade(lines, levels, N) {
     var carries = [], names = [];
     for (var k = 0; k < N; k++) {
@@ -378,12 +242,8 @@
     lines.push("  return dfRenorm(" + names.join(", ") + ");");
   }
 
-  // N roughly ordered, possibly overlapping words into N that don't: one
-  // pass up (each word absorbs everything below it, shedding an exact
-  // error), one pass down (the errors become the low words). dfTwoSum
-  // rather than dfQuickTwoSum wherever which operand is larger is not
-  // certain, after a cancellation it isn't, because a quick-sum with its
-  // operands the wrong way round returns a wrong error term and says nothing.
+  // N overlapping words into N that don't: one pass up, one down. dfTwoSum, not
+  // dfQuickTwoSum, wherever the larger operand is uncertain (after a cancellation).
   function genRenorm(N) {
     var args = [], lines = [];
     for (var i = 0; i < N; i++) args.push("float c" + i);
@@ -427,10 +287,8 @@
     return lines.join("\n");
   }
 
-  // Products a_i * b_j land on level i + j. Below the last level each is a
-  // dfTwoProd, whose error term lands one level down; ON the last level a
-  // plain product is all that can be kept anyway. Operands are split once
-  // each rather than once per product they appear in.
+  // a_i * b_j lands on level i + j as a dfTwoProd (error one level down); on the
+  // last level a plain product. Operands are split once each.
   function genMul(N) {
     var lines = ["MF dfMul(MF a, MF b) {"], levels = [];
     for (var s = 0; s < N - 1; s++) {
@@ -455,8 +313,7 @@
     return lines.join("\n");
   }
 
-  // a*a: the two cross terms a_i*a_j and a_j*a_i are the same number, and
-  // doubling it is exact, so about half the products.
+  // a*a: cross terms are equal and doubling is exact, so about half the products.
   function genSqr(N) {
     var lines = ["MF dfSqr(MF a) {"], levels = [];
     for (var s = 0; s < N - 1; s++) lines.push("  vec2 as" + s + " = dfSplit(a." + COMP[s] + ");");
@@ -494,9 +351,8 @@
     return lines.join("\n");
   }
 
-  // Long division, a float32 quotient word at a time against the exact
-  // remainder. N words of quotient; the (N+1)th, which only rounds the last
-  // bit, is left out for the same reason fastDiv leaves it out at two.
+  // Long division, one float32 quotient word at a time; the (N+1)th word is
+  // dropped, as fastDiv drops it at two.
   function genDiv(N) {
     var lines = ["MF dfDiv(MF a, MF b) {", "  float q0 = a.x / b.x;", "  MF r = dfSub(a, dfMulFloat(b, q0));"], q = ["q0"];
     for (var i = 1; i < N; i++) {
@@ -508,11 +364,8 @@
     return lines.join("\n");
   }
 
-  // A two-word root by the same float32-corrected Newton step fastSqrt
-  // uses (~47 bits), then ONE step at full precision, which squares that
-  // error to ~2^-94. The step's correction is (a - s*s) / 2s: a residual of
-  // ~2^-47 of the root, of which three words need the leading 24 bits, a
-  // float32 division, and four need 48, hence the second quotient word.
+  // fastSqrt's float32-corrected Newton step (~47 bits), then one full-precision
+  // step (~2^-94). Four words need a second quotient word for the correction.
   function genSqrt(N) {
     var lines = [
       "MF dfSqrt(MF a) {",
@@ -561,13 +414,8 @@
   }
 
   function buildLibraryText(N, two, opt) {
-    // pi/2 for the range reduction, and the series, at this word count.
-    // From the exact rational wherever there is a BigInt to hold one: at two
-    // words as well. The float64 fallback only knows pi/2 to 53 bits, and
-    // the reduction multiplies that error by the quarter-turn count: measured
-    // at 5e-13 for an angle of 3000 radians, six of df's bits. (Without
-    // BigInt there are no three- or four-word precisions to build at all:
-    // see isSupported.)
+    // pi/2 pieces and the series at this word count, from the exact rational
+    // whenever BigInt exists: float64's pi/2 loses six df bits at 3000 radians.
     var halfPiPieces = typeof BigInt === "function"
       ? (function () { var pi = piRational(); return codyWaitePiecesExact(pi[0], pi[1] * big(2), Math.max(5, 2 * N + 1)); })()
       : codyWaitePieces(Math.PI / 2, 5);
@@ -582,11 +430,8 @@
     function exactLiteral(sign, denominator) {
       return two ? num(sign / denominator) : literal(rationalWords(big(sign), big(denominator), N));
     }
-    // A delta this small needs this many terms of each series to be exact
-    // to the last word: at two words, |delta| <= 2^-6 and terms through
-    // delta^5 / delta^6; past that, |delta| <= 2^-10 and through delta^7 /
-    // delta^8, whose first dropped terms (delta^9/9!, delta^10/10!) are
-    // under 2^-108: below a fourth word.
+    // Terms for the nudge series to be exact to the last word at this |delta|
+    // bound (2^-6 at two words, 2^-10 past that).
     var nudgeLimit = two ? 0.015625 : 0.0009765625;
     var nudgeSin = two ? [-6, 120] : [-6, 120, -5040];
     var nudgeCos = two ? [-2, 24, -720] : [-2, 24, -720, 40320];
@@ -814,8 +659,7 @@
     "  return r;",
     "}",
     "",
-    // Series in u = x*x, carried far enough that the first dropped term is
-    // below the last word at |x| = pi/4.
+    // Series in u = x*x; first dropped term below the last word at |x| = pi/4.
     hornerGLSL("dfSinTaylor", sinLiterals, true, two ? "dfMul(x, x)" : "dfSqr(x)"),
     hornerGLSL("dfCosTaylor", cosLiterals, false, two ? "dfMul(x, x)" : "dfSqr(x)"),
     "",
@@ -956,12 +800,8 @@
     ]).join("\n");
   }
 
-  // ---- A world coordinate pair, handed to a shader as uniforms ----
-  //
-  // One vec2 uniform per WORD, holding that word of x and of y:
-  // <base>Hi, <base>Lo, <base>Lo2, <base>Lo3. Every program declares all
-  // four whatever its precision and reads as many as it carries (float32
-  // reads Hi alone), so the JS side sets them the same way for all of them.
+  // ---- A world coordinate pair as uniforms: one vec2 per word (<base>Hi, Lo,
+  // Lo2, Lo3). Every program declares all four and reads as many as it carries ----
   var WORD_SUFFIXES = ["Hi", "Lo", "Lo2", "Lo3"];
   function wordUniformDecls(base) {
     return WORD_SUFFIXES.map(function (sfx) { return "uniform vec2 " + base + sfx + ";"; });
@@ -996,10 +836,8 @@
     usePrecision: usePrecision,
     PRECISIONS: ORDER,
     UNIFORM_DECL: UNIFORM_DECL,
-    // The library at whatever precision usePrecision() last named: a getter
-    // rather than a baked string for exactly that reason. A measurement page
-    // can still pin one: assigning to it replaces the getter's answer until
-    // it is assigned null again.
+    // Rebuilt at usePrecision()'s current precision; a measurement page can pin
+    // one by assigning (null unpins).
     get GLSL_LIBRARY() { return pinnedLibrary || buildLibrary(); },
     set GLSL_LIBRARY(text) { pinnedLibrary = text; },
     buildLibrary: buildLibrary,

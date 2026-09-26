@@ -1,95 +1,16 @@
-// This file is part of Chaos Accelerator, licensed under the Common Public
-// Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in the project
-// root, or https://chaosaccelerator.com/license for a hosted copy.
+// CPAL-1.0 License. See chaosaccelerator.com/license.html
 
-// The multi-float (double-, triple- and quad-float) port of physics-gpu.js's
-// GLSL physics library.
-//
-// WHY THIS EXISTS
-// ---------------
-// The first version of the df path carried extended precision only in the
-// six per-body ACCUMULATORS, collapsing them to float32 for the actual
-// collision and solver math on the theory that every geometric computation
-// already works on small differences. Measurement said otherwise: coarsen
-// any ONE of the six state fields by 16x and re-run 500 steps, and the
-// answer moves by 1e-4 to 3e-4, five of the six matter about equally. The
-// float32 layer, not the accumulators, was setting the floor, and the real
-// gain over float32 was about one decade rather than the four a bad metric
-// had suggested. See the README's precision section for the numbers.
-//
-// So this file carries the whole step in df: collisions, both solvers,
-// the funnel and splitter, and (in physics-gpu.js's generated step) Mutual
-// Gravity's force sum. The float64 JS engine holds a proportional response
-// down to a starting-position difference of ~1e-12, which is the target;
-// float32 gives out around 1e-4.
-//
-// HOW TO READ IT
-// --------------
-// Every function here is a port of its namesake in physics-gpu.js's
-// GLSL_LIBRARY, which is itself a line-for-line port of physics-engine.js.
-// Same formulas, same variable names, same order of operations, only the
-// spelling changes, because GLSL cannot give a user type operators.
-// `a + b` becomes `dfAdd(a, b)` for scalars and `dv2Add(a, b)` for vectors;
-// `dot(a, b)` becomes `dv2Dot(a, b)`; a float literal `1.0` becomes
-// `MF(1.0, 0.0, ...)`.
-//
-// MF is the scalar type: a macro physics-df.js defines as vec2, vec3 or vec4
-// depending on how many float32 words the shader being built carries. This
-// file is written once against it and serves double-, triple- and
-// quad-float alike: the "df" in every name is historical, and means
-// "whatever multi-float precision this shader is", not "two words".
-//
-// That makes this a THIRD hand-synced implementation of the same physics,
-// alongside physics-engine.js and the float32 GLSL. The project already
-// accepts that trade for the first two (see the README's "Two
-// implementations, kept in lockstep on purpose"), and the same defense
-// applies here: physics-tests.js cross-checks this against both of them,
-// and the grid's own precision override renders the float32 and df passes
-// at the same view so they can be compared directly.
-//
-// WHERE THIS IS NOT A STRAIGHT PORT
-// ---------------------------------
-// A df operation costs 10-20 float32 ones and a df sin/cos about forty of
-// THOSE, where float32 has a hardware instruction, so work the float32
-// library happily repeats is worth lifting out here. Every item below
-// computes the SAME values the straight port would; it only computes each
-// of them once. (The one exception is marked.)
-//
-//  - Segment geometry. A line's endpoints, direction and length are built
-//    once per step into a DSegment and handed to every collision test that
-//    line takes part in, instead of being re-derived (sin/cos included)
-//    inside each one. For an ANCHORED line or trapezoid they are built once
-//    per RUN: nothing ever moves it, so its geometry is a constant of the
-//    pixel. physics-gpu.js's generated step owns where those live.
-//  - Prepared hinges. No velocity iteration can change an angle, so the
-//    rotated anchors and the inverted 2x2 effective-mass matrix are the
-//    same on all 8 of them. dfPrepareHinge builds them once.
-//  - Prepared contacts. A contact's normal and lever arms are fixed for the
-//    step, so its effective mass is the same on every velocity iteration
-//    and its positional push the same on every position iteration.
-//    dfPrepareContact builds both once.
-//  - Immovable sides. An anchored body (and the world pin) has zero inverse
-//    mass, so every update to it multiplies by zero. The callers know which
-//    side that is when the shader is generated, and say so, so the zero
-//    work is never emitted.
-//  - Trig across the position solve (THE EXCEPTION). The position solver
-//    turns each hinged body by a tiny correction several times a step. The
-//    straight port re-evaluates sin/cos from scratch before each one; here
-//    each body's pair is carried through the loop and advanced by the
-//    correction itself (dfSinCosNudge: angle-sum identities with a short
-//    series for the small delta). That agrees with a fresh evaluation to
-//    within a df ulp or two rather than bit for bit. OPTIONS.nudgeTrig
-//    turns it off, which makes the whole file bit-identical to the
-//    straight port again: physics-tests.js uses that to check the rest.
+// Multi-float port of physics-gpu.js's GLSL_LIBRARY: same formulas and names,
+// operators spelled as dfAdd/dv2Add calls, MF as the scalar type (vec2/3/4 per
+// physics-df.js). Not line-for-line: segment geometry, hinge and contact prep
+// are hoisted out of the loops, and the position solve nudges its sin/cos.
 (function (global) {
   "use strict";
 
   var PhysicsDF = global.PhysicsDF;
   function d(n) { return PhysicsDF.num(n); }
 
-  // Mirrors physics-gpu.js's own constants. Prefixed so a df shader can
-  // include both libraries without colliding: the float32 one is still
-  // pulled in for the per-pixel cascade's f32 helpers and for `Body`.
+  // physics-gpu.js's constants, prefixed so a df shader can include both libraries.
   var LINE_THICKNESS = 20;
   var LINE_PARALLEL_EPS = 0.05;
   var RESTITUTION_THRESHOLD = 30;
@@ -97,8 +18,8 @@
   var POSITION_PERCENT = 0.2;
   var FIXED_DT = 1 / 60;
 
-  // Read when a shader is GENERATED, not baked into this file's text, so a
-  // measurement page can flip one and rebuild. See the header for nudgeTrig.
+  // Read at shader generation, so a measurement page can flip one and rebuild.
+  // nudgeTrig off makes this bit-identical to a straight port (physics-tests.js uses that).
   var OPTIONS = { nudgeTrig: true };
 
   function buildLibrary() {
@@ -112,8 +33,7 @@
     "const MF DF_HALF_RESTITUTION_THRESHOLD = " + d(RESTITUTION_THRESHOLD * 0.5) + ";",
     "const MF DF_POSITION_SLOP = " + d(POSITION_SLOP) + ";",
     "const MF DF_POSITION_PERCENT = " + d(POSITION_PERCENT) + ";",
-    // 1/60 is not representable in binary at all, so unlike the float32
-    // library's DT this literal actually carries the extra digits.
+    // 1/60 is inexact in binary, so unlike the float32 DT this carries extra digits.
     "const MF DF_DT = " + d(FIXED_DT) + ";",
     "const MF DF_GRAVITY = " + d(global.PhysicsEngine.GRAVITY) + ";",
     "const MF DF_ZERO = MF(0.0);",
@@ -257,10 +177,8 @@
     "  return t;",
     "}",
     "",
-    // accel is the body's whole acceleration (see advanceVelocity's own
-    // comment in physics-gpu.js): the df gravity constant in the uniform
-    // case, and under Mutual Gravity the df force sum the generated step
-    // builds, at the pass's own precision, like everything else here.
+    // accel is the body's whole acceleration: the gravity constant, or under
+    // Mutual Gravity the df force sum the generated step builds.
     "DVec2 dfAdvanceVelocity(DVec2 v, MF dt, DVec2 accel) {",
     "  v.x = dfAdd(v.x, dfMul(accel.x, dt));",
     "  v.y = dfAdd(v.y, dfMul(accel.y, dt));",
@@ -691,8 +609,7 @@
   }
 
   global.PhysicsGPUDF = {
-    // A getter, not a baked string: OPTIONS is read each time a shader is
-    // assembled, so flipping one takes effect on the next build.
+    // A getter: OPTIONS is read on every build.
     get GLSL_LIBRARY() { return buildLibrary(); },
     OPTIONS: OPTIONS,
   };

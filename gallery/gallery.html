@@ -2,48 +2,26 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<!-- This file is part of Chaos Accelerator, licensed under the Common
-     Public Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in
-     the project root, or https://chaosaccelerator.com/license for a
-     hosted copy. -->
-<!-- The gallery: patterns people have found, each a pair of screenshots
-     (the scene in the builder, and the map it makes) and a link to that
-     map. Linked from the landing page (index.html), whose preview strip
-     reads the same list, and styled by the same sheet.
-
-     The list is gallery.json in this folder, an array of entries in the
-     order they show:
-
-       {
-         "scene": "scene1.jpg",           the builder screenshot, in this folder
-         "map": "map1.jpg",               the map screenshot, in this folder
-         "name": "Double Pendulum",
-         "creator": "Evan",
-         "url": "../chaos.html#map/..."   where a click on the entry goes
-       }
-
-     `url` is the map at the view the screenshot shows. A link pasted straight
-     out of a submission email (https://chaosaccelerator.com/chaos.html#map/...)
-     works as it is; the entries made here use the relative form, so the
-     same file works from a local copy of the site too. To add an entry: put
-     the two pictures in this folder as sceneN.jpg and mapN.jpg, and add an
-     object to the end of the array. Both pages read the file, nothing else
-     has to change. -->
+<!-- CPAL-1.0 License. See chaosaccelerator.com/license.html -->
+<!-- The gallery: patterns people have found, read from gallery.json in this folder (index.html's strip
+     reads the same list), one entry per pattern in the order shown:
+       { "scene": "scene1.jpg", "map": "map1.jpg", "name": "Double Pendulum", "creator": "Evan", "url": "../chaos.html#map/..." }
+     scene and map are screenshots in this folder; url is the map at the view shown, relative so a local copy
+     works (an absolute link from a submission email works too). To add one: put sceneN.jpg and mapN.jpg here
+     and append an object. -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#14161c">
 <title>Gallery: Chaos Accelerator</title>
 <meta name="description" content="Fractals people have made with Chaos Accelerator, and how to add yours.">
-<link rel="stylesheet" href="../landing.css?v=m70">
+<link rel="stylesheet" href="../scripts/landing.css?v=m70">
 </head>
 <body>
 <main class="page page-wide">
 
-  <!-- One row: the way back, the title, and the corner menu (which the
-       script puts in the page where its tag is). -->
   <header class="page-head">
     <a class="back-link" href="../index.html">&larr; Chaos Accelerator</a>
     <h1>Gallery</h1>
-    <script src="../corner-menu.js?v=m70"></script>
+    <script src="../scripts/corner-menu.js?v=m70"></script>
   </header>
 
   <section class="carousel" id="carousel" aria-roledescription="carousel" aria-label="Gallery">
@@ -59,17 +37,10 @@
 
   <section class="section submit" aria-labelledby="submit-label">
     <h2 class="section-lead" id="submit-label">Submit your own:</h2>
-    <!-- A click opens the dialog below, a sample of the email to send,
-         which works whatever the reader uses for mail. The link's own
-         address is the same email as a mailto: draft, for a browser that
-         runs no script (and the dialog offers it again, for whoever does
-         have a mail app wired up). -->
+    <!-- Opens the dialog below rather than a mailto: draft (useless where mail is a web page); the href stays a mailto: for no-script browsers. -->
     <p>If you find a cool pattern, <a id="submit-link" href="mailto:evan.chaosaccelerator@gmail.com?subject=Gallery%20submission&amp;body=Evan%2C%0D%0AI%20would%20like%20to%20submit%20my%20pattern%20for%20the%20gallery.%0D%0AUrl%3A%20%3CRequired%20to%20attach%3E%0D%0AMap%20screenshot%3A%20%3CPlease%20attach%3E%0D%0AScene%20screenshot%3A%20%3COptionally%20attach%3E%0D%0AMy%20name%20for%20attribution%3A%20%3CPreferred%2FOptional%3E%0D%0AScene%20name%3A%20%3CPreferred%2FOptional%3E">email me (evan.chaosaccelerator@gmail.com)</a> and I will put it in the gallery page.</p>
   </section>
 
-  <!-- The sample email. Each field has its own Copy, and the whole thing
-       is filled in by the script below (the subject carries the moment it
-       was opened; see there). -->
   <dialog class="mail-dialog" id="mail-dialog" aria-labelledby="mail-dialog-title">
     <div class="mail-dialog-head">
       <h2 id="mail-dialog-title">Send me an email like this</h2>
@@ -99,14 +70,6 @@
 <div class="watermark">chaosaccelerator.com</div>
 <script>
   // ---- The carousel ----
-  //
-  // A scroll container with snapping (see .carousel-track in landing.css),
-  // so a swipe, the scroll wheel and a drag of the scrollbar all work with
-  // no help from here: the arrows, the dots and the arrow keys only scroll
-  // it. Like the landing page's tour: the slides are narrower than the
-  // track, with the ends padded so the first and last can sit centered
-  // too, and the neighbors show at the edges. Which one is showing is
-  // whichever is nearest the middle.
   (function () {
     var carousel = document.getElementById("carousel");
     var track = document.getElementById("carousel-track");
@@ -161,10 +124,6 @@
       img.loading = "lazy";
       return img;
     }
-    // One entry of gallery.json (the format is at the head of this file) as
-    // a slide. The whole slide is the link. Paths resolve against the list's
-    // own address, so a bare file name means this folder and a full address
-    // is left alone.
     function slide(entry, base) {
       var a = el("a", "slide");
       a.href = new URL(entry.url, base).href;
@@ -176,8 +135,6 @@
       caption.appendChild(el("span", "slide-name", entry.name));
       caption.appendChild(el("span", "slide-by", "by " + entry.creator));
       a.appendChild(caption);
-      // A click on a neighbor showing at the edge brings it to the middle;
-      // only the one in the middle is the link.
       a.addEventListener("click", function (e) {
         var i = slides.indexOf(a);
         if (i !== current()) { e.preventDefault(); goTo(i); }
@@ -215,8 +172,6 @@
         count = entries.length;
         if (!count) track.appendChild(el("p", "carousel-note", "Nothing here yet. Yours could be the first: see below."));
         carousel.classList.toggle("has-many", count > 1);
-        // "#3" opens on the third pattern: what the landing page's strip
-        // links to, so the one clicked there is the one that shows.
         var wanted = Number(location.hash.slice(1));
         if (wanted >= 1) goTo(wanted - 1, true);
         update();
@@ -227,14 +182,6 @@
   })();
 
   // ---- The submission email ----
-  //
-  // A click on the link opens the dialog rather than a mailto: draft: a
-  // mailto: only works where the browser has a mail app to hand it to,
-  // and on a machine where mail is a web page it does nothing at all. The
-  // dialog shows the email to send instead, To, Subject and Body, each
-  // with its own Copy, and offers the mailto: draft as well for whoever
-  // does have the app.
-  //
   // The subject carries the moment the dialog was opened, to the second:
   // mail clients thread messages by subject, and a dozen submissions all
   // titled "Gallery submission" would land in the inbox as one
@@ -274,7 +221,6 @@
     }
     refresh();
 
-    // No <dialog> (an old browser): the link stays the mailto: draft.
     if (!dialog.showModal) return;
     link.addEventListener("click", function (e) {
       e.preventDefault();
@@ -282,13 +228,8 @@
       dialog.showModal();
     });
     document.getElementById("mail-dialog-close").addEventListener("click", function () { dialog.close(); });
-    // A click on the backdrop, which is the dialog element itself outside
-    // its box, shuts it; Escape already does.
     dialog.addEventListener("click", function (e) { if (e.target === dialog) dialog.close(); });
 
-    // Copy: the clipboard API where the page is allowed it, and selecting
-    // the text where it is not, so a manual copy is one keystroke away.
-    // The button says "Copied" for a moment either way it managed it.
     Array.prototype.forEach.call(dialog.querySelectorAll(".mail-copy"), function (button) {
       var target = document.getElementById(button.getAttribute("data-copy"));
       button.addEventListener("click", function () {

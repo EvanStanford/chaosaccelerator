@@ -1,16 +1,8 @@
-/* This file is part of Chaos Accelerator, licensed under the Common Public
-   Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in the project
-   root, or https://chaosaccelerator.com/license for a hosted copy. */
+/* CPAL-1.0 License. See chaosaccelerator.com/license.html */
 
-/* The pages that are documents rather than the app: index.html (the
-   landing page), gallery/gallery.html, other.html (other projects),
-   readme.html (the README, as a page), and the license and error pages. They share the app's
-   palette, the same custom properties physics.css declares, copied rather
-   than imported so that neither page has to load the app's stylesheet for
-   six colors, and its system font stack, and nothing else: the app's own
-   sheets pin html/body to the window's height for a full-bleed canvas, which
-   is exactly wrong for a page that scrolls. (The landing page pins itself to
-   one screen too, its own way: see the end of this file.) */
+/* The document pages (index, gallery, other projects, readme, license, error).
+   The app's palette is copied, not imported: the app's sheets pin html/body
+   to the window's height, wrong for a page that scrolls. */
 :root {
   --bg: #14161c;
   --bg-panel: #1b1e27;
@@ -39,14 +31,11 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 .page {
   max-width: 980px;
   margin: 0 auto;
-  /* The safe-area insets: the app's pages run edge to edge on a phone (see
-     chaos.html's viewport-fit=cover), and these keep the same meta tag. */
+  /* Safe-area insets: these pages keep viewport-fit=cover. */
   padding: max(10px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) 72px max(20px, env(safe-area-inset-left));
 }
 
-/* A page whose middle runs the whole width of the window (the gallery,
-   whose carousel is the window's width the way the landing page's tour
-   is); only what is read, the section under it, keeps the page's width. */
+/* A page whose middle runs the whole window width (the gallery carousel). */
 .page-wide {
   max-width: none;
   padding-left: max(16px, env(safe-area-inset-left));
@@ -54,8 +43,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 }
 .page-wide .section { max-width: 980px; margin-left: auto; margin-right: auto; }
 
-/* The site's name in the window's lower right corner, the same mark the
-   app itself wears (#watermark in app-shell.css). */
+/* Site name, lower right; same mark as #watermark in app-shell.css. */
 .watermark {
   position: fixed;
   right: 12px;
@@ -67,16 +55,10 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   pointer-events: none;
   user-select: none;
 }
-/* On the landing page it is a link into the app, so it takes the pointer
-   there, and still looks the same as everywhere else. */
 a.watermark { pointer-events: auto; text-decoration: none; }
 a.watermark:hover { color: #fff; text-decoration: none; }
 
-/* ---- The page head ----
-   On a page with a title (the gallery, other projects): the back link, the
-   title and the corner menu share one row, the title centered between the
-   other two. The menu, normally pinned to the page's corner, sits in the
-   row here; its list still drops from it. */
+/* ---- The page head: back link, title and corner menu on one row ---- */
 .page-head {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
@@ -106,8 +88,6 @@ a.watermark:hover { color: #fff; text-decoration: none; }
   letter-spacing: -0.02em;
   font-weight: 800;
 }
-/* The title is the way in, and wears the Fractal-ize button's own gradient
-   so the two read as the same invitation. */
 .masthead h1 a {
   background: linear-gradient(135deg, #ffd23f, #ff6b35 55%, #ff2e63);
   -webkit-background-clip: text;
@@ -129,8 +109,6 @@ a.watermark:hover { color: #fff; text-decoration: none; }
   font-size: 14px;
   color: var(--text-dim);
 }
-/* "Open source" is the way to the repository, but reads as the rest of the
-   line: no color of its own and no underline, even under the pointer. */
 .credits a, .credits a:hover { color: inherit; text-decoration: none; }
 .credits p { margin: 2px 0; }
 
@@ -138,8 +116,6 @@ a.watermark:hover { color: #fff; text-decoration: none; }
 
 .section { margin-top: 48px; }
 
-/* A line of ordinary text introducing what follows it, centered over it:
-   "In depth video tutorial:", "How to:". Sentence case and body-sized. */
 .section-lead {
   margin: 0 0 14px;
   font-size: 17px;
@@ -148,11 +124,7 @@ a.watermark:hover { color: #fff; text-decoration: none; }
   color: var(--text);
 }
 
-/* A 16:9 box the iframe fills (other.html; the landing page's video slide
-   reuses it). By aspect-ratio, NOT the old padding-top trick: a percentage
-   padding is a percentage of the PARENT's width, so the moment this box is
-   narrower than its parent the trick makes it 16:9 of the wrong width,
-   which is exactly what it did, a 532px-wide video 9/16ths of 940px tall. */
+/* 16:9 via aspect-ratio, NOT padding-top: a % padding is of the PARENT's width. */
 .video {
   position: relative;
   width: 100%;
@@ -171,9 +143,7 @@ a.watermark:hover { color: #fff; text-decoration: none; }
 }
 /* ---- The way in ---- */
 
-/* The Fractal-ize button, exactly: every declaration below is .fractalize-btn's
-   own (physics.css), here on a link. Copied because this page does not load
-   that sheet, if the button there changes, change this with it. */
+/* A copy of .fractalize-btn (physics.css); change both together. */
 .fractalize-btn {
   display: inline-block;
   font-family: inherit;
@@ -203,7 +173,6 @@ a.watermark:hover { color: #fff; text-decoration: none; }
   0%, 100% { box-shadow: 0 4px 18px rgba(255, 107, 53, 0.55); }
   50% { box-shadow: 0 4px 30px rgba(255, 46, 99, 0.9); }
 }
-/* Large, as asked: the one place the copy departs from the original. */
 .fractalize-btn.large { font-size: 22px; padding: 18px 48px; }
 @media (prefers-reduced-motion: reduce) {
   .fractalize-btn { animation: none; }
@@ -211,20 +180,15 @@ a.watermark:hover { color: #fff; text-decoration: none; }
 
 /* ---- Other projects ---- */
 
-/* Level with the corner menu's button (40px tall, 10px down), and clear of
-   it on the right. */
 .back-link { display: inline-block; margin: 0 56px 28px 0; padding: 12px 0; font-size: 14px; line-height: 16px; }
 
 .project + .project { margin-top: 48px; }
 .project h2 { margin: 0 0 4px; font-size: 22px; }
 .project .sub { margin: 0 0 14px; font-size: 15px; color: var(--text-dim); }
 
-
 /* ---- The license page ---- */
 
-/* The LICENSE file's own text, as written: monospaced, its line breaks kept,
-   but wrapped, it is hard-wrapped at ~75 columns, which a phone cannot show
-   without either this or a sideways scroll. */
+/* The LICENSE text as written: monospaced, line breaks kept, but wrapped for phones. */
 .license-text {
   margin: 0;
   padding: 20px;
@@ -241,18 +205,9 @@ a.watermark:hover { color: #fff; text-decoration: none; }
 
 /* ---- The gallery ---- */
 
-/* The gallery page's carousel, built like the landing page's tour: the
-   current pattern front and center, its neighbors showing at the edges
-   (the next one about half in view on a wide window), swiped or stepped
-   through with the arrows. It is a scroll container with snapping rather
-   than anything animated by hand, so a swipe, the scroll wheel and the
-   keyboard all just work; the arrows and the dots only scroll it
-   (gallery/gallery.html). The slides are narrower than the track, which
-   is padded at both ends by the difference, so the first and the last can
-   sit centered too. The pattern is square, so the slide is kept narrow
-   enough that it is not taller than most windows. */
-/* In px and vw, not %: a % here would be of the track's content box, which
-   is itself the track less the padding this sets, a circle. */
+/* Carousel: a snap scroll container, so swipe, wheel and keyboard just work.
+   Slides are narrower than the track, padded at both ends by the difference so
+   first and last can center. px and vw, not %: a % here is of the content box. */
 .carousel { --slide-w: min(520px, 82vw); }
 .carousel-window { position: relative; }
 .carousel-track {
@@ -274,8 +229,6 @@ a.watermark:hover { color: #fff; text-decoration: none; }
   text-align: center;
   color: var(--text-dim);
 }
-/* The ones not in the middle are dimmed a little, so the one that is
-   reads as the one to look at. */
 .slide {
   flex: 0 0 var(--slide-w);
   scroll-snap-align: center;
@@ -291,8 +244,7 @@ a.watermark:hover { color: #fff; text-decoration: none; }
 }
 .slide.is-current { opacity: 1; }
 .slide:hover { color: var(--text); text-decoration: none; }
-/* The map, whole, in a fixed square frame: a submitted screenshot can be
-   any shape, and a pattern someone found is not something to crop. */
+/* The whole map in a fixed square: submissions are any shape, never cropped. */
 .slide-frame { position: relative; aspect-ratio: 1 / 1; background: #0c0d11; }
 .slide-map {
   position: absolute;
@@ -301,8 +253,6 @@ a.watermark:hover { color: #fff; text-decoration: none; }
   height: 100%;
   object-fit: contain;
 }
-/* The scene it came from, tucked into a corner like a picture-in-picture.
-   This one IS cropped to shape: it is a reminder, not the exhibit. */
 .slide-scene {
   position: absolute;
   left: 12px;
@@ -325,8 +275,6 @@ a.watermark:hover { color: #fff; text-decoration: none; }
 .slide-name { font-size: 17px; font-weight: 600; }
 .slide-by { font-size: 17px; color: #fff; white-space: nowrap; }
 
-/* The arrows sit on the picture, halfway down it: half the caption's height
-   above the window's own middle. */
 .carousel-arrow {
   position: absolute;
   top: calc(50% - 46px);
@@ -346,8 +294,6 @@ a.watermark:hover { color: #fff; text-decoration: none; }
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease;
 }
-/* Just outside the slide in the middle, or over its edges once the slide
-   is most of the width. */
 .carousel-arrow.prev { left: max(0px, calc(50% - var(--slide-w) / 2 - 56px)); }
 .carousel-arrow.next { right: max(0px, calc(50% - var(--slide-w) / 2 - 56px)); }
 .carousel-arrow:hover { background: rgba(20, 22, 28, 0.95); border-color: var(--accent); }
@@ -375,15 +321,13 @@ a.watermark:hover { color: #fff; text-decoration: none; }
 /* One pattern: nothing to step between. */
 .carousel:not(.has-many) .carousel-arrow,
 .carousel:not(.has-many) .carousel-dots { display: none; }
-/* A finger swipes, and the arrows would only cover the picture. */
+/* Touch swipes instead; arrows would only cover the picture. */
 @media (hover: none) and (pointer: coarse) {
   .carousel-arrow { display: none; }
 }
 
 .submit p { margin: 0; text-align: center; font-size: 17px; }
 
-/* The sample email (gallery.html): a dialog over the page, the three
-   fields of the message each with a Copy button beside it. */
 .mail-dialog {
   width: min(92vw, 560px);
   margin: auto;
@@ -446,8 +390,6 @@ a.watermark:hover { color: #fff; text-decoration: none; }
 }
 .mail-copy:hover { background: var(--bg); border-color: var(--accent); }
 .mail-dialog-actions { margin-top: 14px; text-align: right; font-size: 14px; }
-/* The dialog focuses its first control as it opens, so the ring shows at
-   once: in the page's own accent rather than the browser's. */
 .mail-dialog :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (max-width: 480px) {
   .mail-field { grid-template-columns: minmax(0, 1fr) auto; }
@@ -456,13 +398,8 @@ a.watermark:hover { color: #fff; text-decoration: none; }
 
 /* ---- The landing page: one screen ---- */
 
-/* index.html is a single screen, never taller than the window: the title
-   and the button at the top, the tour (a sideways carousel: the video, the
-   two steps, the gallery, other projects) filling whatever is left in the middle, the dots
-   and the credits at the foot. Nothing scrolls up or down; the wheel, the
-   arrow keys and a swipe step the tour instead (the script in index.html).
-   Everything that has a size in the vertical is given it in vh, so a short
-   window shrinks the type and the gaps rather than losing the foot. */
+/* index.html is one screen: masthead, the tour (a sideways carousel), dots and
+   credits. Vertical sizes are in vh so a short window shrinks type and gaps. */
 body.landing {
   height: 100vh;
   height: 100dvh;
@@ -477,8 +414,7 @@ body.landing {
   padding: env(safe-area-inset-top) max(16px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
 }
 .landing .masthead { flex: none; margin: 0; padding-top: clamp(8px, 2vh, 20px); }
-/* Under the corner menu's button, where the title would otherwise run into
-   it: a phone's width leaves no room beside a 30px title for a button. */
+/* Under the corner menu's button: no room beside a 30px title on a phone. */
 @media (max-width: 640px) {
   .landing .masthead { padding-top: 48px; }
 }
@@ -488,8 +424,6 @@ body.landing {
   font-size: clamp(14px, min(2.2vw, 2.4vh), 19px);
   line-height: 1.35;
 }
-/* The tagline is a way in too, in the text's own color so it still reads
-   as the line under the title; it underlines on hover like any link. */
 .landing .tagline a { color: inherit; }
 .landing .tagline a:hover { color: inherit; text-decoration: underline; }
 .landing .launch { margin: clamp(10px, 2vh, 20px) 0 clamp(12px, 2.4vh, 24px); }
@@ -498,14 +432,9 @@ body.landing {
   padding: clamp(11px, 2vh, 18px) clamp(30px, 5.5vh, 48px);
 }
 
-/* The tour. Its height is what the masthead and the foot leave, and its
-   slides are sized from that: as wide as the window allows, but no wider
-   than lets a 16:9 picture over a caption fit that height, so the
-   screenshots (16:9 themselves) show whole. cqh is the tour's own height
-   (container-type: size); a browser without it keeps the width-only rule
-   and crops instead. The same width, as --slide-w, is what pads the
-   track's ends so the first and last slides can sit centered, and what
-   puts the arrows just outside the slide. */
+/* The tour fills what masthead and foot leave. --slide-w: as wide as the window
+   allows, but no wider than fits a 16:9 picture over a caption in that height
+   (cqh; a browser without it keeps the width rule and crops). Also pads the track. */
 .tour {
   position: relative;
   flex: 1;
@@ -530,12 +459,7 @@ body.landing {
   outline: none;
 }
 .tour-track::-webkit-scrollbar { display: none; }
-/* A slide is as tall as its content, a 16:9 picture over its caption, and
-   sits centered in the track: on a wide window --slide-w was chosen so
-   that just fits, and on a narrow one, where the width is the window's,
-   the card is shorter than the track and floats in the middle. The slides
-   not in the middle are dimmed a little, so the one that is reads as the
-   one to look at. */
+/* A slide is as tall as its content and centered in the track; off-center slides dimmed. */
 .tour-slide {
   display: flex;
   flex: 0 0 var(--slide-w);
@@ -551,9 +475,10 @@ body.landing {
   transition: opacity 0.25s ease;
 }
 .tour-slide.is-current { opacity: 1; }
+/* Edge slides center only when clicked: their video would take the click. */
+.tour-slide:not(.is-current) iframe { pointer-events: none; }
 .tour-track:focus-visible .tour-slide.is-current { box-shadow: 0 0 0 2px var(--accent); }
-/* The picture: 16:9, shrinking (the caption never does) only when even
-   the narrowest fit leaves the slide taller than the track. */
+/* The 16:9 picture shrinks (the caption never does) when the slide is taller than the track. */
 .tour-media {
   position: relative;
   flex: 0 1 auto;
@@ -570,8 +495,6 @@ body.landing {
   height: 100%;
   object-fit: cover;
 }
-/* The step slides are links to the app: the anchor lays out exactly like
-   the slide it fills, so the picture still shrinks when it has to. */
 .tour-link {
   display: flex;
   flex-direction: column;
@@ -581,8 +504,6 @@ body.landing {
 }
 .tour-link:hover { color: inherit; text-decoration: none; }
 .tour-link:hover .tour-caption h2 { text-decoration: underline; }
-/* "Step 1:" / "Step 2:", a badge in the top left corner of the picture,
-   close to three times the caption's size. */
 .tour-step {
   position: absolute;
   top: 10px;
@@ -609,8 +530,6 @@ body.landing {
   line-height: 1.45;
   color: var(--text-dim);
 }
-/* The gallery slide: the gallery's map pictures side by side, filling the
-   same frame the screenshots do, every card a link to the gallery page. */
 .gallery-strip {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -631,8 +550,6 @@ body.landing {
   transition: border-color 0.12s ease;
 }
 .gallery-card:hover { color: var(--text); text-decoration: none; border-color: var(--accent); }
-/* The map fills the card above the name, with the scene it came from in
-   the bottom left corner, a smaller copy of the gallery page's own inset. */
 .gallery-card-frame {
   position: relative;
   flex: 1;
@@ -665,8 +582,6 @@ body.landing {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* The arrows, halfway down the track and just outside the slide, or over
-   its edges once the slide is the whole width. */
 .tour .carousel-arrow { top: 50%; transform: translateY(-50%); }
 .tour .carousel-arrow.prev { left: max(0px, calc(50% - var(--slide-w) / 2 - 56px)); }
 .tour .carousel-arrow.next { right: max(0px, calc(50% - var(--slide-w) / 2 - 56px)); }
@@ -681,9 +596,7 @@ body.landing {
 
 /* ---- The corner menu ---- */
 
-/* One button at the top right of the landing page, and the list it drops
-   down: About, other projects, the source, the license. (This sheet has no
-   general button style: each button here says everything about itself.) */
+/* One button at the top right and the list it drops down. */
 .corner-menu {
   position: absolute;
   top: max(10px, env(safe-area-inset-top));
@@ -731,17 +644,14 @@ body.landing {
   text-decoration: none;
 }
 .corner-menu-list a:hover { background: var(--bg); color: var(--text); text-decoration: none; }
-/* The icons: one color, the text's, so they read as marks in a list rather
-   than as four logos in their brand colors. */
+/* Icons in the text color, not brand colors. */
 .corner-menu-list svg { flex: none; width: 18px; height: 18px; color: var(--text); }
-/* The bat is three times as wide as it is tall, so it gets more width
-   than the others, taken from the margins so the labels still line up. */
+/* The bat is 3:1, so it gets more width, taken from the margins. */
 .corner-menu-list svg.wide { width: 24px; margin: 0 -3px; }
 
 /* ---- The readme page ---- */
 
-/* README.md rendered as a page (readme.html): the document's own
-   headings, so no masthead; the first one is the title. */
+/* README.md rendered as a page: the document's own headings, no masthead. */
 .readme h1 {
   margin: 0 0 12px;
   font-size: clamp(34px, 6vw, 52px);

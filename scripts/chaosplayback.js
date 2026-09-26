@@ -1,35 +1,15 @@
-// This file is part of Chaos Accelerator, licensed under the Common Public
-// Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in the project
-// root, or https://chaosaccelerator.com/license for a hosted copy.
+// CPAL-1.0 License. See chaosaccelerator.com/license.html
 
-// The movie player (chaosplayback.html). Three things, in order:
-//
-//  1. READ the movie out of the address: the scene, how its map is drawn,
-//     and the keyframes (share-url.js). Nothing else is needed, which is
-//     what makes a movie's link something that can be sent to anyone: opened
-//     cold, it renders and plays the same movie.
-//
-//  2. RENDER every frame before showing any of them. The camera's position
-//     at each frame comes from movie-path.js. The PICTURE comes from the app
-//     itself, loaded in a frame and asked for one finished still at a time
-//     (FractalGrid.renderStill), so a movie is drawn by exactly the code
-//     that draws the map: the same precision ladder at a deep zoom, the same
-//     draws sized to what the GPU will allow, the same antialiasing. A second
-//     renderer here would be thousands of lines, and would be a different
-//     picture by the first deep zoom.
-//
-//  3. PLAY what was rendered, looping, from memory. Frames are kept as JPEG
-//     blobs rather than bitmaps, a minute of full-resolution movie is tens
-//     of gigabytes unpacked, and tens of megabytes packed, and unpacked a
-//     little ahead of the playhead as it goes.
+// The movie player (chaosplayback.html): 1. READ the movie out of the address
+// (share-url.js); 2. RENDER every frame first, via the app itself loaded in an iframe
+// (FractalGrid.renderStill), so a movie is drawn by exactly the code that draws the map;
+// 3. PLAY from memory, frames kept as JPEG blobs and unpacked a little ahead of the playhead.
 (function () {
   "use strict";
 
   var FPS = MoviePath.FPS;
   var JPEG_QUALITY = 0.92;
-  // Unpacked frames held at once, as a budget in bytes: enough for half a
-  // second ahead at any sensible size, without a 5-megapixel movie holding
-  // gigabytes.
+  // Unpacked-frame budget: half a second ahead at any sensible size, without gigabytes.
   var DECODED_BUDGET_BYTES = 384 * 1024 * 1024;
   var SPEEDS = [0.25, 0.5, 1, 2, 4];
 
@@ -67,25 +47,17 @@
   var movie = link.view.movie;
   var quality = MoviePath.QUALITIES[Math.min(movie.quality, MoviePath.QUALITIES.length - 1)];
 
-  // The way back. The map gets the keyframes back too, in its own link, so
-  // the Movie card comes up holding the movie this was rendered from, ready
-  // to be changed and rendered again, on the first keyframe's view.
+  // The way back, keyframes included, so the Movie card comes up holding this movie.
   var first = movie.keyframes[0];
   $("back-to-map").href = "chaos.html#" + ShareUrl.encode({
     page: ShareUrl.PAGE_MAP,
     scene: link.scene,
     view: { center: first.center, zoom: first.zoom, display: link.view.display, lowSaturation: link.view.lowSaturation, precision: link.view.precision, movie: movie },
   });
-  // A different movie pasted over this one's address: the simple, certain way
-  // to get from one to the other is to start over.
+  // A different movie pasted over the address: start over.
   window.addEventListener("hashchange", function () { location.reload(); });
 
-  // ---- The screen ----
-  //
-  // One canvas, the size of the stage in device pixels. Whatever is being
-  // shown, a frame just rendered, or the movie playing, is drawn to fit
-  // inside it whole, so a movie keeps its shape in a window that has changed
-  // since it was rendered.
+  // ---- The screen ---- one canvas, stage-sized in device px; whatever is shown is drawn to fit inside it whole.
   var shown = null; // the last thing drawn, for redrawing after a resize
 
   function fitScreen() {
@@ -117,15 +89,10 @@
   var blobPromises = [];  // one per frame; the same promise twice where two frames are the same picture
   var blobs = [];         // what they resolve to
   var frameWidth = 0, frameHeight = 0;
-  // Each finished frame is copied here out of the renderer's canvas, in the
-  // one task it can be (see renderStill), and packed from here.
   var copy = document.createElement("canvas");
   var copyCtx = copy.getContext("2d");
   var recentFrameMs = [];
-  // What has been packed so far, for estimating what the whole movie will
-  // come to. Counted per frame of the MOVIE, so a picture shared by several
-  // identical frames is counted as often as it plays: an estimate of the
-  // movie, which is what a reader expects, a little over what is held.
+  // Packed so far, for the size estimate: counted per frame of the MOVIE, shared pictures included.
   var packedBytes = 0, packedFrames = 0;
   function formatBytes(bytes) {
     var units = ["B", "KB", "MB", "GB"], u = 0;
@@ -133,20 +100,11 @@
     return (u === 0 || bytes >= 100 ? Math.round(bytes) : bytes.toFixed(1)) + " " + units[u];
   }
   var renderStartedAt = 0, frameStartedAt = 0;
-  // How many frames, from the first, are finished pictures: what End Early
-  // keeps. Counted where progress is reported, since that is called once
-  // per finished frame, whether drawn or shared with the one before.
   var renderedCount = 0;
-  // Set by End Early: the frame in flight is abandoned rather than waited
-  // for (its renderer goes with the engine, see finishRender), and its
-  // callback, should it land first, must do nothing.
+  // Set by End Early: the frame in flight is abandoned, and its callback must do nothing.
   var endedEarly = false;
 
-  // The app's own watermark (see #watermark in app-shell.css), drawn INTO
-  // every frame rather than laid over the player, so it is still there in a
-  // downloaded file. Sized against the frame, not in fixed pixels: the same
-  // 12px that reads well on a full-resolution frame would fill a quarter of
-  // a 1/8-resolution one's width.
+  // The app's watermark, drawn INTO every frame so it survives download. Sized against the frame, not fixed px.
   function stampWatermark() {
     var size = Math.max(7, Math.round(copy.height * 0.022));
     var inset = Math.round(size);
@@ -185,16 +143,10 @@
     renderDetail.textContent = detail + "  \u00b7  pauses while this tab is in the background";
   }
 
-  // Everything that decides what a frame looks like. Two frames with the
-  // same key are the same picture (a camera holding still while nothing in
-  // the simulation moves either), and are rendered once.
   function frameKey(f) {
     return [f.center.x, f.center.xLo, f.center.y, f.center.yLo, f.scale, f.step].join(" ");
   }
 
-  // Every frame in `frames` has its picture on the way: wait for the
-  // packing, then play. Also the end End Early jumps to, with `frames` cut
-  // down to the finished ones.
   function finishRender() {
     renderStatus.textContent = "Finishing\u2026";
     Promise.all(blobPromises).then(function (all) {
@@ -203,17 +155,13 @@
         return;
       }
       blobs = all;
-      // The renderer has done its work (or, ended early, is abandoned
-      // mid-frame); its GPU memory is wanted back.
       engine.remove();
       beginPlayback();
     });
   }
 
-  // End Early, confirmed: the movie is the frames finished so far. Nothing
-  // asks the renderer to stop; the frame it is on simply never gets
-  // collected, and the engine is removed once the finished frames are
-  // packed.
+  // End Early, confirmed: the movie is the frames finished so far. The renderer is not
+  // asked to stop; its frame is simply never collected.
   function endEarly() {
     if (endedEarly || renderedCount < 1) return;
     endedEarly = true;
@@ -250,8 +198,7 @@
     frameStartedAt = performance.now();
     var spec = frames[i];
     grid.renderStill({ center: spec.center, scale: spec.scale, step: spec.step, antialias: quality.antialias }, function (canvas) {
-      // Called from inside the renderer's own frame: anything thrown here
-      // would be thrown THERE, and end its render loop for good.
+      // Called from inside the renderer's own frame: anything thrown here would end its render loop.
       if (endedEarly) return; // this frame was given up on
       try {
         if (copy.width !== canvas.width || copy.height !== canvas.height) {
@@ -260,8 +207,6 @@
         }
         copyCtx.drawImage(canvas, 0, 0);
         stampWatermark();
-        // toBlob packs a snapshot taken now, so `copy` is free for the next
-        // frame straight away.
         blobPromises[i] = new Promise(function (resolve) { copy.toBlob(resolve, "image/jpeg", JPEG_QUALITY); });
         blobPromises[i].then(function (blob) {
           if (!blob) return;
@@ -296,20 +241,16 @@
   function startEngine() {
     renderPanel.hidden = false;
     var rect = stage.getBoundingClientRect();
-    // Sized ONCE, in pixels: a renderer that followed the window would
-    // restart its picture on every resize, and hand back frames of different
-    // sizes either side of one.
+    // Sized ONCE: a renderer that followed the window would restart on every resize.
     engine.style.width = Math.max(16, Math.round(rect.width / quality.divisor)) + "px";
     engine.style.height = Math.max(16, Math.round(rect.height / quality.divisor)) + "px";
     engine.addEventListener("load", function () {
-      // A map link starts the map as the page loads (see openAddress in
-      // transition.js), so by now it either has or it isn't going to.
+      // A map link starts the map on load (openAddress in transition.js), so by now it has or won't.
       var grid = null;
       try {
         grid = engine.contentWindow && engine.contentWindow.FractalGrid;
       } catch (err) {
-        // Opened straight off the disk, where a browser treats every file as
-        // an origin of its own and one page may not reach into another.
+        // Opened off the disk: every file is its own origin.
         fail("The movie player has to be opened from a web server (http://\u2026), not as a file.");
         return;
       }
@@ -319,8 +260,6 @@
       }
       beginRender(grid);
     });
-    // The app, opened on this movie's map: drawn the way the movie is to be
-    // drawn, and otherwise at its defaults.
     engine.src = "chaos.html#" + ShareUrl.encode({
       page: ShareUrl.PAGE_MAP,
       scene: link.scene,
@@ -328,21 +267,10 @@
     });
   }
 
-  // ---- The sound ----
-  //
-  // A Shepard tone that follows the zoom: three orders of magnitude in is one
-  // octave up, three out is one down, so a movie that dives forever climbs
-  // forever without ever getting anywhere. Six partials an octave apart,
-  // each faded by a window over log-frequency centred on 220 Hz (an A, so
-  // the partials all land on A's at every thousandfold zoom): full volume
-  // within an octave of the centre, falling away by a cosine to silence two
-  // octaves further out, fuller and more organ-like than Shepard's own
-  // Gaussian, with nothing shrill at the top. As the pitch climbs, a partial
-  // fading out at the top is replaced by one fading in at the bottom, and
-  // since a partial's volume depends only on its absolute frequency the join
-  // is seamless. Each partial is one plain sine: two a few cents apart, for
-  // warmth, beat against each other at a few hertz, which is worse. Everything
-  // moves through smoothing so nothing clicks.
+  // ---- The sound ---- a Shepard tone following the zoom: three orders of magnitude
+  // is one octave. Six sine partials an octave apart, each faded by a window over
+  // log-frequency centred on 220 Hz (flat within an octave, cosine to silence two further
+  // out); a partial's volume depends only on its absolute frequency, so the wrap is seamless.
   var OCTAVES_PER_DECADE = 1 / 3;
   var TONE_CENTER_HZ = 220;
   var TONE_FLAT = 1;           // octaves either side of the centre at full volume
@@ -365,19 +293,13 @@
       osc.start();
       partials.push({ k: k, gain: gain, osc: osc, x: null });
     }
-    // Where partial k sits in the window for a tone at `octaves`: it climbs
-    // continuously with the tone, and wraps from the top of the window to
-    // the bottom, both silent, rather than every partial jumping an octave
-    // whenever the tone crosses a whole number, which was audible however
-    // smoothly it was done.
+    // Partial k's place in the window: climbs continuously and wraps top to bottom, both silent.
     function place(octaves, k) {
       var width = 2 * TONE_HALF_WIDTH, x = (octaves + k + TONE_HALF_WIDTH) % width;
       if (x < 0) x += width;
       return x - TONE_HALF_WIDTH;
     }
-    // The window over log-frequency: flat in the middle, cosine edges, and
-    // exactly zero at the window's edge so the partial that wraps round does
-    // so in silence.
+    // Flat in the middle, cosine edges, exactly zero at the edge so the wrap is silent.
     function bell(x) {
       var a = Math.abs(x);
       if (a <= TONE_FLAT) return 1;
@@ -385,18 +307,13 @@
       return 0.5 * (1 + Math.cos(Math.PI * (a - TONE_FLAT) / (TONE_HALF_WIDTH - TONE_FLAT)));
     }
     return {
-      // `octaves` is the tone's position: any real number, only its fraction
-      // is audible.
       setPitch: function (octaves) {
         var now = ctx.currentTime;
         partials.forEach(function (p) {
           var x = place(octaves, p.k);
           var hz = TONE_CENTER_HZ * Math.pow(2, x);
-          // Small moves are smoothed so nothing zippers; a wrap round the
-          // window (or the movie looping or being seeked) is taken at once:
-          // an oscillator changes pitch without a break in its wave, so an
-          // instant change makes no click where a smoothed one would chirp.
-          // Volume is always smoothed: an instant change there IS a click.
+        // Small moves are smoothed; a wrap (or a seek) jumps at once: an instant pitch
+        // change makes no click, a smoothed one would chirp. Volume is always smoothed.
           var jump = p.x === null || Math.abs(x - p.x) > 0.5;
           if (jump) p.osc.frequency.setValueAtTime(hz, now);
           else p.osc.frequency.setTargetAtTime(hz, now, 0.02);
@@ -404,7 +321,6 @@
           p.x = x;
         });
       },
-      // 1 is on, 0 is off; either way it gets there smoothly.
       setLevel: function (level) {
         master.gain.setTargetAtTime(TONE_LEVEL * level, ctx.currentTime, TONE_FADE_S);
       },
@@ -415,14 +331,12 @@
     };
   }
 
-  // Frame i's place on the tone, from the zoom it was rendered at.
   var log10DefaultScale = 0;
   function pitchOf(i) {
     return (log10DefaultScale - Math.log10(frames[i].scale)) * OCTAVES_PER_DECADE;
   }
 
-  // The live sound: off until asked for, and the AudioContext made only then,
-  // in the click, browsers don't let a page start sound on its own.
+  // Off until asked, and the AudioContext made only in the click: a page can't start sound on its own.
   var btnSound = $("sound");
   var soundOn = false, audioCtx = null, liveTone = null;
   function updateSound() {
@@ -449,8 +363,7 @@
   var decoded = {};       // frame index -> ImageBitmap, or true while it is being unpacked
   var maxDecoded = 24;
 
-  // At more than two frames of movie per frame of screen there is no point
-  // unpacking the ones that would never be shown.
+  // Past two movie frames per screen frame, skip unpacking the ones never shown.
   function stride() { return Math.max(1, Math.round(SPEEDS[speedIndex] * FPS / 60)); }
   function indexAt(p) {
     var i = Math.floor(p / stride()) * stride();
@@ -465,8 +378,6 @@
       decoded[i] = bitmap;
     }, function () { delete decoded[i]; });
   }
-  // The frame under the playhead and the ones coming up, unpacked; everything
-  // else let go.
   function keepAhead() {
     var wanted = {}, step = stride(), i = indexAt(position);
     for (var n = 0; n < maxDecoded; n++) {
@@ -506,9 +417,7 @@
         if (looping) next = next % frames.length;
         else { next = frames.length - 1; setPlaying(false); }
       }
-      // Never ahead of the unpacker: a playhead that ran on regardless would
-      // skip whatever wasn't ready, and a movie that stutters forward reads
-      // worse than one that waits a frame.
+      // Never ahead of the unpacker: waiting a frame reads better than stuttering forward.
       if (decoded[indexAt(next)] && decoded[indexAt(next)] !== true) position = next;
     }
     lastTickAt = now;
@@ -540,7 +449,6 @@
     [btnPlayPause, scrubber, btnSpeed, btnLoop, btnRestart, btnSound].forEach(function (control) { control.disabled = false; });
 
     btnPlayPause.addEventListener("click", function () {
-      // Play, at the end of a movie that doesn't loop, means play it again.
       if (!playing && !looping && position >= frames.length - 1) seek(0);
       setPlaying(!playing);
     });
@@ -572,19 +480,10 @@
     requestAnimationFrame(tick);
   }
 
-  // ---- Saving it as a file ----
-  //
-  // The frames are replayed once, off screen, into a canvas the browser's own
-  // MediaRecorder is filming, so this takes as long as the movie runs, and
-  // produces whatever video format this browser records (WebM in Chrome and
-  // Firefox, MP4 in Safari). That is the price of having no encoder of our
-  // own: a real one would mean shipping a muxer library. Every frame is held
-  // for exactly one frame's time, paced against the clock rather than by
-  // counting timeouts, so the file runs at the movie's own speed.
-  //
-  // With the sound on, the file gets the tone too: a second Shepard tone,
-  // played into the recording alone and not the speakers, following the
-  // frames as they are filmed. With it off the file has no audio track.
+  // ---- Saving it as a file ---- the frames are replayed once, off screen, into a canvas
+  // MediaRecorder is filming, so it takes as long as the movie and produces whatever this
+  // browser records (WebM in Chrome/Firefox, MP4 in Safari). Paced against the clock, not by
+  // counting timeouts. With sound on, a second tone plays into the recording alone.
   var DOWNLOAD_LABEL = "Download";
   function downloadMovie() {
     if (btnDownload.disabled) return;
@@ -610,8 +509,7 @@
         filmTone = new ShepardTone(audioCtx, sink);
         stream.addTrack(sink.stream.getAudioTracks()[0]);
       }
-      // Generous on purpose: this picture is mostly fine noise, which a
-      // default bitrate turns to mush.
+      // Generous: fine noise turns to mush at a default bitrate.
       recorder = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: Math.min(60e6, Math.max(8e6, frameWidth * frameHeight * 12)), audioBitsPerSecond: 128000 });
     } catch (err) {
       if (filmTone) filmTone.stop();
@@ -636,7 +534,6 @@
     };
     btnDownload.disabled = true;
     var startedAt = 0;
-    // "1m29s", or "29s" inside the first minute.
     function formatRecorded(seconds) {
       seconds = Math.floor(seconds);
       var m = Math.floor(seconds / 60), s = seconds % 60;
@@ -645,8 +542,7 @@
     var movieLength = formatRecorded(blobs.length / FPS);
     function film1(i) {
       if (i >= blobs.length) {
-        // One more frame's time, or the last frame is cut short, and with
-        // sound, long enough for the tone to fade out rather than stop dead.
+        // One more frame's time, or the last frame is cut short; with sound, long enough to fade.
         if (filmTone) filmTone.setLevel(0);
         setTimeout(function () { recorder.stop(); }, filmTone ? Math.max(1000 / FPS, 1000 * TONE_FADE_S * 4) : 1000 / FPS);
         return;
@@ -662,8 +558,7 @@
         }, Math.max(0, due - performance.now()));
       }, function () { recorder.stop(); });
     }
-    // The first frame is on the canvas before filming starts, so the file
-    // doesn't open on a blank.
+    // First frame on the canvas before filming starts, so the file doesn't open on a blank.
     createImageBitmap(blobs[0]).then(function (bitmap) {
       filmCtx.drawImage(bitmap, 0, 0);
       bitmap.close();

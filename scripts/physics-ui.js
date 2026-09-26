@@ -1,27 +1,16 @@
-// This file is part of Chaos Accelerator, licensed under the Common Public
-// Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in the project
-// root, or https://chaosaccelerator.com/license for a hosted copy.
+// CPAL-1.0 License. See chaosaccelerator.com/license.html
 
+// Scene builder UI: canvas drawing, tools and handles, the side panel, playback,
+// scene import/export and the hand-off to the fractal grid.
 (function (global) {
   "use strict";
 
-  // Now a scene property (scene.simulationSteps: the Simulation Duration
-  // slider), not a fixed constant: it travels with the scene through export/
-  // import and the Fractal Grid handoff, so the same duration authored here
-  // is what a sent scene simulates per pixel there. This is only the default
-  // for a brand-new scene, and for pasted JSON that leaves it out: see the
-  // scene object literal and parseSceneData below.
+  // Default only: simulationSteps travels with the scene (export/import, grid handoff).
   var DEFAULT_SIMULATION_STEPS = 1000;
-  // Notches are hundreds of steps: matches fractal-grid.js's own slider
-  // exactly, notch-for-notch, since a scene's simulationSteps now has to mean
-  // the same thing on both pages' identical sliders.
+  // Notches match fractal-grid.js's slider notch-for-notch.
   var SIMULATION_STEPS_PER_NOTCH = 100;
   var SIMULATION_STEPS_MAX_NOTCHES = 50;
-  // The slider moves in hundreds; the number beside it can be typed, to any
-  // whole step up to the slider's own top. So a duration is no longer always
-  // a notch, the slider just rests on the nearest one, and everything that
-  // takes a duration in (a loaded scene, a link, the map's own control) keeps
-  // the exact value, clamped, rather than snapping it.
+  // Typed durations keep their exact value; the slider just rests on the nearest notch.
   var SIMULATION_STEPS_MAX = SIMULATION_STEPS_PER_NOTCH * SIMULATION_STEPS_MAX_NOTCHES;
   function clampSimulationSteps(v) {
     v = Number(v);
@@ -31,27 +20,16 @@
   function simulationStepsNotch(steps) {
     return Math.min(SIMULATION_STEPS_MAX_NOTCHES, Math.max(1, Math.round(steps / SIMULATION_STEPS_PER_NOTCH)));
   }
-  // Auto-saved on every edit so navigating away and back (e.g. via the
-  // above, or the topbar's back-link) restores exactly what was there
-  // before, instead of resetting to the hardcoded seed scene.
+  // Auto-saved on every edit; restored when the page is reopened.
   var EDITOR_STORAGE_KEY = "physicsEditorScene";
-  // Set while the scene on screen is one that arrived by link and has not
-  // been edited since: see saveEditorAutosave. `true` until the first save
-  // after loading, which is when the scene has settled (restored, framed,
-  // normalized) into what "unedited" actually looks like.
+  // Non-null while the scene arrived by link and is unedited: see saveEditorAutosave.
   var sharedSceneIdentity = null;
-  // Shared with fractal-grid.js's tip-popover system (not page-specific):
-  // this page has no tips of its own yet, but the Settings panel's Reset
-  // Tool Tips button clears the same key either way, so it's ready to work
-  // the moment tips do get added here too.
   var TIP_DISMISSED_KEY = "physicsAppDismissedTips";
 
   var canvas = document.getElementById("physics-canvas");
   var ctx = canvas.getContext("2d");
   var canvasArea = document.getElementById("canvas-area");
-  // Floats over the canvas at top center: read for its RECT, not grabbed
-  // for hiding: it is what decides how far down the drag-to-delete zone has
-  // to sit. See deleteZoneCenter.
+  // Read for its rect: decides where the drag-to-delete zone sits (deleteZoneCenter).
   var playbackToolbar = document.getElementById("playback-toolbar");
   var panelEl = document.getElementById("panel");
   var btnSettings = document.getElementById("btn-settings");
@@ -109,20 +87,8 @@
   var btnSendToGrid = document.getElementById("btn-send-to-grid");
   var sendToGridErrorEl = document.getElementById("send-to-grid-error");
 
-  // X/Y aren't wired to any behavior yet: this just records, per the scene,
-  // which (body, property) pair is earmarked as the future override target
-  // for the fractal-viewer integration. Output IS wired up (colors the
-  // playback background): it excludes radius/length since the simulation
-  // never changes a shape's size, only its position and rotation.
-  // vx/vy: an offset added to whatever starting velocity the body already
-  // has (authored directly, or set with the Set Velocity tool), the exact
-  // same "offset an authored value" treatment x/y/angle/radius/length/size
-  // already get, just landing on velocity instead of position/shape. Listed
-  // last since, unlike every property above it, changing it has no visible
-  // effect on the scene as drawn in the editor (only once Play/the grid
-  // steps the scene does a velocity do anything): see
-  // physics-grid-codegen.js's velocityTargets for where the offset is
-  // actually applied.
+  // X/Y Inputs only record a target; Output colors the playback background.
+  // vx/vy are offsets, applied in physics-grid-codegen.js's velocityTargets.
   var PROPERTIES_BY_TYPE = {
     circle: [
       { key: "x", label: "Center X" },
@@ -148,8 +114,7 @@
       { key: "vx", label: "Starting X Velocity" },
       { key: "vy", label: "Starting Y Velocity" },
     ],
-    // Identical trapezoid to a funnel, so identical linkable properties,
-    // only which edge is the special one differs (see createSplitter).
+    // Same trapezoid as a funnel; only the special edge differs (createSplitter).
     splitter: [
       { key: "x", label: "Center X" },
       { key: "y", label: "Center Y" },
@@ -159,22 +124,13 @@
       { key: "vy", label: "Starting Y Velocity" },
     ],
   };
-  // Output-only (never an X/Y Input: see PROPERTIES_BY_TYPE above): a
-  // bounce count is something a run PRODUCES, not a starting condition you
-  // can dial in. Unlike the other three it isn't a body-state field at all;
-  // it's accumulated over the run by counting the steps where this body
-  // starts touching something (see PhysicsEngine.step's contactFlags).
+  // Output-only: bounces are accumulated over a run (PhysicsEngine.step's contactFlags).
   var OUTPUT_PROPERTIES = [
     { key: "x", label: "Center X" },
     { key: "y", label: "Center Y" },
     { key: "angle", label: "Rotation" },
     { key: "bounces", label: "Bounce Count" },
   ];
-  // What an Output can read once a SECOND object is chosen. The three
-  // positional ones become the mean of the pair; "distance" has no one-body
-  // meaning at all, so it only exists here. Bounce Count is deliberately
-  // absent: a bounce is one body's event, and "the average bounce count of
-  // two bodies" is a number nobody wants to look at.
   var OUTPUT_PAIR_PROPERTIES = [
     { key: "x", label: "Average X" },
     { key: "y", label: "Average Y" },
@@ -186,22 +142,10 @@
   }
 
   var scene = {
-    // Off: the usual constant downward gravity. On: no "down" at all, and
-    // every body attracts every other by its mass instead, see
-    // PhysicsEngine.computeAccelerations.
+    // On: no "down"; every body attracts every other (PhysicsEngine.computeAccelerations).
     mutualGravity: false,
-    // On: bodies bounce off each other exactly as they always have.
-    // Off: PhysicsEngine.step never checks any pair for contact at all,
-    // no impulse, so everything passes straight through
-    // everything else. Toggling Mutual Gravity flips this to a sensible
-    // default (see mutualGravityCheckbox's own handler) but never locks it;
-    // the checkbox itself always wins after that.
+    // Off: no pair contact at all. Toggling Mutual Gravity resets this to a default.
     collisionsEnabled: true,
-    // How many steps Play (and a scene sent to the Fractal Grid) simulates:
-    // see the Simulation Duration slider. Shared with fractal-grid.js's own
-    // per-pixel step count: sending a scene seeds that page's slider with
-    // this value, though it can still be explored further from there without
-    // that changing what's authored here.
     simulationSteps: DEFAULT_SIMULATION_STEPS,
     bodies: [],
     hinges: [],
@@ -209,19 +153,10 @@
     xInput: null,
     yInput: null,
     output: null,
-    // The Pac-Man-wrap edges (see PhysicsEngine.step). Live-synced to the
-    // canvas's current size while editing (see resizeCanvas), then frozen
-    // the moment Play or Send-to-Grid locks in a run: see isPlaying's
-    // gate on that sync, and btnSendToGrid's handler below.
+    // Wrap edges. Synced to the canvas while editing, frozen once Play/Send locks a run.
     frameWidth: 0,
     frameHeight: 0,
-    // "Stop when any object reaches the frame edge": travels with
-    // the scene (serialized, sent to the fractal grid) since it's really a
-    // property of how this scene's Output should be read, not a page-local
-    // viewing preference. Defaults on: a wrapped-around Output value is
-    // rarely what you want to see colored, and continuous stop-at-edge is
-    // the behavior almost every scene should use unless explicitly opted
-    // out of.
+    // Stop-at-edge vs wrap: serialized with the scene, since it changes how Output reads.
     edgeMode: PhysicsEngine.DEFAULT_EDGE_MODE,
     maxSimulationBodies: PhysicsEngine.MAX_SIMULATION_BODIES,
   };
@@ -232,53 +167,20 @@
   var stepCount = 0;
   var dragging = false;
   var dragOffset = { x: 0, y: 0 };
-  // True while a body drag (see `dragging` above) currently has the body
-  // over the delete zone: recomputed every mousemove, read on mouseup to
-  // decide whether releasing there deletes the body instead of just moving
-  // it, and read by render() to draw the zone at its "about to delete" size.
   var deleteZoneArmed = false;
-  // A drag that began on a hinge's dot (select tool only). It moves nothing,
-  // not the hinge, not either body: a hinge's position is where two bodies
-  // were pinned, and sliding it would mean re-deriving both local anchors
-  // under the user's finger. All the drag is for is carrying the hinge to the
-  // delete zone, which until this existed was something a hinge could only
-  // reach by taking one of its bodies with it. `current` is the pointer, for
-  // the ghost dot render() draws there.
+  // A drag on a hinge dot moves nothing; it only carries the hinge to the delete zone.
   var hingeDrag = null; // { hingeIndex, current: {x,y} }
-  // Which spring is selected, if any, never at the same time as a body
-  // (selectBody and selectSpring each clear the other). A selected spring is
-  // what the panel's two Spring sliders edit, and what Delete removes.
   var selectedSpring = -1;
-  // The Spring tool, mid-drag: where the press landed (see pickSpringEnd) and
-  // where the pointer is now. Committed on release by finalizeSpringDrawing.
   var springDraw = null; // { start: <spring end>, current: {x,y} }
-  // A drag that began on a spring (select tool only), the same gesture as
-  // hingeDrag and for the same purpose: it moves nothing, and exists to carry
-  // the spring to the delete zone.
   var springDrag = null; // { springIndex, current: {x,y} }
-  // Click-and-drag shape creation: set on mousedown while the Circle/Line
-  // tool is active, updated on every mousemove to drive the temp preview
-  // (see drawShapePreview), and consumed (cleared, turned into a real body)
-  // on mouseup, see finalizeShapeDrawing. null whenever not actively
-  // drawing a new shape.
   var drawingShape = null; // { tool: "circle" | "line", start: {x,y}, current: {x,y} }
   var velocityDrag = null; // Set Velocity tool, mid-drag: { bodyIndex, start: {x,y}, current: {x,y} }
-  // The on-canvas Radius/Length handle (see resizeHandleGeometry), mid-drag.
-  // Only bodyIndex: everything about WHERE the handle is and which way it
-  // points is recomputed fresh every mousemove from the body's current
-  // state, not cached at drag-start, a hinge-preserving resize can move
-  // body.x/y out from under a stale snapshot mid-drag (see
-  // PhysicsHingeGeometry.applyBodyEditPreservingHinge).
+  // Only bodyIndex: handle geometry is recomputed every move, since a hinge-preserving
+  // resize can move body.x/y mid-drag.
   var resizeHandleDrag = null; // { bodyIndex }
-  // The on-canvas rotation handle (line only), mid-drag. angleOffset is
-  // captured once at mousedown, the difference between the cursor's angle
-  // around the pivot and the body's angle at that moment, so the body
-  // doesn't snap the instant the drag starts (see updateRotationHandleDrag).
+  // angleOffset (cursor angle minus body angle at mousedown) stops the body snapping on grab.
   var rotationHandleDrag = null; // { bodyIndex, angleOffset }
-  // A drag shorter than this reads as "just a click": places the same
-  // fixed-size default shape the tool always used to (see
-  // computeShapeParams), rather than the tiny near-zero-size body a literal
-  // reading of the drag distance would create.
+  // Shorter drags count as a click and place the default-size shape.
   var CLICK_DRAG_THRESHOLD = 6;
   var DEFAULT_CIRCLE_RADIUS = 30;
   var DEFAULT_LINE_LENGTH = 140;
@@ -288,11 +190,7 @@
   var LENGTH_MIN = 10, LENGTH_MAX = 800;
   var rafId = null;
   var dpr = 1;
-  // 1 while editing (the canvas fills canvasArea exactly, its own long-
-  // standing behavior); while playing, canvasArea can be a different size/
-  // aspect ratio than the locked scene.frameWidth/frameHeight, so this is
-  // how much the frame is scaled up/down to fit inside it without
-  // distorting it: see resizeCanvas.
+  // 1 while editing; while playing, how much the locked frame is scaled to fit canvasArea.
   var displayScale = 1;
 
   function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
@@ -304,17 +202,8 @@
 
   // ---- Rendering ----
 
-  // Ruled from the ORIGIN out, rather than from the top-left corner in: the
-  // coordinate system a scene is authored and read in puts (0, 0) at the
-  // center of the frame with +y pointing up (see physics-coords.js), and a
-  // mesh that starts counting from a corner quietly says otherwise. Every
-  // line is the same weight: the two through the origin are deliberately
-  // NOT emphasized, so this stays a sense of scale behind the scene rather
-  // than a pair of marks competing with it.
-  //
-  // Still drawn in engine space (the same space body.x/y is in, and the
-  // space this whole file draws in): this is a picture OF the authored
-  // system, not a second copy of it.
+  // Ruled from the origin (frame center: see physics-coords.js), not the corner;
+  // every line the same weight on purpose.
   var GRID_STEP = 50;
   function drawGrid(w, h) {
     var originX = w / 2, originY = h / 2;
@@ -330,27 +219,13 @@
     ctx.stroke();
   }
 
-  // A circle smaller than this is drawn AT this size during playback: a
-  // display floor only, with nothing behind it changed: the body keeps its
-  // real radius for collisions, mass and gravity, and the fractal grid's own
-  // preview applies the same floor (see drawHoverBody in fractal-grid.js).
-  // Small radii are easy to reach: the fractal grid can link a radius to a
-  // pixel's coordinate, so a body can be a fraction of a pixel across and
-  // simply invisible while it's the thing you're trying to watch.
-  //
-  // Playback only. While editing, the drawn size is the size you are setting,
-  // and quietly rounding it up would make the Radius field lie about what it
-  // does below 15.
+  // Playback-only display floor; physics keeps the real radius (the grid preview does the same).
   var MIN_PLAYBACK_DISPLAY_RADIUS = 15;
   function playbackDisplayRadius(radius) {
     return isPlaying ? Math.max(radius, MIN_PLAYBACK_DISPLAY_RADIUS) : radius;
   }
 
-  // The trapezoid's 4 corners in path order (mouthLeft -> throatLeft ->
-  // throatRight -> mouthRight): shared by the funnel and the splitter,
-  // which are the same shape. Takes a plain {x,y,angle,size} rather than a
-  // real body so drawShapePreview can call it on the in-progress drag params
-  // too, not just a placed body.
+  // Trapezoid corners in path order (mouthLeft, throatLeft, throatRight, mouthRight).
   var FUNNEL_MOUTH_COLOR = "#2dd4bf"; // teal: the funnel's teleporting long side
   var SPLITTER_SHORT_COLOR = "#f0883e"; // amber: the splitter's splitting short side
   function funnelPathVertices(x, y, angle, size) {
@@ -358,12 +233,7 @@
     return [v.mouthLeft, v.throatLeft, v.throatRight, v.mouthRight];
   }
 
-  // Which edge of that trapezoid is the special (non-wall) one, as a pair of
-  // indices into the list above: a funnel's is the long mouth (3->0, where
-  // a ball teleports to the throat), a splitter's is the short throat (1->2,
-  // where a ball becomes two on the mouth). The other three are ordinary
-  // walls in both cases, so drawing only has to know which single edge to
-  // pull out and what color it gets.
+  // The special (non-wall) edge: funnel = long mouth (3->0), splitter = short throat (1->2).
   function trapezoidEdgeRoles(type) {
     var isSplitter = type === "splitter";
     var special = isSplitter ? [1, 2] : [3, 0];
@@ -411,10 +281,6 @@
         ctx.strokeStyle = "#ffcf4d";
         strokeEdges(roles.solid.concat([roles.special]));
       }
-      // The 3 wall edges match a line's own color; the special one, the
-      // funnel's teleporting mouth, or the splitter's splitting short side,
-      // is drawn separately in a distinct color so it reads as different
-      // from a wall.
       ctx.lineWidth = PhysicsEngine.LINE_THICKNESS;
       ctx.strokeStyle = body.isAnchored ? "#5a6178" : "#3a63d1";
       strokeEdges(roles.solid);
@@ -438,12 +304,7 @@
     ctx.restore();
   }
 
-  // Shared by drawShapePreview and finalizeShapeDrawing, so what's
-  // previewed while dragging is exactly what gets placed on release. A drag
-  // under CLICK_DRAG_THRESHOLD is treated as a plain click and returns the
-  // same fixed-size default (centered exactly where they clicked) the tool
-  // always placed before this feature existed, dragging further is what's
-  // new, sizing the shape from the drag itself instead.
+  // Shared by preview and placement. A drag under CLICK_DRAG_THRESHOLD places the default size.
   function computeShapeParams(shape, endPoint) {
     var start = shape.start;
     var dx = endPoint.x - start.x, dy = endPoint.y - start.y;
@@ -453,16 +314,11 @@
       if (shape.tool === "funnel" || shape.tool === "splitter") return { x: start.x, y: start.y, radius: 0, angle: 0, length: 0, size: DEFAULT_FUNNEL_SIZE };
       return { x: start.x, y: start.y, radius: 0, angle: 0, length: DEFAULT_LINE_LENGTH, size: 0 };
     }
-    // Circle and funnel are both "drag from center, release sets size":
-    // drag distance IS the size directly, same 1:1 feel as a circle radius.
     if (shape.tool === "circle") return { x: start.x, y: start.y, radius: dist, angle: 0, length: 0, size: 0 };
     if (shape.tool === "funnel" || shape.tool === "splitter") return { x: start.x, y: start.y, radius: 0, angle: 0, length: 0, size: dist };
     return { x: (start.x + endPoint.x) / 2, y: (start.y + endPoint.y) / 2, radius: 0, angle: Math.atan2(dy, dx), length: dist, size: 0 };
   }
 
-  // The "if they let go now" preview while click-dragging a new circle/line
-  // into existence (see drawingShape): dashed and translucent so it never
-  // reads as an already-placed body.
   function drawShapePreview(shape) {
     var params = computeShapeParams(shape, shape.current);
     ctx.save();
@@ -508,10 +364,6 @@
     ctx.restore();
   }
 
-  // Consumes `shape` (see drawingShape) into a real body at mouse-release,
-  // using the exact same params drawShapePreview just showed, then
-  // everything after is identical to how a body has always been created
-  // (select it, refresh the mapping dropdowns, back to Select).
   function finalizeShapeDrawing(shape, endPoint) {
     var params = computeShapeParams(shape, endPoint);
     if (shape.tool === "circle") {
@@ -529,33 +381,15 @@
   }
 
   // ---- Starting-velocity arrows (the Set Velocity tool) ----
-  //
-  // One pixel of drag becomes this much starting speed, and an arrow drawn
-  // for an existing velocity is that velocity divided by the same number,
-  // so the arrow you let go of is exactly the arrow that stays behind.
-  //
-  // At 1, one pixel dragged is one pixel per second, so a 60px drag is a
-  // tidy one pixel per frame at the engine's 1/60s step. That is a third as
-  // much speed per pixel as this started out at, which is the point: aiming
-  // is three times finer, at the cost of three times the drag for a given
-  // speed. Note the engine's own speed ceiling now needs a drag as long as
-  // the cap itself (1000px under ordinary gravity, more under Mutual), which
-  // is wider than the canvas, so top speed is no longer reachable by
-  // dragging alone, only by typing a velocity into a scene's JSON.
+  // Starting speed per pixel of drag; at 1 the engine's speed cap is beyond a canvas-wide drag.
   var VELOCITY_DRAG_SCALE = 1;
   var VELOCITY_ARROW_COLOR = "#e06bff";
-  // Below this there is no meaningful direction to point, and a
-  // one-pixel-long arrow on every body reads as clutter rather than data.
   var VELOCITY_ARROW_MIN_SPEED = 1;
 
   function velocityFromDrag(drag) {
     var vx = (drag.current.x - drag.start.x) * VELOCITY_DRAG_SCALE;
     var vy = (drag.current.y - drag.start.y) * VELOCITY_DRAG_SCALE;
-    // The engine clamps on the very first step anyway (see advanceVelocity),
-    // so clamping here too keeps the arrow honest: it shows the speed the
-    // body will actually start with, not one that would be silently trimmed
-    // the moment Play is pressed. Which ceiling applies depends on the
-    // scene's gravity mode, so ask rather than assuming.
+    // Clamp as the engine does on its first step, so the arrow shows the real start speed.
     var cap = PhysicsEngine.speedCapFor(scene);
     var speed = Math.sqrt(vx * vx + vy * vy);
     if (speed > cap) {
@@ -571,9 +405,6 @@
     var len = speed / VELOCITY_DRAG_SCALE;
     var ux = vx / speed, uy = vy / speed;
     var tipX = x + ux * len, tipY = y + uy * len;
-    // Head scales with the arrow but stays inside sane bounds, so a tiny
-    // velocity doesn't get a head bigger than its shaft and a huge one
-    // doesn't grow a head the size of the body.
     var head = Math.min(14, Math.max(6, len * 0.25));
     var perpX = -uy, perpY = ux;
 
@@ -585,8 +416,6 @@
     if (isPreview) ctx.setLineDash([6, 4]); // dashed only while the drag is still live
     ctx.beginPath();
     ctx.moveTo(x, y);
-    // Stop the shaft just short of the tip so a round line cap can't poke
-    // out through the head.
     ctx.lineTo(tipX - ux * head * 0.6, tipY - uy * head * 0.6);
     ctx.stroke();
     ctx.setLineDash([]);
@@ -599,20 +428,12 @@
     ctx.restore();
   }
 
-  // Every non-anchored body's starting velocity, so whatever the tool left
-  // behind stays visible rather than being invisible state you have to
-  // remember. Editing only: during playback the velocity changes every frame
-  // and is already shown by the motion itself, so arrows there would be
-  // noise instead of a description of the scene being authored.
+  // Editing only: during playback the motion shows the velocity itself.
   function drawVelocityArrows() {
     if (isPlaying) return;
     for (var i = 0; i < scene.bodies.length; i++) {
       var body = scene.bodies[i];
-      // An anchored body never moves, so it has no starting velocity to show
-      // - and the tool refuses to give it one.
       if (body.isAnchored) continue;
-      // The body being dragged right now is drawn from the live drag below
-      // instead, so its old arrow doesn't linger underneath the new one.
       if (velocityDrag && velocityDrag.bodyIndex === i) continue;
       drawVelocityArrow(body.x, body.y, body.vx, body.vy, false);
     }
@@ -636,8 +457,6 @@
     ctx.lineWidth = 2;
     ctx.stroke();
     if (grabbed) {
-      // The hinge stays put while it is dragged (see hingeDrag), so this ring
-      // is what says WHICH one the ghost under the pointer stands for.
       ctx.beginPath();
       ctx.arc(p.x, p.y, HINGE_RADIUS + 5, 0, Math.PI * 2);
       ctx.strokeStyle = "#ffcf4d";
@@ -646,9 +465,6 @@
     }
   }
 
-  // The thing actually under the pointer during a hinge drag: a faded copy of
-  // the dot, tethered back to the real one, so the gesture reads as "carrying
-  // this hinge somewhere" even though the hinge itself never moves.
   function drawHingeDragGhost(drag) {
     var hinge = scene.hinges[drag.hingeIndex];
     if (!hinge) return;
@@ -673,19 +489,12 @@
     ctx.restore();
   }
 
-  // The Spring tool's drag, as the spring it would become: from wherever the
-  // press landed to wherever a release right now would (both snapped exactly
-  // as finalizeSpringDrawing will snap them), relaxed, at the softest weight,
-  // its real stiffness is not decided until it exists.
   function drawSpringPreview(draw) {
     var end = pickSpringEnd(draw.current.x, draw.current.y);
     var dx = end.world.x - draw.start.world.x, dy = end.world.y - draw.start.world.y;
     drawSpringShape(draw.start.world, end.world, PhysicsEngine.SPRING_STIFFNESS_MIN, Math.sqrt(dx * dx + dy * dy), false, 0.7);
   }
 
-  // The thing under the pointer during a spring drag: see drawHingeDragGhost,
-  // whose gesture this is. The spring itself never moves; it is already drawn
-  // selected, which is what says which one the ghost stands for.
   function drawSpringDragGhost(drag) {
     var spring = scene.springs[drag.springIndex];
     if (!spring) return;
@@ -709,11 +518,7 @@
       spring.stiffness, 60, false, 0.6);
   }
 
-  // Which hinge's dot is under this point, or -1. Last-drawn first, matching
-  // what is visibly on top. Only HALF the touch slop the bodies get: a hinge
-  // always sits on a body, so every pixel given to it is taken from that
-  // body's own grab area, and a pendulum bob pinned through its center (a
-  // 30px circle) would otherwise be nearly all hinge to a finger.
+  // Hinge dot under this point, or -1; last-drawn first. Half the bodies' touch slop: a hinge sits on a body.
   function hitTestHinge(px, py) {
     var r = HINGE_RADIUS + HINGE_HIT_PAD + pointerSlop / 2;
     for (var i = scene.hinges.length - 1; i >= 0; i--) {
@@ -725,13 +530,7 @@
   }
 
   // ---- Springs ----
-  //
-  // Drawn as a zigzag between its two attachment points. Two things about it
-  // are readouts rather than decoration: its THICKNESS is its stiffness (on
-  // the slider's own log scale, so equal slider travel is equal change in
-  // weight), and its number of coils is fixed by its REST length, so a
-  // spring that has been stretched shows long, open coils and a compressed
-  // one shows them packed, which is how a real one tells you the same thing.
+  // Thickness is stiffness (log scale); coil count follows REST length, so stretch reads as open coils.
   var SPRING_COLOR = "#c8d3e6";
   var SPRING_SELECTED_COLOR = "#ffcf4d";
   var SPRING_COIL_AMPLITUDE = 8;   // half the zigzag's width
@@ -740,9 +539,7 @@
   var SPRING_LEAD = 10;            // the straight stub at each end
   var SPRING_WIDTH_MIN = 1.5, SPRING_WIDTH_MAX = 6;
   var SPRING_HIT_PAD = 3;
-  // Within this of a body's center, an end snaps TO the center. Dead center is
-  // the one attachment with no lever arm, a ball hung a pixel off it slowly
-  // starts to spin, and it is nobody's intent to miss it by a pixel.
+  // Within this of a body's center an end snaps to the center (no lever arm, no spin).
   var SPRING_CENTER_SNAP = 8;
 
   // 0 at the softest spring the slider allows, 1 at the stiffest.
@@ -762,13 +559,9 @@
     if (len < 1e-6) return;
     var ux = dx / len, uy = dy / len, px = -uy, py = ux;
     var lead = Math.min(SPRING_LEAD, len * 0.2);
-    // By rest length, so stretch reads as open coils, with a floor from the
-    // drawn length, or a spring with little or no rest length (every coil it
-    // has spread over hundreds of pixels) stops looking like a spring at all.
     var coils = clamp(Math.max(Math.round(restLength / SPRING_COIL_PITCH), Math.ceil(len / SPRING_COIL_MAX_PITCH)), 6, 40);
     var span = len - 2 * lead;
     ctx.lineTo(a.x + ux * lead, a.y + uy * lead);
-    // Two points per coil, alternating sides, each centered in its half-coil.
     for (var k = 0; k < coils * 2; k++) {
       var along = lead + span * (k + 0.5) / (coils * 2);
       var side = (k % 2 === 0 ? 1 : -1) * SPRING_COIL_AMPLITUDE;
@@ -803,10 +596,7 @@
     ctx.restore();
   }
 
-  // Where this spring would sit relaxed, as a tick across its own axis
-  // measured from end A, only for the selected one, which is the one whose
-  // Rest Length slider is on screen. Without it that slider changes a number
-  // and a coil count and nothing that says "this is slack, that is taut".
+  // Rest-length tick across the selected spring's axis, so the slider shows slack vs taut.
   function drawSpringRestMarker(a, b, restLength) {
     var dx = b.x - a.x, dy = b.y - a.y;
     var len = Math.sqrt(dx * dx + dy * dy);
@@ -837,10 +627,7 @@
     if (selected && !isPlaying) drawSpringRestMarker(p.a, p.b, spring.restLength);
   }
 
-  // Which spring is under this point, or -1: by distance to the straight
-  // line between its ends, out to the zigzag's own half-width. Half the touch
-  // slop, as a hinge gets (see hitTestHinge): a spring usually crosses open
-  // background, but where it does cross a body it should not swallow it.
+  // Spring under this point, or -1: distance to the chord out to the zigzag's half-width; half touch slop.
   function hitTestSpring(px, py) {
     var reach = SPRING_COIL_AMPLITUDE + SPRING_HIT_PAD + pointerSlop / 2;
     for (var i = scene.springs.length - 1; i >= 0; i--) {
@@ -854,9 +641,7 @@
     return -1;
   }
 
-  // What a Spring-tool press or release landed on: a body (with the point in
-  // that body's own frame, snapped to dead center when it is close) or, with
-  // nothing under it, a fixed point on the background.
+  // What a Spring-tool press/release landed on: a body (local point, snapped to center when close) or the background.
   function pickSpringEnd(x, y) {
     var hit = hitTestTopmost(x, y);
     if (hit < 0) return { body: null, local: { x: x, y: y }, world: { x: x, y: y } };
@@ -868,13 +653,8 @@
     return { body: hit, local: { x: local.x, y: local.y }, world: { x: x, y: y } };
   }
 
-  // A new spring starts RELAXED, its rest length is the length it was drawn
-  // at, so placing one disturbs nothing until something moves, and at a
-  // stiffness that bobs whatever it is tied to about once a second, whatever
-  // that weighs: one fixed number would be a rod on the smallest circle and
-  // slack thread on the largest. springStableStiffness already knows how
-  // readily the two ends give way (it is SPRING_STABILITY / (w * dt^2)), so
-  // the stiffness for a frequency f is that times (2*pi*f*dt)^2 / STABILITY.
+  // A new spring starts relaxed, stiff enough to bob its load at about NEW_SPRING_HZ:
+  // stable is SPRING_STABILITY / (w * dt^2), so k = stable * (2*pi*f*dt)^2 / STABILITY.
   var NEW_SPRING_HZ = 1;
   function defaultSpringStiffness(spring) {
     var stable = PhysicsEngine.springStableStiffness(spring, scene.bodies, PhysicsGPU.FIXED_DT);
@@ -906,8 +686,7 @@
       flashStatus("Neither end of that spring can move");
       return;
     }
-    // bodyB is always a body; a background end is always A (the convention a
-    // hinge uses, and the one PhysicsEngine reads).
+    // bodyB is always a body; a background end is always A (hinge convention, what PhysicsEngine reads).
     var a = start, b = end;
     if (b.body === null) { a = end; b = start; }
     var spring = {
@@ -923,48 +702,27 @@
   }
 
   // ---- Radius/Length/Size drag handle ----
-  //
-  // px beyond the shape's own edge to the handle's center: separate per
-  // shape since a line's handle reads as noticeably closer than a circle's
-  // at the same gap (an end point vs. a curved edge), so it wants more room.
-  // A funnel/splitter uses the circle's own gap: like a circle, its handle
-  // sits at a fixed 45-degree direction rather than along an axis, so the
-  // same "curved edge" reasoning applies.
+  // Gap from shape edge to handle center, per shape: a line's end reads closer than a curved edge.
   var RESIZE_HANDLE_GAP_CIRCLE = 32;
   var RESIZE_HANDLE_GAP_LINE = 52;
   var RESIZE_HANDLE_GAP_FUNNEL = 32;
   var RESIZE_HANDLE_LENGTH = 34; // capsule long axis
   var RESIZE_HANDLE_WIDTH = 16; // capsule short axis
   var RESIZE_HANDLE_HIT_PAD = 6; // grabbable area extends this far past the visual capsule
-  // Bounds the funnel/splitter resize handle's drag: the same range the
-  // side panel's old Size field used.
   var SIZE_MIN = 10, SIZE_MAX = 400;
 
   function resizeHandleSupported(body) {
     return !!body && (body.type === "circle" || body.type === "line" || isTrapezoidType(body.type));
   }
 
-  // The point a body's own rotate-or-resize actually pivots around, the
-  // same point applyBodyEditPreservingHinge itself keeps fixed: its own
-  // hinge's world point (however many hinges that point is itself removed
-  // from the body, see PhysicsHingeGeometry.hingeWorldPointA) if it has
-  // one, otherwise its own current center. Shared by the circle/trapezoid
-  // resize handle's reference point and every rotation handle's drag math,
-  // whichever body owns the hinge, this is what "hinged" means for it.
+  // Pivot for resize/rotate (what applyBodyEditPreservingHinge keeps fixed): hinge world point if any, else center.
   function handlePivot(bodyIndex) {
     var body = scene.bodies[bodyIndex];
     var ownHinge = PhysicsHingeGeometry.findOwnHinge(scene, bodyIndex);
     return ownHinge ? PhysicsHingeGeometry.hingeWorldPointA(scene, ownHinge) : { x: body.x, y: body.y };
   }
 
-  // Where the handle sits and which way it points, for whichever body is
-  // passed in: shared by drawing, hit-testing, and the live drag itself
-  // (recomputed fresh every mousemove, not cached at drag-start) so none of
-  // the three can ever disagree about where the handle actually is.
-  //
-  // refX/refY is the point that stays fixed while dragging: see
-  // handlePivot. dirX/dirY is the unit vector pointing away from that
-  // point, out along the handle.
+  // Shared by drawing, hit-testing and the drag. refX/refY stays fixed (handlePivot); dirX/dirY points out along it.
   function resizeHandleGeometry(bodyIndex) {
     var body = scene.bodies[bodyIndex];
     if (!resizeHandleSupported(body)) return null;
@@ -972,20 +730,14 @@
 
     if (body.type === "circle" || isTrapezoidType(body.type)) {
       var ref = handlePivot(bodyIndex);
-      // 45 degrees up-and-right: screen space, so "up" is -Y. Fixed
-      // regardless of the body's own angle: PhysicsEngine.halfExtent's
-      // trapezoid case is the reach to its FARTHEST corner, the max over
-      // every direction, so any direction, this one included, clears the
-      // shape no matter how it's currently rotated.
+      // Fixed 45 degrees up-right (screen space): halfExtent's trapezoid reach is the max over all directions.
       var dirX = Math.SQRT1_2, dirY = -Math.SQRT1_2;
       var gap = body.type === "circle" ? RESIZE_HANDLE_GAP_CIRCLE : RESIZE_HANDLE_GAP_FUNNEL;
       var dist = PhysicsEngine.halfExtent(body) + gap;
       return { refX: ref.x, refY: ref.y, dirX: dirX, dirY: dirY, x: ref.x + dirX * dist, y: ref.y + dirY * dist };
     }
 
-    // Line: always inline with the line itself. A hinge doesn't move the
-    // reference point the way it does for a circle above: it only picks
-    // which end, so the handle isn't sitting right on top of the hinge dot.
+    // Line: inline with the line; a hinge only picks which end, so the handle avoids the dot.
     var half = body.length / 2;
     var axisX = Math.cos(body.angle), axisY = Math.sin(body.angle);
     var sign = 1;
@@ -1002,9 +754,6 @@
     return { refX: body.x, refY: body.y, dirX: dirX2, dirY: dirY2, x: body.x + dirX2 * dist2, y: body.y + dirY2 * dist2 };
   }
 
-  // The capsule shell shared by both handles: drawn in whatever local frame
-  // the caller has already ctx.translate/rotate'd into, so this never has to
-  // know which handle it's drawing or which way it's oriented in world space.
   function drawHandleCapsuleBase(halfLen, halfWid) {
     ctx.beginPath();
     ctx.moveTo(-halfLen + halfWid, -halfWid);
@@ -1020,9 +769,6 @@
     ctx.stroke();
   }
 
-  // The 3-line "drag me" grip texture shared by both handles, perpendicular
-  // to whatever the caller's local +X axis means for it (the arrow's own
-  // shaft direction, straight or curved): same local frame as the capsule.
   function drawHandleGripLines() {
     var gripHalfLen = 5, gripSpacing = 3;
     ctx.strokeStyle = "#1b1e27";
@@ -1035,11 +781,6 @@
     });
   }
 
-  // Capsule button, arrow on top: one head points back at the reference
-  // point (refX/refY), the other points away from it, with 3 short grip
-  // lines perpendicular to the shaft in the middle, drawn in the handle's
-  // own local frame (local +X = dirX/dirY) so the shape math never has to
-  // think in world space at all.
   function drawResizeHandle(bodyIndex) {
     var geo = resizeHandleGeometry(bodyIndex);
     if (!geo) return;
@@ -1078,9 +819,6 @@
     ctx.restore();
   }
 
-  // px/py already in frame/scene space (matching canvasPoint's output while
-  // editing): rotated into the handle's own local frame (the inverse of
-  // drawResizeHandle's own rotate) so this is a plain axis-aligned box test.
   function hitTestResizeHandle(bodyIndex, px, py) {
     var geo = resizeHandleGeometry(bodyIndex);
     if (!geo) return false;
@@ -1092,12 +830,7 @@
     return Math.abs(localX) <= halfLen && Math.abs(localY) <= halfWid;
   }
 
-  // Applies the live drag straight through applyBodyEditPreservingHinge, the
-  // same mutator every other resize path uses, so a hinged body's resize
-  // behaves identically everywhere. Projects the cursor onto the handle's
-  // own axis (the inverse of resizeHandleGeometry's own ref + (size + GAP) *
-  // dir placement) to recover the new size directly, rather than tracking a
-  // delta from drag-start: immune to drift if a frame gets missed.
+  // Projects the cursor onto the handle axis (no drift), via applyBodyEditPreservingHinge like every resize.
   function updateResizeHandleDrag(p) {
     var bodyIndex = resizeHandleDrag.bodyIndex;
     var body = scene.bodies[bodyIndex];
@@ -1124,21 +857,10 @@
     render();
   }
 
-  // ---- Rotation drag handle (line and funnel/splitter: a circle has no
-  // starting angle to set) ----
-  //
-  // Sits just outside the resize handle, on the same ray from the same
-  // reference point, same idea as that handle, "just farther out", but
-  // turned 90 degrees so its own long axis (and the arrow drawn along it)
-  // runs tangentially instead of radially, matching how dragging it actually
-  // moves the handle: along an arc around the pivot, not straight out from
-  // it. The arrow itself is a short curved stroke rather than a straight
-  // one, to read as "this rotates" rather than "this resizes" at a glance.
+  // ---- Rotation drag handle (line and funnel/splitter; a circle has no angle) ----
+  // Same ray as the resize handle, farther out, turned 90 degrees: it drags along an arc around the pivot.
   var ROTATION_HANDLE_GAP = 14; // beyond the resize handle's own far edge
-  // Deliberately small and unrelated to the body's actual size or how far
-  // away its real pivot is: a true-scale arc over a ~30px span would look
-  // almost perfectly straight. This is purely a cosmetic "which icon am I"
-  // signal, not a preview of the real rotation radius.
+  // Cosmetic only: a true-scale arc over ~30px would look straight.
   var ROTATION_ARC_RADIUS = 22;
   var ROTATION_ARC_HALF_ANGLE = 0.7; // radians; sets the arc's chord to ~match the resize handle's own arrow span
 
@@ -1146,11 +868,7 @@
     return !!body && (body.type === "line" || isTrapezoidType(body.type));
   }
 
-  // Reuses resizeHandleGeometry's own ref point and end-choice wholesale,
-  // "just outside" means literally the same ray, farther along it, and
-  // only rotates the local frame 90 degrees (dirX/dirY here is the TANGENT
-  // direction, i.e. the resize handle's own dir rotated a quarter turn) so
-  // the two handles read as a matched pair rather than unrelated controls.
+  // Reuses resizeHandleGeometry's ref point and end; dirX/dirY here is the TANGENT (dir rotated a quarter turn).
   function rotationHandleGeometry(bodyIndex) {
     var body = scene.bodies[bodyIndex];
     if (!rotationHandleSupported(body)) return null;
@@ -1159,8 +877,6 @@
 
     var resizeDist = Math.hypot(resizeGeo.x - resizeGeo.refX, resizeGeo.y - resizeGeo.refY);
     var dist = resizeDist + RESIZE_HANDLE_LENGTH / 2 + ROTATION_HANDLE_GAP + RESIZE_HANDLE_LENGTH / 2;
-    // A 90-degree turn of (dirX, dirY): tangent to the circle the handle
-    // would trace if the body actually rotated all the way around.
     var tanX = -resizeGeo.dirY, tanY = resizeGeo.dirX;
     return {
       refX: resizeGeo.refX, refY: resizeGeo.refY,
@@ -1170,10 +886,6 @@
     };
   }
 
-  // Same capsule/grip shell as the resize handle, oriented along the
-  // tangent direction instead of the radial one, with a curved double-arrow
-  // (a short arc, bulging away from the body: see ROTATION_ARC_RADIUS)
-  // standing in for the straight one.
   function drawRotationHandle(bodyIndex) {
     var geo = rotationHandleGeometry(bodyIndex);
     if (!geo) return;
@@ -1185,14 +897,7 @@
 
     drawHandleCapsuleBase(halfLen, halfWid);
 
-    // The arc's own center sits toward the pivot side (local +Y, since
-    // dirX/dirY, "away from pivot", rotates to local -Y under this
-    // frame's tanX/tanY basis), so an UNshifted arc's midpoint would touch
-    // the local origin while its two ends sit a full sagitta further toward
-    // +Y: the whole curve living to one side of the capsule's centerline
-    // instead of straddling it. Dropping the circle's center by half the
-    // sagitta centers the curve instead: its midpoint and its ends then land
-    // symmetrically on either side of local Y=0.
+    // Arc center sits toward the pivot (+Y); dropping it half a sagitta centers the curve on the capsule.
     var R = ROTATION_ARC_RADIUS, half = ROTATION_ARC_HALF_ANGLE;
     var sagitta = R * (1 - Math.cos(half));
     var arcCenterY = R - sagitta / 2;
@@ -1204,9 +909,6 @@
     ctx.beginPath();
     ctx.arc(0, arcCenterY, R, startAngle, endAngle);
     ctx.stroke();
-    // Tangent-to-the-arc arrowheads at each end, pointing further along the
-    // curve (away from its own midpoint): the curved equivalent of the
-    // straight handle's two outward-pointing triangles.
     var headLen = 6, headHalfWidth = 3.5;
     function arrowhead(angle, sign) {
       var px = R * Math.cos(angle), py = arcCenterY + R * Math.sin(angle);
@@ -1227,8 +929,6 @@
     ctx.restore();
   }
 
-  // Same shape as hitTestResizeHandle, in the rotation handle's own
-  // (tangentially rotated) local frame.
   function hitTestRotationHandle(bodyIndex, px, py) {
     var geo = rotationHandleGeometry(bodyIndex);
     if (!geo) return false;
@@ -1240,12 +940,7 @@
     return Math.abs(localX) <= halfLen && Math.abs(localY) <= halfWid;
   }
 
-  // Absolute, not incremental: every tick sets body.angle to exactly the
-  // cursor's current angle around the pivot minus the offset captured at
-  // mousedown (see rotationHandleDrag), the offset is what stops the body
-  // from snapping the instant the drag starts just because the grab point
-  // wasn't exactly on the handle's own centerline. Same hinge-preserving
-  // mutator applyBodyEditPreservingHinge always uses for a rotation.
+  // Absolute: angle = cursor angle around the pivot minus the mousedown offset (rotationHandleDrag).
   function updateRotationHandleDrag(p) {
     var bodyIndex = rotationHandleDrag.bodyIndex;
     var body = scene.bodies[bodyIndex];
@@ -1260,23 +955,11 @@
   }
 
   // ---- Un-anchor button ----
-  //
-  // Only ever shown for a body that is both anchored AND currently selected
-  // - not just anchored (that would clutter every anchored body in the
-  // scene, not only the one being worked on), and not just selected (most
-  // selected bodies aren't anchored, and have nothing here to undo). A
-  // click toggles the same isAnchored flag the Anchor tool already does:
-  // one more redundant control reaching the same edit, not a new kind of
-  // edit (the side panel's own checkbox for this was removed along with the
-  // rest of the Properties section).
+  // Only for a body that is both anchored and selected; toggles the same isAnchored flag as the Anchor tool.
   var ANCHOR_ICON_RADIUS = 12;
   var ANCHOR_ICON_GAP = 14; // beyond the farthest existing handle's own edge
   var ANCHOR_ICON_HIT_PAD = 4;
 
-  // Chains onto whichever handles this body already has, same ray as the
-  // resize handle, positioned past the outermost one that actually exists
-  // for this body's type (the rotation handle if it has one, otherwise just
-  // the resize handle), "after the buttons already there," literally.
   function anchorIconGeometry(bodyIndex) {
     var body = scene.bodies[bodyIndex];
     if (!body || !body.isAnchored) return null;
@@ -1307,9 +990,7 @@
     ctx.font = "14px sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    // The glyph's own bitmap sits a couple pixels left of center within its
-    // reported metrics (a common emoji-font quirk): nudged right here
-    // rather than fighting textAlign for it.
+    // The glyph's bitmap sits a couple px left of center (emoji-font quirk): nudged right.
     ctx.fillText("⚓", geo.x + 2, geo.y + 1);
     ctx.restore();
   }
@@ -1323,33 +1004,14 @@
   }
 
   // ---- Drag-to-delete zone ----
-  //
-  // Appears only while an existing body is being dragged by hand (the
-  // `dragging` state, not a resize/rotation/anchor drag, and not a new
-  // shape being drawn) or a hinge or a spring is (`hingeDrag` / `springDrag`,
-  // whose drags exist for nothing else), fixed at the top center of the frame regardless of
-  // where the drag itself is, same as the "drag an icon up to X" gesture on
-  // an Android or iOS home screen.
+  // Shown during a plain body drag or a hinge/spring drag, fixed at the frame's top center.
   var DELETE_ZONE_RADIUS = 20;
   var DELETE_ZONE_TOP_MARGIN = 44; // distance from the frame's own top edge to the zone's center, with nothing in the way
   var DELETE_ZONE_ARMED_SCALE = 1.3; // drawn this much bigger once the dragged body actually overlaps it
   var DELETE_ZONE_TOOLBAR_GAP = 14; // clear air between the transport's bottom edge and the zone's
 
-  // Top center of the frame is also where the playback transport floats, and
-  // that is a DOM element painted over the canvas, so the zone was drawn
-  // underneath it and the user had nothing to drop onto. This drops below
-  // the transport instead.
-  //
-  // Measured rather than moved down by a constant: the transport's height
-  // changes with the step readout under it (which carries text after a run
-  // and none before one) and with how wide the speed button's own label
-  // gets, so a constant picked against any one of those states is wrong in
-  // the others. Falling back to the bare margin keeps this working if the
-  // transport is ever absent or unmeasurable.
-  //
-  // Everything here is in frame units, which while editing are CSS pixels
-  // from the canvas's top-left corner: the same units canvasPoint hands
-  // the hit test, so the two agree without either converting.
+  // Below the playback transport, measured since its height varies (step readout, speed label).
+  // Frame units = CSS px from the canvas's top-left while editing, same as canvasPoint.
   function deleteZoneTop() {
     var y = DELETE_ZONE_TOP_MARGIN;
     if (playbackToolbar) {
@@ -1359,10 +1021,7 @@
           DELETE_ZONE_TOOLBAR_GAP + DELETE_ZONE_RADIUS * DELETE_ZONE_ARMED_SCALE);
       }
     }
-    // On a frame too short to hold both, the zone stays inside it rather
-    // than being pushed off the bottom edge by a transport that fills the
-    // top: a zone that can't be reached is worse than one drawn close to
-    // the transport.
+    // On a frame too short for both, keep the zone reachable inside it.
     var armed = DELETE_ZONE_RADIUS * DELETE_ZONE_ARMED_SCALE;
     return Math.min(y, Math.max(armed, (scene.frameHeight || 0) - armed));
   }
@@ -1371,15 +1030,7 @@
     return { x: (scene.frameWidth || 0) / 2, y: deleteZoneTop() };
   }
 
-  // Checked against the cursor, not the body's own center or size: a body
-  // is dragged by whatever point it was grabbed at (see dragOffset), which
-  // for anything but a circle grabbed dead-center isn't the same point as
-  // body.x/y, so "is the item on top of the zone" is really "is wherever
-  // I'm holding it right now on top of the zone." Scaling the hit area by
-  // the body's own reach instead (a line's half-length, say) would also
-  // make a long object arm the zone while its center, and the cursor
-  // holding it, are still far away, which measured out as a surprisingly
-  // easy accidental delete for anything large.
+  // Tested against the cursor (the grab point), not the body's extent: a long body would arm it too easily.
   var DELETE_ZONE_HIT_PAD = 6;
   function isOverDeleteZone(px, py) {
     var zone = deleteZoneCenter();
@@ -1412,26 +1063,15 @@
     ctx.restore();
   }
 
-  // Groups X/Y/Output badges by which body they're on so 2-3 sharing one
-  // body get spaced out instead of stacking illegibly on top of each other.
-  // Longest an off-screen pointer is drawn, as a fraction of the frame's
-  // shorter side rather than a pixel count: the fractal grid's replay panel
-  // draws the same arrows into a canvas a fraction of this size, and a fixed
-  // length would be either a stub there or a monster here. The arrow
-  // approaches this without reaching it however far out the body goes; see
-  // PhysicsHingeGeometry.offscreenPointer for the curve.
+  // Fraction of the frame's shorter side (the grid's replay canvas is smaller):
+  // see PhysicsHingeGeometry.offscreenPointer.
   var OFFSCREEN_ARROW_MAX_FRACTION = 0.12;
   function offscreenArrowMaxLength() {
     return OFFSCREEN_ARROW_MAX_FRACTION * Math.min(scene.frameWidth || 0, scene.frameHeight || 0);
   }
 
-  // An arrow whose TIP sits on the frame edge, pointing outward at a body
-  // that has left the view: the tail trails back inside, growing with how
-  // far out the body is. One per body, in the body's own outline color, so
-  // it reads as "that object went this way".
+  // Tip on the frame edge pointing at an off-screen body; tail grows with distance.
   function drawOffscreenArrow(pointer, color) {
-    // Pull the tip a little inside the frame so the head isn't half-clipped
-    // by the canvas edge it is sitting on.
     var inset = 3;
     var tipX = pointer.tipX - pointer.dirX * inset;
     var tipY = pointer.tipY - pointer.dirY * inset;
@@ -1471,9 +1111,7 @@
       (byBody[key] = byBody[key] || []).push(e);
     });
 
-    // Any mapped body that has left the frame gets a pointer instead of a
-    // badge: ONE per body however many of X, Y and Output it carries, since
-    // the arrow says where the object is, not which role it plays.
+    // One pointer per off-frame body, however many of X, Y and Output it carries.
     Object.keys(byBody).forEach(function (key) {
       var body = scene.bodies[key];
       var pointer = PhysicsHingeGeometry.offscreenPointer(
@@ -1496,15 +1134,9 @@
     });
   }
 
-  // Pulled out of render() so it can also be called from the pagehide/
-  // visibilitychange safety net below: see there for why that net exists.
   function saveEditorAutosave() {
     var authored = PhysicsCoords.toAuthoredJSON(serializeScene());
-    // A scene that arrived by link is not saved until it is EDITED: opening
-    // a friend's link must not overwrite the scene this browser was in the
-    // middle of, which is otherwise exactly what the first render() after
-    // loading it would do. Compared without the frame, which follows the
-    // window rather than anything the user did.
+    // A linked scene is not saved until edited (a link must not overwrite this browser's scene); frame excluded.
     if (sharedSceneIdentity !== null) {
       var identity = sceneIdentity(authored);
       if (sharedSceneIdentity === true) sharedSceneIdentity = identity;
@@ -1514,41 +1146,27 @@
     try {
       localStorage.setItem(EDITOR_STORAGE_KEY, JSON.stringify(authored));
     } catch (err) {
-      // Full/unavailable storage shouldn't break editing: auto-save is a
-      // convenience, not a requirement.
+      // Full/unavailable storage must not break editing.
     }
   }
 
   function render() {
-    // A typed/pasted coordinate (or a hinge-cascade result) can land a body
-    // outside the locked frame: settle it back in (see
-    // PhysicsHingeGeometry.normalizeAllBodiesIntoFrame) before drawing, so
-    // it's corrected the same render it happened in rather than lagging a
-    // frame behind. Skipped while playing: bodies are mid-simulation then,
-    // driven by the already-correct GPU trajectory, not something to
-    // reach in and re-settle.
+    // Settle bodies pushed outside the frame before drawing; skipped while playing (the GPU owns them).
     if (!isPlaying) {
       PhysicsHingeGeometry.normalizeAllBodiesIntoFrame(scene);
     }
 
-    // Drawing code below works entirely in frame/scene-space coordinates
-    // (the same space body.x/y always have): this transform is the only
-    // place that space meets actual canvas pixels, via whatever displayScale
-    // resizeCanvas last computed.
+    // Drawing works in frame space; this transform is the only place it meets canvas pixels.
     var w = scene.frameWidth || canvasArea.clientWidth || 1;
     var h = scene.frameHeight || canvasArea.clientHeight || 1;
     var renderScale = displayScale * dpr;
     ctx.setTransform(renderScale, 0, 0, renderScale, 0, 0);
     ctx.clearRect(0, 0, w, h);
     drawGrid(w, h);
-    // Under the scene rather than over it: a key is for reading against, and
-    // a body that reaches the frame's edge should still be seen to.
     drawOutputKeyBorder(w, h);
     drawOutputKeyRing();
     updateOutputKeyControls();
     for (var i = 0; i < scene.bodies.length; i++) drawBody(scene.bodies[i], i === selectedIndex);
-    // Over the bodies, so where each one is attached can be seen; under the
-    // hinges, which are small and would otherwise be lost beneath a coil.
     for (var sp = 0; sp < scene.springs.length; sp++) drawSpring(scene.springs[sp], sp === selectedSpring);
     for (var j = 0; j < scene.hinges.length; j++) drawHinge(scene.hinges[j], !!hingeDrag && hingeDrag.hingeIndex === j);
     drawOutputKeyBodyDot(w, h);
@@ -1565,40 +1183,19 @@
     if (drawingShape) drawShapePreview(drawingShape);
     if (springDraw) drawSpringPreview(springDraw);
     refreshSpringPanel();
-    // render() already runs after every editing mutation (drag, add/delete,
-    // property edits, hinges): piggyback the auto-save here instead of
-    // instrumenting each call site separately. Skipped during playback: it
-    // describes the STARTING scene, and running it every animation frame
-    // would overwrite the real saved scene with a mid-animation frame.
+    // Auto-save piggybacks on render(); skipped during playback so a mid-run frame is never saved.
     if (!isPlaying) {
       saveEditorAutosave();
       recordUndoState(); // same piggyback, same reason: see "Undo / redo" below
     }
   }
 
-  // While editing, the frame just IS the canvas: live-synced here on every
-  // resize, same as before this feature existed. The instant Play (or Send-
-  // to-Grid, in its own click handler) locks it, this stops touching it:
-  // isPlaying gates the sync, not a one-time snapshot, so simply not being
-  // in playing mode is what "unlocked" means, including right after Reset.
-  //
-  // Also gated on canvasArea actually having a size: this page now shares a
-  // document with the grid view (see chaos.html/transition.js), and a
-  // display:none element's clientWidth/clientHeight are always 0, with no
-  // guard, switching to the grid view (which fires a resize so other layout
-  // notices the swap) would zero out the authored frame permanently, since
-  // scene.frameWidth/frameHeight is live editor state, not a snapshot.
-  // Whatever the frame was BEFORE going invisible is still correct; only a
-  // resize while actually visible is real information about what it is now.
+  // isPlaying gates the frame sync (Play/Send-to-Grid lock it). Also gated on a nonzero
+  // size: this page shares a document with the grid view, and display:none reports 0x0.
   function resizeCanvas() {
     dpr = Math.min(window.devicePixelRatio || 1, 2);
     if (!isPlaying && canvasArea.clientWidth > 0 && canvasArea.clientHeight > 0) {
-      // The authored origin is the frame's center (see physics-coords.js),
-      // so a frame that changes size moves every engine-space coordinate
-      // with it: what the scene is described as, its position relative to
-      // the middle, is what has to hold still. Without this, resizing the
-      // window would silently re-author the whole scene, sliding it toward
-      // the top-left exactly the way a corner origin always did.
+      // Origin is the frame center (physics-coords.js): shift the scene so it holds still relative to the middle.
       var prevW = scene.frameWidth, prevH = scene.frameHeight;
       scene.frameWidth = canvasArea.clientWidth;
       scene.frameHeight = canvasArea.clientHeight;
@@ -1608,13 +1205,7 @@
     }
     var fw = scene.frameWidth || canvasArea.clientWidth || 1;
     var fh = scene.frameHeight || canvasArea.clientHeight || 1;
-    // "Contain" fit: the frame's own aspect ratio is preserved and it's
-    // scaled (up or down) to fit entirely inside whatever canvasArea is
-    // right now, rather than stretching to fill it, this is what keeps a
-    // locked-in scene from distorting if the window's aspect ratio has
-    // since changed. 1 exactly reproduces the pre-existing "always fill
-    // canvasArea" behavior whenever fw/fh already match its current size,
-    // i.e. always, while editing.
+    // "Contain" fit: preserves the locked frame's aspect ratio; 1 while editing.
     displayScale = Math.min(canvasArea.clientWidth / fw, canvasArea.clientHeight / fh) || 1;
     var cssW = fw * displayScale, cssH = fh * displayScale;
     canvas.style.width = cssW + "px";
@@ -1629,26 +1220,9 @@
   }
 
   new ResizeObserver(resizeCanvas).observe(canvasArea);
-  // Belt and suspenders: a locked-frame Play run depends on actually
-  // noticing every window resize (that's what re-fits/re-centers the
-  // letterboxed canvas), and a plain window resize event is a second,
-  // independent way to catch that alongside the ResizeObserver above.
   window.addEventListener("resize", resizeCanvas);
 
-  // Safety net for the auto-save above: a couple of controls (the gravity
-  // slider, the "Stop on wrap" checkbox) don't call render() from their own
-  // change handler, render() already runs constantly from everything ELSE
-  // (drag, add/delete, property edits), so in practice those controls'
-  // changes get swept up into the next save anyway... unless nothing else
-  // happens before the user navigates away
-  // (e.g. to the fractal grid), in which case the save that already
-  // happened is missing this one, and it silently doesn't survive the trip.
-  // Rather than relying on every current AND future control to remember to
-  // trigger a save itself, flush whatever `scene` currently is the moment
-  // the page actually goes away: pagehide covers navigation/tab close,
-  // visibilitychange also catches switching tabs/apps or minimizing.
-  // Calling this twice is harmless (it's just an overwrite with the same
-  // data), so no need to be precious about which one actually fires first.
+  // Some controls (gravity slider, Stop-on-wrap) don't render(): flush on pagehide/hidden so a last edit is kept.
   function flushEditorAutosaveOnHide() {
     if (!isPlaying) saveEditorAutosave();
   }
@@ -1659,13 +1233,8 @@
 
   // ---- Hit testing (topmost first = end of array first, matching paint order) ----
 
-  // How far outside a shape's drawn edge the pointer now pressing the canvas
-  // may land and still pick it up. Zero for a mouse, which is as exact as it
-  // looks; a fingertip covers a disc of glass and reports some point inside
-  // it, which for a LINE, a few pixels thick, is a miss more often than
-  // not. Set per press from the pointer's own type (see the pointerdown
-  // handler), so a touch laptop gets each where it applies. The on-canvas
-  // handles widen their own hit boxes by the same amount.
+  // Extra reach past a shape's edge for a press: 0 for a mouse, more for a fingertip.
+  // Set per press from the pointer type.
   var TOUCH_HIT_SLOP = 14;
   var pointerSlop = 0;
   var HIT_RING = [[1, 0], [0.7071, 0.7071], [0, 1], [-0.7071, 0.7071], [-1, 0], [-0.7071, -0.7071], [0, -1], [0.7071, -0.7071]];
@@ -1680,11 +1249,7 @@
   function hitTestTopmost(px, py) {
     var hit = hitTestExact(px, py);
     if (hit >= 0 || pointerSlop <= 0) return hit;
-    // Nothing exactly under the point: whatever is nearest within the slop,
-    // found by trying a ring of points at half of it and then at all of it.
-    // Coarse next to a true distance-to-shape, but that is a function the
-    // engine doesn't have for every shape, and eight probes of the one it
-    // does are plenty to tell "meant that line" from "meant empty space".
+    // Nothing exactly under the point: nearest within the slop, probed on rings at half and full slop.
     for (var ring = 1; ring <= 2; ring++) {
       var r = pointerSlop * ring / 2;
       for (var k = 0; k < HIT_RING.length; k++) {
@@ -1709,19 +1274,11 @@
     activeTool = tool;
     toolButtons.forEach(function (b) { b.classList.toggle("active", b.getAttribute("data-tool") === tool); });
     canvas.className = "tool-" + tool;
-    // Back to Select means the tool was used or abandoned; either way what
-    // it wanted done no longer needs saying.
     if (tool === "select") hideToolHint();
   }
 
-  // Every tool button says what it wants done in its title, which a mouse
-  // reads by hovering, and a finger never sees. So a tool picked BY TOUCH
-  // says the same thing in a toast over the canvas instead (#editor-hint-
-  // toast: see chaos.html), from the same title attribute so there is
-  // still one copy of each instruction, with its "click" read as "tap".
-  // Which kind of pointer pressed last is noted at the window, in the
-  // capture phase, so it is already known by the time the click it produces
-  // reaches a button.
+  // A tool picked by touch shows its button's title in a toast (#editor-hint-toast), "click" read as "tap".
+  // Pointer type is noted at the window in the capture phase, before the click reaches a button.
   var toolHintEl = document.getElementById("editor-hint-toast");
   var toolHintTimer = null;
   var TOOL_HINT_VISIBLE_MS = 6000;
@@ -1747,15 +1304,7 @@
     });
   });
 
-  // No dedicated "Select" button: it's the default, and any click in the
-  // surrounding chrome that isn't itself another tool button (a sample
-  // button, a slider, Clear All, a property field, plain empty space...)
-  // backs out of whatever tool is active, the same as clicking that button
-  // used to. Scoped to the panel specifically so it never fires for clicks
-  // on the canvas itself, which is how every tool actually gets used. (The
-  // old #topbar was the other container this listened on; it no longer
-  // exists, what survived of it lives in .panel-head inside #panel, so the
-  // one listener covers it.)
+  // No Select button: any panel click that isn't a tool button backs out of the tool (canvas clicks excluded).
   panelEl.addEventListener("click", function (e) {
     if (e.target.closest("[data-tool]")) return;
     setActiveTool("select");
@@ -1773,9 +1322,6 @@
   });
 
   // ---- Settings panel (gear button, upper right) ----
-  //
-  // More can just be added into #settings-panel-body (see #editor-view in
-  // chaos.html) without needing anything else here to change.
   btnSettings.addEventListener("click", function () {
     settingsPanel.classList.toggle("open");
   });
@@ -1784,29 +1330,14 @@
   });
 
   // ---- The top bar (small-window layout only) ----
-  //
-  // On a desktop the Play transport floats over the top of the scene and the
-  // settings button over its corner, and the scene has room to spare under
-  // both. A phone's scene has none, so there (LayoutMode.isMobile: the
-  // window's size, not the device) the two are MOVED into #editor-topbar, a
-  // bar locked to the top of the screen with the canvas starting below it,
-  // and moved back when the window is wide again. Moved rather than copied,
-  // for the reason the grid's dock gives: every listener and every id stays
-  // on the one element it was bound to. (The settings PANEL the button opens
-  // takes the whole screen in that layout: that part is only CSS, see
-  // .settings-panel in mobile.css.)
-  //
-  // Nothing else has to know. The canvas area shrinks by the bar's height,
-  // which its ResizeObserver turns into a resize like any other, and
-  // deleteZoneTop already measures the transport wherever it happens to be.
+  // On a phone-sized window (LayoutMode.isMobile) the back chevron, transport and settings button
+  // are MOVED into #editor-topbar (listeners and ids stay put) and moved back when wide again.
   var editorTopbar = document.getElementById("editor-topbar");
   var topbarHomes = null; // where each element lives in the desktop layout
   function setTopbarActive(active) {
     if (!editorTopbar || !playbackToolbar) return;
     if (active === !!topbarHomes) return;
     if (active) {
-      // The back chevron goes first: the leading edge of a top bar is where
-      // every phone app keeps it. (Absent on a page that has none.)
       var btnHome = document.getElementById("btn-home");
       topbarHomes = [btnHome, playbackToolbar, btnSettings].filter(Boolean).map(function (el) {
         return { el: el, parent: el.parentNode, next: el.nextSibling };
@@ -1825,20 +1356,11 @@
     setTopbarActive(window.LayoutMode.isMobile());
   }
   // ---- Sound volume (mute button + settings slider) ----
-  //
-  // PhysicsSound's volume is shared, module-level state, the fractal
-  // grid's identical controls (see fractal-grid.js's own copy of this
-  // exact pattern) read and write the very same value, so the one
-  // onVolumeChange listener below is what keeps every location (this
-  // page's mute button AND its settings slider, whether it was one of
-  // THEM or the grid page's own pair that actually changed it) in sync,
-  // continuously, not just at some particular moment like panel-open.
+  // PhysicsSound's volume is shared with the grid's controls; onVolumeChange keeps
+  // every mute button and slider in sync.
   function setVolumeIconState(container, volume) {
     var muted = volume <= 0;
-    // Explicit "inline"/"none" on both sides, not "" for the visible case:
-    // .vol-mute-x's own CSS default (see app-shell.css) IS display:none, so
-    // clearing back to "just use the stylesheet" would leave it hidden
-    // instead of showing it.
+    // Explicit "inline"/"none": .vol-mute-x's stylesheet default is display:none, so "" would hide it.
     container.querySelector(".vol-arc-1").style.display = muted ? "none" : "inline";
     container.querySelector(".vol-arc-2").style.display = (muted || volume <= 0.5) ? "none" : "inline";
     container.querySelector(".vol-mute-x").style.display = muted ? "inline" : "none";
@@ -1880,22 +1402,13 @@
     var frontIndex = hits[0];
     var behindIndex = hits.length > 1 ? hits[1] : null;
 
-    // At most one hinge per (object, background) pair and per (object,
-    // object) pair: a second one would just be redundant (the first
-    // already pins that exact relationship) or, worse, over-constrain the
-    // solver by fighting the first hinge over a slightly different pivot.
-    // hingeConnects treats "background" as bodyA === null, so this one call
-    // covers both cases: behindIndex === null checks this object against
-    // the background, otherwise it checks the two objects against each
-    // other.
+    // One hinge per pair (a second would over-constrain the solver);
+    // hingeConnects treats bodyA === null as the background.
     if (PhysicsEngine.hingeConnects(scene.hinges, behindIndex, frontIndex)) {
       flashStatus(behindIndex === null ? "Already hinged to the background" : "These two objects are already hinged together");
       return;
     }
-    // An anchored object doesn't move, hinging another object to it is the
-    // same idea as hinging straight to the background, just through a real
-    // (but immobile) body instead. Disallowed so there's exactly one way to
-    // pin something in place, not two that happen to behave identically.
+    // Hinging to an anchored object would be a second way to pin to the background: disallowed.
     if (behindIndex !== null && (scene.bodies[behindIndex].isAnchored || scene.bodies[frontIndex].isAnchored)) {
       flashStatus("Can't hinge to an anchored object: hinge to the background instead");
       return;
@@ -1914,10 +1427,7 @@
     scene.hinges.push(hinge);
   }
 
-  // Keeping a hinge point fixed under resize/rotate/move: pure scene math,
-  // no DOM, so it now lives in physics-hinge-geometry.js (loaded above)
-  // where the fractal grid's hover-preview and the regression suite can
-  // both reach it directly instead of through this file's DOM-bound setup.
+  // Pure scene math lives in physics-hinge-geometry.js, shared with the grid's preview and the tests.
   var translateBodyPreservingHinges = PhysicsHingeGeometry.translateBodyPreservingHinges;
   var applyBodyEditPreservingHinge = PhysicsHingeGeometry.applyBodyEditPreservingHinge;
 
@@ -1937,16 +1447,11 @@
   }
 
   // ---- The Spring section of the panel ----
-  //
-  // The stiffness slider is a position on a LOG scale between the engine's
-  // own limits: stiffness spans three decades, and what reads as "a bit
-  // stiffer" is a ratio, not a difference, a linear slider would spend
-  // nine tenths of its travel on springs too stiff to tell apart.
+  // Stiffness slider is a LOG scale: stiffness spans three decades, and "a bit stiffer" is a ratio.
   function springSliderToStiffness(v) {
     var lo = PhysicsEngine.SPRING_STIFFNESS_MIN, hi = PhysicsEngine.SPRING_STIFFNESS_MAX;
     var k = lo * Math.pow(hi / lo, clamp(v / Number(springStiffnessSlider.max), 0, 1));
-    // Three significant figures: the slider has a thousand stops, and the
-    // number is going into a scene file a person may read.
+    // Three significant figures: the number goes into a scene file a person may read.
     var mag = Math.pow(10, Math.floor(Math.log10(k)) - 2);
     return clamp(Math.round(k / mag) * mag, lo, hi);
   }
@@ -1954,34 +1459,24 @@
     return Math.round(springStiffnessT(k) * Number(springStiffnessSlider.max));
   }
 
-  // Called from render(), so it follows everything that can change what it
-  // shows, the selection, a slider, a body the spring is tied to being
-  // resized, without any of them having to know it exists. Cheap when
-  // nothing changed: it writes to the DOM only on a difference, which is
-  // also what keeps it from fighting the slider the user is dragging.
+  // Called from render(); writes to the DOM only on a difference, so it never fights a slider being dragged.
   function refreshSpringPanel() {
     var spring = !isPlaying && selectedSpring >= 0 ? scene.springs[selectedSpring] : null;
     if (springSection.hidden !== !spring) {
       springSection.hidden = !spring;
-      // The panel scrolls; a section that appears below the fold has not,
-      // as far as the user can tell, appeared.
       if (spring && springSection.scrollIntoView) springSection.scrollIntoView({ block: "nearest" });
     }
     if (!spring) return;
     function setValue(el, v) { if (el.value !== String(v)) el.value = String(v); }
     function setText(el, t) { if (el.textContent !== t) el.textContent = t; }
-    // Only when the slider does not already MEAN this stiffness: the value it
-    // holds while being dragged rounds (three figures) to what was stored, and
-    // writing the nearest stop back could nudge the thumb under the finger.
+    // Only when the slider does not already mean this stiffness: writing the nearest stop back could nudge the thumb.
     if (springSliderToStiffness(Number(springStiffnessSlider.value)) !== spring.stiffness) {
       setValue(springStiffnessSlider, stiffnessToSpringSlider(spring.stiffness));
     }
     setText(springStiffnessReadout, Math.round(spring.stiffness).toLocaleString());
     setValue(springRestSlider, Math.round(spring.restLength));
     setText(springRestReadout, Math.round(spring.restLength) + " px");
-    // The engine will not run a spring stiffer than the things on its ends
-    // can take (see PhysicsEngine's SPRING_STABILITY). Saying so here beats
-    // a slider whose top stretch silently does nothing.
+    // The engine caps stiffness by what the ends can take (SPRING_STABILITY): say so.
     var stable = PhysicsEngine.springStableStiffness(spring, scene.bodies, PhysicsGPU.FIXED_DT);
     setText(springStiffnessNote, spring.stiffness > stable
       ? "What it is tied to is light enough that the simulation limits this to " + Math.round(stable).toLocaleString() + "."
@@ -2022,9 +1517,7 @@
   window.addEventListener("keydown", function (e) {
     if (isPlaying) return;
     if (e.key !== "Delete" && e.key !== "Backspace") return;
-    // A focused text field owns these keys. A focused SLIDER does not: it has
-    // no use for them, and the Spring sliders are focused the moment they are
-    // touched, which is exactly when Delete should still mean the spring.
+    // A focused text field owns these keys; a focused slider (a touched Spring slider) does not.
     var focused = document.activeElement;
     if (focused && focused.tagName === "INPUT" && focused.type !== "range") return;
     if (selectedSpring >= 0) deleteSelectedSpring();
@@ -2032,22 +1525,9 @@
   });
 
   // ---- Canvas interaction ----
-  //
-  // Pointer events, not mouse events: one set of listeners for a mouse, a
-  // finger and a pen. (Mouse events alone left every DRAG in the editor dead
-  // on a touchscreen, a browser only synthesizes them for a tap, never for
-  // a moving finger, so shapes could not be drawn, moved, resized, rotated
-  // or aimed.) The canvas has touch-action: none (see mobile.css), so a
-  // finger on it is never the browser's to scroll with.
-  //
-  // One pointer at a time. A second finger landing mid-drag is not primary
-  // and is ignored rather than fought over, and the pointer that started a
-  // gesture is the only one that can move or finish it. (isPrimary is the
-  // whole test: a primary pointer can only go down while no other of its
-  // kind is, so an id left behind by a pointerup that never arrived is
-  // simply overwritten instead of locking the canvas.) Captured, so the drag
-  // keeps arriving while the pointer is outside the canvas, which a finger,
-  // unlike a mouse over a window, otherwise stops doing at the canvas's edge.
+  // Pointer events, not mouse events (never synthesized for a moving finger); touch-action: none is in mobile.css.
+  // One pointer at a time: only a primary pointer starts a gesture and only it can move or finish it.
+  // Captured, so a drag keeps arriving after a finger leaves the canvas.
   var activePointerId = null;
 
   canvas.addEventListener("pointerdown", function (e) {
@@ -2059,12 +1539,8 @@
     var p = canvasPoint(e);
 
     if (activeTool === "select") {
-      // Checked before the ordinary hit-test below: all three sit OUTSIDE
-      // the selected body's own shape on purpose, so a click there must not
-      // fall through to hitTestTopmost and re-select (or start dragging)
-      // whatever body happens to be underneath it. The anchor icon is a
-      // plain click, not a drag: it toggles immediately and never sets any
-      // drag state.
+      // Before the hit-test: the handles sit OUTSIDE the selected body, so a click
+      // there must not select whatever body is under them.
       if (selectedIndex >= 0 && hitTestAnchorIcon(selectedIndex, p.x, p.y)) {
         var anchoredBody = scene.bodies[selectedIndex];
         anchoredBody.isAnchored = false;
@@ -2084,9 +1560,6 @@
         resizeHandleDrag = { bodyIndex: selectedIndex };
         return;
       }
-      // Before the bodies: a hinge is drawn over whatever it pins, so the dot
-      // is what the user sees themselves pressing. The selection is left as
-      // it was, nothing about this gesture is about a body.
       var hingeHit = hitTestHinge(p.x, p.y);
       if (hingeHit >= 0) {
         hingeDrag = { hingeIndex: hingeHit, current: p };
@@ -2094,12 +1567,7 @@
         render();
         return;
       }
-      // A spring, unless a body is squarely under the pointer: a spring
-      // usually ends INSIDE the bodies it joins, and a press there has to
-      // keep meaning the body, or a sprung ball could only be grabbed by its
-      // rim. Everywhere else along its length the spring is what was pressed.
-      // Selecting is the press; the drag that may follow carries it nowhere
-      // but the delete zone (see springDrag).
+      // A spring, unless a body is squarely under the pointer: springs end inside the bodies they join.
       var springHit = hitTestExact(p.x, p.y) >= 0 ? -1 : hitTestSpring(p.x, p.y);
       if (springHit >= 0) {
         springDrag = { springIndex: springHit, current: p };
@@ -2116,9 +1584,7 @@
       }
     } else if (activeTool === "circle") {
       if (!canAddBody()) return;
-      // Placement happens on mouseup (finalizeShapeDrawing): this just
-      // starts the drag; activeTool stays "circle" throughout so the drag
-      // knows what kind of preview to draw.
+      // Placement happens on release (finalizeShapeDrawing); this just starts the drag.
       drawingShape = { tool: "circle", start: p, current: p };
       render();
     } else if (activeTool === "funnel" || activeTool === "splitter") {
@@ -2142,20 +1608,12 @@
       setActiveTool("select");
       render();
     } else if (activeTool === "spring") {
-      // A drag, like the shape tools: the press is one end, the release the
-      // other (see finalizeSpringDrawing). Either may be a body or the bare
-      // background, so there is nothing to reject until both are known.
       springDraw = { start: pickSpringEnd(p.x, p.y), current: p };
       render();
     } else if (activeTool === "velocity") {
-      // Unlike the click-once tools around it this one is a drag: mousedown
-      // only picks the body and records where the drag began, and the
-      // velocity isn't committed until mouseup.
       var hitV = hitTestTopmost(p.x, p.y);
       if (hitV >= 0 && scene.bodies[hitV].isAnchored) {
-        // An anchored body is pinned in place: a starting velocity would be
-        // discarded on the first step, so say so rather than appearing to
-        // set one.
+        // An anchored body would discard the velocity on its first step: say so.
         flashStatus("An anchored object can't be given a velocity");
         setActiveTool("select");
       } else if (hitV >= 0) {
@@ -2166,10 +1624,7 @@
       }
       render();
     } else if (activeTool === "input") {
-      // Quick shortcut for the most common X/Y Input scenario: a single
-      // object's own Center X/Y. Still just an ordinary mapping afterward,
-      // freely overridable (different bodies, different properties) in the
-      // dropdowns below.
+      // Shortcut for the common X/Y Input: this object's Center X/Y. Still an ordinary mapping.
       var hit3 = hitTestTopmost(p.x, p.y);
       if (hit3 >= 0) {
         scene.xInput = { body: hit3, property: "x" };
@@ -2179,11 +1634,7 @@
       setActiveTool("select");
       render();
     } else if (activeTool === "input-velocity") {
-      // Same shortcut as "input" above, but for the vx/vy properties
-      // instead of x/y: see PROPERTIES_BY_TYPE. Rejects an anchored
-      // object: its velocity is never read (invMass/invInertia are always
-      // zero, so PhysicsEngine.step never advances it), so linking one
-      // would be a mapping that visibly does nothing.
+      // Same shortcut for vx/vy. Rejects an anchored object: its velocity is never read.
       var hit5 = hitTestTopmost(p.x, p.y);
       if (hit5 >= 0 && scene.bodies[hit5].isAnchored) {
         flashStatus("An anchored object's velocity is never used");
@@ -2195,9 +1646,7 @@
       setActiveTool("select");
       render();
     } else if (activeTool === "output") {
-      // Quick shortcut for the most common Output scenario: an object's
-      // own Center Y. Rejects an anchored object: it never moves, so
-      // tracking its Y would just be a constant, almost never the intent.
+      // Shortcut for the common Output: this object's Center Y. Anchored would be a constant.
       var hit4 = hitTestTopmost(p.x, p.y);
       if (hit4 >= 0 && scene.bodies[hit4].isAnchored) {
         flashStatus("Output can't be an anchored object");
@@ -2257,10 +1706,7 @@
     render();
   });
 
-  // The browser took the pointer away mid-gesture (a system swipe, an
-  // incoming call, a palm): whatever was in progress is dropped, not
-  // committed, a half-drawn shape placed wherever the finger happened to be
-  // is worse than no shape.
+  // The browser took the pointer mid-gesture: drop whatever was in progress, never commit it.
   window.addEventListener("pointercancel", function (e) {
     if (e.pointerId !== activePointerId) return;
     activePointerId = null;
@@ -2307,24 +1753,17 @@
       return;
     }
     if (hingeDrag) {
-      // Decided from where the pointer IS, not from the last pointermove's
-      // deleteZoneArmed: a touch can lift without a final move event.
+      // Judged from where the pointer IS: a touch can lift without a final move event.
       var upPoint = canvasPoint(e);
       var droppedHinge = isOverDeleteZone(upPoint.x, upPoint.y) ? hingeDrag.hingeIndex : -1;
       hingeDrag = null;
       deleteZoneArmed = false;
       canvas.classList.remove("dragging");
-      // Nothing else in a scene refers to a hinge by index (mappings name
-      // bodies), so removing one is only this. Released anywhere else, the
-      // drag simply ends: it never moved anything to put back.
       if (droppedHinge >= 0) scene.hinges.splice(droppedHinge, 1);
       render();
       return;
     }
     if (springDrag) {
-      // The same release rule as a hinge's, just above. The spring was
-      // selected by the press that began this, so dropping it on the zone is
-      // deleting the selection.
       var springUp = canvasPoint(e);
       var droppedSpring = isOverDeleteZone(springUp.x, springUp.y);
       springDrag = null;
@@ -2355,21 +1794,8 @@
   });
 
   // ---- Undo / redo ----
-  //
-  // One step each way, in memory only: the scene as it was before the most
-  // recent edit, and, once undone, the scene as it was before the undo.
-  // Deliberately not a history: a second Cmd/Ctrl-Z after an undo does
-  // nothing, and a fresh edit after an undo drops the redo.
-  //
-  // States are the same authored JSON the auto-save writes (so a snapshot
-  // is a string, and two states compare with ===), taken from render()
-  // exactly where the auto-save is, after every editing mutation. But not
-  // DURING one: render() also runs on every pointermove of a drag, and a
-  // step per pixel would make undo revert the last pixel of a move rather
-  // than the move. So nothing is recorded while a canvas gesture is under
-  // way or while any pointer is held down anywhere on the page (a slider
-  // being dragged fires input events by the dozen); the release records the
-  // finished edit as one step against the state before the press.
+  // One step each way, not a history. Snapshots are the autosave's authored JSON, recorded from
+  // render() after an edit but never while a gesture or pointer press is under way (a drag renders per pixel).
   var undoPrevJSON = null;    // the step back, or null when there is none
   var undoCurrentJSON = null; // the scene as last recorded
   var redoJSON = null;        // the step forward, only ever set by undo
@@ -2386,21 +1812,14 @@
     if (editInProgress()) return;
     var json = currentUndoJSON();
     if (json === undoCurrentJSON) return;
-    // The very first record is the loaded scene: a baseline, not an edit.
-    // (Loose null test: a render reaching here before this block has run
-    // - a ResizeObserver can fire early, finds these vars hoisted but not
-    // yet assigned.)
+    // Loose null test: an early ResizeObserver render can get here before these vars are assigned.
     if (undoCurrentJSON != null) {
       undoPrevJSON = undoCurrentJSON;
       redoJSON = null;
     }
     undoCurrentJSON = json;
   }
-  // Capture phase, so pointerHeld is already true/false by the time any
-  // handler (and the render() it calls) runs. The bubble-phase pointerup
-  // below runs AFTER the canvas's own pointerup handlers, which is what
-  // records a resize or rotation drag: the two gestures whose release
-  // doesn't render (their last pointermove already did).
+  // Capture phase so pointerHeld is set before any handler renders; the bubble pointerup records resize/rotation drags.
   window.addEventListener("pointerdown", function () { pointerHeld = true; }, true);
   window.addEventListener("pointerup", function () { pointerHeld = false; }, true);
   window.addEventListener("pointercancel", function () { pointerHeld = false; }, true);
@@ -2418,11 +1837,7 @@
     var target = undoPrevJSON;
     var before = undoCurrentJSON;
     restoreUndoJSON(target);
-    // Set AFTER the render inside restoreUndoJSON, which records on its own
-    // and would otherwise have counted the undo as a fresh edit (clearing
-    // the redo it just made possible). Re-serialized rather than reusing
-    // `target`, so the next comparison is against exactly what the scene
-    // now round-trips to.
+    // After restoreUndoJSON's render, which would otherwise count the undo as a fresh edit and clear the redo.
     undoCurrentJSON = currentUndoJSON();
     undoPrevJSON = null; // one step only
     redoJSON = before;
@@ -2439,23 +1854,16 @@
 
   var IS_APPLE = /Mac|iPhone|iPad|iPod/.test((navigator.platform || navigator.userAgent) || "");
   window.addEventListener("keydown", function (e) {
-    // Cmd on Apple, Ctrl elsewhere; Ctrl-Y is the Windows/Linux redo,
-    // Shift-Z the one every platform shares.
+    // Cmd on Apple, Ctrl elsewhere; Ctrl-Y is the Windows/Linux redo.
     var mod = IS_APPLE ? e.metaKey : e.ctrlKey;
     if (!mod || e.altKey) return;
     var key = typeof e.key === "string" ? e.key.toLowerCase() : "";
     var isUndo = key === "z" && !e.shiftKey;
     var isRedo = (key === "z" && e.shiftKey) || (!IS_APPLE && key === "y");
     if (!isUndo && !isRedo) return;
-    // Builder screen only, and not while it is playing back (the scene is
-    // mid-simulation then, not the one being edited), nor over the Import/
-    // Export modal, whose textarea has an undo of its own.
+    // Builder only, not during playback or over the Import/Export modal.
     if (editorView.hidden || isPlaying || !modalBackdrop.hidden) return;
-    // A focused text field owns its own undo; a slider or checkbox has none
-    // to own (same split the Delete key makes above). A field that is no
-    // longer on screen doesn't count: the Export textarea keeps focus after
-    // its modal closes, and would otherwise swallow every Cmd-Z until the
-    // user happened to click somewhere else.
+    // A focused text field owns its own undo, unless hidden: the Export textarea keeps focus after its modal closes.
     var focused = document.activeElement;
     if (focused && focused.offsetParent === null) focused = null;
     if (focused && (focused.tagName === "TEXTAREA" || focused.isContentEditable ||
@@ -2466,14 +1874,9 @@
 
   // ---- Gravity ----
 
-  // Shared by the Edge Handling dropdown and Mutual Gravity's auto-nudge
-  // below: the same rules apply no matter which one asked for the change,
-  // so there's exactly one place that knows how to change edge mode.
+  // The one place that changes edge mode (Edge Handling dropdown and Mutual Gravity's nudge).
   function applyEdgeMode(mode) {
-    // Scene Lifespan's whole value IS "when did this stop early", which only
-    // Sticky Edges ever does: under either other mode it would report the
-    // full step budget for every pixel, so it's cleared rather than silently
-    // left meaningless.
+    // Scene Lifespan only means anything under Sticky Edges.
     var leavingSticky = mode !== "sticky";
     if (leavingSticky && scene.output && scene.output.property === "lifespan") {
       scene.output = null;
@@ -2486,17 +1889,7 @@
 
   mutualGravityCheckbox.addEventListener("change", function () {
     scene.mutualGravity = mutualGravityCheckbox.checked;
-    // Two one-time nudges toward the combination that actually behaves well,
-    // NOT a lock: Collisions and Edge Handling are perfectly ordinary
-    // controls the instant after this runs, and flipping Mutual Gravity
-    // again just re-nudges both.
-    // On: the classic "stuck together, orbiting madly" failure mode this
-    // engine used to hit is what Collisions=off sidesteps, so default there,
-    // and nothing pulls a flung-out body back under Mutual Gravity the way
-    // downward gravity does, so Infinite Space (no edge to bounce or wrap
-    // off of) matches what that physics actually implies.
-    // Off: back to the everyday case, where bouncing off things (Collisions
-    // on) and Pac-Man-style wrapping are both normally what's wanted.
+    // One-time nudges, not a lock: mutual gravity behaves with Collisions off and Infinite Space; off restores the defaults.
     scene.collisionsEnabled = !scene.mutualGravity;
     collisionsCheckbox.checked = scene.collisionsEnabled;
     applyEdgeMode(scene.mutualGravity ? "infinite" : "wrap");
@@ -2510,9 +1903,7 @@
   function updateSimulationStepsReadout(value) {
     if (simulationStepsReadout.value !== String(value)) simulationStepsReadout.value = String(value);
   }
-  // Typed: applied when the field is committed (Enter, or leaving it), not per
-  // keystroke, "1200" passes through 1, 12 and 120 on the way. Anything
-  // unusable just puts the current value back.
+  // Applied on commit (Enter or blur), not per keystroke; unusable input restores the current value.
   simulationStepsReadout.addEventListener("change", function () {
     var typed = clampSimulationSteps(simulationStepsReadout.value);
     if (typed !== null) {
@@ -2529,10 +1920,6 @@
   simulationStepsSlider.addEventListener("input", function () {
     scene.simulationSteps = Number(simulationStepsSlider.value) * SIMULATION_STEPS_PER_NOTCH;
     updateSimulationStepsReadout(scene.simulationSteps);
-    // Only actually reachable while editing (this slider is disabled during
-    // a run: see setEditingEnabled), but keep the playback slider's own
-    // range showing the current setting anyway, so it's already correct the
-    // moment Play first runs rather than snapping to a new range then.
     if (!isPlaying) playbackProgressSlider.max = String(scene.simulationSteps);
   });
 
@@ -2541,19 +1928,8 @@
   });
 
   // ---- Max Objects ----
-  //
-  // How many bodies a splitter may grow the scene to. Only splitters grow
-  // anything, so the control is shown only when the scene has one: for
-  // every other scene it is a number that provably cannot matter, and the
-  // panel is better without it.
-  //
-  // It is not just a safety rail. Every slot, filled or not, is a body the
-  // Fractal Grid's shader unrolls and collision-checks against every other
-  // one, for every pixel, on every step, so the cost is quadratic in this
-  // number and it is by far the biggest lever on whether a splitter scene
-  // renders in a moment or hangs the GPU. Hence a control rather than a
-  // constant: the usable value depends on the scene, the step count and the
-  // machine, and the only way to find it is to raise it until it hurts.
+  // How many bodies a splitter may grow the scene to; shown only when the scene has one. The grid
+  // shader checks every slot against every other per pixel per step (quadratic): the biggest lever on GPU hangs.
   maxBodiesSlider.min = String(PhysicsEngine.MIN_SIMULATION_BODIES);
   maxBodiesSlider.max = String(PhysicsEngine.MAX_SIMULATION_BODIES_LIMIT);
 
@@ -2569,11 +1945,7 @@
   maxBodiesSlider.addEventListener("input", function () {
     scene.maxSimulationBodies = Number(maxBodiesSlider.value);
     maxBodiesReadout.textContent = String(scene.maxSimulationBodies);
-    // render(), unlike the Simulation Duration slider beside it, because
-    // render() is also what auto-saves the scene, and this is a value
-    // someone will set once and then reload the page to try, so it should
-    // be durable the moment it's set rather than on the next unrelated
-    // redraw.
+    // render() (unlike the duration slider) so the value autosaves the moment it's set.
     render();
   });
 
@@ -2606,9 +1978,7 @@
     }
   }
 
-  // includeLifespan: only the Output body dropdown offers "Scene lifespan"
-  // - X/Y Input drive a property FROM a pixel's position, which lifespan
-  // (a fact about the whole run, not any one body) has nothing to receive.
+  // includeLifespan: only the Output dropdown offers Scene lifespan; inputs drive a body property.
   function populateBodySelect(select, mapping, includeLifespan) {
     select.innerHTML = "";
     var noneOpt = document.createElement("option");
@@ -2630,8 +2000,6 @@
     select.value = !mapping ? "" : mapping.property === "lifespan" ? "lifespan" : mapping.body;
   }
 
-  // Called whenever the body list changes shape (add/delete/load): rebuilds
-  // all three dropdown pairs from scratch and re-selects the current mapping.
   function refreshMappingUI() {
     populateBodySelect(xInputBodySelect, scene.xInput);
     populatePropertySelect(xInputPropertySelect, scene.xInput ? scene.xInput.body : null, scene.xInput ? scene.xInput.property : null);
@@ -2639,9 +2007,6 @@
     populatePropertySelect(yInputPropertySelect, scene.yInput ? scene.yInput.body : null, scene.yInput ? scene.yInput.property : null);
     populateBodySelect(outputBodySelect, scene.output, true);
     refreshOutputPairUI();
-    // Max Objects only means anything once something can grow the scene.
-    // Hung off this function because every place the body list changes
-    // already calls it, adding, deleting, loading a sample, pasted JSON.
     refreshMaxBodiesVisibility();
   }
 
@@ -2690,19 +2055,14 @@
     if (outputBodySelect.value === "") {
       scene.output = null;
     } else if (outputBodySelect.value === "lifespan") {
-      // Lifespan's value IS "when did Sticky Edges first trigger": under
-      // any other mode every scene just runs the full step budget and would
-      // report that same constant for everything, so it's turned on
-      // automatically rather than silently making the mapping meaningless.
+      // Lifespan only means anything under Sticky Edges: turn it on.
       if (scene.edgeMode !== "sticky") {
         scene.edgeMode = "sticky";
         edgeModeSelect.value = "sticky";
       }
       scene.output = { body: null, bodyB: null, property: "lifespan" };
     } else {
-      // Keeps whatever second object was already chosen, unless it is now
-      // body A itself: re-picking the first object shouldn't silently drop
-      // the pair you set up.
+      // Keep the chosen second object unless it is now body A itself.
       var keptB = scene.output && typeof scene.output.bodyB === "number" ? scene.output.bodyB : null;
       var newBody = Number(outputBodySelect.value);
       scene.output = { body: newBody, bodyB: keptB === newBody ? null : keptB, property: OUTPUT_PROPERTIES[0].key };
@@ -2718,12 +2078,7 @@
   });
 
   // ---- Output's optional second object ----
-  //
-  // Choosing one turns the Output from "this body's X" into "the average X
-  // of these two", and unlocks Distance Apart, which has no single-body
-  // meaning. Offered only for a mapping that actually reads a body: Scene
-  // Lifespan and Bounce Count are facts about a run and about one body
-  // respectively, and neither has a second half.
+  // A pair reads the average (and unlocks Distance Apart). Only for a mapping that reads a body.
   function refreshOutputPairUI() {
     var isBodyMapping = scene.output && typeof scene.output.body === "number";
     var pairable = isBodyMapping && scene.bodies.length > 1;
@@ -2745,22 +2100,10 @@
         outputBodyBSelect.appendChild(opt);
       });
       outputBodyBSelect.value = typeof scene.output.bodyB === "number" ? scene.output.bodyB : "";
-      // A bodyB that no longer exists (deleted, or now the same index as
-      // body A after a reindex) silently falls back to no pair rather than
-      // leaving the mapping pointing at nothing.
       if (outputBodyBSelect.value === "") scene.output.bodyB = null;
     }
-    // The property list itself depends on whether a pair is active, and the
-    // current property may not survive the switch: "distance" means
-    // nothing without two bodies, and Bounce Count means nothing with them.
-    //
-    // Only for a mapping that READS A BODY, though. Scene Lifespan is
-    // `{ body: null, property: "lifespan" }`, and "lifespan" is in neither
-    // body-property list by design, so running the fallback over it
-    // rewrote the property to "x" while body stayed null, leaving a mapping
-    // that names no body and no body-property. The grid rejects exactly
-    // that shape ("missing an Output mapping"), which is how picking Scene
-    // Lifespan broke the fractal page.
+    // The property list depends on whether a pair is active. Body mappings only: Scene Lifespan is
+    // { body: null } and in neither list; the fallback would rewrite it to a shape the grid rejects.
     var props = outputPropertiesFor(scene.output);
     if (isBodyMapping && !props.some(function (p) { return p.key === scene.output.property; })) {
       scene.output.property = props[0].key;
@@ -2777,26 +2120,9 @@
   });
 
   // ---- "Not ready yet" guidance for the Fractal-ize button ----
-  //
-  // The button is ALWAYS the same bright color (see .fractalize-btn in
-  // physics.css): it only ever grays out, with an explanation, while the
-  // pointer is actually over it or briefly after a click that couldn't
-  // proceed. That rules out the native `disabled` attribute: a genuinely
-  // disabled button stops reliably firing the hover events this depends on
-  // in every browser, so readiness is instead just a plain JS check, run
-  // fresh on demand rather than continuously mirrored into a DOM attribute.
-  //
-  // Checked in a fixed order, body count, then input, then output, so the
-  // message always points at the SINGLE earliest thing actually in the way,
-  // never several at once.
-  //
-  // "Body count" means: is there anything here for a map to be a picture OF.
-  // One body on its own is a thing falling, and the rule used to be simply
-  // "more than one body", which also turned away a lone ball on a spring,
-  // a complete scene (and a chaotic one: it swings and bounces at once).
-  // So one body counts once something is attached to it.
-  // Shared with gridSceneFromShared, which asks the same of a scene arriving
-  // in a map link: a link to a lone sprung ball has to open, too.
+  // Never the native `disabled` attribute: a disabled button stops firing the hover events this depends on.
+  // Checked in a fixed order so the message names the single earliest blocker. One body counts once
+  // something is attached to it (a lone ball on a spring). Shared with gridSceneFromShared.
   function hasSomethingToMap(s) {
     var attached = (s.springs || []).length > 0 || (s.hinges || []).length > 0;
     return s.bodies.length > 1 || (s.bodies.length === 1 && attached);
@@ -2827,13 +2153,8 @@
     return { ready: true };
   }
 
-  // Whatever's currently highlighted because of the CURRENT hint: tracked
-  // so showing a new one (or hiding) only ever clears exactly what this
-  // feature itself turned on, never anything else.
   var hintHighlighted = [];
-  // Set only while a click's post-click grace period (see the click handler
-  // below) is running: mouseenter/mouseleave both defer to it instead of
-  // fighting over the button's class while it's ticking.
+  // Set during a click's grace period: mouseenter/mouseleave defer to it.
   var notReadyClickTimer = null;
 
   function showNotReadyHint(readiness) {
@@ -2864,17 +2185,10 @@
   });
 
   btnSendToGrid.addEventListener("click", function () {
-    // The scene may currently be showing a mid- or post-Play animation
-    // frame (tick() writes those straight into scene.bodies) rather than
-    // what was actually authored: reset first so the fractal is always
-    // generated from the starting configuration, not wherever Play left it.
+    // Playback writes animation frames into scene.bodies: reset so the fractal starts from the authored scene.
     resetToInitialScene();
     var readiness = gridReadiness();
     if (!readiness.ready) {
-      // Clicking a not-ready button is the same hint a hover would show,
-      // just held for a fixed window regardless of whether the pointer
-      // stays put, clicking is often a quick tap, and the whole point is
-      // that the explanation is still legible after it.
       showNotReadyHint(readiness);
       if (notReadyClickTimer) clearTimeout(notReadyClickTimer);
       notReadyClickTimer = setTimeout(function () {
@@ -2885,8 +2199,6 @@
     }
     sendToGridErrorEl.textContent = "";
     sendToGridErrorEl.className = "readout";
-    // Both views live in one document, so this is a view switch (and the
-    // transition that plays over it), not a navigation.
     window.AppShell.goToGrid(serializeScene());
   });
 
@@ -2896,12 +2208,7 @@
     return Math.round(n * 10000) / 10000;
   }
 
-  // The frame an authored scene is being loaded INTO: see
-  // PhysicsCoords.toEngineJSON for why it is the receiving frame that
-  // matters rather than the one the JSON was written at. scene.frameWidth
-  // is already live-synced to the canvas by resizeCanvas; the fallback
-  // covers the one moment it isn't, the very first load, where canvasArea
-  // is exactly what resizeCanvas is about to set it to anyway.
+  // The frame an authored scene is loaded INTO (see PhysicsCoords.toEngineJSON); the fallback covers the very first load.
   function liveFrame() {
     return {
       frameWidth: scene.frameWidth || canvasArea.clientWidth || 0,
@@ -2909,13 +2216,8 @@
     };
   }
 
-  // Moves the whole scene rigidly: every body plus every hinge-to-world
-  // anchor, which is a world point rather than a local offset (see
-  // PhysicsEngine.hingeBodyA). Nothing relative changes, so there is no
-  // hinge geometry to re-establish afterward; this is not an edit of any
-  // one body and deliberately doesn't go through
-  // PhysicsHingeGeometry.translateBodyPreservingHinges, whose whole job is
-  // moving one body WITHOUT its neighbors.
+  // Moves the whole scene rigidly, world-anchored hinge/spring ends included. NOT
+  // translateBodyPreservingHinges, whose job is moving one body without its neighbors.
   function translateWholeScene(dx, dy) {
     if (!dx && !dy) return;
     scene.bodies.forEach(function (b) { b.x += dx; b.y += dy; });
@@ -2923,7 +2225,6 @@
       if (h.bodyA !== null) return;
       h.localAnchorA = { x: h.localAnchorA.x + dx, y: h.localAnchorA.y + dy };
     });
-    // A spring's background end is a world point too, for the same reason.
     scene.springs.forEach(function (sp) {
       if (sp.bodyA !== null) return;
       sp.localAnchorA = { x: sp.localAnchorA.x + dx, y: sp.localAnchorA.y + dy };
@@ -2933,9 +2234,7 @@
   function serializeScene() {
     return serializeSceneOf(scene);
   }
-  // The same, of any scene-shaped object, which is how a shared link's scene
-  // reaches the grid without first becoming the editor's (see
-  // gridSceneFromShared). The parameter deliberately shadows the live scene.
+  // Of any scene-shaped object (see gridSceneFromShared); the parameter deliberately shadows the live scene.
   function serializeSceneOf(scene) {
     return {
       mutualGravity: !!scene.mutualGravity,
@@ -2983,12 +2282,7 @@
     };
   }
 
-  // Validates a plain scene-shaped object (from the Import modal's textarea,
-  // or from the auto-saved copy in localStorage) and returns fresh, ready-
-  // to-use bodies/hinges/mappings, or throws with a message fit to show
-  // the user. Pulled out of loadSceneFromImportModal so the auto-restore-
-  // on-load feature below can reuse the exact same validation instead of a
-  // second copy.
+  // Validates any scene-shaped object into fresh bodies/hinges/mappings, or throws a message fit to show.
   function parseSceneData(parsed) {
     if (!parsed || !Array.isArray(parsed.bodies)) {
       throw new Error('JSON must have a "bodies" array.');
@@ -3011,10 +2305,7 @@
       } else {
         throw new Error('bodies[' + i + "]: type must be \"circle\", \"line\", \"funnel\", or \"splitter\"");
       }
-      // An anchored body's velocity is never used and, left in place, makes
-      // it act like a moving wall in the contact solver (see computeMass).
-      // The builder can't author one, but an older link or hand-edited
-      // JSON can still carry it.
+      // An anchored body's velocity would make it a moving wall in the contact solver (see computeMass).
       if (!body.isAnchored) {
         if (b.vx !== undefined) body.vx = Number(b.vx);
         if (b.vy !== undefined) body.vy = Number(b.vy);
@@ -3047,10 +2338,7 @@
       }
     }
 
-    // Absent from every scene saved before springs existed. Indices are
-    // checked like a hinge's; the two numbers are CLAMPED into the sliders'
-    // own range rather than rejected, the way maxSimulationBodies is, so a
-    // hand-edited value lands somewhere the editor can show.
+    // Absent from scenes saved before springs existed; stiffness/rest length are clamped, not rejected.
     var newSprings = [];
     if (Array.isArray(parsed.springs)) {
       for (var si = 0; si < parsed.springs.length; si++) {
@@ -3082,26 +2370,19 @@
 
     function parseMapping(raw, label, propsList, allowLifespan) {
       if (raw === null || raw === undefined) return null;
-      // Scene Lifespan has no body of its own: checked before the
-      // Number(raw.body) coercion below, which would otherwise turn a
-      // genuine `body: null` into bodyIndex 0 instead of rejecting or
-      // preserving it.
+      // Scene Lifespan has no body: checked before Number(raw.body) turns a genuine null into 0.
       if (allowLifespan && raw.body === null && raw.property === "lifespan") return { body: null, bodyB: null, property: "lifespan" };
       var bodyIndex = Number(raw.body);
       if (!(bodyIndex >= 0 && bodyIndex < newBodies.length)) {
         throw new Error(label + ".body index out of range.");
       }
-      // Output only: an optional second body, which switches the mapping to
-      // the pair reading (average, or Distance Apart). Absent/null is the
-      // one-body mapping.
       var bodyB = null;
       if (allowLifespan && raw.bodyB !== null && raw.bodyB !== undefined) {
         bodyB = Number(raw.bodyB);
         if (!(bodyB >= 0 && bodyB < newBodies.length)) {
           throw new Error(label + ".bodyB index out of range.");
         }
-        // Paired with itself is just the body: accepted and collapsed
-        // rather than rejected, since it means exactly what one body means.
+        // Paired with itself is just the body.
         if (bodyB === bodyIndex) bodyB = null;
       }
       var props = propsList
@@ -3122,14 +2403,11 @@
       xInput: parseMapping(parsed.xInput, "xInput"),
       yInput: parseMapping(parsed.yInput, "yInput"),
       output: parseMapping(parsed.output, "output", OUTPUT_PROPERTIES, true),
-      // Pasted JSON that leaves any of these out, or garbles one, gets the
-      // same default a brand-new scene starts with rather than an error.
       edgeMode: PhysicsEngine.edgeModeOf(parsed),
       mutualGravity: parsed.mutualGravity === true,
       maxSimulationBodies: PhysicsEngine.maxSimulationBodiesFor(parsed),
       collisionsEnabled: PhysicsEngine.collisionsEnabled(parsed),
-      // Kept exact (see clampSimulationSteps): the number field shows it as
-      // it is, and the slider rests on the nearest hundred.
+      // Kept exact (see clampSimulationSteps); the slider rests on the nearest hundred.
       simulationSteps: clampSimulationSteps(parsed.simulationSteps) || DEFAULT_SIMULATION_STEPS,
     };
   }
@@ -3156,9 +2434,7 @@
     playbackProgressSlider.max = String(scene.simulationSteps);
   }
 
-  // Common tail for anything that replaces the whole scene at once (pasted
-  // JSON, a sample, Clear All): refresh every panel that reads scene state
-  // directly rather than through render()'s own per-frame sync.
+  // Common tail for anything replacing the whole scene: refresh panels that read scene state directly.
   function finishSceneReplace() {
     importJsonErrorEl.textContent = "";
     importJsonErrorEl.className = "readout";
@@ -3189,9 +2465,6 @@
     closeModal();
   }
 
-  // Samples are fetched on click (not preloaded) since they're only ever
-  // needed the moment a button is pressed: same validation path as pasted
-  // JSON, so a malformed sample file fails the same way a bad paste would.
   function loadSample(url, label) {
     if (scene.bodies.length > 0 && !window.confirm("Clear current scene and load " + label + "?")) return;
     fetch(url)
@@ -3227,11 +2500,7 @@
     finishSceneReplace();
   });
 
-  // Restores whatever was being edited last time, so navigating away (e.g.
-  // to Send to Fractal Grid, or the back-link) and returning doesn't lose
-  // work to the hardcoded seed scene. Silently falls back to the caller
-  // seeding a default scene on any error: a corrupted or outdated save
-  // should never be able to break the page from loading.
+  // Restores the last edited scene; any error falls back to the seed scene so a bad save can't break loading.
   function loadPersistedScene() {
     var raw = localStorage.getItem(EDITOR_STORAGE_KEY);
     if (!raw) return false;
@@ -3244,12 +2513,7 @@
   }
 
   // ---- Scenes that arrive by link ----
-  //
-  // The address bar carries the whole scene (see share-url.js for the format
-  // and transition.js for when it is read and written). A link's scene is the
-  // same authored JSON Export writes, so it comes in through the same door a
-  // pasted one does: validated by parseSceneData, and placed from the center
-  // of whatever frame this window has.
+  // The address bar carries the whole scene (share-url.js, transition.js): the same authored JSON Export writes.
 
   function sceneIdentity(authored) {
     var copy = {};
@@ -3259,11 +2523,7 @@
     return JSON.stringify(copy);
   }
 
-  // On load, ahead of the auto-saved scene: a link says what to show, and
-  // this browser's own last scene is still there for the next plain visit
-  // (see sharedSceneIdentity). False, leaving the caller to fall back, when
-  // there is no scene in the address bar or it can't be used; transition.js
-  // reads the same link a moment later and is what tells the user why.
+  // On load, ahead of the autosave. False when the address bar has no usable scene; transition.js tells the user why.
   function loadSceneFromLink() {
     try {
       var shared = ShareUrl.decode(location.hash);
@@ -3276,11 +2536,7 @@
     }
   }
 
-  // ---- Export / Import modal ----
-  //
-  // One shared dialog shell (see #modal-backdrop in #editor-view), opening
-  // just shows the one content div (export or import) that's relevant and
-  // hides the other, rather than building separate dialogs.
+  // ---- Export / Import modal: one shared dialog shell (#modal-backdrop) ----
   function openModal(title, contentEl) {
     modalTitle.textContent = title;
     exportModalContent.hidden = contentEl !== exportModalContent;
@@ -3292,9 +2548,7 @@
   }
 
   btnExportScene.addEventListener("click", function () {
-    // No indent argument: a compact one-liner (no newlines/tabs) rather
-    // than the pretty-printed shape the old live-synced textarea used,
-    // this is meant to be pasted around whole, not read in place.
+    // A compact one-liner: meant to be pasted whole, not read in place.
     exportJsonTextarea.value = JSON.stringify(PhysicsCoords.toAuthoredJSON(serializeScene()));
     openModal("Export Scene", exportModalContent);
     exportJsonTextarea.focus();
@@ -3317,37 +2571,15 @@
 
   // ---- Play / reset ----
 
-  // Used to gray out every editing control the instant Play started (an
-  // enabled=false call below), since a run in flight was launched against
-  // whatever they held and changing them silently wouldn't do anything
-  // until a fresh Play. That hid the fact that they were still real,
-  // pressable actions: see lockedDuringPlaybackControls just below, which
-  // instead lets each one reset the run and apply immediately. So this is
-  // now an enabled-only hook: resetToInitialScene() and the initial boot
-  // both still want the "refresh selects to match the live scene" side
-  // effect, but there's nothing left to do for the disable side.
+  // Enabled-only now: controls no longer gray out during playback (see lockedDuringPlaybackControls).
   function setEditingEnabled(enabled) {
     if (!enabled) return;
-    // Property selects have their own conditional disabled state (only
-    // enabled when their body select isn't "None"): refreshMappingUI
-    // restores that.
     refreshMappingUI();
   }
 
   // ---- Keep these usable during playback instead of graying out ----
-  //
-  // Every real editing control in #panel, including Mutual Gravity/
-  // Collisions (which never grayed out, but silently changing physics
-  // properties mid-run without resetting was just as stale a no-op as the
-  // grayed-out controls were: see the mutualGravityCheckbox/
-  // collisionsCheckbox change handlers, which only assign into `scene`).
-  // Now any of them can be touched mid-run: the first effect is exactly
-  // what Reset does (snap back to the pre-play scene), and only then does
-  // the control's own handler run, against that now-editable scene. Not
-  // in this list: btnPlayPause/btnMute/playbackProgressSlider/btnSpeed/
-  // btnReset (the playback transport itself, now its own floating toolbar
-  // - see chaos.html) and outputBodyBSelect/the "Advanced" disclosures,
-  // which stay plain toggles/selects with no reset side effect.
+  // Touching any of these mid-run first does what Reset does, then runs the control's own handler.
+  // Not listed: the playback transport, outputBodyBSelect and the Advanced disclosures.
   var lockedDuringPlaybackControls = toolButtons.concat([
     btnExportScene, btnImportScene,
     btnSampleDoublePendulum, btnSamplePinball, btnSampleBinaryStar, btnClearAll,
@@ -3356,17 +2588,8 @@
     xInputBodySelect, yInputBodySelect, outputBodySelect,
     xInputPropertySelect, yInputPropertySelect, outputPropertySelect,
   ]);
-  // A capturing listener on #panel (an ancestor of every control above)
-  // always runs before that control's own listener fires, however each one
-  // is wired (click/input/change), so the reset is guaranteed to land
-  // first no matter which of the three events actually fired. For a
-  // select/slider/checkbox, the browser has already committed the new
-  // value to e.target by this point but the control's own handler hasn't
-  // read it yet; resetToInitialScene() -> setEditingEnabled(true) ->
-  // refreshMappingUI() can rebuild that same element (wiping it back to
-  // the pre-play value), so the new value is snapshotted first and
-  // restored right after: whatever the user just picked/checked is what
-  // the control's own handler sees.
+  // A capturing listener on #panel runs before the control's own, whatever event it uses. The reset's
+  // refreshMappingUI can rebuild the element, so the just-committed value is snapshotted and restored.
   function resetBeforeLockedControlAction(e) {
     if (!isPlaying) return;
     if (lockedDuringPlaybackControls.indexOf(e.target) === -1) return;
@@ -3381,13 +2604,7 @@
   panelEl.addEventListener("input", resetBeforeLockedControlAction, true);
   panelEl.addEventListener("change", resetBeforeLockedControlAction, true);
 
-  // Stops the clock without leaving playback mode, isPlaying (and so
-  // editing-locked) stays true, since resuming later depends on
-  // scene.bodies still holding exactly what the trajectory last wrote into
-  // it. Used by the Pause click, a progress-slider drag, and tick()
-  // reaching the final frame; only resetToInitialScene (Reset, or
-  // Fractal-ize taking a fresh snapshot) goes the rest of the way back to
-  // Editing.
+  // Stops the clock without leaving playback mode (isPlaying stays true); only resetToInitialScene goes back to Editing.
   function pausePlayback() {
     isAdvancing = false;
     if (rafId) cancelAnimationFrame(rafId);
@@ -3395,103 +2612,47 @@
     updatePlayPauseButtonUI();
   }
 
-  // Playback applies zero physics: it's a pure lookup into the GPU-computed
-  // trajectory, written into the same body objects the renderer already
-  // knows how to draw.
   var trajectory = null;
 
-  // The stepCount playback actually stops at for this run: scene.
-  // simulationSteps unless "Stop on wrap" found the Output body wrapping
-  // earlier (see PhysicsHingeGeometry.findWrapStopStep). Recomputed fresh at
-  // the top of every Play click.
+  // Where playback stops this run: simulationSteps, or earlier if findWrapStopStep found a wrap.
   var effectiveMaxSteps = DEFAULT_SIMULATION_STEPS;
-  // The Output body's interpolated (continuous, sub-step-accurate) x/y/angle
-  // for the FINAL frame of a wrap-stopped run: null when this run isn't
-  // stopping early. trajectory[] only ever holds discrete, once-per-step
-  // samples, so the last logged sample before a wrap is itself a
-  // discontinuous function of the starting conditions (which step happened
-  // to notice the crossing); this override replaces just that one body's
-  // displayed state on the final frame with findWrapStopStep's continuous
-  // reconstruction, without touching how any other body is drawn.
+  // The Output body's continuous x/y/angle for the FINAL frame of a wrap-stopped run (null otherwise):
+  // the last discrete sample is a discontinuous function of the starting conditions.
   var wrapStopOverride = null;
-  // Scene Lifespan's own value for this run, a single fact about the whole
-  // trajectory (when did some watched body first cross an edge), known as
-  // soon as findWrapStopStep runs at Play time, not a per-step positional
-  // readout, so unlike x/y/angle it holds constant across every frame of
-  // playback instead of varying as the animation plays. scene.simulationSteps
-  // (never crossed, ran the full budget) when this isn't a lifespan run, or a
-  // lifespan run that never stopped early.
+  // Scene Lifespan's value for this run, constant across frames; simulationSteps if it never stopped early.
   var lifespanValue = DEFAULT_SIMULATION_STEPS;
-  // Bounce Count's per-step running totals for this run (see
-  // PhysicsEngine.runBounceCounts), or null when Output isn't Bounce Count.
-  // Unlike x/y/angle it isn't in the GPU trajectory, that only logs body
-  // state, so it's counted alongside, on the JS engine, at Play time.
+  // Bounce Count's per-step totals (JS engine; not in the GPU trajectory), or null.
   var bounceCounts = null;
-  // Every step (0-indexed) at which some pair of bodies started touching
-  // this run: the bounce sound's own trigger list (see
-  // PhysicsEngine.runBounceEvents and tick()'s own use of it below).
-  // Computed unconditionally alongside bounceCounts, not just when Output is
-  // Bounce Count: the sound plays regardless of what's being colored by.
+  // Steps (0-indexed) at which a pair started touching: the bounce sound's triggers, whatever the Output.
   var bounceEvents = [];
 
-  // The Output property's own exact range, not a per-trajectory min/max
-  // scan: mirrors fractal-grid.js's outputRangeMax exactly. A non-anchored
-  // body's x/y is already wrapped into exactly [0, frameWidth)/[0,
-  // frameHeight) (PhysicsEngine.step's frame wrap, always on here since
-  // resizeCanvas always keeps scene.frameWidth/frameHeight set), so those
-  // bounds ARE the true range, not an estimate; angle has no positional
-  // bound, but mod(angle, TAU) is which way the body is *currently* facing,
-  // independent of how many full turns it took to get there, so the color
-  // still runs the whole spectrum every rotation instead of slowly
-  // saturating over many of them.
+  // The property's exact range (mirrors fractal-grid.js): x/y wrap into [0, frame); mod(angle, TAU)
+  // is the current facing, so the color runs the whole spectrum every turn instead of saturating.
   var TAU = Math.PI * 2;
   function outputRangeMax(property) {
     if (property === "x") return scene.frameWidth;
     if (property === "y") return scene.frameHeight;
-    // Also not circular: two bodies at the greatest separation the world
-    // allows are as far apart as they get, and mod()-ing that back to 0
-    // would paint "maximally apart" the same color as "touching".
+    // Not circular, nor is lifespan below: maximal separation must not read as touching.
     if (property === "distance") return PhysicsEngine.outputDistanceMax(scene);
-    // Not circular like x/y/angle: see outputColorForNormalized's own
-    // comment on why lifespan uses a clamp, not this range's usual mod().
     if (property === "lifespan") return scene.simulationSteps;
     return TAU;
   }
 
-  // Same mapping as the fractal grid: a full-saturation rainbow running the
-  // whole way from hue 360° (t=0, the property's minimum) to 0° (t=1, its
-  // maximum): 0° and 360° render identically, so the wrap point reads as
-  // one continuous loop of color instead of a seam.
-  // OKLCH, not HSL: HSL's lightness is not perceptually uniform (yellow
-  // reads far brighter than blue at the same L/S), so a fast-changing value
-  // flashes light/dark as the hue sweeps, fine for the fractal grid's
-  // static image, but headache-inducing for something animating in place.
-  // Fixed lightness/chroma keeps every hue the same apparent brightness;
-  // only the hue itself carries the value, same as the HSL version did.
-  //
-  // hueRange (default 360) is how much of the wheel the property's range is
-  // spread over: see outputHueRange.
+  // Same rainbow as the fractal grid, hue 360 (min) down to 0 (max). OKLCH, not HSL: HSL lightness
+  // isn't perceptually uniform and flashes as the hue sweeps on something animating in place.
   function outputColorForNormalized(t, hueRange) {
     var hue = (hueRange || 360) * (1 - t);
     return "oklch(60% 0.136 " + hue.toFixed(2) + ")";
   }
 
-  // The map's own rule for the outputs that now have a color KEY on this page
-  // (see "The Output's color key"): a range that does not wrap, Scene
-  // Lifespan always, x/y wherever the edges don't wrap them, stops at 300
-  // degrees, so that its two ends are two colors rather than the same red
-  // (fractal-grid.js: isCircularOutput / HUE_RANGE_MAX). Before there was a
-  // key nobody could see that this page spread them over the full 360 and the
-  // map did not; with a key it would be a legend whose two ends read as the
-  // same value. The other outputs are left exactly as they were.
+  // The map's rule: a range that does not wrap (lifespan; x/y unless the edges wrap) stops at 300
+  // degrees so the key's ends are two colors (fractal-grid.js: isCircularOutput, HUE_RANGE_MAX).
   function outputHueRange(prop) {
     if (prop === "lifespan") return 300;
     if (prop === "x" || prop === "y") return scene.edgeMode === "wrap" ? 360 : 300;
     return 360;
   }
-  // Where in its color range a POSITION (an x or a y, in engine space) lands:
-  // wrapped into the frame, or, with the edges off, squashed into it.
-  // Shared by the playback background and the border that is its key.
+  // Where a POSITION lands in its color range: wrapped into the frame, or with the edges off squashed into it.
   function positionOutputT(prop, value) {
     var rangeMax = outputRangeMax(prop);
     if (scene.edgeMode === "infinite") return PhysicsEngine.frameSigmoid(value / rangeMax);
@@ -3503,34 +2664,20 @@
     var rangeMax = outputRangeMax(scene.output.property);
     var t;
     if (scene.output.property === "lifespan") {
-      // Not circular like x/y/angle, see outputRangeMax's own comment,
-      // and already fully known for the whole run, so no per-step lookup.
       t = Math.min(1, Math.max(0, lifespanValue / rangeMax));
     } else if (scene.output.property === "distance") {
-      // Clamped, not wrapped, for the same reason lifespan is: the maximum
-      // separation is a real value the pair can legitimately sit at.
+      // Clamped, not wrapped: maximal separation is a real value.
       t = Math.min(1, Math.max(0, outputValueAtFrame(trajectory[currentStepCount - 1], scene.output) / rangeMax));
     } else if (scene.output.property === "bounces") {
-      // Scaled against the most bounces this run reaches (its final total),
-      // so the color sweeps the whole rainbow across the run however few or
-      // many bounces it turns out to have: the single-scene reading of the
-      // fractal grid's "scale against the max bounce count in view".
       var maxBounces = bounceCounts ? bounceCounts[effectiveMaxSteps - 1] : 0;
       t = maxBounces > 0 ? bounceCounts[currentStepCount - 1] / maxBounces : 0;
     } else {
-      // Same override as applyTrajectoryStep, and for the same reason: on
-      // the final frame of a wrap-stopped run, trajectory[]'s own logged
-      // sample is the discontinuous one findWrapStopStep exists to replace.
       var value = (wrapStopOverride && currentStepCount === effectiveMaxSteps)
         ? wrapStopOverride[scene.output.property]
         : outputValueAtFrame(trajectory[currentStepCount - 1], scene.output);
       var prop = scene.output.property;
       if (prop === "x" || prop === "y") {
-        // With the edges off nothing wraps this coordinate back into the
-        // frame, so there is no range to divide it into: a sigmoid squashes
-        // the whole infinite line into the color range instead (see
-        // positionOutputT). Angle is left alone: it is genuinely circular
-        // whatever the edges do.
+        // Edges off: a sigmoid squashes the unbounded coordinate into range (positionOutputT); angle is always circular.
         t = positionOutputT(prop, value);
       } else {
         t = PhysicsHingeGeometry.wrapIntoRange(value, rangeMax) / rangeMax;
@@ -3540,41 +2687,16 @@
   }
 
   // ---- The Output's color key ----
-  //
-  // What the map does with a scene is color every pixel by its Output, and
-  // nothing on this page said which color meant what. For the two kinds of
-  // Output whose value IS something already on screen, the screen itself can
-  // say so:
-  //
-  //   a body's X or Y (or a pair's average): a border around the scene,
-  //       shaded along that axis: the color a run gets is the border's color
-  //       at the height (or the distance across) where the body ends up,
-  //       with a pointer from the body to that spot on the border.
-  //   Scene Lifespan: the playback scrubber's own track, shaded along its
-  //       length: the color is the one under the point where the run stops.
-  //   a body's Rotation, a ring around that body, shaded around its
-  //       circumference: the color is the one the body POINTS at, the end
-  //       of a line, the radius mark on a circle, with a pointer drawn out
-  //       to the ring from that end, since a line's two ends look alike.
-  //
-  // All use exactly the colors Play already paints the background with
-  // (outputColorForNormalized), so during a run the background can be seen
-  // to match the key beside the body. The other Outputs, a bounce count, a
-  // distance apart, a pair's average rotation, are numbers with no place on
-  // the screen to stand for them, and get no key in the scene.
-  //
-  // And whatever the Output is, once there is one the Set Output button is
-  // itself a swatch of its whole range, low to high from left to right (see
-  // updateOutputKeyControls): the one key every Output can have.
+  // Shows which color means what, in the colors Play paints the background with: X/Y as a border shaded
+  // along that axis, Scene Lifespan as the scrubber's track, Rotation as a ring around the body, each
+  // with a pointer. Whatever the Output, the Set Output button is a swatch of its whole range.
   var OUTPUT_KEY_BORDER_PX = 10;   // the border's thickness, in screen pixels
   var OUTPUT_KEY_STOPS = 24;       // gradients interpolate in sRGB; the hue sweep is given to them in slices
   function outputKeyAxis() {
     var prop = scene.output && scene.output.property;
     return prop === "x" || prop === "y" ? prop : null;
   }
-  // Drawn by render(), in frame space like everything else there, so it
-  // hugs the FRAME, which while playing is letterboxed inside the canvas
-  // area rather than filling it.
+  // Drawn by render() in frame space, so it hugs the FRAME (letterboxed while playing).
   function drawOutputKeyBorder(w, h) {
     var axis = outputKeyAxis();
     if (!axis || !(w > 0 && h > 0)) return;
@@ -3584,9 +2706,7 @@
       var hueRange = outputHueRange(axis), length = axis === "y" ? h : w;
       for (var i = 0; i <= OUTPUT_KEY_STOPS; i++) {
         var f = i / OUTPUT_KEY_STOPS;
-        // The last stop is a hair inside the frame: AT the far edge a wrapped
-        // coordinate is the near edge again, and the key would end on the
-        // color it started with.
+        // A hair inside the frame: AT the far edge a wrapped coordinate is the near edge again.
         gradient.addColorStop(f, outputColorForNormalized(positionOutputT(axis, Math.min(f * length, length - 1e-6)), hueRange));
       }
     } catch (err) {
@@ -3599,19 +2719,8 @@
     ctx.fillRect(0, h - b, w, b);
     ctx.fillRect(0, b, b, h - 2 * b);
     ctx.fillRect(w - b, b, b, h - 2 * b);
-    // Ruler ticks. The two sides that are the scale, the ones the color
-    // changes ALONG, are ticked across their thickness, to match the fine
-    // divisions the ring has round its circumference (there a by-product of
-    // how it is drawn, in slices; here drawn on purpose). The other two sides
-    // are one flat color each, with nothing to measure, so each gets exactly
-    // one: a line down the middle of its thickness, running its whole length.
-    //
-    // That line is also what sets the spacing. It sits half a border's
-    // thickness in from the edge, and the side ticks carry on from it at that
-    // same interval, so going round a corner the ruling simply continues,
-    // the flat side's one line being the first (and, at the far end, the
-    // last) tick of the run. The interval is stretched by whatever fraction
-    // of a pixel makes a whole number of them fit between the two lines.
+    // Ruler ticks: the two sides the color changes ALONG are ticked across their thickness; the others
+    // get one line down the middle, which also sets the interval (stretched so a whole number fit).
     var px = 1 / (displayScale || 1);
     var length = axis === "y" ? h : w, span = axis === "y" ? w : h;
     var first = b / 2, last = length - b / 2;
@@ -3634,23 +2743,15 @@
     ctx.restore();
     drawOutputKeyBorderPointer(axis, w, h, b);
   }
-  // The ring's pointer, for the border: a dashed line through the Output body
-  // straight across the whole scene (for Y; straight up and down, for X),
-  // from one side of the border to the other, ending in a dot ON each, so
-  // the color being pointed at is the color the scene would get if it stopped
-  // right now, and can be read off whichever side is nearer the eye. Under
-  // the bodies, like the rest of the key, so it appears to pass behind one.
+  // The border's pointer: a dashed line through the Output body with a dot on each side; under the bodies.
   function drawOutputKeyBorderPointer(axis, w, h, b) {
     var output = scene.output, body = scene.bodies[output.body];
     if (!body) return;
-    // The value is the Output's own (a pair's average, a split ball's whole
-    // lineage): the same figure Play colors the background by.
     var value = outputValueAtFrame(scene.bodies, output);
     var length = axis === "y" ? h : w, span = axis === "y" ? w : h;
     if (!isFinite(value)) return;
     if (scene.edgeMode === "wrap") value = PhysicsHingeGeometry.wrapIntoRange(value, length);
-    // Off the frame (the edges are off, and it has left): nothing on the
-    // border is level with it.
+    // Off the frame (edges off): nothing on the border is level with it.
     if (value < 0 || value > length) return;
     var px = 1 / (displayScale || 1);
     ctx.save();
@@ -3674,10 +2775,7 @@
     });
     ctx.restore();
   }
-  // The third dot of the border's pointer: on the tracked body's own center
-  // (midway between the two, for a pair), where the dashed line passes
-  // through it. Drawn separately from the rest of the key, AFTER the bodies,
-  // everything else sits under them, and this one would be hidden there.
+  // The pointer's third dot, on the body's own center: drawn AFTER the bodies, unlike the rest of the key.
   function drawOutputKeyBodyDot(w, h) {
     var axis = outputKeyAxis();
     if (!axis) return;
@@ -3702,8 +2800,7 @@
     ctx.restore();
   }
 
-  // The ring, for a single body's Rotation. (A pair's average rotation is an
-  // angle neither body is pointing at, so there is nothing to draw it round.)
+  // The ring, for a single body's Rotation (a pair's average points at nothing).
   var OUTPUT_KEY_RING_GAP_PX = 22;    // from the body's farthest reach to the ring
   var OUTPUT_KEY_RING_WIDTH_PX = 10;
   var OUTPUT_KEY_RING_SEGMENTS = 90;  // arcs of 4 degrees: a conic gradient, without needing createConicGradient
@@ -3713,8 +2810,6 @@
     var body = scene.bodies[output.body];
     if (!body) return;
     var px = 1 / (displayScale || 1); // one screen pixel, in frame units
-    // How far the body reaches from its center, and where along its own
-    // direction the mark that does the pointing ends.
     var reach;
     if (body.type === "circle") reach = playbackDisplayRadius(body.radius);
     else if (isTrapezoidType(body.type)) {
@@ -3730,10 +2825,7 @@
     ctx.lineCap = "butt";
     var step = TAU / OUTPUT_KEY_RING_SEGMENTS;
     for (var i = 0; i < OUTPUT_KEY_RING_SEGMENTS; i++) {
-      // The color of the segment's MIDDLE, and a hair of overlap so no seam
-      // shows between neighbours. Canvas angles run the way body.angle does
-      // (see drawBody), so the ring needs no conversion: the point of it at
-      // angle a is the color of a rotation of a.
+      // Mid-segment color, with a hair of overlap against seams; canvas angles run the way body.angle does.
       ctx.strokeStyle = outputColorForNormalized((i + 0.5) / OUTPUT_KEY_RING_SEGMENTS, outputHueRange("angle"));
       ctx.beginPath();
       ctx.arc(body.x, body.y, radius, i * step - 0.003, (i + 1) * step + 0.003);
@@ -3757,15 +2849,8 @@
     ctx.restore();
   }
 
-  // The keys that are CONTROLS rather than drawing: the scrubber's track (for
-  // Scene Lifespan) and the Set Output button (for any Output at all). A
-  // class and a custom property on each rather than inline styles, because a
-  // range input's track can only be reached through pseudo-elements, and the
-  // button still has hover and active looks of its own to keep (see
-  // .output-key in physics.css). Called from render(), so they follow every
-  // change that can matter, the mapping, the edge mode, a loaded scene,
-  // without each of them having to remember it; the state string is what
-  // stops that being a style write per frame.
+  // The keys that are CONTROLS: the scrubber's track and the Set Output button. A class plus a custom property,
+  // since a range track is only reachable via pseudo-elements (.output-key in physics.css); the state string avoids a style write per frame.
   var outputKeyControlsState = null;
   var btnOutputTool = document.querySelector('.tool-btn[data-tool="output"]');
   function outputKeyGradient(prop) {
@@ -3782,10 +2867,6 @@
     if (state === outputKeyControlsState) return;
     outputKeyControlsState = state;
     var gradient = prop ? outputKeyGradient(prop) : "";
-    // The button says which state it is in as well as showing it: "Set
-    // Output" is an instruction, and once there is an Output it has been
-    // followed. It is still the same tool either way, pressing it arms
-    // picking a (different) Output exactly as before.
     if (btnOutputTool) btnOutputTool.textContent = prop ? "Output Set" : "Set Output";
     [[playbackProgressSlider, prop === "lifespan"], [btnOutputTool, !!prop]].forEach(function (pair) {
       var el = pair[0], on = pair[1];
@@ -3800,19 +2881,9 @@
     return s.bodies.some(function (b) { return b.type === "splitter"; });
   }
 
-  // The Output body's value at one trajectory frame: the AVERAGE over every
-  // body in its lineage, not one fixed index, so a mapping onto a ball that
-  // has since split into two (or more) tracks all of them at once. Only a
-  // split-created body carries an explicit `lineage`; everything else is
-  // implicitly its own index, so a scene with no splitter averages exactly
-  // one body and reads identically to what this replaced.
+  // The Output value at one frame: the AVERAGE over the body's lineage, so a split ball tracks all its pieces.
   function outputValueAtFrame(frame, output) {
-    // PhysicsEngine.computeOutputValue reads a SCENE (bodies with a lineage
-    // tag); a trajectory frame is the same information in a flatter shape,
-    // so it is wrapped into one here rather than duplicating the pair/
-    // distance rules a second time. Keeping exactly one definition of "what
-    // does this Output mean" is the point: the grid's GLSL is already a
-    // second copy of it and that is one more than anyone wants.
+    // Wrapped into a scene shape so PhysicsEngine.computeOutputValue stays the one JS definition.
     var asScene = {
       bodies: frame.map(function (b, i) {
         return { x: b.x, y: b.y, angle: b.angle, lineage: b.lineage !== undefined ? b.lineage : i };
@@ -3822,15 +2893,10 @@
     return PhysicsEngine.computeOutputValue(asScene, output);
   }
 
-  // stepCount is 1-indexed ("Step 1 / 1000" is the state after 1 physics
-  // step); trajectory[] is 0-indexed with row i holding the state after i+1
-  // steps, so the lookup is stepCount: 1.
+  // stepCount is 1-indexed; trajectory[] is 0-indexed, so the lookup is stepCount - 1.
   function applyTrajectoryStep(stepCount) {
     var frame = trajectory[stepCount - 1];
-    // A splitter's run has MORE bodies in later frames than the scene was
-    // authored with (see PhysicsEngine.runTrajectory): grow the scene to
-    // match so every ball a split produced actually gets drawn, and shrink
-    // back when scrubbing to a frame from before it existed.
+    // A splitter's run has more bodies in later frames: grow or shrink the scene to match the frame.
     while (scene.bodies.length < frame.length) {
       var born = frame[scene.bodies.length];
       var extra = PhysicsEngine.createCircle(born.x, born.y, born.radius, false);
@@ -3843,9 +2909,7 @@
       scene.bodies[i].y = frame[i].y;
       scene.bodies[i].angle = frame[i].angle;
     }
-    // Only meaningful on the exact final frame of a wrap-stopped run: see
-    // wrapStopOverride's own comment. Scene Lifespan has no body of its own
-    // to correct here: its value doesn't come from any body's position.
+    // Only on the final frame of a wrap-stopped run (see wrapStopOverride); lifespan has no body to correct.
     if (wrapStopOverride && stepCount === effectiveMaxSteps && scene.output.body !== null) {
       var out = scene.bodies[scene.output.body];
       out.x = wrapStopOverride.x;
@@ -3854,27 +2918,13 @@
     }
   }
 
-  // Steps per real second the trajectory plays back at: matches the fixed
-  // timestep it was simulated with, so "Step 600" reaches the screen at
-  // roughly the same wall-clock moment the physics itself models it (10s).
   var STEPS_PER_SECOND = 1 / PhysicsGPU.FIXED_DT;
-  // True only while the clock is actively advancing, unlike isPlaying,
-  // which stays true through a pause too (see pausePlayback), so this is
-  // exactly what the Play/Pause button's own icon reflects.
+  // True only while the clock advances; isPlaying stays true through a pause.
   var isAdvancing = false;
-  // Elapsed steps as a float, accumulated frame to frame rather than
-  // recomputed from a fixed start time (see tick()), pausing simply stops
-  // adding to it, and resuming picks up from exactly where it left off
-  // with no separate "how long were we paused" bookkeeping needed.
   var playbackClockSteps = 0;
   var lastTickTime = 0;
 
-  // The step actually shown right now: stepCount itself can be dragged
-  // past effectiveMaxSteps (the progress slider spans the full configured
-  // Simulation Duration, not just however far this particular run got; see
-  // playbackProgressSlider's own "input" handler), in which case the scene
-  // just holds on its real final frame rather than indexing past the end
-  // of a trajectory that was never simulated that far.
+  // stepCount can be dragged past effectiveMaxSteps (the slider spans the full duration): hold on the real final frame.
   function currentDisplayStep() { return Math.min(stepCount, effectiveMaxSteps); }
 
   function updateStepReadout() {
@@ -3888,9 +2938,7 @@
     playbackProgressSlider.value = String(Math.max(1, stepCount));
   }
 
-  // Drawings rather than the characters they used to be: U+23F8 has an emoji
-  // form, and a phone with no plain-text glyph for it draws that, an orange
-  // tile in a row of white icons. (Same two in fractal-grid.js.)
+  // Drawings, not characters: U+23F8 has an emoji form some phones draw as an orange tile. (Same in fractal-grid.js.)
   var PLAY_ICON_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72a.6.6 0 0 0 .92.5l10.55-6.86a.6.6 0 0 0 0-1L8.92 4.64a.6.6 0 0 0-.92.5z"></path></svg>';
   var PAUSE_ICON_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg>';
   function updatePlayPauseButtonUI() {
@@ -3904,37 +2952,18 @@
   }
 
   // ---- Playback speed ----
-  //
-  // A multiplier on STEPS_PER_SECOND, not a replacement for it: 1x is
-  // still exactly real-time (see STEPS_PER_SECOND's own comment), so this
-  // only ever scales that. Read fresh by tick() every frame, so dragging
-  // the slider takes effect immediately on a run already in progress
-  // rather than only on the next Play. Defaults to a real-time 1x on this
-  // page: the fractal grid's own default (fractal-grid.js) is 2x instead.
+  // A multiplier on STEPS_PER_SECOND (1x is real time), read fresh by tick() every frame; the grid defaults to 2x.
   var playbackSpeed = 1;
   var SPEED_MIN = 0.5, SPEED_MAX = 16;
-  // The slider itself moves in log2(speed) space, not speed: see
-  // sliderValueToSpeed/speedToSliderValue. A linear 0.5-16 slider spends
-  // almost no travel on 0.5-2 (where a small change is a huge relative
-  // speed difference) and most of it on 8-16 (where it barely matters);
-  // log space instead gives 0.5->1, 1->2, 2->4, 4->8 and 8->16 each the
-  // same amount of the slider's length, since each is the same ×2 step.
-  // step="1" in this same space is what actually restricts the control to
-  // just those six whole-power-of-two speeds: an integer log2(speed) is
-  // exactly a power of two, so there's nothing extra to round here.
+  // log2(speed) space, so each x2 step gets equal travel; step="1" restricts it to powers of two.
   var SPEED_LOG_MIN = Math.log2(SPEED_MIN), SPEED_LOG_MAX = Math.log2(SPEED_MAX);
   function sliderValueToSpeed(v) { return Math.pow(2, v); }
   function speedToSliderValue(speed) { return Math.log2(speed); }
-  // The HTML hardcodes matching min/max/step (see #speed-slider's own
-  // comment) for a flash-free first paint before this runs: set from the
-  // same constants here so the two can never quietly drift apart.
+  // The HTML hardcodes matching min/max/step for a flash-free first paint; set from the same constants so they can't drift.
   speedSlider.min = String(SPEED_LOG_MIN);
   speedSlider.max = String(SPEED_LOG_MAX);
   speedSlider.step = "1";
 
-  // "2x"/"16x" (no decimal) once a whole step no longer reads as a
-  // meaningfully different speed; "0.5x"/"1.3x" below that, where a tenth
-  // is still a noticeable fraction of the current value.
   function formatSpeed(v) {
     return (v < 2 ? v.toFixed(1) : String(Math.round(v))) + "x";
   }
@@ -3946,12 +2975,7 @@
     speedSlider.value = String(speedToSliderValue(playbackSpeed));
   }
 
-  // Fixed positioning (see #speed-popup's own HTML comment) means this has
-  // to be placed by hand, the same way positionTip places fractal-grid.js's
-  // tip popover: measured against the button's live position rather than
-  // laid out declaratively, since nothing here is a normal-flow descendant
-  // of it. Centered above the button, clamped so a button near either edge
-  // doesn't push the popup off-screen.
+  // Fixed positioning, so placed by hand (like fractal-grid.js's positionTip): centered above the button, clamped on-screen.
   function positionSpeedPopup() {
     var rect = btnSpeed.getBoundingClientRect();
     var width = speedPopup.offsetWidth, height = speedPopup.offsetHeight;
@@ -3992,21 +3016,8 @@
     if (!speedPopup.hidden) positionSpeedPopup();
   });
 
-  // Driven by elapsed wall-clock time, not "one step per callback": a
-  // requestAnimationFrame callback fires whenever the browser is ready to
-  // paint, nominally the display's refresh interval but NOT a fixed
-  // timer, it stretches under system load, background-tab throttling, or
-  // a slower display, and advancing exactly one step per callback would
-  // silently slow the whole playback down right along with it. Instead,
-  // every callback adds however much real time just passed (scaled to
-  // steps, and to the user's chosen playbackSpeed) onto playbackClockSteps
-  // and jumps straight to its floor: a slow/late callback skips ahead to
-  // stay on schedule (less smooth) rather than dragging the total run time
-  // out.
-  // This page only ever plays back one scene at a time (no Inspect-style
-  // comparison here), so both sound effects always play as a single voice:
-  // chordFrequencies(1) is just middle C, the same trivial n<=1 case
-  // fractal-grid.js's own multi-voice version collapses to.
+  // Driven by elapsed wall-clock time, not one step per callback: rAF intervals stretch under load, so a
+  // late callback skips ahead to stay on schedule. One scene at a time, so the sounds are single-voice.
   function singleVoiceFreq() { return PhysicsSound.chordFrequencies(1)[0]; }
 
   function tick() {
@@ -4017,11 +3028,7 @@
     playbackClockSteps = Math.min(effectiveMaxSteps, playbackClockSteps + dt * STEPS_PER_SECOND * playbackSpeed);
     var targetStep = Math.floor(playbackClockSteps);
     if (targetStep > stepCount) {
-      // Captured before stepCount moves: bounceEvents/wrapStopOverride
-      // below need to know exactly which steps this tick newly crossed,
-      // not just where it ended up (a slow frame can jump stepCount by more
-      // than 1 at once, and every bounce logged in between still deserves
-      // its own sound rather than being silently skipped).
+      // Before stepCount moves: a slow frame can jump several steps, and every bounce crossed still sounds.
       var prevStepCount = stepCount;
       stepCount = targetStep;
       var displayStep = currentDisplayStep();
@@ -4030,59 +3037,31 @@
       updateStepReadout();
       updatePlaybackProgressSliderPosition();
       render();
-      // bounceEvents holds 0-indexed trajectory rows; stepCount is
-      // 1-indexed (trajectory[stepCount-1] is "now"), so an event index e
-      // has just been reached exactly when prevStepCount <= e < stepCount.
-      // One bounce sound per tick is enough even if several qualify at
-      // once: several pairs settling in the same frame should read as one
-      // busy moment, not a burst of identical blips.
+      // bounceEvents rows are 0-indexed, stepCount 1-indexed: event e was just reached when prevStepCount <= e < stepCount.
       for (var i = 0; i < bounceEvents.length; i++) {
         if (bounceEvents[i] >= prevStepCount && bounceEvents[i] < stepCount) {
           PhysicsSound.playBounce(singleVoiceFreq());
           break;
         }
       }
-      // The sticky-edge stop is a single terminal event (effectiveMaxSteps
-      // itself, only set below scene.simulationSteps when
-      // findWrapStopStep actually found one): fires once, the instant
-      // playback first reaches it.
       if (wrapStopOverride && prevStepCount < effectiveMaxSteps && stepCount >= effectiveMaxSteps) {
         PhysicsSound.playEdge(singleVoiceFreq());
       }
     }
     if (stepCount >= effectiveMaxSteps) {
-      // Freeze right here on the final frame: don't rewind. initialScene
-      // still holds the true authored start (untouched by playback, which
-      // only ever writes into scene.bodies), so Play/Reset/Fractal-ize all
-      // stay correct without the display needing to snap back on its own;
-      // see togglePlayPause and resetToInitialScene. Just a pause, not a
-      // full stop, isPlaying (and so editing-locked) stays true until
-      // Reset, since resuming below depends on scene.bodies still matching
-      // this trajectory exactly.
+      // Freeze on the final frame: a pause, not a stop, so isPlaying stays true until Reset.
       pausePlayback();
       return;
     }
     rafId = requestAnimationFrame(tick);
   }
 
-  // Always plays from the very first frame: this is only ever reached from
-  // Editing (isPlaying false, no run loaded) or right after Reset, since a
-  // run already loaded now pauses/resumes in place instead of restarting
-  // (see togglePlayPause). Returns false (and leaves everything as it was)
-  // if the GPU simulation itself fails.
+  // Only reached from Editing or right after Reset; returns false, leaving everything as it was, if the simulation fails.
   function startPlaybackFromScratch() {
     initialScene = PhysicsEngine.cloneScene(scene);
     try {
-      // A splitter grows new bodies mid-run. The GPU can represent that now
-      // (PhysicsGPU.padSceneForSplitting pre-allocates dormant slots up to
-      // MAX_SIMULATION_BODIES and a split wakes one), but its trajectory
-      // rows are then always that full width, with dormant slots reporting
-      // size 0, whereas playback below wants rows that GROW, so
-      // applyTrajectoryStep can size the drawn scene to whatever existed at
-      // that frame. One scene playing back once is cheap in JS, so it runs
-      // there and keeps the growing-row shape; see
-      // PhysicsEngine.runTrajectory. The regression suite checks the two
-      // agree step for step on the same splitter scene.
+      // A splitter grows bodies mid-run: the GPU pads rows to full width, but playback wants rows that GROW
+      // (applyTrajectoryStep sizes the scene per frame), so it runs on the JS engine. The suite checks the two agree.
       trajectory = sceneHasSplitter(scene)
         ? PhysicsEngine.runTrajectory(scene, scene.simulationSteps, PhysicsGPU.FIXED_DT)
         : PhysicsGPU.runSceneOnGPU(scene, scene.simulationSteps);
@@ -4114,11 +3093,7 @@
     setEditingEnabled(false);
     statusEl.textContent = "Playing";
     statusEl.className = "status-playing";
-    // The slider's own range is the full configured Simulation Duration,
-    // not effectiveMaxSteps: a run that stops early should read as a
-    // thumb resting short of the far end, not a shorter bar (see
-    // playbackProgressSlider's "input" handler for the matching clamp on
-    // the way back in).
+    // The slider spans the full configured duration, not effectiveMaxSteps: an early stop reads as a thumb short of the end.
     playbackProgressSlider.min = "1";
     playbackProgressSlider.max = String(scene.simulationSteps);
     playbackProgressSlider.disabled = false;
@@ -4126,14 +3101,7 @@
     return true;
   }
 
-  // The Play/Pause button's only click handler. Pausing is always immediate;
-  // "playing" either starts a fresh run, resumes a paused one right where it
-  // left off, or, if the run had already reached its last frame, restarts
-  // it from the top, the same as every Play click used to before this was a
-  // toggle. There's no dwell-then-autoplay grace period to protect here the
-  // way the fractal grid's hover panel needs (see its own PLAY_PAUSE_GRACE_MS):
-  // playback on this page never starts itself, so every play/pause is
-  // already the user's own click.
+  // Pause is immediate; play starts, resumes, or restarts a finished run. No autoplay grace period here: every play is a click.
   function togglePlayPause() {
     if (isAdvancing) {
       pausePlayback();
@@ -4153,11 +3121,7 @@
 
   btnPlayPause.addEventListener("click", togglePlayPause);
 
-  // Scrubbing always pauses: dragging mid-play would otherwise fight the
-  // clock for control of stepCount every frame. Values past effectiveMaxSteps
-  // are allowed, the slider's range is the full configured duration, and
-  // just hold on the real final frame, via the same currentDisplayStep()
-  // clamp tick() itself uses.
+  // Scrubbing always pauses (else it fights the clock); values past effectiveMaxSteps hold on the real final frame.
   playbackProgressSlider.addEventListener("input", function () {
     if (!isPlaying) return;
     pausePlayback();
@@ -4170,16 +3134,8 @@
     render();
   });
 
-  // Shared by the Reset button and Fractal-ize: both need the live `scene`
-  // back to exactly what was authored before Play started, since playback
-  // writes each displayed frame straight into scene.bodies (see tick()) and
-  // a paused-or-finished run stays frozen there rather than rewinding on
-  // its own. The only path that re-enables editing: a run stays locked
-  // through every pause/resume/scrub in between, since resuming depends on
-  // scene.bodies still matching this trajectory exactly. initialScene is
-  // nulled once consumed so a later
-  // click, after further edits with no new Play in between, trusts the
-  // live scene instead of reverting those edits to a now-stale snapshot.
+  // Shared by Reset and Fractal-ize: playback writes into scene.bodies, so restore the authored scene. The only
+  // path that re-enables editing. initialScene is nulled once consumed so later edits aren't reverted.
   function resetToInitialScene() {
     pausePlayback();
     isPlaying = false;
@@ -4196,12 +3152,7 @@
     canvasArea.style.backgroundColor = "";
     playbackProgressSlider.disabled = true;
     playbackProgressSlider.value = playbackProgressSlider.min || "1";
-    // resizeCanvas(), not render(): isPlaying is already false by now, so
-    // this both re-syncs frameWidth/frameHeight to the live canvas size and
-    // un-locks the display back to filling canvasArea, without it, the
-    // canvas would stay letterboxed at whatever size it was scaled/centered
-    // to during playback until the next unrelated window resize happened to
-    // fix it.
+    // resizeCanvas(), not render(): re-syncs the frame and un-letterboxes the canvas now that isPlaying is false.
     resizeCanvas();
   }
 
@@ -4216,29 +3167,14 @@
     scene.bodies.push(PhysicsEngine.createLine(w / 2 + 130, h * 0.25, 140, 0.3, false));
   }
 
-  // Scene must be populated (restored or seeded) BEFORE the first
-  // resizeCanvas() call: resizeCanvas() renders internally, and render()
-  // now also auto-saves, loading the persisted scene afterward instead
-  // would read back whatever that first render() just wrote, which is the
-  // still-empty freshly-initialized scene, not the real save. (This isn't
-  // hypothetical: it happened, wiping every saved scene on the very next
-  // load, and only showed up by actually reloading the page, every
-  // automated test constructs scenes directly and never exercises this
-  // startup ordering at all.)
-  // The frame has to be known BEFORE the scene is restored or seeded.
-  // Restoring reads authored, center-relative coordinates and needs a frame
-  // to place them in; seeding writes engine coordinates straight from the
-  // canvas size, which the first resizeCanvas() below must then see as
-  // already matching rather than as a frame change to re-center for.
+  // Order matters: the frame must be known before the scene is restored or seeded, and the scene must be
+  // populated BEFORE the first resizeCanvas(), whose render() auto-saves and would overwrite the real save with an empty scene.
   if (canvasArea.clientWidth > 0 && canvasArea.clientHeight > 0) {
     scene.frameWidth = canvasArea.clientWidth;
     scene.frameHeight = canvasArea.clientHeight;
   }
   if (!loadSceneFromLink() && !loadPersistedScene()) seedDefaultScene();
-  // Redundant when loadPersistedScene ran applySceneData above, but harmless
-  // and cheap, and it's what keeps a fresh (seeded) scene's slider in sync
-  // with scene.simulationSteps without relying on the HTML's own default
-  // value staying hand-matched to DEFAULT_SIMULATION_STEPS forever.
+  // Redundant after loadPersistedScene, but keeps a seeded scene's slider in sync without trusting the HTML default.
   simulationStepsSlider.value = String(simulationStepsNotch(scene.simulationSteps));
   updateSimulationStepsReadout(scene.simulationSteps);
   playbackProgressSlider.max = String(scene.simulationSteps);
@@ -4250,16 +3186,8 @@
   render();
 
   // ---- What the transition needs from the editor ----
-  //
-  // The zoom-out explainer draws the editor's scene, tiled, into its own
-  // canvas: see transition.js. It wants the BODIES and nothing else: no
-  // grid lines, no hinges, no mapping badges, no selection handles, none of
-  // the editing chrome render() above also paints.
-  //
-  // drawBody() draws into this module's own `ctx`, so the context is
-  // swapped for the duration rather than the drawing being duplicated: one
-  // definition of what a circle/line/funnel/splitter looks like, used by
-  // both the editor and the animation that zooms away from it.
+  // transition.js draws the editor's BODIES, tiled, into its own canvas: none of the editing chrome.
+  // drawBody() draws into this module's `ctx`, so the context is swapped rather than the drawing duplicated.
   global.PhysicsUI = {
     drawSceneBodies: function (targetCtx, bodies) {
       var previous = ctx;
@@ -4270,11 +3198,7 @@
         ctx = previous;
       }
     },
-    // One spring between two world points, into someone else's canvas: the
-    // same trick as drawSceneBodies, so the map's replay panel and the
-    // transition draw a spring exactly the way the editor does (coils by
-    // rest length, weight by stiffness) instead of from a copy of their own.
-    // `color` is optional: an inspected point's own hue, on the map.
+    // One spring into someone else's canvas, drawn as the editor draws it; `color` is optional (an inspected point's hue).
     drawSpringBetween: function (targetCtx, a, b, stiffness, restLength, color) {
       var previous = ctx;
       ctx = targetCtx;
@@ -4297,23 +3221,13 @@
         ctx = previous;
       }
     },
-    // The scene as currently authored, for the transition to simulate and
-    // draw. A copy, so the animation stepping it forward can't disturb what
-    // the editor is holding.
+    // A copy, so the transition stepping it forward can't disturb the editor's.
     currentScene: function () { return PhysicsEngine.cloneScene(scene); },
-    // ---- What the address bar needs from the editor (see transition.js) ----
-    //
-    // The scene as a link describes it: the authored JSON, exactly what
-    // Export shows. Null during a run, when scene.bodies is a frame of the
-    // animation rather than anything that was authored: the address just
-    // keeps saying what it said when Play was pressed.
+    // For the address bar (transition.js): the authored JSON; null during a run, when scene.bodies is an animation frame.
     shareScene: function () {
       return isPlaying ? null : PhysicsCoords.toAuthoredJSON(serializeScene());
     },
-    // Why a link's scene can't be used, or null if it can. On load the
-    // scene is already in by the time anyone could be told otherwise (see
-    // loadSceneFromLink), so this is how transition.js finds out, and says,
-    // that it was refused instead.
+    // Why a link's scene can't be used, or null; how transition.js finds out, since on load the scene is already in.
     sharedSceneProblem: function (authored) {
       try {
         parseSceneData(PhysicsCoords.toEngineJSON(authored, liveFrame()));
@@ -4322,9 +3236,7 @@
         return err.message;
       }
     },
-    // A link opened while the page is already up (pasted over the address,
-    // or reached with Back). Returns why it was refused, or null once the
-    // scene is in.
+    // A link opened while the page is up (pasted address, or Back). Returns why it was refused, or null.
     loadSharedScene: function (authored) {
       var data;
       try {
@@ -4338,14 +3250,8 @@
       finishSceneReplace();
       return null;
     },
-    // The scene a map link opens ON: validated like any other, but placed in
-    // the link's OWN frame rather than this window's. The frame is physics:
-    // it is where the edges are, and the range an x/y Output is colored over
-    // - so the map in a link is only the same map if it is computed in the
-    // frame it was shared from. (The editor can't do the same: there the
-    // frame IS the canvas. It shows the scene centered in its own window,
-    // as it would a pasted one.) Throws, with a message fit to show, if the
-    // scene is one the editor itself would refuse to send.
+    // The scene a map link opens ON, placed in the link's OWN frame: the frame is physics (edges, x/y color range),
+    // so the map only matches in the frame it was shared from. Throws a message fit to show if the editor would refuse it.
     gridSceneFromShared: function (authored) {
       var frame = { frameWidth: Number(authored.frameWidth), frameHeight: Number(authored.frameHeight) };
       if (!(frame.frameWidth > 0 && frame.frameHeight > 0)) throw new Error("it doesn't say how big the scene's frame is");
@@ -4359,33 +3265,16 @@
     },
     reportLinkProblem: function (message) { flashStatus(message, 6000); },
     // ---- The one setting that exists on both pages ----
-    //
-    // Simulation Duration is scene.simulationSteps, and the fractal grid
-    // has its own slider on the same value. That page calls this when its
-    // slider moves, so the number the user set there is the one still
-    // showing here when they come back, and, since the handoff is built
-    // from this scene, the one a later Fractal-ize sends back over.
-    //
-    // Without it the grid's change lived only in that module: the editor
-    // kept showing the old duration and the next Fractal-ize overwrote the
-    // user's choice with it.
-    //
-    // Snapped to the slider's own notches (and clamped to its range) rather
-    // than trusted: this is a setter reachable from another module, and a
-    // value between notches would leave the slider unable to represent what
-    // the scene says.
+    // The grid's own Simulation Duration slider calls this so the value survives the round trip.
+    // Snapped to the slider's notches and clamped: a setter reachable from another module.
     setSimulationSteps: function (steps) {
       var next = clampSimulationSteps(steps);
       if (next === null || next === scene.simulationSteps) return;
       scene.simulationSteps = next;
       simulationStepsSlider.value = String(simulationStepsNotch(next));
       updateSimulationStepsReadout(next);
-      // The same guard the slider's own handler uses: during a run the
-      // progress slider's range belongs to the run, not to the setting.
       if (!isPlaying) playbackProgressSlider.max = String(next);
-      // render() is what normally sweeps a change into the autosave, and
-      // nothing is rendering here: the editor isn't the visible view when
-      // this is called.
+      // Nothing renders here (the editor isn't the visible view), so autosave by hand.
       saveEditorAutosave();
     },
   };

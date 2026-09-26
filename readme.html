@@ -2,26 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<!-- This file is part of Chaos Accelerator, licensed under the Common
-     Public Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in
-     the project root, or https://chaosaccelerator.com/license for a
-     hosted copy. -->
-<!-- The README, as a page: linked as "About" from the landing page's
-     corner menu (index.html). This page reads README.md itself and renders
-     it, the same way license.html shows the LICENSE file, so there is one
-     copy of the text and the repository's front page and this one never
-     drift apart. The Markdown is turned into HTML by the small renderer
-     below, which covers what a README uses (headings, paragraphs, lists,
-     links, images, code, quotes, rules, bold and italic) and nothing
-     more: a construct it does not know is shown as the text it was. -->
+<!-- CPAL-1.0 License. See chaosaccelerator.com/license.html -->
+<!-- The README as a page ("About"): fetches README.md and renders it with the small Markdown renderer below. -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#14161c">
 <title>About: Chaos Accelerator</title>
 <meta name="description" content="About Chaos Accelerator: the project's README.">
-<link rel="stylesheet" href="landing.css?v=m70">
+<link rel="stylesheet" href="scripts/landing.css?v=m70">
 </head>
 <body>
-<script src="corner-menu.js?v=m70"></script>
+<script src="scripts/corner-menu.js?v=m70"></script>
 <main class="page">
   <a class="back-link" href="index.html">&larr; Chaos Accelerator</a>
   <article class="readme" id="readme"><p class="readme-note">Loading&hellip;</p></article>
@@ -30,12 +20,6 @@
 <div class="watermark">chaosaccelerator.com</div>
 <script>
   // ---- Markdown to HTML ----
-  //
-  // Line by line, one block at a time: a fenced code block, a heading, a
-  // rule, a quote, a list, or a paragraph (consecutive plain lines). The
-  // inline marks (code, images, links, bold, italic) are applied to every
-  // block's text except code, in that order, after the text has been
-  // escaped, so a README can mention <tags> and they show as written.
   function escapeHtml(text) {
     return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }

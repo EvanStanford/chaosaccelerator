@@ -2,35 +2,23 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<!-- This file is part of Chaos Accelerator, licensed under the Common
-     Public Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in
-     the project root, or https://chaosaccelerator.com/license for a
-     hosted copy. -->
-<!-- The landing page: one screen, never taller than the window. The title
-     and the button at the top, a sideways carousel (the "tour": the video,
-     the two steps, the gallery, other projects) filling the middle, the dots and the
-     credits at the foot. The app itself, the scene builder and the map, one
-     document, is chaos.html, which is where this file's name used to lead;
-     see the script just below for the links that still do. -->
+<!-- CPAL-1.0 License. See chaosaccelerator.com/license.html -->
+<!-- The landing page: one screen, a sideways carousel (the "tour") in the middle. The app itself is chaos.html. -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#14161c">
 <title>Chaos Accelerator</title>
 <meta name="description" content="Create your own hardware accelerated fractals from physics simulations.">
 <script>
-  // Every link shared before this page existed points HERE, with the whole
-  // scene in its fragment (see share-url.js): "#bldr/..." for the builder,
-  // "#map/..." for a map. They are handed straight on to the app, fragment
-  // and all, before anything is drawn: replace(), so Back does not land on
-  // a page that immediately forwards again. ("#movi/" links always went to
-  // chaosplayback.html and never come through here.)
+  // Old shared links carry the scene in their fragment (share-url.js): hand them to the
+  // app with replace(), so Back does not land on a page that forwards again.
   if (/^#(bldr|map)\//.test(location.hash)) location.replace("chaos.html" + location.hash);
 </script>
-<link rel="stylesheet" href="landing.css?v=m70">
+<link rel="stylesheet" href="scripts/landing.css?v=m70">
 </head>
 <body class="landing">
 <main class="screen">
 
-  <script src="corner-menu.js?v=m70"></script>
+  <script src="scripts/corner-menu.js?v=m70"></script>
 
   <header class="masthead">
     <h1><a href="chaos.html">Chaos Accelerator</a></h1>
@@ -45,9 +33,7 @@
 
       <article class="tour-slide is-current" aria-label="Video tutorial">
         <div class="tour-media video">
-          <!-- PLACEHOLDER VIDEO: the tutorial has not been recorded yet, and
-               this is the cams video standing in for it. Swap the id in the
-               src below. -->
+          <!-- PLACEHOLDER VIDEO: the cams video stands in until the tutorial is recorded; swap the id in src. -->
           <iframe src="https://www.youtube-nocookie.com/embed/_dtBUiaAqRE" title="Chaos Accelerator video tutorial (placeholder)" loading="lazy" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
         </div>
         <div class="tour-caption">
@@ -82,8 +68,7 @@
       </article>
 
       <article class="tour-slide" aria-label="Gallery">
-        <!-- Filled by the script at the foot of the page from the gallery's
-             own list; every card leads to the gallery page. -->
+        <!-- Filled from gallery/gallery.json by the script at the foot of the page. -->
         <div class="tour-media gallery-strip" id="gallery-strip"></div>
         <div class="tour-caption">
           <h2>Gallery</h2>
@@ -114,14 +99,6 @@
 <a class="watermark" href="chaos.html">chaosaccelerator.com</a>
 <script>
   // ---- The tour ----
-  //
-  // A scroll container with snapping (see .tour-track in landing.css), so a
-  // swipe and a sideways trackpad scroll work with no help from here: the
-  // arrows, the dots and the arrow keys only scroll it. The page itself
-  // never scrolls up or down, so a vertical wheel steps the tour instead,
-  // one slide per flick. The slides are narrower than the track on a wide
-  // window, with the ends padded so the first and last can sit centered
-  // too, so "which one is showing" is whichever is nearest the middle.
   (function () {
     var track = document.getElementById("tour-track");
     var dots = document.getElementById("tour-dots");
@@ -159,6 +136,11 @@
     }
 
     slides.forEach(function (s, i) {
+      s.addEventListener("click", function (e) {
+        if (i !== current()) { e.preventDefault(); goTo(i); }
+      });
+    });
+    slides.forEach(function (s, i) {
       var dot = document.createElement("button");
       dot.type = "button";
       dot.setAttribute("aria-label", (s.getAttribute("aria-label") || "Slide " + (i + 1)) + ", " + (i + 1) + " of " + slides.length);
@@ -171,10 +153,6 @@
       if (e.key === "ArrowLeft") { e.preventDefault(); goTo(current() - 1); }
       if (e.key === "ArrowRight") { e.preventDefault(); goTo(current() + 1); }
     });
-    // One step per flick, not per event: a trackpad or a free-spinning
-    // wheel sends a stream of them for one gesture, so after a step the
-    // rest of that stream is ignored for a moment. A sideways gesture is
-    // left to the track's own scrolling.
     var wheelHoldUntil = 0;
     window.addEventListener("wheel", function (e) {
       if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
@@ -193,12 +171,6 @@
   })();
 
   // ---- The gallery slide ----
-  //
-  // The gallery's own list (gallery/gallery.json; gallery/gallery.html
-  // describes the format) fills the gallery slide: one card per pattern, each
-  // a link to that pattern in the gallery. Without it (no script, or the
-  // file missing) the slide stays empty and the link under it still leads
-  // there.
   (function () {
     var strip = document.getElementById("gallery-strip");
     var list = new URL("gallery/gallery.json", location.href);
@@ -216,8 +188,6 @@
           img.alt = entry.name + " by " + entry.creator;
           img.loading = "lazy";
           frame.appendChild(img);
-          // The scene it came from, tucked into the bottom left corner the
-          // way the gallery page shows it.
           if (entry.scene) {
             var scene = document.createElement("img");
             scene.className = "gallery-card-scene";

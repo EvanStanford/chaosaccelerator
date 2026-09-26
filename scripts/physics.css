@@ -1,7 +1,6 @@
-/* This file is part of Chaos Accelerator, licensed under the Common Public
-   Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in the project
-   root, or https://chaosaccelerator.com/license for a hosted copy. */
+/* CPAL-1.0 License. See chaosaccelerator.com/license.html */
 
+/* The scene builder (editor view of chaos.html): theme variables, panel, canvas, controls. */
 :root {
   --bg: #14161c;
   --bg-panel: #1b1e27;
@@ -33,8 +32,6 @@ html, body {
   flex-direction: column;
 }
 
-
-
 .status-ok, .status-playing {
   font-size: 12px;
   padding: 4px 10px;
@@ -45,22 +42,14 @@ html, body {
 .status-playing { background: #163a25; color: #7ee0a0; }
 .status-error { background: #3a1418; color: #ff9a9a; }
 
-/* ---- Panel head: all the chrome there is ----
-   The old #topbar (page title, status chip, settings/back buttons) is gone
-   from both pages so the canvas can run edge to edge. What survived lives
-   in this row at the top of #panel. (#editor-view only: the fractal page
-   keeps its own chrome in a menu column instead; see #grid-menu-column in
-   fractal-grid.css.) */
+/* ---- Panel head: all the chrome there is (#editor-view only; the grid view keeps its own menu column) ---- */
 .panel-head {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
 }
-/* Errors only. "Editing", "Playing", "Ready" were the whole reason the old
-   status chip needed permanent space, and none of them told anyone
-   anything they couldn't see; a compile failure or an unreadable scene
-   very much does, so the element stays and only shows for those. */
+/* Errors only: a compile failure or an unreadable scene. */
 #status:not(.status-error) {
   display: none;
 }
@@ -138,13 +127,8 @@ button.danger:hover { background: var(--danger); color: white; }
   color: white;
 }
 
-/* Native <details>/<summary>: collapsed by default (no `open` attribute
-   needed), so "advanced" needs no JS state of its own. Collapsed, it's just
-   an arrow + label; open, it grows a dashed fieldset-style box around its
-   contents with "advanced" overlapping the top border as the legend:
-   summary is pulled out of flow and repositioned there, background-matched
-   to the panel so it "erases" the dashed line behind the text the same way
-   a real <fieldset>/<legend> pair does natively. */
+/* Native <details>/<summary>, collapsed by default. Open, a dashed fieldset-style box
+   with the summary as legend: pulled out of flow, background-matched to erase the line. */
 .collapsible {
   margin-top: 12px;
 }
@@ -200,9 +184,7 @@ button.danger:hover { background: var(--danger); color: white; }
   color: var(--text-dim);
 }
 .field span b { color: var(--text); font-weight: 600; }
-/* The Simulation Duration readout, typed into: sits where the bold number
-   was and reads like it, until it is focused. 16px on a phone, or iOS zooms
-   the page the moment it is tapped. */
+/* Simulation Duration readout, typed into: reads like the bold number until focused. 16px or iOS zooms. */
 .steps-number {
   width: 5.2em;
   padding: 1px 4px;
@@ -234,9 +216,7 @@ select {
 }
 select:disabled { opacity: 0.5; }
 
-/* A select that is the whole field (Edge Handling), rather than one of the
-   pair in .dual-select below: it takes the full width the way a slider in
-   the same position would, instead of shrinking to its longest option. */
+/* A select that is the whole field (Edge Handling): full width, not its longest option. */
 .field select {
   width: 100%;
 }
@@ -249,16 +229,11 @@ select:disabled { opacity: 0.5; }
   flex: 1;
   min-width: 0;
 }
-/* An author `display` beats the UA's own [hidden] rule, so a .dual-select
-   toggled with el.hidden would stay on screen without this: the same trap
-   .modal-backdrop[hidden] below already exists for. Output's optional
-   second-object row is toggled that way (see refreshOutputPairUI). */
+/* An author display beats the UA's [hidden] rule, so el.hidden needs this. */
 .dual-select[hidden] {
   display: none;
 }
-/* The Spring section is toggled the same way (see refreshSpringPanel), and
-   gets the same guarantee rather than relying on .panel-section never being
-   given a `display` of its own. */
+/* Same guarantee for the Spring section (refreshSpringPanel). */
 #spring-section[hidden] {
   display: none;
 }
@@ -275,13 +250,7 @@ select:disabled { opacity: 0.5; }
   gap: 10px;
   margin-top: 4px;
 }
-/* Simulation's Advanced box sits directly above the playback controls: the
-   ordinary 4px above reads as cramped right after a bordered box, unlike
-   after a plain .field, so this one spot gets more room. Scoped to the
-   sibling pairing itself rather than bumping .collapsible's own margin
-   everywhere, since Tools' and Input/Output's Advanced boxes are each
-   followed by a new .panel-section (which already has its own spacing),
-   not a .field-row/.playback-controls. */
+/* Simulation's Advanced box sits right above the playback controls: 4px reads cramped after a bordered box. */
 .collapsible + .field-row,
 .collapsible + .playback-controls {
   margin-top: 18px;
@@ -302,21 +271,14 @@ select:disabled { opacity: 0.5; }
   position: relative;
   min-width: 0;
   background: #0c0d11;
-  /* Centers #physics-canvas, which resizeCanvas() sizes explicitly in JS
-     (not 100%/100% below): exactly canvasArea's own size while editing,
-     but a locked frame's own aspect ratio, scaled to fit, while playing. */
+  /* Centers #physics-canvas, which resizeCanvas() sizes in JS (not 100%/100%). */
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-/* Floats over the scene rather than living in the side panel: the whole
-   point is that it's the one button you can't miss. Positioned against
-   #canvas-area (not the viewport), so it stays centered over the scene
-   specifically in both the desktop (side panel) and portrait (bottom panel)
-   layouts. pointer-events:none on the wrapper + auto on its children keeps
-   the empty space around the button/error message from blocking clicks on
-   the canvas underneath. */
+/* Floats over the scene, positioned against #canvas-area so it stays centered in both
+   layouts. pointer-events none on the wrapper, auto on children: the empty space must not block the canvas. */
 #fractalize-wrap {
   position: absolute;
   left: 50%;
@@ -342,20 +304,14 @@ select:disabled { opacity: 0.5; }
   margin: 0;
   color: var(--text);
 }
-/* A genuine error (e.g. a splitter scene): shown only right after an
-   actual send attempt fails. */
+/* A genuine error, shown only after a send attempt fails. */
 #fractalize-wrap .readout.error {
   border-color: var(--danger);
   color: var(--danger);
 }
 
-/* The Play transport, floated top-center over the scene instead of docked
-   in #panel (see chaos.html's comment on #playback-toolbar): same
-   #canvas-area-relative centering #fractalize-wrap uses above, mirrored to
-   the top edge. Needs its own translucent card (--bg-panel-float, the same
-   fill fractal-grid.css's floating panel/settings-panel use) since
-   .playback-controls was designed to sit directly on #panel's own solid
-   background, and now floats over the canvas instead. */
+/* The Play transport, floated top-center over the scene. Its own translucent card:
+   .playback-controls was designed for #panel's solid background. */
 #playback-toolbar {
   position: absolute;
   left: 50%;
@@ -374,28 +330,20 @@ select:disabled { opacity: 0.5; }
   border-radius: 12px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
 }
-/* Both were designed with a margin-top for the space above them inside
-   #panel's flowing column: meaningless (and lopsided) as the first things
-   in this floating card. */
+/* Their margin-top was for #panel's column; meaningless here. */
 #playback-toolbar .playback-controls {
   margin-top: 0;
 }
 #playback-toolbar .readout {
   margin-top: 0;
 }
-/* Guidance toward what to do next: shown while hovering the button, or
-   briefly after clicking it, whenever the scene isn't ready yet (see
-   gridReadiness/showNotReadyHint in physics-ui.js). A distinct, calmer
-   color from .error: this isn't something broken, just not finished yet. */
+/* Not-ready hint (showNotReadyHint in physics-ui.js): calmer than .error, nothing is broken. */
 #fractalize-wrap .readout.hint {
   border-color: var(--accent);
   color: var(--accent-hover);
 }
 
-/* Loud on purpose: warm, saturated, animated, the opposite of every other
-   button in this app, which is exactly the point (this is the one action
-   that actually leaves the editor). Always this color, whether or not the
-   scene is actually ready: see .not-ready below for the one exception. */
+/* Loud on purpose: the one action that leaves the editor. Always this color; .not-ready below is the exception. */
 .fractalize-btn {
   font-family: inherit;
   font-size: 17px;
@@ -411,8 +359,7 @@ select:disabled { opacity: 0.5; }
   animation: fractalizePulse 2.2s ease-in-out infinite;
   transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
 }
-/* The gradient again: the plain button:hover rule above outranks the
-   class alone on hover, and would paint this one the app's blue. */
+/* The gradient again: button:hover above would paint it blue. */
 .fractalize-btn:hover {
   background: linear-gradient(135deg, #ffd23f, #ff6b35 55%, #ff2e63);
   transform: translateY(-2px) scale(1.05);
@@ -422,10 +369,7 @@ select:disabled { opacity: 0.5; }
 .fractalize-btn:active {
   transform: translateY(0) scale(0.97);
 }
-/* The ONE time the button isn't bright: while hovering, or briefly after
-   clicking, a scene that isn't ready to send yet, a class toggled from JS
-   rather than the native :disabled state, since a truly disabled button
-   stops firing the hover events this whole interaction depends on. */
+/* A class, not :disabled: a disabled button stops firing the hover events this depends on. */
 .fractalize-btn.not-ready,
 .fractalize-btn.not-ready:hover {
   animation: none;
@@ -441,10 +385,7 @@ select:disabled { opacity: 0.5; }
   50% { box-shadow: 0 4px 30px rgba(255, 46, 99, 0.9); }
 }
 
-/* Points at whichever button would actually move the scene toward being
-   fractal-ize-able (see gridReadiness's highlight list): an outward pulse
-   in the same warm hue as the Fractal-ize button itself, so the connection
-   between "why can't I click that" and "click THIS instead" reads clearly. */
+/* Pulses the button that would move the scene toward ready (gridReadiness's highlight list). */
 @keyframes highlightHintPulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(255, 107, 53, 0.65); }
   50% { box-shadow: 0 0 0 6px rgba(255, 107, 53, 0); }
@@ -469,8 +410,7 @@ select:disabled { opacity: 0.5; }
 #physics-canvas.tool-output { cursor: pointer; }
 #physics-canvas.dragging { cursor: grabbing; }
 
-/* Gear button in the panel head, and its × twin inside the settings panel:
-   square, icon-only, otherwise matching button.secondary's look. */
+/* Gear button and its close twin in the settings panel: square, icon-only. */
 .icon-button {
   flex-shrink: 0;
   width: 32px;
@@ -489,16 +429,7 @@ select:disabled { opacity: 0.5; }
   background: var(--bg-input);
 }
 
-/* .settings-panel and its header/body are styled in app-shell.css now: the
-   settings button and the panel it opens both moved to a shared, cross-view
-   floating design (see .floating-settings-btn there) instead of each page
-   keeping its own copy of a slide-in drawer. */
-
-/* Apple-style toggle switch: under the hood this is still the exact same
-   <input type="checkbox" id="sticky-edges-checkbox">, just visually hidden
-   (see .toggle-switch input below) with .toggle-slider drawn on top of it
-   and styled off its :checked/:disabled state, so all of physics-ui.js's
-   existing .checked/.disabled/change-event logic needs no changes at all. */
+/* Apple-style toggle: still the same checkbox input, visually hidden, with .toggle-slider styled off :checked/:disabled. */
 .toggle-field {
   display: flex;
   align-items: center;
@@ -556,8 +487,7 @@ select:disabled { opacity: 0.5; }
   cursor: not-allowed;
 }
 
-/* Reusable modal (see openModal in physics-ui.js): a centered dialog over
-   a dimmed backdrop, used for both Export and Import. */
+/* Reusable modal (openModal in physics-ui.js): Export and Import. */
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -618,16 +548,10 @@ select:disabled { opacity: 0.5; }
   word-break: break-all;
 }
 
-
 /* ---- The Output's color key, on the scrubber ----
-   With Scene Lifespan as the Output, the playback scrubber's track IS the
-   key: the color a run gets is the one under the point where it stops (see
-   "The Output's color key" in physics-ui.js, which sets the class and the
-   --output-key gradient). A native range input's track can't be painted
-   from outside, so with the class on the input gives up its native look
-   for one that can: the gradient as the input's own background, a
-   transparent track over it, and a plain white thumb that reads against
-   every hue. Without the class nothing here applies. */
+   With Scene Lifespan as the Output the track IS the key (physics-ui.js sets the class
+   and --output-key). A native track cannot be painted from outside, so the input gives
+   up its native look: gradient background, transparent track, white thumb. */
 #playback-progress-slider.output-key {
   -webkit-appearance: none;
   appearance: none;
@@ -663,9 +587,7 @@ select:disabled { opacity: 0.5; }
   border: 2px solid #14161c;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
-/* Before Play the scrubber is disabled, which would dim it to half, but
-   the key is most use exactly then, before there is a run to watch. So the
-   track keeps its full color and only the thumb says "not yet". */
+/* Disabled before Play, but the key is most use then: full color, only the thumb dims. */
 #playback-progress-slider.output-key:disabled {
   opacity: 1;
 }
@@ -676,11 +598,8 @@ select:disabled { opacity: 0.5; }
   background: #9399ad;
 }
 
-/* ...and on the Set Output button, which once an Output is set IS a swatch
-   of its whole range, low to high from left to right. background-IMAGE, so
-   the button's own idle/hover/active background COLORS underneath are left
-   to their rules; what says "armed" over a swatch is a white ring instead
-   of the blue fill it would otherwise hide. */
+/* ...and on the Set Output button, a swatch of its whole range. background-IMAGE so the
+   idle/hover/active colors still apply; armed is a white ring, not the blue fill. */
 button.tool-btn.output-key {
   background-image: var(--output-key);
   border-color: rgba(255, 255, 255, 0.35);

@@ -1,0 +1,180 @@
+/* CPAL-1.0 License. See chaosaccelerator.com/license.html */
+
+/* Global Stats card: this file styles only what fractal-stats-panel.js builds inside the shared .menu-card. */
+
+/* Status line, sticky at the top of the card body; negative margins cancel .menu-card-body's 14px padding. */
+.stats-status {
+  margin: -14px -14px 0 -14px;
+  padding: 10px 14px;
+  position: sticky;
+  top: -14px;
+  z-index: 2;
+  background: var(--bg-panel-float);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+.stats-status-working { color: var(--accent); }
+.stats-status-stale { color: #e0b36a; }
+.stats-status-loading,
+.stats-status-working {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.stats-status-loading { color: var(--text-dim); }
+
+/* Spinner: in the status bar, and alone in a section still waiting on numbers. */
+.stats-spinner {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2.5px solid var(--border);
+  border-top-color: var(--accent);
+  animation: stats-spinner-spin 0.8s linear infinite;
+}
+@keyframes stats-spinner-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ---- Sections: an accordion, exactly one open, and only the open one is measured ---- */
+.stats-section {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.stats-section:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+.stats-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-dim);
+  text-align: left;
+  cursor: pointer;
+}
+/* The open heading is inert (it cannot be collapsed), so no hover or pointer. */
+.stats-section:not(.stats-section-open) > .stats-section-head:hover,
+.stats-section-open > .stats-section-head {
+  color: var(--text);
+}
+.stats-section-open > .stats-section-head {
+  cursor: default;
+}
+.stats-section-title {
+  font-weight: 600;
+}
+.stats-section-caret {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-right: 4px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+  opacity: 0.8;
+}
+.stats-section-open > .stats-section-head .stats-section-caret {
+  transform: rotate(45deg);
+}
+.stat-loading {
+  display: flex;
+  justify-content: center;
+  padding: 22px 0;
+}
+.stats-section-body {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.stats-section-body[hidden] {
+  display: none;
+}
+
+/* ---- Rows: label left, value right, wrapping when a value is too long ---- */
+.stat-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  padding: 3px 0;
+  flex-wrap: wrap;
+}
+.stat-label {
+  color: var(--text-dim);
+  white-space: pre-wrap;
+}
+.stat-value {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  margin-left: auto;
+}
+.stat-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+/* Hovered legend line (or pie slice): its samples light up on the map too. */
+.stat-legend {
+  cursor: default;
+  border-radius: 4px;
+}
+.stat-legend-pinnable {
+  cursor: pointer;
+}
+.stat-row-pinned .stat-label::after {
+  content: " \25CF";
+  font-size: 8px;
+  vertical-align: middle;
+  color: var(--accent);
+}
+.stat-divider {
+  border-top: 1px solid var(--border);
+  margin: 8px 0 6px 0;
+}
+.stat-row-hot .stat-label,
+.stat-row-hot .stat-value {
+  color: #ffffff;
+  font-weight: 600;
+}
+.stat-row-hot .stat-swatch {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 1px #ffffff;
+}
+
+/* Charts size to this box's width, so the panel defers drawing until the body is in the DOM. */
+.stat-chart {
+  margin: 6px 0;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+  overflow: hidden;
+}
+.stat-chart canvas {
+  display: block;
+}
+
+/* Stale: the view moved on. Dimmed rather than cleared. */
+.stats-stale .stats-section {
+  opacity: 0.45;
+}

@@ -2,10 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<!-- This file is part of Chaos Accelerator, licensed under the Common
-     Public Attribution License, Version 1.0 (CPAL-1.0): see LICENSE in
-     the project root, or https://chaosaccelerator.com/license for a
-     hosted copy. -->
+<!-- CPAL-1.0 License. See chaosaccelerator.com/license.html -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Double-float precision probe</title>
 <style>
@@ -79,13 +76,13 @@
 </p>
 <div id="tiles" style="display:flex;flex-wrap:wrap;gap:14px"></div>
 
-<script src="physics-engine.js"></script>
-<script src="physics-coords.js"></script>
-<script src="physics-hinge-geometry.js"></script>
-<script src="physics-df.js"></script>
-<script src="physics-gpu.js"></script>
-<script src="physics-gpu-df.js"></script>
-<script src="physics-grid-codegen.js"></script>
+<script src="scripts/physics-engine.js"></script>
+<script src="scripts/physics-coords.js"></script>
+<script src="scripts/physics-hinge-geometry.js"></script>
+<script src="scripts/physics-df.js"></script>
+<script src="scripts/physics-gpu.js"></script>
+<script src="scripts/physics-gpu-df.js"></script>
+<script src="scripts/physics-grid-codegen.js"></script>
 <script>
 (function () {
   "use strict";
@@ -267,18 +264,6 @@
   }
 
   // ---- 4. The two shaders side by side, at increasing zoom ----
-  //
-  // A deliberately minimal stand-in for fractal-grid.js's real shader:
-  // same offset cascade, same step loop, same "mod the output into its own
-  // range" coloring, minus the parts (sticky-edges, Color Zoom) that have
-  // nothing to do with precision. Assembled from the same exported codegen
-  // the grid itself calls, so the precision seam under test is the real one.
-  // Two long angled deflectors in a Pac-Man-wrapped frame, so the ball
-  // cannot fall past them without being turned: it hits something every
-  // lap, which is what makes the outcome after 500 steps a genuinely
-  // sensitive function of where it started. A scene that merely falls
-  // would be a poor test: its answer is nearly linear in the starting
-  // position, so it looks smooth at any zoom and any precision.
   var DEMO_SCENE = {
     bodies: [
       PhysicsEngine.createCircle(596, 120, 30, false),
@@ -291,11 +276,6 @@
     output: { body: 0, property: "y" },
     frameWidth: 1192, frameHeight: 819,
   };
-  // Deliberately modest. A df step now costs roughly an order of
-  // magnitude more than a float32 one (the whole solver is df, not
-  // just the accumulators), so the tile counts that were free before
-  // are not. This section is an illustration; the numbers that matter
-  // are in the correlation table above it.
   var DEMO_STEPS = 200, DEMO_CENTER = { x: 0, y: 0 }, TILE = 72;
 
   function demoShader(precision) {
@@ -387,10 +367,6 @@
     return { canvas: cv };
   }
 
-  // Samples one row of the same view at both precisions AND in float64 on
-  // the CPU, then correlates. A 24-point row keeps the CPU side (24 full
-  // 500-step simulations per zoom level) instant, and correlation needs
-  // only the shape of the curve, not many points.
   var SAMPLES = 16;
   // The Output property here is circular (a frame-wrapped y), so two samples
   // straddling the wrap point look maximally far apart while being
@@ -418,9 +394,6 @@
     }
     return (da > 0 && db > 0) ? num / Math.sqrt(da * db) : NaN;
   }
-  // Renders one SAMPLES x 1 strip. u_resolution stays square so the uv
-  // formula matches the real grid's exactly; the JS side below reproduces
-  // the same world coordinates for the CPU runs.
   function sampleRow(precision, scale) {
     if (!demoSources[precision]) demoSources[precision] = demoShader(precision);
     var g = new OffscreenCanvas(SAMPLES, 1).getContext("webgl2");

@@ -1,22 +1,20 @@
-// The corner menu: everything about the site that is not the site, behind
-// one button at the top right of every page (index.html and the pages it
-// leads to). Each entry's icon is a plain one-color drawing, so the menu
-// reads as a list rather than a row of logos. The markup is written here,
-// once, and put in the page where this script's tag is, so the pages
-// include one line instead of a copy each; the links are resolved against
-// this file, so the same script works from gallery/ too.
-//
-// Open and shut by its button; shut again by a click anywhere else, or
-// Escape. The entries are ordinary links, so choosing one just leaves.
+// CPAL-1.0 License. See chaosaccelerator.com/license.html
+
+// The corner menu: site links behind one button at the top right of every page. The markup is
+// written here once and inserted where the script tag is; links resolve against the site root
+// (this file's folder is scripts/) so it works from gallery/ too. Closes on outside click or Escape.
 (function () {
   var script = document.currentScript;
-  var root = new URL(".", script.src);
+  var root = new URL("../", script.src);
   var html = 
     "<nav class=\"corner-menu\" id=\"corner-menu\" aria-label=\"About this site\">\n" +
     "  <button class=\"corner-menu-btn\" id=\"corner-menu-btn\" type=\"button\" aria-label=\"Menu\" aria-expanded=\"false\" aria-controls=\"corner-menu-list\">\n" +
     "    <svg viewBox=\"0 0 24 24\" width=\"22\" height=\"22\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" aria-hidden=\"true\"><path d=\"M4 7h16M4 12h16M4 17h16\"></path></svg>\n" +
     "  </button>\n" +
     "  <ul class=\"corner-menu-list\" id=\"corner-menu-list\" hidden>\n" +
+    "    <li><a href=\"chaos.html\">\n" +
+    "      <svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 12h13M13 6l6 6-6 6\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"></path></svg>\n" +
+    "      Launch the web app</a></li>\n" +
     "    <li><a href=\"readme.html\">\n" +
     "      <svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"9.25\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\"></circle><path d=\"M12 10.75v6.5\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"></path><circle cx=\"12\" cy=\"7.5\" r=\"1.25\" fill=\"currentColor\"></circle></svg>\n" +
     "      About</a></li>\n" +
