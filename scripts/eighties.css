@@ -1,0 +1,396 @@
+/* CPAL-1.0 License. See chaosaccelerator.com/license.html */
+
+/* The eighties theme, layered over landing.css: black, neon purple and a setting sun. The grid and
+   sun are drawn by eighties-ride.js inside the .sun box laid out here. */
+
+/* Saira, Latin subset, every weight in one variable file (SIL OFL, assets/fonts/OFL.txt). */
+@font-face {
+  font-family: "Saira";
+  src: url("../assets/fonts/saira-latin.woff2?v=m70") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+:root {
+  --bg: #000;
+  --bg-panel: #0b0615;
+  --border: #4a2a70;
+  --neon: #c77dff;
+  --neon-glow: rgba(199, 125, 255, 0.45);
+  --text: #f3ebff;
+  --text-dim: #a898c2;
+  --accent: #ff4fd8;
+  --accent-hover: #ff85e6;
+  --font: "Saira", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --horizon: 25vh;
+  --sun-r: min(22.2vh, 45vw);
+  --sun-sink: 0.1;
+}
+@supports (height: 1dvh) {
+  :root { --horizon: 25dvh; --sun-r: min(22.2dvh, 45vw); }
+}
+
+body.eighties { font-family: var(--font); background: var(--bg); }
+
+/* Fades in over the CSS sun, which stays as the picture when WebGL is unavailable. */
+.ride {
+  position: fixed;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+.ride-on .ride { opacity: 1; }
+
+/* ---- The sky: the sun, a bit under half set, and the title on it ---- */
+
+.eighties .screen { padding-top: 0; }
+.sky { flex: none; height: var(--horizon); }
+.sun {
+  position: absolute;
+  left: calc(50% - var(--sun-r));
+  top: calc(var(--horizon) - var(--sun-r) * (1 - var(--sun-sink)));
+  width: calc(var(--sun-r) * 2);
+  height: calc(var(--sun-r) * (1 - var(--sun-sink)));
+  overflow: hidden;
+}
+.sun-disc {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  background:
+    linear-gradient(transparent 21.45%, #000 21.45% 21.55%, transparent 21.55% 27.26%, #000 27.26% 27.74%,
+      transparent 27.74% 36.03%, #000 36.03% 37.37%, transparent 37.37%),
+    linear-gradient(#ffed59, #ff941f 16%, #ff3369 31%, #9926f2 45%);
+  transition: opacity 0.6s ease;
+}
+.ride-on .sun-disc { opacity: 0; }
+
+/* Black like the bands; the pink edge keeps letters readable where a band crosses them. */
+.sun-title {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--sun-r) * 0.12);
+  margin: 0;
+  color: #000;
+  font-weight: 800;
+  line-height: 0.95;
+  text-align: center;
+  text-transform: uppercase;
+  text-shadow: 0 0 1px #ff5c9a, 0 0 1px #ff5c9a, 0 0 4px rgba(255, 92, 154, 0.8);
+}
+.sun-title a, .sun-title a:hover { display: block; color: inherit; text-decoration: none; }
+.sun-title span { display: block; }
+/* Tracking also pads the last letter; the negative margin re-centers each line. */
+.sun-title span:first-child { font-size: calc(var(--sun-r) * 0.345); letter-spacing: 0.1em; margin-right: -0.1em; }
+.sun-title span:last-child { font-size: calc(var(--sun-r) * 0.213); letter-spacing: 0.06em; margin-right: -0.06em; }
+
+/* The tagline on a fixed-size billboard standing just in front of the horizon. The slot is the
+   gap left of the sun; the billboard shows only when it fits there whole. */
+.billboard-slot {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: grid;
+  place-items: end center;
+  width: calc(50% - var(--sun-r));
+  height: calc(var(--horizon) * 1.12);
+  container: billboard / size;
+}
+.billboard { display: none; flex-direction: column; }
+@container billboard (min-width: 345px) and (min-height: 176px) {
+  .billboard { display: flex; }
+}
+.billboard-lamps { position: relative; flex: none; height: 12px; }
+/* Faceted lamp heads, each throwing a cone of light down onto the board. */
+.billboard-lamps i { position: absolute; top: 0; }
+.billboard-lamps i:nth-child(1) { left: 18%; }
+.billboard-lamps i:nth-child(2) { left: 50%; }
+.billboard-lamps i:nth-child(3) { left: 82%; }
+.billboard-lamps i::before,
+.billboard-lamps i::after { content: ""; position: absolute; pointer-events: none; }
+.billboard-lamps i::before {
+  left: -11px;
+  width: 22px;
+  height: 12px;
+  background: linear-gradient(100deg, #6b5a86 0 38%, #3c2f52 38% 70%, #241a35 70%);
+  clip-path: polygon(20% 0, 80% 0, 100% 100%, 0 100%);
+}
+.billboard-lamps i::after {
+  top: 12px;
+  left: -51px;
+  width: 102px;
+  height: 60px;
+  background: linear-gradient(rgba(255, 236, 190, 0.34), rgba(255, 236, 190, 0));
+  clip-path: polygon(40% 0, 60% 0, 100% 100%, 0 100%);
+  z-index: 1;
+}
+/* The right lamp's light cuts out twice in quick succession every 10 seconds. */
+.billboard-lamps i:nth-child(3)::after { animation: lampFlicker 10s linear infinite; }
+@keyframes lampFlicker {
+  0%, 94% { opacity: 1; }
+  94.01%, 95.2% { opacity: 0; }
+  95.21%, 96.4% { opacity: 1; }
+  96.41%, 97.6% { opacity: 0; }
+  97.61%, 100% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .billboard-lamps i:nth-child(3)::after { animation: none; }
+}
+.billboard-board {
+  flex: none;
+  margin: 0;
+  padding: 0.7em 0.9em;
+  border: 2px solid #f2d9ff;
+  background: #07030d;
+  /* The grid lines' white core and purple glow (eighties-ride.js). */
+  box-shadow: 0 0 4px #9933ff, 0 0 14px #9933ff, 0 0 28px rgba(153, 51, 255, 0.6), inset 0 0 10px rgba(153, 51, 255, 0.55);
+}
+/* Neon lettering, on the billboard or floating under Launch. */
+.billboard-board,
+.tagline-float {
+  font-size: 17px;
+  white-space: nowrap;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: 0.03em;
+  text-align: center;
+  text-transform: uppercase;
+  color: #ffe3fa;
+  text-shadow: 0 0 2px #fff, 0 0 6px #ff4fd8, 0 0 14px #ff4fd8, 0 0 26px #b400ff;
+}
+.billboard-board a,
+.tagline-float a { color: inherit; text-decoration: none; }
+.billboard-board a:hover,
+.tagline-float a:hover { color: #fff; text-decoration: none; }
+/* Tall, narrow screens have no room for the billboard beside the sun: the tagline floats under Launch. */
+.tagline-float { display: none; flex: none; margin: 0 0 clamp(8px, 2vh, 20px); font-size: 15px; }
+@media (max-aspect-ratio: 3/4) {
+  .tagline-float { display: block; }
+}
+/* Two posts from the board down to the horizon. */
+.billboard-posts {
+  flex: none;
+  height: 60px;
+  background: linear-gradient(90deg, transparent 20%, #2a1a40 20% 22.5%, #5a3d80 22.5% 23.5%, transparent 23.5% 76.5%,
+    #5a3d80 76.5% 77.5%, #2a1a40 77.5% 80%, transparent 80%);
+  /* Soft, and fading into the floor's haze like the grid near the horizon. */
+  filter: blur(0.8px);
+  -webkit-mask-image: linear-gradient(#000 45%, rgba(0, 0, 0, 0.35));
+  mask-image: linear-gradient(#000 45%, rgba(0, 0, 0, 0.35));
+}
+
+/* ---- Launch, just under the horizon ---- */
+
+.eighties .launch { flex: none; margin: clamp(12px, 2.6vh, 28px) 0 clamp(10px, 2vh, 22px); text-align: center; }
+.eighties .fractalize-btn {
+  border-radius: 0;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  text-indent: 0.22em;
+  text-transform: uppercase;
+  color: #000;
+  background: linear-gradient(#ffed59, #ff941f 50%, #ff3369);
+  animation-name: eightiesPulse;
+}
+.eighties .fractalize-btn:hover { color: #000; box-shadow: 0 0 30px rgba(255, 51, 105, 0.9); }
+.eighties .fractalize-btn.large {
+  font-size: clamp(15px, 2.3vh, 20px);
+  padding: clamp(10px, 1.8vh, 16px) clamp(34px, 6vh, 56px);
+}
+@keyframes eightiesPulse {
+  0%, 100% { box-shadow: 0 0 14px rgba(255, 51, 105, 0.55); }
+  50% { box-shadow: 0 0 28px rgba(255, 51, 105, 0.9); }
+}
+
+/* ---- The tour ---- */
+
+/* Room on both sides of the slide in view. cqw: a % in --slide-w is also read inside the track,
+   where it means the content box. */
+.eighties .tour { --room: clamp(20px, 6vw, 88px); --slide-w: min(100vw - 32px - 2 * var(--room), 780px); }
+@supports (width: 1cqh) {
+  .eighties .tour { --slide-w: min(100cqw - 2 * var(--room), 780px, calc((100cqh - 84px) * 16 / 9)); }
+}
+.eighties .tour-track { gap: clamp(40px, 9vw, 140px); }
+/* The tour script animates scrollLeft itself; snapping would fight every step. */
+.eighties .tour-track.swerving { scroll-snap-type: none; }
+.eighties .tour-slide {
+  border-color: var(--neon);
+  border-radius: 0;
+  background: var(--bg-panel);
+  box-shadow: 0 0 18px var(--neon-glow);
+}
+.eighties .tour-media { background: #05020a; border-bottom-color: var(--border); }
+.eighties .tour-step {
+  border-color: var(--neon);
+  border-radius: 0;
+  background: rgba(5, 2, 10, 0.85);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.eighties .gallery-card,
+.eighties .gallery-card-scene.gallery-card-scene { border-radius: 0; }
+.eighties .gallery-card:hover { border-color: var(--neon); }
+
+.eighties .carousel-arrow {
+  border-color: var(--neon);
+  border-radius: 0;
+  background: rgba(0, 0, 0, 0.75);
+  color: var(--neon);
+}
+.eighties .carousel-arrow:hover { background: #000; border-color: var(--accent); color: var(--accent); box-shadow: 0 0 12px var(--neon-glow); }
+.eighties .carousel-dots button::before { width: 9px; height: 9px; border-radius: 0; background: var(--border); }
+.eighties .carousel-dots button[aria-current="true"]::before { background: var(--neon); box-shadow: 0 0 8px var(--neon); }
+.eighties .credits { color: var(--text-dim); text-shadow: 0 0 3px #000, 0 0 6px #000; }
+/* Wrapped credits would run under the watermark. */
+@media (max-width: 640px) {
+  .eighties .foot { padding-bottom: 22px; }
+}
+
+/* ---- The corner menu ---- */
+
+.eighties .corner-menu-btn { border-color: var(--neon); border-radius: 0; background: rgba(0, 0, 0, 0.75); }
+.eighties .corner-menu-btn:hover,
+.eighties .corner-menu-btn[aria-expanded="true"] { background: #000; border-color: var(--accent); box-shadow: 0 0 12px var(--neon-glow); }
+.eighties .corner-menu-list { border-color: var(--neon); border-radius: 0; background: #080410; box-shadow: 0 0 24px var(--neon-glow); }
+.eighties .corner-menu-list a { border-radius: 0; }
+.eighties .corner-menu-list a:hover { background: #1c0f2e; }
+
+/* The button grows into the menu from its corner and the X shrinks it back. Shut, the list stays
+   displayed so the shrink can play. */
+.eighties .corner-menu-list {
+  top: 0;
+  transform-origin: top right;
+  transition: transform 0.2s ease-out, opacity 0.2s ease-out;
+}
+.eighties .corner-menu-list[hidden] {
+  display: block;
+  visibility: hidden;
+  opacity: 0;
+  transform: scale(0.16);
+  pointer-events: none;
+  transition: transform 0.12s ease-in, opacity 0.12s ease-in, visibility 0s 0.12s;
+}
+.eighties .corner-menu-list li:first-child a { margin-right: 36px; }
+.eighties .corner-menu-close {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #fff;
+  cursor: pointer;
+}
+.eighties .corner-menu-close:hover svg { filter: drop-shadow(0 0 3px #fff) drop-shadow(0 0 6px var(--neon)); }
+@media (prefers-reduced-motion: reduce) {
+  .eighties .corner-menu-list, .eighties .corner-menu-list[hidden] { transition: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .eighties .fractalize-btn { animation: none; }
+}
+
+/* ---- The '80s switch, lower left and at the end of the corner menu ---- */
+
+.eighties-toggle {
+  position: fixed;
+  left: max(12px, env(safe-area-inset-left));
+  bottom: 8px;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+  cursor: pointer;
+  user-select: none;
+}
+.corner-menu-list .eighties-toggle {
+  position: static;
+  flex-direction: row-reverse;
+  justify-content: space-between;
+  gap: 11px;
+  margin-top: 4px;
+  padding: 9px 12px;
+  border-top: 1px solid var(--border);
+  font-size: 14px;
+  color: var(--text);
+  text-shadow: none;
+}
+/* The app's switch (physics.css), which the landing pages do not load. */
+.toggle-switch { position: relative; display: inline-block; flex: none; width: 44px; height: 24px; }
+.toggle-switch input { position: absolute; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.toggle-slider {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--border);
+  transition: background 0.15s ease;
+  pointer-events: none;
+}
+.toggle-slider::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  transition: transform 0.15s ease;
+}
+.toggle-switch input:checked + .toggle-slider { background: var(--neon); }
+.toggle-switch input:checked + .toggle-slider::before { transform: translateX(20px); }
+.toggle-switch input:focus-visible + .toggle-slider { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---- '80s off: index.html's dark grey look with the same layout, no WebGL ---- */
+
+:root.eighties-off {
+  --bg: #14161c;
+  --bg-panel: #1b1e27;
+  --border: #2c3040;
+  --neon: #2c3040;
+  --neon-glow: transparent;
+  --text: #e6e8ef;
+  --text-dim: #9399ad;
+  --accent: #5b8cff;
+  --accent-hover: #75a0ff;
+}
+.eighties-off .ride,
+.eighties-off .sun-disc { display: none; }
+.eighties-off .sun-title { text-shadow: none; }
+.eighties-off .sun-title a {
+  background: linear-gradient(#ffed59, #ff941f 35%, #ff3369 65%, #9926f2);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.eighties-off .tour-slide { opacity: 1; }
+.eighties-off .tour-step { background: rgba(12, 13, 17, 0.82); }
+.eighties-off .carousel-arrow { background: rgba(20, 22, 28, 0.8); color: var(--text); }
+.eighties-off .carousel-dots button[aria-current="true"]::before { background: var(--accent); box-shadow: none; }
+.eighties-off .credits { text-shadow: none; }
+.eighties-off .corner-menu-btn { background: rgba(27, 30, 39, 0.85); }
+.eighties-off .corner-menu-btn:hover,
+.eighties-off .corner-menu-btn[aria-expanded="true"] { background: var(--bg-panel); }
+.eighties-off .corner-menu-list { background: var(--bg-panel); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); }
+.eighties-off .corner-menu-list a:hover { background: var(--bg); }
+.eighties-off .corner-menu-close:hover svg { filter: none; color: var(--accent); }
+.eighties-off .billboard-lamps,
+.eighties-off .billboard-posts { visibility: hidden; }
+.eighties-off .billboard-board { border-color: transparent; background: none; box-shadow: none; color: var(--text); text-shadow: none; }
+.eighties-off .tagline-float { color: var(--text); text-shadow: none; }

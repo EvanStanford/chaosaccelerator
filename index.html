@@ -3,30 +3,47 @@
 <head>
 <meta charset="UTF-8">
 <!-- CPAL-1.0 License. See chaosaccelerator.com/license.html -->
-<!-- The landing page: one screen, a sideways carousel (the "tour") in the middle. The app itself is chaos.html. -->
+<!-- The landing page in the eighties theme: the tour rides over the WebGL grid and sun of eighties-ride.js. -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="theme-color" content="#14161c">
+<meta name="theme-color" content="#000000">
 <title>Chaos Accelerator</title>
 <meta name="description" content="Create your own hardware accelerated fractals from physics simulations.">
 <script>
   // Old shared links carry the scene in their fragment (share-url.js): hand them to the
   // app with replace(), so Back does not land on a page that forwards again.
   if (/^#(bldr|map)\//.test(location.hash)) location.replace("chaos.html" + location.hash);
+  // Before first paint, so a page with the '80s switched off never flashes them.
+  try { if (localStorage.getItem("eightiesOff") === "1") document.documentElement.classList.add("eighties-off"); } catch (e) {}
 </script>
 <link rel="stylesheet" href="scripts/landing.css?v=m70">
+<link rel="stylesheet" href="scripts/eighties.css?v=m70">
+<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m70" as="font" type="font/woff2" crossorigin>
 </head>
-<body class="landing">
+<body class="landing eighties">
+<canvas class="ride" id="ride" aria-hidden="true"></canvas>
 <main class="screen">
 
   <script src="scripts/corner-menu.js?v=m70"></script>
 
-  <header class="masthead">
-    <h1><a href="chaos.html">Chaos Accelerator</a></h1>
-    <p class="tagline"><a href="chaos.html">Create your own hardware accelerated fractals from physics simulations!</a></p>
-    <div class="launch">
-      <a class="fractalize-btn large" href="chaos.html">Launch</a>
+  <header class="sky">
+    <div class="sun" id="sun">
+      <div class="sun-disc"></div>
+      <h1 class="sun-title"><a href="chaos.html"><span>Chaos</span> <span>Accelerator</span></a></h1>
+    </div>
+    <div class="billboard-slot">
+      <div class="billboard">
+        <div class="billboard-lamps" aria-hidden="true"><i></i><i></i><i></i></div>
+        <p class="billboard-board"><a href="chaos.html">Create your own hardware<br>accelerated fractals from<br>physics simulations!</a></p>
+        <div class="billboard-posts" aria-hidden="true"></div>
+      </div>
     </div>
   </header>
+
+  <div class="launch">
+    <a class="fractalize-btn large" href="chaos.html">Launch</a>
+  </div>
+
+  <p class="tagline-float"><a href="chaos.html">Create your own hardware<br>accelerated fractals from<br>physics simulations!</a></p>
 
   <section class="tour" id="tour" aria-roledescription="carousel" aria-label="Tour">
     <div class="tour-track" id="tour-track" tabindex="0">
@@ -97,15 +114,22 @@
 
 </main>
 <a class="watermark" href="chaos.html">chaosaccelerator.com</a>
+<label class="eighties-toggle" id="eighties-toggle">
+  <span class="toggle-switch"><input type="checkbox" checked><span class="toggle-slider"></span></span>
+  <span class="eighties-toggle-label">Disable '80s</span>
+</label>
+<script src="scripts/eighties-ride.js?v=m70"></script>
 <script>
   // ---- The tour ----
-  (function () {
+  var tour = (function () {
+    var SWERVE_MS = 950;
     var track = document.getElementById("tour-track");
     var dots = document.getElementById("tour-dots");
     var prev = document.getElementById("tour-prev");
     var next = document.getElementById("tour-next");
     var slides = Array.prototype.slice.call(track.querySelectorAll(".tour-slide"));
     var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    var swerve = null, running = false;
 
     function current() {
       var mid = track.scrollLeft + track.clientWidth / 2;
@@ -116,14 +140,51 @@
       });
       return best;
     }
+    function leftOf(i) {
+      var s = slides[i];
+      return s.offsetLeft - (track.clientWidth - s.offsetWidth) / 2;
+    }
+    function stride() { return slides.length > 1 ? slides[1].offsetLeft - slides[0].offsetLeft : 0; }
+
+    // Quintic from x0 moving at v0 px/ms with acceleration a0 to rest at x1: a click during a
+    // swerve bends it without a jolt.
+    function ease(x0, v0, a0, x1, t0, ms) {
+      var V = v0 * ms, A = a0 * ms * ms;
+      var D = x1 - x0 - V - A / 2, E = -V - A;
+      var c3 = 10 * D - 4 * E - A / 2, c4 = -15 * D + 7 * E + A, c5 = 6 * D - 3 * E - A / 2;
+      return function (t) {
+        var s = Math.max(0, Math.min(1, (t - t0) / ms));
+        return {
+          x: x0 + s * (V + s * (A / 2 + s * (c3 + s * (c4 + s * c5)))),
+          v: (V + s * (A + s * (3 * c3 + s * (4 * c4 + s * 5 * c5)))) / ms,
+          a: (A + s * (6 * c3 + s * (12 * c4 + s * 20 * c5))) / (ms * ms),
+          done: s === 1,
+        };
+      };
+    }
+    function stop() {
+      swerve = null;
+      track.classList.remove("swerving");
+    }
+    function run(now) {
+      if (!swerve) { running = false; return; }
+      var k = swerve.at(now);
+      track.scrollLeft = k.x;
+      if (k.done) { stop(); running = false; }
+      else requestAnimationFrame(run);
+    }
     function goTo(i) {
       i = Math.max(0, Math.min(slides.length - 1, i));
-      var s = slides[i];
-      track.scrollTo({
-        left: s.offsetLeft - (track.clientWidth - s.offsetWidth) / 2,
-        behavior: reduced ? "auto" : "smooth",
-      });
+      var x1 = leftOf(i);
+      if (reduced) { track.scrollLeft = x1; return; }
+      var t0 = performance.now(), x0 = track.scrollLeft, v0 = 0, a0 = 0;
+      if (swerve) { var k = swerve.at(t0); x0 = k.x; v0 = k.v; a0 = k.a; }
+      var span = Math.max(1, Math.abs(x1 - x0) / (stride() || 1));
+      swerve = { to: i, at: ease(x0, v0, a0, x1, t0, SWERVE_MS * Math.pow(span, 0.35)) };
+      track.classList.add("swerving");
+      if (!running) { running = true; requestAnimationFrame(run); }
     }
+    function aim() { return swerve ? swerve.to : current(); }
     function update() {
       var i = current();
       prev.disabled = i <= 0;
@@ -147,20 +208,22 @@
       dot.addEventListener("click", function () { goTo(i); });
       dots.appendChild(dot);
     });
-    prev.addEventListener("click", function () { goTo(current() - 1); });
-    next.addEventListener("click", function () { goTo(current() + 1); });
+    prev.addEventListener("click", function () { goTo(aim() - 1); });
+    next.addEventListener("click", function () { goTo(aim() + 1); });
     window.addEventListener("keydown", function (e) {
-      if (e.key === "ArrowLeft") { e.preventDefault(); goTo(current() - 1); }
-      if (e.key === "ArrowRight") { e.preventDefault(); goTo(current() + 1); }
+      if (e.key === "ArrowLeft") { e.preventDefault(); goTo(aim() - 1); }
+      if (e.key === "ArrowRight") { e.preventDefault(); goTo(aim() + 1); }
     });
+    // A finger or a sideways trackpad swipe takes over from a swerve in flight.
+    track.addEventListener("touchstart", stop, { passive: true });
     var wheelHoldUntil = 0;
     window.addEventListener("wheel", function (e) {
-      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) { if (e.deltaX) stop(); return; }
       e.preventDefault();
       var now = Date.now();
       if (now < wheelHoldUntil || Math.abs(e.deltaY) < 10) return;
       wheelHoldUntil = now + 700;
-      goTo(current() + (e.deltaY > 0 ? 1 : -1));
+      goTo(aim() + (e.deltaY > 0 ? 1 : -1));
     }, { passive: false });
     var scrollFrame = null;
     track.addEventListener("scroll", function () {
@@ -168,6 +231,60 @@
       scrollFrame = requestAnimationFrame(function () { scrollFrame = null; update(); });
     });
     update();
+
+    return {
+      // Where the tour stands, in slides, at frame time now.
+      lane: function (now) {
+        var s = stride();
+        return s ? (swerve ? swerve.at(now).x : track.scrollLeft) / s : 0;
+      },
+    };
+  })();
+
+  // ---- The corner menu's X, over the spot where its button sits ----
+  (function () {
+    var btn = document.getElementById("corner-menu-btn");
+    var list = document.getElementById("corner-menu-list");
+    var item = document.createElement("li");
+    item.innerHTML = "<button class=\"corner-menu-close\" type=\"button\" aria-label=\"Close menu\">" +
+      "<svg viewBox=\"0 0 24 24\" width=\"20\" height=\"20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" aria-hidden=\"true\"><path d=\"M6 6l12 12M18 6L6 18\"></path></svg></button>";
+    list.appendChild(item);
+    item.firstChild.addEventListener("click", function (e) {
+      e.stopPropagation();
+      btn.click();
+      btn.focus();
+    });
+  })();
+
+  // ---- The '80s switch: one in the lower left, a copy at the end of the corner menu ----
+  (function () {
+    var root = document.documentElement;
+    var ride = null;
+    var item = document.createElement("li");
+    item.innerHTML = document.getElementById("eighties-toggle").outerHTML.replace(" id=\"eighties-toggle\"", "");
+    document.getElementById("corner-menu-list").appendChild(item);
+    var boxes = document.querySelectorAll(".eighties-toggle input");
+    var labels = document.querySelectorAll(".eighties-toggle-label");
+
+    function set(on) {
+      root.classList.toggle("eighties-off", !on);
+      Array.prototype.forEach.call(boxes, function (box) { box.checked = on; });
+      Array.prototype.forEach.call(labels, function (label) { label.textContent = on ? "Disable '80s" : "Enable '80s"; });
+      try { localStorage.setItem("eightiesOff", on ? "0" : "1"); } catch (e) {}
+      // The background starts the first time it is shown, and stops while hidden.
+      if (on && !ride && window.EightiesRide) {
+        ride = EightiesRide.start({
+          canvas: document.getElementById("ride"),
+          sun: document.getElementById("sun"),
+          lane: tour.lane,
+        }) || { run: function () {} };
+      }
+      if (ride) ride.run(on);
+    }
+    Array.prototype.forEach.call(boxes, function (box) {
+      box.addEventListener("change", function () { set(box.checked); });
+    });
+    set(!root.classList.contains("eighties-off"));
   })();
 
   // ---- The gallery slide ----
