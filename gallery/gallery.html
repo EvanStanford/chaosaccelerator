@@ -10,12 +10,19 @@
      works (an absolute link from a submission email works too). To add one: put sceneN.jpg and mapN.jpg here
      and append an object. -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="theme-color" content="#14161c">
+<meta name="theme-color" content="#000000">
 <title>Gallery: Chaos Accelerator</title>
 <meta name="description" content="Fractals people have made with Chaos Accelerator, and how to add yours.">
+<script>
+  // Before first paint, so a page with the '80s switched off never flashes them.
+  try { if (localStorage.getItem("eightiesOff") === "1") document.documentElement.classList.add("eighties-off"); } catch (e) {}
+</script>
 <link rel="stylesheet" href="../scripts/landing.css?v=m70">
+<link rel="stylesheet" href="../scripts/eighties.css?v=m70">
+<link rel="preload" href="../assets/fonts/saira-latin.woff2?v=m70" as="font" type="font/woff2" crossorigin>
 </head>
-<body>
+<body class="eighties">
+<canvas class="ride" id="ride" aria-hidden="true"></canvas>
 <main class="page page-wide">
 
   <header class="page-head">
@@ -253,6 +260,24 @@
       });
     });
   })();
+</script>
+<script src="../scripts/eighties-ride.js?v=m70"></script>
+<script src="../scripts/eighties-theme.js?v=m70"></script>
+<script>
+  // ---- The menu's X, the '80s switch and the grid behind the page ----
+  EightiesTheme.start({
+    canvas: document.getElementById("ride"),
+    horizon: 0.25,
+    speed: 0,
+    dim: 0.35,
+    // Slides with the gallery's carousel, a slide at a time.
+    lane: function () {
+      var track = document.getElementById("carousel-track");
+      var slides = track.querySelectorAll(".slide");
+      var stride = slides.length > 1 ? slides[1].offsetLeft - slides[0].offsetLeft : 0;
+      return stride ? track.scrollLeft / stride : 0;
+    },
+  });
 </script>
 </body>
 </html>

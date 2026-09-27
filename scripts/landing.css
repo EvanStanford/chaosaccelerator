@@ -182,9 +182,13 @@ a.watermark:hover { color: #fff; text-decoration: none; }
 
 .back-link { display: inline-block; margin: 0 56px 28px 0; padding: 12px 0; font-size: 14px; line-height: 16px; }
 
-.project + .project { margin-top: 48px; }
-.project h2 { margin: 0 0 4px; font-size: 22px; }
-.project .sub { margin: 0 0 14px; font-size: 15px; color: var(--text-dim); }
+/* The gallery's carousel with a video on each slide. */
+.carousel.projects { --slide-w: min(720px, 86vw); }
+.project .video { border: 0; border-bottom: 1px solid var(--border); border-radius: 0; }
+.project:not(.is-current) iframe { pointer-events: none; }
+.project-caption { padding: 12px 16px 14px; }
+.project-caption h2 { margin: 0 0 4px; font-size: 20px; }
+.project-caption p { margin: 0; font-size: 15px; color: var(--text-dim); }
 
 /* ---- The license page ---- */
 

@@ -5,12 +5,19 @@
 <!-- CPAL-1.0 License. See chaosaccelerator.com/license.html -->
 <!-- The README as a page ("About"): fetches README.md and renders it with the small Markdown renderer below. -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="theme-color" content="#14161c">
+<meta name="theme-color" content="#000000">
 <title>About: Chaos Accelerator</title>
 <meta name="description" content="About Chaos Accelerator: the project's README.">
+<script>
+  // Before first paint, so a page with the '80s switched off never flashes them.
+  try { if (localStorage.getItem("eightiesOff") === "1") document.documentElement.classList.add("eighties-off"); } catch (e) {}
+</script>
 <link rel="stylesheet" href="scripts/landing.css?v=m70">
+<link rel="stylesheet" href="scripts/eighties.css?v=m70">
+<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m70" as="font" type="font/woff2" crossorigin>
 </head>
-<body>
+<body class="eighties">
+<canvas class="ride" id="ride" aria-hidden="true"></canvas>
 <script src="scripts/corner-menu.js?v=m70"></script>
 <main class="page">
   <a class="back-link" href="index.html">&larr; Chaos Accelerator</a>
@@ -109,6 +116,17 @@
       a.textContent = "Open README.md";
       box.appendChild(a);
     });
+</script>
+<script src="scripts/eighties-ride.js?v=m70"></script>
+<script src="scripts/eighties-theme.js?v=m70"></script>
+<script>
+  // ---- The menu's X, the '80s switch and the grid behind the page ----
+  EightiesTheme.start({
+    canvas: document.getElementById("ride"),
+    horizon: 0.25,
+    speed: 0,
+    dim: 0.35,
+  });
 </script>
 </body>
 </html>

@@ -119,6 +119,7 @@
   <span class="eighties-toggle-label">Disable '80s</span>
 </label>
 <script src="scripts/eighties-ride.js?v=m70"></script>
+<script src="scripts/eighties-theme.js?v=m70"></script>
 <script>
   // ---- The tour ----
   var tour = (function () {
@@ -241,51 +242,13 @@
     };
   })();
 
-  // ---- The corner menu's X, over the spot where its button sits ----
-  (function () {
-    var btn = document.getElementById("corner-menu-btn");
-    var list = document.getElementById("corner-menu-list");
-    var item = document.createElement("li");
-    item.innerHTML = "<button class=\"corner-menu-close\" type=\"button\" aria-label=\"Close menu\">" +
-      "<svg viewBox=\"0 0 24 24\" width=\"20\" height=\"20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" aria-hidden=\"true\"><path d=\"M6 6l12 12M18 6L6 18\"></path></svg></button>";
-    list.appendChild(item);
-    item.firstChild.addEventListener("click", function (e) {
-      e.stopPropagation();
-      btn.click();
-      btn.focus();
-    });
-  })();
-
-  // ---- The '80s switch: one in the lower left, a copy at the end of the corner menu ----
-  (function () {
-    var root = document.documentElement;
-    var ride = null;
-    var item = document.createElement("li");
-    item.innerHTML = document.getElementById("eighties-toggle").outerHTML.replace(" id=\"eighties-toggle\"", "");
-    document.getElementById("corner-menu-list").appendChild(item);
-    var boxes = document.querySelectorAll(".eighties-toggle input");
-    var labels = document.querySelectorAll(".eighties-toggle-label");
-
-    function set(on) {
-      root.classList.toggle("eighties-off", !on);
-      Array.prototype.forEach.call(boxes, function (box) { box.checked = on; });
-      Array.prototype.forEach.call(labels, function (label) { label.textContent = on ? "Disable '80s" : "Enable '80s"; });
-      try { localStorage.setItem("eightiesOff", on ? "0" : "1"); } catch (e) {}
-      // The background starts the first time it is shown, and stops while hidden.
-      if (on && !ride && window.EightiesRide) {
-        ride = EightiesRide.start({
-          canvas: document.getElementById("ride"),
-          sun: document.getElementById("sun"),
-          lane: tour.lane,
-        }) || { run: function () {} };
-      }
-      if (ride) ride.run(on);
-    }
-    Array.prototype.forEach.call(boxes, function (box) {
-      box.addEventListener("change", function () { set(box.checked); });
-    });
-    set(!root.classList.contains("eighties-off"));
-  })();
+  // ---- The menu's X, the '80s switches and the background ----
+  EightiesTheme.start({
+    canvas: document.getElementById("ride"),
+    sun: document.getElementById("sun"),
+    lane: tour.lane,
+    drift: document.querySelector(".billboard"),
+  });
 
   // ---- The gallery slide ----
   (function () {

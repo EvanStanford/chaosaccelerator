@@ -8,6 +8,7 @@
   var CELLS_PER_SECOND = 2;
   var BANDS_PER_SECOND = 0.1225;
   var LANE_CELLS = 6;      // sideways travel per carousel slide
+  var DRIFT = 0.25;        // px the drifting element lags per cell/s of sideways speed
   var MAX_DPR = 2;
 
   var VERTEX = [
@@ -26,6 +27,7 @@
     "uniform vec2 u_cam;",   // sideways position and forward travel, in grid cells
     "uniform vec3 u_sun;",   // radius, depth of its center below the horizon, band phase
     "uniform float u_blur;", // cells the grid slid sideways since the last frame
+    "uniform float u_dim;",  // grid brightness
     "out vec4 fragColor;",
     "const float EYE = 4.0;",   // camera height, cells
     "const float FOCAL = 1.1;",
@@ -52,7 +54,7 @@
     "  vec2 g = vec2(q.x * EYE / below + u_cam.x, depth + u_cam.y);",
     "  vec2 fw = max(fwidth(g), vec2(1e-6));",
     "  vec2 l = lines(g.x, fw.x, u_blur) + lines(g.y, fw.y, 0.0);",
-    "  vec3 ground = (vec3(0.95, 0.85, 1.0) * l.x + vec3(0.6, 0.2, 1.0) * 0.6 * l.y) * exp(-depth / FOG);",
+    "  vec3 ground = (vec3(0.95, 0.85, 1.0) * l.x + vec3(0.6, 0.2, 1.0) * 0.6 * l.y) * exp(-depth / FOG) * u_dim;",
     // Bands evenly spaced in sqrt(depth into the band zone), so they slow and thin as they rise.
     "  float r = length(q - vec2(0.0, -u_sun.y));",
     "  float t = q.y / max(u_sun.x - u_sun.y, 1e-4);",
@@ -61,15 +63,17 @@
     "  float bw = max(fwidth(w), 1e-4);",
     "  float band = (1.0 - smoothstep(0.091 * u - bw, 0.091 * u + bw, abs(fract(w) - 0.5))) * smoothstep(0.0, 0.05, u);",
     "  float disc = 1.0 - smoothstep(u_sun.x - px, u_sun.x + px, r);",
-    "  vec3 sky = sunColor(t) * disc * (1.0 - band)",
-    "    + vec3(1.0, 0.25, 0.55) * 0.3 * exp(-12.0 * max(r - u_sun.x, 0.0)) * (1.0 - disc);",
+    "  vec3 sky = (sunColor(t) * disc * (1.0 - band)",
+    "    + vec3(1.0, 0.25, 0.55) * 0.3 * exp(-12.0 * max(r - u_sun.x, 0.0)) * (1.0 - disc)) * step(1e-6, u_sun.x);",
     "  vec3 col = mix(sky, ground, 1.0 - smoothstep(-px, px, q.y));",
-    "  col += vec3(0.85, 0.3, 1.0) * 0.5 * exp(-120.0 * abs(q.y));",
+    "  col += vec3(0.85, 0.3, 1.0) * 0.5 * exp(-120.0 * abs(q.y)) * u_dim;",
     "  fragColor = vec4(min(col, 1.0), 1.0);",
     "}",
   ].join("\n");
 
-  // opts: canvas; sun, the page's box the sun is drawn in; lane(now), the carousel's position in slides.
+  // opts: canvas; sun, the page's box the sun is drawn in, or horizon, its height as a fraction of the
+  // window from the top with no sun; lane(now), a carousel's position in slides; laneCells; speed, cells/s
+  // forward; dim, the grid's brightness; drift, an element that lags a few px while the grid slides.
   function start(opts) {
     var canvas = opts.canvas, root = document.documentElement;
     var still = !!(global.matchMedia && global.matchMedia("(prefers-reduced-motion: reduce)").matches);
@@ -78,7 +82,9 @@
 
     var program = null, loc = {}, raf = 0, dpr = 0, paused = false;
     var vanish = [0, 0], sun = [0, 0];
-    var travel = 0, bands = 0, pace = 1, last = 0, lastCamX = null;
+    var travel = 0, bands = 0, pace = 1, last = 0, lastCamX = null, dirty = true, drift = 0, shownDrift = 0;
+    var speed = opts.speed === undefined ? CELLS_PER_SECOND : opts.speed;
+    var laneCells = opts.laneCells || LANE_CELLS, dim = opts.dim || 1;
 
     function compile(type, source) {
       var shader = gl.createShader(type);
@@ -93,7 +99,7 @@
       gl.attachShader(program, compile(gl.FRAGMENT_SHADER, FRAGMENT));
       gl.linkProgram(program);
       if (!gl.getProgramParameter(program, gl.LINK_STATUS)) { program = null; return false; }
-      ["u_vanish", "u_height", "u_cam", "u_sun", "u_blur"].forEach(function (name) {
+      ["u_vanish", "u_height", "u_cam", "u_sun", "u_blur", "u_dim"].forEach(function (name) {
         loc[name] = gl.getUniformLocation(program, name);
       });
       return true;
@@ -107,6 +113,8 @@
       var w = Math.max(1, Math.round(canvas.clientWidth * scale));
       var h = Math.max(1, Math.round(canvas.clientHeight * scale));
       if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+      dirty = true;
+      if (!opts.sun) { vanish = [w / 2, h * (1 - opts.horizon)]; return; }
       var box = opts.sun.getBoundingClientRect(), r = box.width / 2, H = canvas.clientHeight || 1;
       vanish = [(box.left + r) * h / H, h - box.bottom * h / H];
       sun = [r / H, (r - box.height) / H];
@@ -120,8 +128,18 @@
       gl.uniform2f(loc.u_cam, camX, travel);
       gl.uniform3f(loc.u_sun, sun[0], sun[1], bands);
       gl.uniform1f(loc.u_blur, blur);
+      gl.uniform1f(loc.u_dim, dim);
+      dirty = false;
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       if (!root.classList.contains("ride-on")) root.classList.add("ride-on");
+    }
+
+    // Against the slide, like something nearer than the grid, and back in place once it stops.
+    function driftWith(speed, dt) {
+      drift += (-speed * DRIFT - drift) * Math.min(1, dt * 10);
+      if (Math.abs(drift - shownDrift) < 0.05) return;
+      shownDrift = drift;
+      opts.drift.style.transform = Math.abs(drift) < 0.05 ? "" : "translateX(" + drift.toFixed(2) + "px)";
     }
 
     function tick(now) {
@@ -132,10 +150,12 @@
       // The video has the stage: slow down while it has focus.
       var watching = document.activeElement && document.activeElement.tagName === "IFRAME";
       pace += ((watching ? 0.2 : 1) - pace) * Math.min(1, dt * 2);
-      travel = (travel + CELLS_PER_SECOND * pace * dt) % 1;
+      travel = (travel + speed * pace * dt) % 1;
       bands = (bands + BANDS_PER_SECOND * pace * dt) % 1;
-      var camX = opts.lane(now) * LANE_CELLS;
-      draw(camX, lastCamX === null ? 0 : Math.abs(camX - lastCamX));
+      var camX = opts.lane ? opts.lane(now) * laneCells : 0;
+      // A grid with no sun and no forward travel only redraws when it slides or resizes.
+      if (speed || opts.sun || camX !== lastCamX || dirty) draw(camX, lastCamX === null ? 0 : Math.abs(camX - lastCamX));
+      if (opts.drift && dt) driftWith(lastCamX === null ? 0 : (camX - lastCamX) / dt, dt);
       lastCamX = camX;
     }
 

@@ -3,14 +3,21 @@
 <head>
 <meta charset="UTF-8">
 <!-- CPAL-1.0 License. See chaosaccelerator.com/license.html -->
-<!-- Other projects by the same author; linked from index.html. -->
+<!-- Other projects by the same author, one per slide; linked from index.html. -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="theme-color" content="#14161c">
+<meta name="theme-color" content="#000000">
 <title>Other projects: Chaos Accelerator</title>
+<script>
+  // Before first paint, so a page with the '80s switched off never flashes them.
+  try { if (localStorage.getItem("eightiesOff") === "1") document.documentElement.classList.add("eighties-off"); } catch (e) {}
+</script>
 <link rel="stylesheet" href="scripts/landing.css?v=m70">
+<link rel="stylesheet" href="scripts/eighties.css?v=m70">
+<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m70" as="font" type="font/woff2" crossorigin>
 </head>
-<body>
-<main class="page">
+<body class="eighties">
+<canvas class="ride" id="ride" aria-hidden="true"></canvas>
+<main class="page page-wide">
 
   <header class="page-head">
     <a class="back-link" href="index.html">&larr; Chaos Accelerator</a>
@@ -18,23 +25,113 @@
     <script src="scripts/corner-menu.js?v=m70"></script>
   </header>
 
-  <section class="project">
-    <h2>Mechanical Laser Show</h2>
-    <p class="sub"><a href="https://github.com/EvanStanford/cams">https://github.com/EvanStanford/cams</a></p>
-    <div class="video">
-      <iframe src="https://www.youtube-nocookie.com/embed/_dtBUiaAqRE" title="Mechanical Laser Show" loading="lazy" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
-    </div>
-  </section>
+  <section class="carousel projects has-many" id="carousel" aria-roledescription="carousel" aria-label="Other projects">
+    <div class="carousel-window">
+      <div class="carousel-track" id="carousel-track" tabindex="0">
 
-  <section class="project">
-    <h2>The Art Bot</h2>
-    <p class="sub"><a href="http://theartbot.com">TheArtBot.com</a>, drawing robot from 2014</p>
-    <div class="video">
-      <iframe src="https://www.youtube-nocookie.com/embed/qMU4gqIqz9o" title="The Art Bot, a drawing robot from 2014" loading="lazy" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+        <article class="slide project is-current" aria-label="Mechanical Laser Show">
+          <div class="video">
+            <iframe src="https://www.youtube-nocookie.com/embed/_dtBUiaAqRE" title="Mechanical Laser Show" loading="lazy" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+          </div>
+          <div class="project-caption">
+            <h2>Mechanical Laser Show</h2>
+            <p><a href="https://github.com/EvanStanford/cams">https://github.com/EvanStanford/cams</a></p>
+          </div>
+        </article>
+
+        <article class="slide project" aria-label="The Art Bot">
+          <div class="video">
+            <iframe src="https://www.youtube-nocookie.com/embed/qMU4gqIqz9o" title="The Art Bot, a drawing robot from 2014" loading="lazy" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+          </div>
+          <div class="project-caption">
+            <h2>The Art Bot</h2>
+            <p><a href="http://theartbot.com">TheArtBot.com</a>, drawing robot from 2014</p>
+          </div>
+        </article>
+
+      </div>
+      <button class="carousel-arrow prev" id="carousel-prev" type="button" aria-label="Previous project">&#8249;</button>
+      <button class="carousel-arrow next" id="carousel-next" type="button" aria-label="Next project">&#8250;</button>
     </div>
+    <div class="carousel-dots" id="carousel-dots"></div>
   </section>
 
 </main>
 <div class="watermark">chaosaccelerator.com</div>
+<script src="scripts/eighties-ride.js?v=m70"></script>
+<script src="scripts/eighties-theme.js?v=m70"></script>
+<script>
+  // ---- The carousel ----
+  (function () {
+    var track = document.getElementById("carousel-track");
+    var dots = document.getElementById("carousel-dots");
+    var prev = document.getElementById("carousel-prev");
+    var next = document.getElementById("carousel-next");
+    var slides = Array.prototype.slice.call(track.querySelectorAll(".slide"));
+    var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    function current() {
+      var mid = track.scrollLeft + track.clientWidth / 2;
+      var best = 0, bestDist = Infinity;
+      slides.forEach(function (s, i) {
+        var d = Math.abs(s.offsetLeft + s.offsetWidth / 2 - mid);
+        if (d < bestDist) { bestDist = d; best = i; }
+      });
+      return best;
+    }
+    function goTo(i) {
+      var s = slides[Math.max(0, Math.min(slides.length - 1, i))];
+      track.scrollTo({ left: s.offsetLeft - (track.clientWidth - s.offsetWidth) / 2, behavior: reduced ? "auto" : "smooth" });
+    }
+    function update() {
+      var i = current();
+      prev.disabled = i <= 0;
+      next.disabled = i >= slides.length - 1;
+      Array.prototype.forEach.call(dots.children, function (dot, j) {
+        if (j === i) dot.setAttribute("aria-current", "true");
+        else dot.removeAttribute("aria-current");
+      });
+      slides.forEach(function (s, j) { s.classList.toggle("is-current", j === i); });
+    }
+
+    slides.forEach(function (s, i) {
+      s.addEventListener("click", function (e) {
+        if (i !== current()) { e.preventDefault(); goTo(i); }
+      });
+      var dot = document.createElement("button");
+      dot.type = "button";
+      dot.setAttribute("aria-label", "Project " + (i + 1) + " of " + slides.length);
+      dot.addEventListener("click", function () { goTo(i); });
+      dots.appendChild(dot);
+    });
+    prev.addEventListener("click", function () { goTo(current() - 1); });
+    next.addEventListener("click", function () { goTo(current() + 1); });
+    track.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowLeft") { e.preventDefault(); goTo(current() - 1); }
+      if (e.key === "ArrowRight") { e.preventDefault(); goTo(current() + 1); }
+    });
+    var scrollFrame = null;
+    track.addEventListener("scroll", function () {
+      if (scrollFrame) return;
+      scrollFrame = requestAnimationFrame(function () { scrollFrame = null; update(); });
+    });
+    update();
+  })();
+
+  // ---- The menu's X, the '80s switch and the grid behind the page ----
+  EightiesTheme.start({
+    canvas: document.getElementById("ride"),
+    horizon: 0.25,
+    speed: 0,
+    dim: 0.35,
+    // Slides with the carousel, a project at a time.
+    lane: function () {
+      var track = document.getElementById("carousel-track");
+      var slides = track.querySelectorAll(".slide");
+      var stride = slides.length > 1 ? slides[1].offsetLeft - slides[0].offsetLeft : 0;
+      return stride ? track.scrollLeft / stride : 0;
+    },
+  });
+</script>
 </body>
 </html>

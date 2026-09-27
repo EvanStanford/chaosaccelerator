@@ -357,6 +357,34 @@ body.eighties { font-family: var(--font); background: var(--bg); }
 .toggle-switch input:checked + .toggle-slider::before { transform: translateX(20px); }
 .toggle-switch input:focus-visible + .toggle-slider { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+/* ---- The document pages (About, Gallery, License): neon over a still, dimmer grid ---- */
+
+/* Positioned so it paints above the fixed grid canvas. */
+.eighties .page { position: relative; color: #fff; text-shadow: 0 0 6px rgba(153, 51, 255, 0.7); }
+.eighties .page h1,
+.eighties .page h2,
+.eighties .page h3 { color: #fff; text-shadow: 0 0 4px #b366ff, 0 0 14px #9933ff; }
+.eighties .page :is(h1, h2, h3) a { color: inherit; }
+.eighties .readme,
+.eighties .license-text,
+.eighties .slide,
+.eighties .mail-dialog {
+  border: 1px solid var(--neon);
+  border-radius: 0;
+  background: var(--bg-panel);
+  box-shadow: 0 0 18px var(--neon-glow);
+}
+.eighties .readme { padding: clamp(18px, 3vw, 34px); }
+.eighties .readme pre,
+.eighties .readme code,
+.eighties .readme img,
+.eighties .slide-scene,
+.eighties .mail-field-value,
+.eighties .mail-copy,
+.eighties .mail-dialog-close { border-radius: 0; }
+.eighties .slide-frame,
+.eighties .slide-scene { background: #05020a; }
+
 /* ---- '80s off: index.html's dark grey look with the same layout, no WebGL ---- */
 
 :root.eighties-off {
@@ -379,7 +407,8 @@ body.eighties { font-family: var(--font); background: var(--bg); }
   background-clip: text;
   color: transparent;
 }
-.eighties-off .tour-slide { opacity: 1; }
+.eighties-off .tour-slide,
+.eighties-off .slide { opacity: 1; }
 .eighties-off .tour-step { background: rgba(12, 13, 17, 0.82); }
 .eighties-off .carousel-arrow { background: rgba(20, 22, 28, 0.8); color: var(--text); }
 .eighties-off .carousel-dots button[aria-current="true"]::before { background: var(--accent); box-shadow: none; }
@@ -394,3 +423,7 @@ body.eighties { font-family: var(--font); background: var(--bg); }
 .eighties-off .billboard-posts { visibility: hidden; }
 .eighties-off .billboard-board { border-color: transparent; background: none; box-shadow: none; color: var(--text); text-shadow: none; }
 .eighties-off .tagline-float { color: var(--text); text-shadow: none; }
+.eighties-off .page,
+.eighties-off .page h1,
+.eighties-off .page h2,
+.eighties-off .page h3 { color: var(--text); text-shadow: none; }
