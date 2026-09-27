@@ -5463,6 +5463,60 @@
     }
   );
 
+  addTest(
+    "A scene's shader carries only the physics it can reach",
+    "every program was assembled from the whole float32 library, the whole multi-float library and every color mode, so a two-circle scene's shader was two thirds functions nothing called (the multi-float programs even carried the float32 physics). PhysicsGPU.pruneUnusedGLSL drops what main() never names, and stepOnce() emits its contact flags and solver loops only when something reads them",
+    function () {
+      function circles(collisions) {
+        var scene = { bodies: [PhysicsEngine.createCircle(300, 200, 30, false), PhysicsEngine.createCircle(500, 250, 25, false)], hinges: [], frameWidth: 1200, frameHeight: 800, edgeMode: "wrap" };
+        if (collisions === false) scene.collisionsEnabled = false;
+        return scene;
+      }
+      var pendulum = {
+        bodies: [PhysicsEngine.createLine(400, 300, 140, 1.5708, false), PhysicsEngine.createLine(470, 370, 140, 0, false)],
+        hinges: [
+          { bodyA: null, bodyB: 0, localAnchorA: { x: 400, y: 230 }, localAnchorB: { x: -70, y: 0 } },
+          { bodyA: 0, bodyB: 1, localAnchorA: { x: 70, y: 0 }, localAnchorB: { x: -70, y: 0 } },
+        ],
+        frameWidth: 1200, frameHeight: 800, edgeMode: "wrap",
+      };
+      // Comments inside a kept function may still name a dropped one.
+      function has(source, names) {
+        var code = source.replace(/\/\/.*$/gm, "");
+        return names.filter(function (name) { return new RegExp("\\b" + name + "\\b").test(code); });
+      }
+      var f32 = PhysicsGPU.compileSceneToTrajectoryGLSL(circles(), 10, "f32").fragmentSource;
+      var df = PhysicsGPU.compileSceneToTrajectoryGLSL(circles(), 10, "df").fragmentSource;
+      var hinged = PhysicsGPU.compileSceneToTrajectoryGLSL(pendulum, 10, "f32").fragmentSource;
+      var free = PhysicsGPU.compileSceneToTrajectoryGLSL(circles(false), 10, "f32").fragmentSource;
+      var f32Gone = ["collideLineCircle", "collideLineLine", "funnelVertices", "collideSplitterShortSideTHit", "solveHingeVelocity", "solve2x2", "lineEndpoint0", "FunnelVerts"];
+      var f32Kept = ["collideCircleCircle", "solveContactVelocity", "solveContactPosition", "advanceVelocity"];
+      var dfGone = ["struct Body", "collideCircleCircle", "dfCollideLineCircle", "dfSinCos", "dfSolveHingeVelocity", "dfMod"];
+      var dfKept = ["dfCollideCircleCircle", "dfSolveContactVelocity", "dfAdvanceVelocityGravity"];
+      var hingedGone = ["solveContactVelocity", "collideLineLine", "collideCircleCircle", "struct Contact"];
+      var hingedKept = ["solveHingeVelocity", "solveHingePosition", "solve2x2"];
+      var leftovers = has(f32, f32Gone).concat(has(df, dfGone), has(hinged, hingedGone));
+      var missing = f32Kept.filter(function (n) { return has(f32, [n]).length === 0; })
+        .concat(dfKept.filter(function (n) { return has(df, [n]).length === 0; }), hingedKept.filter(function (n) { return has(hinged, [n]).length === 0; }));
+      // Contact flags: one body's, and only for a caller that asks (the map's Bounce Count).
+      var consts = circles().bodies.map(PhysicsGPU.bodyConst);
+      var pairs = PhysicsGPU.collisionPairs(2, consts, []);
+      var silent = PhysicsGPU.generateStepOnceGLSL(2, consts, pairs, [], undefined, "f32", false, true, null, []);
+      var flagged = PhysicsGPU.generateStepOnceGLSL(2, consts, pairs, [], undefined, "f32", false, true, null, [], { contactBody: 1 });
+      var flagsOk = !/g_contact/.test(silent) && /bool g_contact1/.test(flagged) && !/g_contact0/.test(flagged);
+      var noLoops = !/for \(int iter/.test(free);
+      var runs = [circles(), circles(false), pendulum].every(function (scene) {
+        var traj = PhysicsGPU.runSceneOnGPU(scene, 5);
+        return traj.length === 5 && traj[4].every(function (b) { return isFinite(b.x) && isFinite(b.y); });
+      });
+      var detail = "two free circles: float32 shader " + f32.split("\n").length + " lines, double-float " + df.split("\n").length +
+        "; hinged pendulum " + hinged.split("\n").length + "; unreachable code left in=" + (leftovers.length ? leftovers.join(",") : "none") +
+        "; needed code missing=" + (missing.length ? missing.join(",") : "none") + "; contact flags only when asked=" + flagsOk +
+        "; no solver loops without contacts or hinges=" + noLoops + "; the pruned shaders run=" + runs;
+      return { pass: leftovers.length === 0 && missing.length === 0 && flagsOk && noLoops && runs, detail: detail };
+    }
+  );
+
   // ---- Runner / report rendering ----
 
   function renderRow(tbody, name, bugRef, outcome) {

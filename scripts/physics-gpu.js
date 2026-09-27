@@ -559,11 +559,12 @@
   }
 
   // The full preamble a shader needs before generated code, in the right order.
+  // Whole libraries: pruneUnusedGLSL drops what the finished program never names.
   function libraryGLSL(precision, maxSpeed) {
     if (!global.PhysicsDF.isExtended(precision)) return speedCapDecls(precision, maxSpeed) + GLSL_LIBRARY;
     // Everything multi-float from here on is at this precision (PhysicsDF.usePrecision).
     global.PhysicsDF.usePrecision(precision);
-    // Order matters: df arithmetic, then the f32 library (mixed callers still use it), then df physics.
+    // Order matters: df arithmetic, then the f32 library (a df grid still reads its DT), then df physics.
     return [global.PhysicsDF.UNIFORM_DECL, "", global.PhysicsDF.GLSL_LIBRARY, "",
       speedCapDecls(precision, maxSpeed), GLSL_LIBRARY, "", global.PhysicsGPUDF.GLSL_LIBRARY].join("\n");
   }
@@ -770,7 +771,9 @@
   // precision: "f32" or "df"/"tf"/"qf" (see PhysicsDF). mutualGravity: n-body pull.
   // collisions: only Mutual Gravity's accel loop needs it (touching-bodies rule).
   // spawnBase: see padSceneForSplitting. springs: see the Springs section above.
-  function generateStepOnceGLSL(n, consts, pairs, hingeAnchors, frame, precision, mutualGravity, collisions, spawnBase, springs, touchFlagsFor) {
+  // flags { contactBody, touchBody }: g_contactN for that one body (the map's Bounce
+  // Count) and g_touchK per other body for that one (the goal order); neither by default.
+  function generateStepOnceGLSL(n, consts, pairs, hingeAnchors, frame, precision, mutualGravity, collisions, spawnBase, springs, flags) {
     var df = global.PhysicsDF.isExtended(precision);
     if (df) global.PhysicsDF.usePrecision(precision);
     var collisionsOn = collisions !== false;
@@ -882,11 +885,12 @@
     }
 
     var lines = [];
-    for (var cd = 0; cd < n; cd++) lines.push("bool g_contact" + cd + " = false;");
-    // touchFlagsFor: one body whose partners are told apart, g_touchK per other body (the map's goal order).
-    var touchBody = typeof touchFlagsFor === "number" ? touchFlagsFor : -1;
+    var contactBody = flags && typeof flags.contactBody === "number" ? flags.contactBody : -1;
+    var touchBody = flags && typeof flags.touchBody === "number" ? flags.touchBody : -1;
+    if (contactBody >= 0) lines.push("bool g_contact" + contactBody + " = false;");
     for (var td = 0; td < n; td++) if (touchBody >= 0 && td !== touchBody) lines.push("bool g_touch" + td + " = false;");
 
+    function moves(idx) { return consts[idx].isAnchored ? "false" : "true"; }
     // ---- df only: segment geometry, built as seldom as possible ----
     // A df sin/cos is the dearest thing in that library. A movable line or trapezoid
     // is built once per step; an anchored one once per run, into a global.
@@ -940,10 +944,10 @@
       var gravK = consts.map(function (c) { return global.PhysicsEngine.gravitationalMass(unitBodyOf(c)); });
       var reachK = consts.map(function (c) { return global.PhysicsEngine.halfExtent(unitBodyOf(c)); });
       var GRAV_G = global.PhysicsEngine.MUTUAL_GRAVITY_CONSTANT;
-      // A dead spawn slot neither pulls nor is pulled (and cannot divide 0 by 0).
-      function gravGate(i, j, cond) {
+      // A dead spawn slot neither pulls nor is pulled: its pairs are skipped whole.
+      function pairOpen(i, j) {
         var gate = bothAliveExpr(i, j);
-        return gate ? "(" + cond + ") && " + gate : cond;
+        return "  " + (gate ? "if (" + gate + ") " : "") + "{";
       }
 
       if (df) {
@@ -963,7 +967,7 @@
         for (var pa = 0; pa < n; pa++) {
           for (var pb = pa + 1; pb < n; pb++) {
             if (consts[pa].isAnchored && consts[pb].isAnchored) continue;
-            lines.push("  {");
+            lines.push(pairOpen(pa, pb));
             lines.push("    DVec2 gd = dv2(dfSub(dbody" + pb + ".x, dbody" + pa + ".x), dfSub(dbody" + pb + ".y, dbody" + pa + ".y));");
             lines.push("    MF gr2 = dv2LengthSq(gd);");
             lines.push("    MF gContact = dfAdd(gravReach" + pa + ", gravReach" + pb + ");");
@@ -975,14 +979,13 @@
             if (!consts[pb].isAnchored) applyLines.push("gravAcc" + pb + " = dv2Sub(gravAcc" + pb + ", dv2Scale(gd, dfMul(gravGM" + pa + ", gk)));");
             if (collisionsOn) {
               // Touching bodies do not pull: see PhysicsEngine.computeAccelerations.
-              lines.push("    if (" + gravGate(pa, pb, outside) + ") {");
+              lines.push("    if (" + outside + ") {");
               lines.push("      MF gk = dfDiv(DF_ONE, dfMul(gr2, dfSqrt(gr2)));");
               applyLines.forEach(function (l) { lines.push("      " + l); });
               lines.push("    }");
             } else {
               // Collisions off: the smooth interior law, as in the JS engine.
-              var aliveOnly = bothAliveExpr(pa, pb);
-              lines.push("    " + (aliveOnly ? "if (" + aliveOnly + ") " : "") + "{");
+              lines.push("    {");
               lines.push("      MF gk;");
               lines.push("      if (" + outside + ") {");
               lines.push("        gk = dfDiv(DF_ONE, dfMul(gr2, dfSqrt(gr2)));");
@@ -1014,28 +1017,42 @@
         for (var a = 0; a < n; a++) {
           if (consts[a].isAnchored) continue;
           lines.push("  vec2 gravAcc" + a + " = vec2(0.0);");
-          for (var b2 = 0; b2 < n; b2++) {
-            if (b2 === a) continue;
-            lines.push("  {");
-            lines.push("    vec2 d = vec2(body" + b2 + ".x - body" + a + ".x, body" + b2 + ".y - body" + a + ".y);");
+          accelExpr[a] = "gravAcc" + a;
+        }
+        // Once per unordered pair: d is shared, and the second body's pull is along -d.
+        // Each body still accumulates in ascending index order.
+        function pull32(toward, r3) {
+          return "(" + fnum(GRAV_G) + " * gravMass" + toward + " / " + r3 + ") * d";
+        }
+        for (var pa = 0; pa < n; pa++) {
+          for (var pb = pa + 1; pb < n; pb++) {
+            if (consts[pa].isAnchored && consts[pb].isAnchored) continue;
+            var aMoves = !consts[pa].isAnchored, bMoves = !consts[pb].isAnchored;
+            lines.push(pairOpen(pa, pb));
+            lines.push("    vec2 d = vec2(body" + pb + ".x - body" + pa + ".x, body" + pb + ".y - body" + pa + ".y);");
             // Touching bodies do not pull (PhysicsEngine.computeAccelerations); collisions off: smooth interior law.
-            lines.push("    float contact = " + reachExpr[a] + " + " + reachExpr[b2] + ";");
+            lines.push("    float contact = " + reachExpr[pa] + " + " + reachExpr[pb] + ";");
             lines.push("    float r2 = dot(d, d);");
             if (collisionsOn) {
-              lines.push("    if (" + gravGate(a, b2, "r2 >= contact * contact") + ") gravAcc" + a + " += (" +
-                fnum(GRAV_G) + " * gravMass" + b2 + " / (r2 * sqrt(r2))) * d;");
+              lines.push("    if (r2 >= contact * contact) {");
+              if (aMoves) lines.push("      gravAcc" + pa + " += " + pull32(pb, "(r2 * sqrt(r2))") + ";");
+              if (bMoves) lines.push("      gravAcc" + pb + " -= " + pull32(pa, "(r2 * sqrt(r2))") + ";");
+              lines.push("    }");
             } else {
-              lines.push("    float u2_" + b2 + " = r2 / (contact * contact);");
-              lines.push("    float pull" + b2 + " = (r2 >= contact * contact)");
-              lines.push("      ? " + fnum(GRAV_G) + " * gravMass" + b2 + " / (r2 * sqrt(r2))");
-              lines.push("      : " + fnum(GRAV_G) + " * gravMass" + b2 + " / (contact * contact * contact) *");
-              lines.push("        (35.0 / 8.0 - 21.0 / 4.0 * u2_" + b2 + " + 15.0 / 8.0 * u2_" + b2 + " * u2_" + b2 + ");");
-              var aliveGate32 = bothAliveExpr(a, b2);
-              lines.push("    " + (aliveGate32 ? "if (" + aliveGate32 + ") " : "") + "gravAcc" + a + " += pull" + b2 + " * d;");
+              lines.push("    {");
+              lines.push("      float u2 = r2 / (contact * contact);");
+              lines.push("      bool outside = r2 >= contact * contact;");
+              lines.push("      float poly = (35.0 / 8.0 - 21.0 / 4.0 * u2 + 15.0 / 8.0 * u2 * u2);");
+              [[pa, pb, aMoves, "+="], [pb, pa, bMoves, "-="]].forEach(function (side) {
+                if (!side[2]) return;
+                lines.push("      gravAcc" + side[0] + " " + side[3] + " (outside");
+                lines.push("        ? " + fnum(GRAV_G) + " * gravMass" + side[1] + " / (r2 * sqrt(r2))");
+                lines.push("        : " + fnum(GRAV_G) + " * gravMass" + side[1] + " / (contact * contact * contact) * poly) * d;");
+              });
+              lines.push("    }");
             }
             lines.push("  }");
           }
-          accelExpr[a] = "gravAcc" + a;
         }
       }
       lines.push("");
@@ -1162,6 +1179,11 @@
       lines.push("");
     }
     function accelFor(i) { return sprung[i] ? "accel" + i : gravityAccelFor(i); }
+    // Plain gravity in df takes the form that skips the zero x component.
+    function advance(i, vExpr, dtExpr) {
+      if (df && !mutualGravity && !sprung[i]) return "dfAdvanceVelocityGravity(" + vExpr + ", " + dtExpr + ")";
+      return E.advanceVelocity + "(" + vExpr + ", " + dtExpr + ", " + accelFor(i) + ")";
+    }
     // A turned body's spin after `t` of this step's torque: see springSpinGLSL.
     function spinExpr(i, t) {
       return (df ? "dfSpringSpin(" : "springSpin(") + B(i) + ".w, sprAlpha" + i + ", sprSwing" + i + ", " + t + ")";
@@ -1171,7 +1193,7 @@
     for (var g = 0; g < n; g++) {
       if (consts[g].isAnchored) continue;
       lines.push("  " + E.vecType + " u" + g + " = " + E.vec(B(g) + ".vx", B(g) + ".vy") + ";");
-      lines.push("  " + E.vecType + " vFull" + g + " = " + E.advanceVelocity + "(u" + g + ", " + E.DT + ", " + accelFor(g) + ");");
+      lines.push("  " + E.vecType + " vFull" + g + " = " + advance(g, "u" + g, E.DT) + ";");
     }
     lines.push("");
 
@@ -1197,41 +1219,46 @@
     }
     // A line's collide argument: half-length in float32, prebuilt segment in df.
     function lineArg(idx) { return df ? segExpr(idx) : "BODY" + idx + "_HALF"; }
+    // df sweeps against an anchored segment skip its zero velocity; float32 folds it.
+    function isStatic(idx) { return df && consts[idx].isAnchored; }
+    function lineCircleCall(li, ci) {
+      return (isStatic(li) ? "dfCollideLineCircleStatic" : E.collideLineCircle) + "(" + probeRef(li) + ", " + lineArg(li) + ", " + probeRef(ci) + ", BODY" + ci + "_HALF)";
+    }
     // Only a line<->line pair can fill its second contact slot.
     function pairSlots(pair) {
       return consts[pair[0]].type === "line" && consts[pair[1]].type === "line" ? ["c0", "c1"] : ["c0"];
     }
 
     // Contacts are computed once per step and reused by every solver iteration.
+    // A pair with a dead spawn slot is not detected at all: it stays a miss.
+    function detected(type, name, expr, gate) {
+      if (!gate) return "  " + type + " " + name + " = " + expr + ";";
+      var miss = type === E.contactPairType ? E.contactPairType + "(" + E.noContact + ", " + E.noContact + ")" : E.noContact;
+      return "  " + type + " " + name + " = " + miss + ";\n  if (" + gate + ") " + name + " = " + expr + ";";
+    }
     ordinaryPairs.forEach(function (pair) {
       var i = pair[0], j = pair[1];
       var tA = consts[i].type, tB = consts[j].type;
       var varName = "pair_" + i + "_" + j;
       var refI = probeRef(i), refJ = probeRef(j);
+      var gate = bothAliveExpr(i, j);
       if (tA === "circle" && tB === "circle") {
-        lines.push("  " + E.contactPairType + " " + varName + " = " + E.contactPairType + "(" + E.collideCircleCircle + "(" + refI + ", BODY" + i + "_HALF, " + refJ + ", BODY" + j + "_HALF), " + E.noContact + ");");
+        lines.push(detected(E.contactPairType, varName, E.contactPairType + "(" + E.collideCircleCircle + "(" + refI + ", BODY" + i + "_HALF, " + refJ + ", BODY" + j + "_HALF), " + E.noContact + ")", gate));
       } else if (tA === "line" && tB === "circle") {
-        lines.push("  " + E.contactPairType + " " + varName + " = " + E.contactPairType + "(" + E.collideLineCircle + "(" + refI + ", " + lineArg(i) + ", " + refJ + ", BODY" + j + "_HALF), " + E.noContact + ");");
+        lines.push(detected(E.contactPairType, varName, E.contactPairType + "(" + lineCircleCall(i, j) + ", " + E.noContact + ")", gate));
       } else if (tA === "circle" && tB === "line") {
         // collideLineCircle takes (line, circle): swap rA/rB back and flip the normal.
-        lines.push("  " + E.contactType + " " + varName + "_raw = " + E.collideLineCircle + "(" + refJ + ", " + lineArg(j) + ", " + refI + ", BODY" + i + "_HALF);");
+        lines.push(detected(E.contactType, varName + "_raw", lineCircleCall(j, i), gate));
         lines.push("  " + varName + "_raw.normal = " + E.negVec(varName + "_raw.normal") + ";");
         lines.push("  { " + E.vecType + " tmp_" + i + "_" + j + " = " + varName + "_raw.rA; " + varName + "_raw.rA = " + varName + "_raw.rB; " + varName + "_raw.rB = tmp_" + i + "_" + j + "; }");
         lines.push("  " + E.contactPairType + " " + varName + " = " + E.contactPairType + "(" + varName + "_raw, " + E.noContact + ");");
       } else {
-        lines.push("  " + E.contactPairType + " " + varName + " = " + E.collideLineLine + "(" + refI + ", " + lineArg(i) + ", " + refJ + ", " + lineArg(j) + ");");
+        lines.push(detected(E.contactPairType, varName, E.collideLineLine + "(" + refI + ", " + lineArg(i) + ", " + refJ + ", " + lineArg(j) + ")", gate));
       }
-    });
-    // A pair involving a dead spawn slot counts for nothing: clearing hit is the whole suppression.
-    ordinaryPairs.forEach(function (pair) {
-      var gate = bothAliveExpr(pair[0], pair[1]);
-      if (!gate) return;
-      var varName = "pair_" + pair[0] + "_" + pair[1];
-      lines.push("  if (!" + gate + ") { " + varName + ".c0.hit = false; " + varName + ".c1.hit = false; }");
     });
     // df only: per-contact constants no solver iteration changes (dfPrepareContact), after the gating.
     function prepareContactLine(contactExpr, a, b) {
-      return "  dfPrepareContact(" + contactExpr + ", BODY" + a + "_INV_MASS, BODY" + a + "_INV_INERTIA, BODY" + b + "_INV_MASS, BODY" + b + "_INV_INERTIA);";
+      return "  dfPrepareContact(" + contactExpr + ", BODY" + a + "_INV_MASS, BODY" + a + "_INV_INERTIA, " + moves(a) + ", BODY" + b + "_INV_MASS, BODY" + b + "_INV_INERTIA, " + moves(b) + ");";
     }
     if (df) {
       ordinaryPairs.forEach(function (pair) {
@@ -1242,16 +1269,16 @@
     }
     lines.push("");
 
-    // "Touching anything this step?" per body, for the caller (the grid's Bounce
-    // Count). Globals: a constant-initialized bool is legal there, and no inout to thread.
-    for (var cf = 0; cf < n; cf++) {
+    // "Touching anything this step?" for the flagged body. Globals: a constant-initialized
+    // bool is legal there, and no inout to thread.
+    if (contactBody >= 0) {
       var touching = [];
       ordinaryPairs.forEach(function (pair) {
-        if (pair[0] !== cf && pair[1] !== cf) return;
+        if (pair[0] !== contactBody && pair[1] !== contactBody) return;
         var vn = "pair_" + pair[0] + "_" + pair[1];
         touching.push("(" + pairSlots(pair).map(function (slot) { return vn + "." + slot + ".hit"; }).join(" || ") + ")");
       });
-      lines.push("  g_contact" + cf + " = " + (touching.length ? touching.join(" || ") : "false") + ";");
+      lines.push("  g_contact" + contactBody + " = " + (touching.length ? touching.join(" || ") : "false") + ";");
     }
     for (var tk = 0; touchBody >= 0 && tk < n; tk++) {
       if (tk === touchBody) continue;
@@ -1266,11 +1293,15 @@
     lines.push("");
 
     // Per-body earliest contact tHit, default DT; folded only when a slot hit (a miss carries 0.0).
+    // A body in no pair keeps the whole step: no tHit, vPre is vFull, and leg 2 is skipped.
+    var paired = {};
+    ordinaryPairs.forEach(function (pair) { paired[pair[0]] = true; paired[pair[1]] = true; });
+    trapezoidPairs.forEach(function (tp) { paired[tp.trap] = true; paired[tp.circle] = true; });
     function contactTHitExpr(varName, slot) {
       return varName + "." + slot + ".hit ? " + varName + "." + slot + ".tHit : " + E.DT;
     }
     for (var q = 0; q < n; q++) {
-      if (consts[q].isAnchored) continue;
+      if (consts[q].isAnchored || !paired[q]) continue;
       lines.push("  " + E.scalarType + " body" + q + "THit = " + E.DT + ";");
     }
     ordinaryPairs.forEach(function (pair) {
@@ -1299,25 +1330,29 @@
         var fi = fp.trap, ci = fp.circle;
         var refF = probeRef(fi), refC = probeRef(ci);
         var vn = "trap_" + fi + "_" + ci;
-        // A dead slot would still register hits: suppress at the Contact so the solve loops keep their variables.
+        // A dead slot's pair is a miss without any test, so the solve loops keep their variables.
         var gate = bothAliveExpr(fi, ci);
         var sizeArg = df ? trapExpr(fi) : "BODY" + fi + "_HALF * 2.0";
         if (!df) lines.push("  FunnelVerts " + vn + "_v = funnelVertices(" + refF + ", " + sizeArg + ");");
         fp.walls.forEach(function (w) {
           var segArgs = df ? trapExpr(fi) + "." + w[0] : vn + "_v." + w[1] + ", " + vn + "_v." + w[2];
-          lines.push("  " + E.contactType + " " + vn + "_" + w[0] + " = " + E.sweptCapsule + "(" + segArgs +
-            ", " + E.vec(refF + ".vx", refF + ".vy") + ", " + E.vec(refF + ".x", refF + ".y") + ", " + refC + ", BODY" + ci + "_HALF, " + E.halfThickness + ");");
-          if (gate) lines.push("  if (!" + gate + ") " + vn + "_" + w[0] + ".hit = false;");
+          lines.push(detected(E.contactType, vn + "_" + w[0], (isStatic(fi)
+            ? "dfSweptCapsuleCircleContactStatic(" + segArgs + ", " + E.vec(refF + ".x", refF + ".y")
+            : E.sweptCapsule + "(" + segArgs + ", " + E.vec(refF + ".vx", refF + ".vy") + ", " + E.vec(refF + ".x", refF + ".y")) +
+            ", " + refC + ", BODY" + ci + "_HALF, " + E.halfThickness + ")", gate));
           // Trapezoid is side A, circle side B: the order both solve loops use.
           if (df) lines.push(prepareContactLine(vn + "_" + w[0], fi, ci));
         });
+        var hitCall = "(" + refF + ", " + sizeArg + ", " + refC + ", BODY" + ci + "_HALF)";
         if (fp.kind === "funnel") {
-          lines.push("  " + E.mouthHitType + " " + vn + "_mouth = " + E.mouthHitFn + "(" + refF + ", " + sizeArg + ", " + refC + ", BODY" + ci + "_HALF);");
-          if (gate) lines.push("  if (!" + gate + ") " + vn + "_mouth.hit = false;");
+          var mouthFn = isStatic(fi) ? "dfCollideFunnelMouthTHitStatic" : E.mouthHitFn;
+          lines.push("  " + E.mouthHitType + " " + vn + "_mouth" + (gate ? "; if (" + gate + ") " + vn + "_mouth" : "") + " = " + mouthFn + hitCall + ";");
+          if (gate) lines.push("  else " + vn + "_mouth.hit = false;");
         } else {
           // Not folded into tHit: a split is applied at the end of the step, unlike a teleport.
-          lines.push("  " + E.splitHitType + " " + vn + "_split = " + E.splitHitFn + "(" + refF + ", " + sizeArg + ", " + refC + ", BODY" + ci + "_HALF);");
-          if (gate) lines.push("  if (!" + gate + ") " + vn + "_split.hit = false;");
+          var splitFn = isStatic(fi) ? "dfCollideSplitterShortSideTHitStatic" : E.splitHitFn;
+          lines.push("  " + E.splitHitType + " " + vn + "_split" + (gate ? "; if (" + gate + ") " + vn + "_split" : "") + " = " + splitFn + hitCall + ";");
+          if (gate) lines.push("  else " + vn + "_split.hit = false;");
         }
         var wallTHits = fp.walls.map(function (w) { return vn + "_" + w[0] + ".hit ? " + vn + "_" + w[0] + ".tHit : " + E.DT; });
         lines.push("  " + E.scalarType + " " + vn + "_solidTHit = " + E.min(wallTHits[0], E.min(wallTHits[1], wallTHits[2])) + ";");
@@ -1369,8 +1404,8 @@
         var vn = "trap_" + fi + "_" + ci;
         var excluded = trapezoidExclusion(fp, fi, ci);
         var anyHit = "(" + fp.walls.map(function (w) { return vn + "_" + w[0] + ".hit"; }).join(" || ") + ")";
-        lines.push("  g_contact" + fi + " = g_contact" + fi + " || (!" + excluded + " && " + anyHit + ");");
-        lines.push("  g_contact" + ci + " = g_contact" + ci + " || (!" + excluded + " && " + anyHit + ");");
+        if (fi === contactBody) lines.push("  g_contact" + fi + " = g_contact" + fi + " || (!" + excluded + " && " + anyHit + ");");
+        if (ci === contactBody) lines.push("  g_contact" + ci + " = g_contact" + ci + " || (!" + excluded + " && " + anyHit + ");");
         if (touchBody === ci) lines.push("  g_touch" + fi + " = g_touch" + fi + " || (!" + excluded + " && " + anyHit + ");");
         if (touchBody === fi) lines.push("  g_touch" + ci + " = g_touch" + ci + " || (!" + excluded + " && " + anyHit + ");");
       });
@@ -1381,7 +1416,7 @@
     // (gravity only up to tHit): reflecting with a full step of gravity early or late differs by 2*(g.n)*DT.
     for (var g3 = 0; g3 < n; g3++) {
       if (consts[g3].isAnchored) continue;
-      var t1 = "body" + g3 + "THit";
+      var t1 = paired[g3] ? "body" + g3 + "THit" : E.DT;
       // A teleport winner's position is overridden to the throat center; velocity is unchanged.
       if (funnelPairsByCircle[g3]) {
         lines.push("  if (teleWon_" + g3 + ") { " + B(g3) + ".x = teleTarget_" + g3 + ".x; " + B(g3) + ".y = teleTarget_" + g3 + ".y; } else { " +
@@ -1399,15 +1434,18 @@
       } else {
         lines.push("  " + B(g3) + ".angle = " + E.add(B(g3) + ".angle", E.mul(B(g3) + ".w", t1)) + ";");
       }
-      lines.push("  " + E.vecType + " vPre" + g3 + " = " + E.advanceVelocity + "(u" + g3 + ", " + t1 + ", " + accelFor(g3) + ");");
-      lines.push("  " + B(g3) + ".vx = vPre" + g3 + ".x; " + B(g3) + ".vy = vPre" + g3 + ".y;");
+      if (paired[g3]) {
+        lines.push("  " + E.vecType + " vPre" + g3 + " = " + advance(g3, "u" + g3, t1) + ";");
+        lines.push("  " + B(g3) + ".vx = vPre" + g3 + ".x; " + B(g3) + ".vy = vPre" + g3 + ".y;");
+      } else {
+        lines.push("  " + B(g3) + ".vx = vFull" + g3 + ".x; " + B(g3) + ".vy = vFull" + g3 + ".y;");
+      }
     }
     lines.push("");
 
     // ---- The two solve loops ----
     // float32 re-derives everything per call. df lifts what a loop cannot change out
     // of it (hinged sin/cos, dfPrepareHinge, dfPrepareContact); the position loop turns bodies, so dfTurn.
-    function moves(idx) { return consts[idx].isAnchored ? "false" : "true"; }
     function massArgs(idx) { return "BODY" + idx + "_INV_MASS, BODY" + idx + "_INV_INERTIA"; }
     var hingeBodies = {};
     hingeAnchors.forEach(function (hg) {
@@ -1460,7 +1498,8 @@
         : "solveContactPosition(" + B(a) + ", BODY" + a + "_INV_MASS, " + B(b) + ", BODY" + b + "_INV_MASS, " + contactExpr + ");";
     }
 
-    lines.push("  for (int iter = 0; iter < " + VELOCITY_ITERATIONS + "; iter++) {");
+    var solves = hingeAnchors.length || ordinaryPairs.length || trapezoidPairs.length;
+    if (solves) lines.push("  for (int iter = 0; iter < " + VELOCITY_ITERATIONS + "; iter++) {");
     hingeAnchors.forEach(function (hg, hi) { lines.push("    " + hingeCall(hg, hi, "velocity")); });
     ordinaryPairs.forEach(function (pair) {
       var varName = "pair_" + pair[0] + "_" + pair[1];
@@ -1479,14 +1518,14 @@
       });
       lines.push("    }");
     });
-    lines.push("  }");
+    if (solves) lines.push("  }");
     lines.push("");
     // Leg 2: the rest of the step and of gravity on the post-impulse velocity; no contact means identity.
     for (var g2 = 0; g2 < n; g2++) {
-      if (consts[g2].isAnchored) continue;
+      if (consts[g2].isAnchored || !paired[g2]) continue;
       var t2 = "body" + g2 + "TRest";
       lines.push("  " + E.scalarType + " " + t2 + " = " + E.sub(E.DT, "body" + g2 + "THit") + ";");
-      lines.push("  " + E.vecType + " vPost" + g2 + " = " + E.advanceVelocity + "(" + E.vec(B(g2) + ".vx", B(g2) + ".vy") + ", " + t2 + ", " + accelFor(g2) + ");");
+      lines.push("  " + E.vecType + " vPost" + g2 + " = " + advance(g2, E.vec(B(g2) + ".vx", B(g2) + ".vy"), t2) + ";");
       lines.push("  " + B(g2) + ".vx = vPost" + g2 + ".x; " + B(g2) + ".vy = vPost" + g2 + ".y;");
       // The rest of a spring's torque onto the post-impulse spin, before the turn reads it.
       if (turned[g2]) lines.push("  " + B(g2) + ".w = " + spinExpr(g2, t2) + ";");
@@ -1500,7 +1539,7 @@
       }
     }
     lines.push("");
-    lines.push("  for (int iter = 0; iter < " + POSITION_ITERATIONS + "; iter++) {");
+    if (solves) lines.push("  for (int iter = 0; iter < " + POSITION_ITERATIONS + "; iter++) {");
     hingeAnchors.forEach(function (hg, hi) { lines.push("    " + hingeCall(hg, hi, "position")); });
     ordinaryPairs.forEach(function (pair) {
       var varName = "pair_" + pair[0] + "_" + pair[1];
@@ -1518,7 +1557,7 @@
       });
       lines.push("    }");
     });
-    lines.push("  }");
+    if (solves) lines.push("  }");
 
     // Frame wrap, last so it never feeds this step's position solve. Decided only
     // by a root body (free, or hinged to the world); hinge children follow their
@@ -1571,17 +1610,21 @@
           if (hasWorldHinge) movedPins.push(ownWorldHingeIdx[root]);
           collectDescendants(root, descendants);
         }
+        // df adds are real work even by zero: only on a wrap step.
+        var wrapIndent = df ? "    " : "  ";
+        if (df) lines.push("  if (" + dxVar + " != 0.0 || " + dyVar + " != 0.0) {");
         movedPins.forEach(function (hi) {
           var hv = "HINGE" + hi + "_A";
           lines.push(df
-            ? "  " + hv + ".x = dfAddFloat(" + hv + ".x, " + dxVar + "); " + hv + ".y = dfAddFloat(" + hv + ".y, " + dyVar + ");"
-            : "  " + hv + " += vec2(" + dxVar + ", " + dyVar + ");");
+            ? wrapIndent + hv + ".x = dfAddFloat(" + hv + ".x, " + dxVar + "); " + hv + ".y = dfAddFloat(" + hv + ".y, " + dyVar + ");"
+            : wrapIndent + hv + " += vec2(" + dxVar + ", " + dyVar + ");");
         });
         Object.keys(descendants).forEach(function (memberStr) {
           lines.push(df
-            ? "  " + E.body + memberStr + ".x = dfAddFloat(" + E.body + memberStr + ".x, " + dxVar + "); " + E.body + memberStr + ".y = dfAddFloat(" + E.body + memberStr + ".y, " + dyVar + ");"
-            : "  body" + memberStr + ".x += " + dxVar + "; body" + memberStr + ".y += " + dyVar + ";");
+            ? wrapIndent + E.body + memberStr + ".x = dfAddFloat(" + E.body + memberStr + ".x, " + dxVar + "); " + E.body + memberStr + ".y = dfAddFloat(" + E.body + memberStr + ".y, " + dyVar + ");"
+            : wrapIndent + "body" + memberStr + ".x += " + dxVar + "; body" + memberStr + ".y += " + dyVar + ";");
         });
+        if (df) lines.push("  }");
       }
     }
 
@@ -1782,7 +1825,7 @@
     if (spawnLocals) locals += "\n" + spawnLocals;
     lines.push(generateTrajectoryMainGLSL(n, locals, hingeAnchors, precision, spawnBase, chunk, springs));
 
-    return { fragmentSource: lines.join("\n"), numBodies: n, precision: df ? precision : "f32", chunk: chunk };
+    return { fragmentSource: pruneUnusedGLSL(lines.join("\n")), numBodies: n, precision: df ? precision : "f32", chunk: chunk };
   }
 
   // ---- Carrying a pixel's simulation across draws (grid playback) ----
@@ -1937,6 +1980,77 @@
       lines.push("if (pbLayer == " + l + ") " + outName + " = vec4(" + [0, 1, 2, 3].map(function (c) { return floatExpr(base + c); }).join(", ") + ");");
     }
     return lines;
+  }
+
+  // ---- Dead-definition pruning ----
+  // Every program is assembled from whole libraries, so most of a small scene's
+  // source is functions, structs and constants nothing reaches. Drops each
+  // top-level definition main() never names, transitively, with the comment block
+  // above it. Lines it does not recognize (#version, uniforms, outputs) stay.
+  function pruneUnusedGLSL(source) {
+    var lines = source.split("\n");
+    var defs = [], kept = {}, i = 0, comment = -1;
+    function define(name, first, last) { defs.push({ name: name, first: first, start: i, last: last }); i = last + 1; comment = -1; }
+    while (i < lines.length) {
+      var line = lines[i], m;
+      if (line === "") { comment = -1; i++; continue; }
+      if (line.indexOf("//") === 0) { if (comment === -1) comment = i; i++; continue; }
+      var first = comment === -1 ? i : comment;
+      if (/^(#|precision |uniform |layout\(|in |out )/.test(line)) {
+        for (var k = first; k <= i; k++) kept[k] = true;
+        i++; comment = -1; continue;
+      }
+      if ((m = /^struct\s+(\w+)/.exec(line))) {
+        var s = i;
+        while (!/\};\s*$/.test(lines[s])) s++;
+        define(m[1], first, s); continue;
+      }
+      if ((m = /^const\s+\w+\s+(\w+)\s*=/.exec(line))) { define(m[1], first, i); continue; }
+      if ((m = /^\w+\s+(\w+)\s*\(/.exec(line))) {
+        var end = i;
+        if (!(line.indexOf("{") !== -1 && /\}\s*$/.test(line))) {
+          while (!/\{\s*$/.test(lines[end])) end++;
+          end++;
+          while (lines[end] !== "}") end++;
+        }
+        define(m[1], first, end); continue;
+      }
+      if ((m = /^\w+\s+(\w+)\s*(=[^;]*)?;\s*$/.exec(line))) { define(m[1], first, i); continue; }
+      for (var h = first; h <= i; h++) kept[h] = true;
+      i++; comment = -1;
+    }
+    var byName = {};
+    defs.forEach(function (d) { byName[d.name] = d; });
+    function namesIn(text) {
+      var out = {}, re = /[A-Za-z_]\w*/g, hit;
+      text = text.replace(/\/\/.*$/gm, "");
+      while ((hit = re.exec(text))) out[hit[0]] = true;
+      return out;
+    }
+    var live = {}, queue = [];
+    function reach(name) {
+      if (!byName[name] || live[name]) return;
+      live[name] = true;
+      queue.push(byName[name]);
+    }
+    var header = [];
+    Object.keys(kept).forEach(function (k) { header.push(lines[k]); });
+    Object.keys(namesIn(header.join("\n"))).forEach(reach);
+    reach("main");
+    while (queue.length) {
+      var d = queue.shift();
+      Object.keys(namesIn(lines.slice(d.start, d.last + 1).join("\n"))).forEach(reach);
+    }
+    defs.forEach(function (d) {
+      if (!live[d.name]) return;
+      for (var k = d.first; k <= d.last; k++) kept[k] = true;
+    });
+    var out = [], blank = false;
+    lines.forEach(function (line, idx) {
+      if (kept[idx]) { out.push(line); blank = false; }
+      else if (line === "" && !blank) { out.push(line); blank = true; }
+    });
+    return out.join("\n");
   }
 
   // ---- WebGL orchestration ----
@@ -2198,6 +2312,7 @@
     springLinksFor: springLinksFor,
     generateBodyLocalsGLSL: generateBodyLocalsGLSL,
     generateHingeAnchorLocalsGLSL: generateHingeAnchorLocalsGLSL,
+    pruneUnusedGLSL: pruneUnusedGLSL,
     compileShader: compileShader,
     linkProgram: linkProgram,
     FIXED_DT: FIXED_DT,

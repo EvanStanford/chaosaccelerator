@@ -438,7 +438,7 @@
     var uniforms = {};
     global.PhysicsDF.WORD_SUFFIXES.forEach(function (sfx, k) { uniforms["u_hoverWorld" + sfx] = [words[0][k], words[1][k]]; });
     return {
-      fragmentSource: lines.join("\n"),
+      fragmentSource: PhysicsGPU.pruneUnusedGLSL(lines.join("\n")),
       numBodies: initial.n,
       precision: df ? precision : "f32",
       uniforms: uniforms,

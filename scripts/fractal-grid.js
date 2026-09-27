@@ -823,7 +823,8 @@
     }
     var frame = PhysicsEngine.wrapsAtEdges(sceneToCompile)
       ? { width: sceneToCompile.frameWidth, height: sceneToCompile.frameHeight } : undefined;
-    var stepOnceSource = PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, sceneToCompile.mutualGravity, PhysicsEngine.collisionsEnabled(sceneToCompile), initial.spawnBase, initial.springs, goalOrder ? outputBodies[0] : null);
+    var stepOnceSource = PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, sceneToCompile.mutualGravity, PhysicsEngine.collisionsEnabled(sceneToCompile), initial.spawnBase, initial.springs,
+      { contactBody: isBounces ? sceneToCompile.output.body : null, touchBody: goalOrder ? outputBodies[0] : null });
     var stepOnceCall = "stepOnce(" + PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, precision, initial.spawnBase, initial.springs) + ");";
 
     // "Stop on wrap": each pixel freezes the first step ANY watched body would cross
@@ -1283,10 +1284,10 @@
     ];
 
     return {
-      gridSource: [].concat(gridHeaderLines, ["uniform bool u_sampleField;", ""], colorLibraryLines, gridPhysicsLines,
-        ["void main() {"], worldCoordLines, gridMainLines, standardTailLines).join("\n"),
-      derivedSource: [].concat(gridHeaderLines, colorLibraryLines, gridPhysicsLines, sampleOutputLines, deltaTLines,
-        gridTailLines, worldCoordLines, gridMainLines, derivedTailLines).join("\n"),
+      gridSource: PhysicsGPU.pruneUnusedGLSL([].concat(gridHeaderLines, ["uniform bool u_sampleField;", ""], colorLibraryLines, gridPhysicsLines,
+        ["void main() {"], worldCoordLines, gridMainLines, standardTailLines).join("\n")),
+      derivedSource: PhysicsGPU.pruneUnusedGLSL([].concat(gridHeaderLines, colorLibraryLines, gridPhysicsLines, sampleOutputLines, deltaTLines,
+        gridTailLines, worldCoordLines, gridMainLines, derivedTailLines).join("\n")),
       precision: df ? "df" : "f32",
       initial: initial,
       outScalar: outScalar,
@@ -6275,7 +6276,7 @@
       budget: "float(u_baseStep + u_steps)",
     });
     var carriesLifespan = vars.some(function (v) { return v.name === "lifespanValue"; });
-    return [
+    return PhysicsGPU.pruneUnusedGLSL([
       "#version 300 es",
       "precision highp float;",
       "precision highp sampler2DArray;",
@@ -6311,7 +6312,7 @@
       loop.loop,
       indentLines(PhysicsGridCodegen.generatePlaybackStateStoreGLSL(vars, "u_group", layersPerGroup), "  "),
       ["}"]
-    ).join("\n");
+    ).join("\n"));
   }
 
   // The color pass: each texel's Output value from its saved state, through
@@ -6319,7 +6320,7 @@
   function buildPlaybackColorShader(pieces, vars) {
     var outScalar = pieces.outScalar;
     var carriesLifespan = vars.some(function (v) { return v.name === "lifespanValue"; });
-    return [
+    return PhysicsGPU.pruneUnusedGLSL([
       "#version 300 es",
       "precision highp float;",
       "precision highp sampler2DArray;",
@@ -6400,7 +6401,7 @@
         "  fragColor = vec4(colorMap(t), 1.0);",
         "}",
       ]
-    ).join("\n");
+    ).join("\n"));
   }
 
   var PLAYBACK_STEP_UNIFORMS = ["resolution", "gridStride", "gridOrigin", "centerHi", "centerLo", "centerLo2", "centerLo3", "scale", "state", "init", "baseStep", "steps", "group", "tileOrigin", "stencil"];
