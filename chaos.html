@@ -197,11 +197,14 @@
             <p class="readout" id="step-readout"></p>
           </div>
           <div id="fractalize-wrap">
+            <div id="editor-toast" class="app-toast" role="alert"></div>
             <p class="readout" id="send-to-grid-error"></p>
             <button id="btn-send-to-grid" class="fractalize-btn">Fractal-ize</button>
           </div>
           <!-- Touch shows no title tooltips, so showToolHint (physics-ui.js) shows the picked tool's title here. -->
           <div id="editor-hint-toast" class="editor-hint-toast" role="status"></div>
+          <!-- Builder side of Nerd Stats, shown while its setting is on (physics.css). -->
+          <pre id="editor-perf-readout"></pre>
         </main>
 
       </div>
@@ -381,6 +384,7 @@
           <svg id="inspect-preview"></svg>
           <!-- Never [hidden] (see showInspectToast): rests at opacity:0, toggled by .visible alone. -->
           <div id="inspect-toast" class="inspect-toast"></div>
+          <div id="grid-toast" class="app-toast" role="alert"></div>
           <!-- Settings and Map Evolution: an accordion group of their own (menuGroups in fractal-grid.js), separate from the left column's. -->
           <div id="grid-right-menu-column">
             <section class="menu-item" id="menu-settings">
@@ -527,7 +531,7 @@
                       <input type="range" id="stats-sample-slider" min="0" max="3" step="1" value="3" aria-label="Analysis sampling resolution" title="How finely the Analysis card measures the view: one simulation per rendered pixel at Full, or one per 2, 4 or 8 pixels each way. Coarser is quicker; Full measures exactly what is on screen.">
                     </label>
                     <label class="toggle-field" id="perf-readout-field">
-                      <span>Nerd Performance Stats</span>
+                      <span>Nerd Stats</span>
                       <span class="toggle-switch">
                         <input type="checkbox" id="perf-readout-checkbox">
                         <span class="toggle-slider"></span>
@@ -669,7 +673,7 @@
               </div>
             </div>
           </section>
-          <!-- Nerd Performance Stats readout (updatePerfReadout). No pointer events: the map still pans through it. -->
+          <!-- Nerd Stats readout (updatePerfReadout). No pointer events: the map still pans through it. -->
           <pre id="perf-readout" hidden></pre>
           <!-- Plain-DOM copy of the context-loss record: readable when the canvas is blank or there is no context at all. -->
           <pre id="grid-debug-log" hidden></pre>
@@ -720,7 +724,6 @@
 
   </section>
 
-  <div id="perf-lowered-toast" class="perf-lowered-toast" role="status"></div>
   <div id="transition-layer" hidden>
     <canvas id="transition-canvas"></canvas>
     <button id="transition-skip" class="secondary">Skip</button>
@@ -730,6 +733,7 @@
 
 </div>
 
+<script src="scripts/app-message.js?v=m76"></script>
 <script src="scripts/physics-engine.js?v=m76"></script>
 <script src="scripts/physics-coords.js?v=m76"></script>
 <script src="scripts/share-url.js?v=m76"></script>

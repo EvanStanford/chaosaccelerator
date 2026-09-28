@@ -310,6 +310,17 @@ select:disabled { opacity: 0.5; }
   color: var(--danger);
 }
 
+/* Builder Nerd Stats, top left under the home button. Look shared with #perf-readout. */
+#editor-perf-readout {
+  display: none;
+  left: var(--panel-inset);
+  top: calc(var(--panel-inset) + var(--settings-btn-size) + 10px);
+  z-index: 9;
+}
+html:has(#perf-readout-checkbox:checked) #editor-perf-readout {
+  display: block;
+}
+
 /* The Play transport, floated top-center over the scene. Its own translucent card:
    .playback-controls was designed for #panel's solid background. */
 #playback-toolbar {
@@ -607,6 +618,17 @@ button.tool-btn.output-key {
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
 }
 button.tool-btn.output-key.active {
+  border-color: #fff;
+  box-shadow: 0 0 0 2px #fff;
+}
+
+button.tool-btn.input-set {
+  background: #1f7a3d;
+  border-color: #2fa352;
+  color: #fff;
+}
+button.tool-btn.input-set:hover { background: #25904a; }
+button.tool-btn.input-set.active {
   border-color: #fff;
   box-shadow: 0 0 0 2px #fff;
 }

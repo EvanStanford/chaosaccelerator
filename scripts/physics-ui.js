@@ -670,20 +670,20 @@
     var dx = end.world.x - start.world.x, dy = end.world.y - start.world.y;
     var length = Math.sqrt(dx * dx + dy * dy);
     if (length < CLICK_DRAG_THRESHOLD) {
-      flashStatus("Drag from one object to another, or to the background");
+      AppMessage.toast("Spring too short");
       return;
     }
     if (start.body === null && end.body === null) {
-      flashStatus("A spring needs an object on at least one end");
+      AppMessage.toast("Springs must attach to at least one object");
       return;
     }
     if (start.body === end.body) {
-      flashStatus("A spring joins two different things");
+      AppMessage.toast("Springs cannot attach to the same object twice");
       return;
     }
     function canMove(e) { return e.body !== null && !scene.bodies[e.body].isAnchored; }
     if (!canMove(start) && !canMove(end)) {
-      flashStatus("Neither end of that spring can move");
+      AppMessage.toast("Springs must attach to at least one non-anchored object");
       return;
     }
     // bodyB is always a body; a background end is always A (hinge convention, what PhysicsEngine reads).
@@ -1166,6 +1166,7 @@
     drawOutputKeyBorder(w, h);
     drawOutputKeyRing();
     updateOutputKeyControls();
+    updateInputToolButtons();
     for (var i = 0; i < scene.bodies.length; i++) drawBody(scene.bodies[i], i === selectedIndex);
     for (var sp = 0; sp < scene.springs.length; sp++) drawSpring(scene.springs[sp], sp === selectedSpring);
     for (var j = 0; j < scene.hinges.length; j++) drawHinge(scene.hinges[j], !!hingeDrag && hingeDrag.hingeIndex === j);
@@ -1375,22 +1376,16 @@
   PhysicsSound.onVolumeChange(updateVolumeUI);
   updateVolumeUI(PhysicsSound.getVolume());
 
-  var flashTimer = null;
-  function flashStatus(message, holdMs) {
-    if (flashTimer) clearTimeout(flashTimer);
-    var prevText = statusEl.textContent, prevClass = statusEl.className;
-    statusEl.textContent = message;
-    statusEl.className = "status-error";
-    flashTimer = setTimeout(function () {
-      statusEl.textContent = prevText;
-      statusEl.className = prevClass;
-      flashTimer = null;
-    }, holdMs || 1600);
+  var editorPerfReadoutEl = document.getElementById("editor-perf-readout");
+  function updateEditorPerfReadout() {
+    editorPerfReadoutEl.textContent = AppMessage.readoutLines().join("\n");
   }
+  AppMessage.onChange(updateEditorPerfReadout);
+  updateEditorPerfReadout();
 
   function canAddBody() {
     if (scene.bodies.length >= PhysicsGPU.MAX_BODIES) {
-      flashStatus("Max " + PhysicsGPU.MAX_BODIES + " bodies");
+      AppMessage.toast("Cannot add more objects, object limit hit.");
       return false;
     }
     return true;
@@ -1402,15 +1397,19 @@
     var frontIndex = hits[0];
     var behindIndex = hits.length > 1 ? hits[1] : null;
 
+    // An anchored object never moves, so a hinge to it pins the other object to the background instead.
+    if (behindIndex !== null && (scene.bodies[behindIndex].isAnchored || scene.bodies[frontIndex].isAnchored)) {
+      if (scene.bodies[behindIndex].isAnchored && scene.bodies[frontIndex].isAnchored) {
+        AppMessage.toast("Cannot hinge to an anchored object");
+        return;
+      }
+      if (scene.bodies[frontIndex].isAnchored) frontIndex = behindIndex;
+      behindIndex = null;
+    }
     // One hinge per pair (a second would over-constrain the solver);
     // hingeConnects treats bodyA === null as the background.
     if (PhysicsEngine.hingeConnects(scene.hinges, behindIndex, frontIndex)) {
-      flashStatus(behindIndex === null ? "Already hinged to the background" : "These two objects are already hinged together");
-      return;
-    }
-    // Hinging to an anchored object would be a second way to pin to the background: disallowed.
-    if (behindIndex !== null && (scene.bodies[behindIndex].isAnchored || scene.bodies[frontIndex].isAnchored)) {
-      flashStatus("Can't hinge to an anchored object: hinge to the background instead");
+      AppMessage.toast(behindIndex === null ? "Objects cannot be double hinged to the background" : "Objects cannot be double hinged to each other");
       return;
     }
 
@@ -1614,7 +1613,7 @@
       var hitV = hitTestTopmost(p.x, p.y);
       if (hitV >= 0 && scene.bodies[hitV].isAnchored) {
         // An anchored body would discard the velocity on its first step: say so.
-        flashStatus("An anchored object can't be given a velocity");
+        AppMessage.toast("Anchored objects cannot have a velocity");
         setActiveTool("select");
       } else if (hitV >= 0) {
         selectBody(hitV);
@@ -1637,7 +1636,7 @@
       // Same shortcut for vx/vy. Rejects an anchored object: its velocity is never read.
       var hit5 = hitTestTopmost(p.x, p.y);
       if (hit5 >= 0 && scene.bodies[hit5].isAnchored) {
-        flashStatus("An anchored object's velocity is never used");
+        AppMessage.toast("Anchored objects cannot have a velocity");
       } else if (hit5 >= 0) {
         scene.xInput = { body: hit5, property: "vx" };
         scene.yInput = { body: hit5, property: "vy" };
@@ -1649,7 +1648,7 @@
       // Shortcut for the common Output: this object's Center Y. Anchored would be a constant.
       var hit4 = hitTestTopmost(p.x, p.y);
       if (hit4 >= 0 && scene.bodies[hit4].isAnchored) {
-        flashStatus("Output can't be an anchored object");
+        AppMessage.toast("Output can't be an anchored object");
       } else if (hit4 >= 0) {
         scene.output = { body: hit4, property: "y" };
         refreshMappingUI();
@@ -2466,7 +2465,16 @@
   }
 
   function loadSample(url, label) {
-    if (scene.bodies.length > 0 && !window.confirm("Clear current scene and load " + label + "?")) return;
+    if (scene.bodies.length > 0) {
+      AppMessage.prompt("Clear current scene and load " + label + "?", ["No", "Yes"], "Yes", function (answer) {
+        if (answer === "Yes") fetchSample(url);
+      });
+    } else {
+      fetchSample(url);
+    }
+  }
+
+  function fetchSample(url) {
     fetch(url)
       .then(function (res) {
         if (!res.ok) throw new Error("HTTP " + res.status);
@@ -2477,7 +2485,7 @@
         finishSceneReplace();
       })
       .catch(function (err) {
-        flashStatus("Couldn't load sample: " + (err.message || err));
+        AppMessage.toast("Couldn't load sample: " + (err.message || err));
       });
   }
 
@@ -2490,7 +2498,7 @@
   btnSampleBinaryStar.addEventListener("click", function () {
     loadSample("samples/binary_star.json", "Binary Star");
   });
-  btnClearAll.addEventListener("click", function () {
+  function clearScene() {
     scene.bodies = [];
     scene.hinges = [];
     scene.springs = [];
@@ -2498,6 +2506,12 @@
     scene.yInput = null;
     scene.output = null;
     finishSceneReplace();
+  }
+  btnClearAll.addEventListener("click", function () {
+    if (scene.bodies.length <= 1) { clearScene(); return; }
+    AppMessage.prompt("Clear current scene?", ["No", "Yes"], "Yes", function (answer) {
+      if (answer === "Yes") clearScene();
+    });
   });
 
   // Restores the last edited scene; any error falls back to the seed scene so a bad save can't break loading.
@@ -2877,6 +2891,30 @@
     });
   }
 
+  // Set Input buttons turn green once both inputs are that kind, on any objects.
+  var inputToolsState = null;
+  var btnInputTool = document.querySelector('.tool-btn[data-tool="input"]');
+  var btnInputVelocityTool = document.querySelector('.tool-btn[data-tool="input-velocity"]');
+  function inputsAreAll(keys) {
+    return !!scene.xInput && !!scene.yInput &&
+      keys.indexOf(scene.xInput.property) >= 0 && keys.indexOf(scene.yInput.property) >= 0;
+  }
+  function updateInputToolButtons() {
+    var location = inputsAreAll(["x", "y"]);
+    var velocity = inputsAreAll(["vx", "vy"]);
+    var state = location + "|" + velocity;
+    if (state === inputToolsState) return;
+    inputToolsState = state;
+    if (btnInputTool) {
+      btnInputTool.textContent = location ? "Input Set (Location)" : "Set Input (Location)";
+      btnInputTool.classList.toggle("input-set", location);
+    }
+    if (btnInputVelocityTool) {
+      btnInputVelocityTool.textContent = velocity ? "Input Set (Velocity)" : "Set Input (Velocity)";
+      btnInputVelocityTool.classList.toggle("input-set", velocity);
+    }
+  }
+
   function sceneHasSplitter(s) {
     return s.bodies.some(function (b) { return b.type === "splitter"; });
   }
@@ -3066,7 +3104,7 @@
         ? PhysicsEngine.runTrajectory(scene, scene.simulationSteps, PhysicsGPU.FIXED_DT)
         : PhysicsGPU.runSceneOnGPU(scene, scene.simulationSteps);
     } catch (err) {
-      flashStatus(err.message || "GPU simulation failed");
+      AppMessage.toast(err.message || "GPU simulation failed");
       return false;
     }
     effectiveMaxSteps = scene.simulationSteps;
@@ -3167,6 +3205,19 @@
     scene.bodies.push(PhysicsEngine.createLine(w / 2 + 130, h * 0.25, 140, 0.3, false));
   }
 
+  // The scene and settings a first visit starts with.
+  function loadDefaultScene() {
+    resetToInitialScene();
+    applySceneData({
+      bodies: [], hinges: [], springs: [], xInput: null, yInput: null, output: null,
+      edgeMode: PhysicsEngine.DEFAULT_EDGE_MODE, maxSimulationBodies: PhysicsEngine.MAX_SIMULATION_BODIES,
+      mutualGravity: false, collisionsEnabled: true, simulationSteps: DEFAULT_SIMULATION_STEPS,
+    });
+    seedDefaultScene();
+    sharedSceneIdentity = null;
+    finishSceneReplace();
+  }
+
   // Order matters: the frame must be known before the scene is restored or seeded, and the scene must be
   // populated BEFORE the first resizeCanvas(), whose render() auto-saves and would overwrite the real save with an empty scene.
   if (canvasArea.clientWidth > 0 && canvasArea.clientHeight > 0) {
@@ -3263,7 +3314,7 @@
       data.frameHeight = frame.frameHeight;
       return serializeSceneOf(data);
     },
-    reportLinkProblem: function (message) { flashStatus(message, 6000); },
+    loadDefaultScene: loadDefaultScene,
     // ---- The one setting that exists on both pages ----
     // The grid's own Simulation Duration slider calls this so the value survives the round trip.
     // Snapped to the slider's notches and clamped: a setter reachable from another module.

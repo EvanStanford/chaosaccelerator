@@ -446,6 +446,18 @@
     }
   }
 
+  // A link that can't be opened: say why, then start the builder over on its default scene.
+  function linkProblem(message) {
+    global.AppMessage.alert(message, function () {
+      global.PhysicsUI.loadDefaultScene();
+      if (current !== "editor") {
+        global.FractalGrid.pausePlayback();
+        showOnly("editor");
+      }
+      syncAddress();
+    });
+  }
+
   function openAddress(onLoad) {
     // The address's entry already exists: no pending push. On load the editor already took the scene.
     pushPending = false;
@@ -453,7 +465,7 @@
     try {
       link = global.ShareUrl.decode(global.location.hash);
     } catch (err) {
-      global.PhysicsUI.reportLinkProblem("This link's scene couldn't be read: " + err.message);
+      linkProblem("Cannot load the given scene: " + err.message);
       return;
     }
     if (!link || !link.scene) return;
@@ -466,7 +478,7 @@
     var problem = onLoad ? global.PhysicsUI.sharedSceneProblem(link.scene)
       : editorHasIt ? null : global.PhysicsUI.loadSharedScene(link.scene);
     if (problem) {
-      global.PhysicsUI.reportLinkProblem("This link's scene couldn't be loaded: " + problem);
+      linkProblem("Cannot load the given scene: " + problem);
       return;
     }
     stopActive(true);
@@ -482,7 +494,7 @@
       try {
         gridScene = global.PhysicsUI.gridSceneFromShared(link.scene);
       } catch (err) {
-        global.PhysicsUI.reportLinkProblem("This link's map couldn't be opened: " + err.message);
+        linkProblem("Cannot load the given pattern: " + err.message);
       }
       if (gridScene) {
         // No explainer for someone who never saw the scene.

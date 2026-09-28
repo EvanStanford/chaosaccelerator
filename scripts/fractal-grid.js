@@ -20,6 +20,12 @@
     shareState: function () { return null; },
     applyShareView: function () {},
     renderStill: function () {},
+    // Replaced by boot(); kept as no-ops if boot stops early, so the way back to the builder still works.
+    defaultScale: function () { return 1; },
+    setScale: function () {},
+    resetView: function () {},
+    renderNow: function () {},
+    pausePlayback: function () {},
   };
 
   // One Settings body (#shared-settings-body) is MOVED between the builder's panel
@@ -151,15 +157,6 @@
     }));
     body.addEventListener("change", early(function (e) { if (e.target !== el.preset) syncPreset(); }));
 
-    var PERF_LOWERED_TOAST_MS = 4000;
-    function showPerfLoweredToast() {
-      var toast = $("perf-lowered-toast");
-      if (!toast) return;
-      toast.textContent = "Performance settings lowered to avoid crashing";
-      toast.classList.add("visible");
-      setTimeout(function () { toast.classList.remove("visible"); }, PERF_LOWERED_TOAST_MS);
-    }
-
     function volumeIcon(volume) {
       var muted = volume <= 0;
       el.volumeIcon.querySelector(".vol-arc-1").style.display = muted ? "none" : "inline";
@@ -178,7 +175,10 @@
     });
     // Reset all: state lives in localStorage, not cookies; wipe it, then hard reload.
     el.resetAll.addEventListener("click", function () {
-      if (!global.confirm("Reset all saved data for this page? This clears your saved scene, dismissed tips, and intro animation state, then reloads.")) return;
+      global.AppMessage.prompt("Reset all saved data for this page? This clears your saved scene, dismissed tips, and intro animation state, then reloads.",
+        ["No", "Yes"], "Yes", function (answer) { if (answer === "Yes") resetAll(); });
+    });
+    function resetAll() {
       try { localStorage.clear(); } catch (err) { /* nothing to clear */ }
       try {
         document.cookie.split(";").forEach(function (pair) {
@@ -189,7 +189,7 @@
       // Clear the address first or the reload loads the scene straight back.
       try { global.history.replaceState(null, "", global.location.pathname + global.location.search); } catch (err) { /* reloads where it is */ }
       global.location.reload();
-    });
+    }
 
     if (/Mac|iPhone|iPad|iPod/.test((global.navigator && (global.navigator.platform || global.navigator.userAgent)) || "")) el.draw.disabled = true;
     writePreset(perfDefaultPreset);
@@ -203,7 +203,8 @@
     if (lowered && lowered.perf) {
       writePreset(lowered.perf);
       if (lowered.readout) $("perf-readout-checkbox").checked = true;
-      if (lowered.toast) showPerfLoweredToast();
+      // Deferred until transition.js has picked the view the toast shows in.
+      if (lowered.toast) setTimeout(function () { global.AppMessage.toast("Performance settings lowered to avoid crashing"); }, 0);
     }
     syncReadouts();
     syncPreset();
@@ -679,6 +680,13 @@
     return TAU;
   }
 
+  // Errors that leave the map unusable: say so, then go back to the builder.
+  function mapUnusable(message) {
+    global.AppMessage.alert(message, function () {
+      if (global.AppShell && global.AppShell.currentView() === "grid") global.AppShell.goToEditor();
+    });
+  }
+
   function showEmptyState(message) {
     canvas.hidden = true;
     emptyState.hidden = false;
@@ -695,8 +703,8 @@
       var outputProblem = PhysicsEngine.outputMappingError(scene.output, scene.bodies.length);
       if (outputProblem) throw new Error(outputProblem);
     } catch (err) {
-      setStatus(false, "Invalid scene");
       showEmptyState("The scene couldn't be read (" + (err.message || err) + "). Go back and send it again.");
+      mapUnusable("Cannot load the given pattern: " + (err.message || err));
       scene = null;
     }
   }
@@ -1320,7 +1328,6 @@
   canvas.addEventListener("webglcontextcreationerror", function (e) { contextCreationError = e.statusMessage || ""; });
   var gl = canvas.getContext("webgl2", { antialias: false });
   if (!gl) {
-    setStatus(false, "WebGL2 unavailable");
     var lossRec = readContextLossRecord();
     var afterLoss = lossRec.n > 0 && Date.now() - lossRec.t < CONTEXT_LOSS_WINDOW_MS;
     contextLossLog = contextLossLog.concat([{ kind: "creation", t: Date.now(), reason: contextCreationError, sinceLossMs: afterLoss ? Date.now() - lossRec.t : -1 }]).slice(-4);
@@ -1330,6 +1337,7 @@
     var retrying = afterLoss && lossRec.n <= CONTEXT_LOSS_MAX_AUTO_RELOADS;
     showEmptyState(retrying ? "The browser refused a WebGL2 context after resetting the page's graphics. Trying again shortly."
       : "This browser/device doesn't support WebGL2, which the physics grid needs.");
+    if (!retrying) mapUnusable("This browser/device doesn't support WebGL2, which the map needs.");
     var retryAt = performance.now() + CONTEXT_CREATION_RETRY_MS;
     function paintDebugLog() {
       showDebugLog(contextLossReportText() + (retrying ? "\nretry  in " + Math.max(0, Math.ceil((retryAt - performance.now()) / 1000)) + "s" : ""));
@@ -1346,8 +1354,8 @@
   try {
     vs = PhysicsGPU.compileShader(gl, gl.VERTEX_SHADER, PhysicsGPU.VERTEX_SOURCE);
   } catch (err) {
-    setStatus(false, "Compile error");
     showEmptyState("Couldn't build the grid shader: " + (err.message || err));
+    mapUnusable("Couldn't build the map: " + (err.message || err));
     return;
   }
 
@@ -1500,7 +1508,7 @@
       pass.status = "failed";
       pass.error = pass.build.error;
       pass.build = null;
-      if (pass.precision !== "f32") setStatus(false, "High-precision shader unavailable: " + pass.error);
+      if (pass.precision !== "f32") global.AppMessage.toast("High-precision shader unavailable: " + pass.error);
       updatePrecisionReadout();
     }
   }
@@ -1515,7 +1523,7 @@
       } catch (err) {
         pass.status = "failed";
         pass.error = err.message || String(err);
-        if (precision !== "f32") setStatus(false, "High-precision shader unavailable: " + pass.error);
+        if (precision !== "f32") global.AppMessage.toast("High-precision shader unavailable: " + pass.error);
       }
       passes[key] = pass;
     }
@@ -1570,8 +1578,9 @@
   }
 
   if (!requestPass("f32", "standard", true)) {
-    setStatus(false, "Compile error");
-    showEmptyState("Couldn't build the grid shader: " + (passes[passKey("f32", "standard")].error || "unknown error"));
+    var buildError = passes[passKey("f32", "standard")].error || "unknown error";
+    showEmptyState("Couldn't build the grid shader: " + buildError);
+    mapUnusable("Couldn't build the map: " + buildError);
     return;
   }
   var activePass = passes[passKey("f32", "standard")];
@@ -5146,7 +5155,8 @@
     try {
       offsetScene = PhysicsGridCodegen.computeOffsetSceneNumeric(scene, worldPoint.x, worldPoint.y);
     } catch (err) {
-      showHoverEmpty("Couldn't preview this point: " + (err.message || err));
+      global.AppMessage.toast("Couldn't inspect this point: " + (err.message || err));
+      showHoverEmpty();
       return;
     }
     // No trajectory yet: controls paused-at-start and disabled until beginPlaybackSession; the slider range is set now so it isn't stale.
@@ -5479,10 +5489,11 @@
       compiled = PhysicsGridCodegen.compileHoverTrajectoryGLSL(scene, worldPoint.x, worldPoint.y, steps, effectivePrecision(), worldPoint.xLo, worldPoint.yLo);
       trajectory = PhysicsGPU.runCompiledTrajectoryOnGPU(compiled, steps);
     } catch (err) {
-      showHoverEmpty("Couldn't replay this point: " + (err.message || err));
+      global.AppMessage.toast("Couldn't replay this point: " + (err.message || err));
+      showHoverEmpty();
       return;
     }
-    if (trajectory.length === 0) { showHoverEmpty("This scene has no bodies to replay."); return; }
+    if (trajectory.length === 0) { global.AppMessage.toast("This scene has no bodies to replay."); showHoverEmpty(); return; }
     var isLifespan = scene.output.property === "lifespan";
     var stopStep = null, wrapOverride = null, lifespanValue = simulationSteps;
     var extraWrapOverrides = [];
@@ -5798,7 +5809,7 @@
   function beginStatsRun() {
     if (!statsWantsWork() || statsRun) return;
     if (!canSampleField()) {
-      statsPanel.setStatus("This browser can't read floating-point values back from the GPU, so Global Stats can't measure anything here.", "stale");
+      statsPanel.setStatus("This browser can't read floating-point values back from the GPU, so nothing to analyze.", "stale");
       return;
     }
     var block = statsSampleBlock();
@@ -5865,7 +5876,7 @@
         // Nothing drawn on the first band: the sampler went away (a precision switch); an untouched target would read as all zeros.
         if (drawn === 0) {
           abandonStatsRun();
-          statsPanel.setStatus("Couldn't sample the view, nothing measured.", "stale");
+          statsPanel.setStatus("Couldn't sample the view, nothing analyzed", "stale");
           return;
         }
         readSampleBand(run.target, drawn, run.bandBuffer);
@@ -6441,7 +6452,7 @@
     var b = pumpProgramBuild(entry.colorBuild, colorFormats, wait);
     if (a === "failed" || b === "failed") {
       entry.status = "failed";
-      setStatus(false, "Playback unavailable: " + (entry.stepBuild.error || entry.colorBuild.error));
+      global.AppMessage.toast("Playback unavailable: " + (entry.stepBuild.error || entry.colorBuild.error));
       discardProgramBuild(entry.stepBuild);
       discardProgramBuild(entry.colorBuild);
       return;
@@ -6465,7 +6476,7 @@
         entry = startPlaybackBuild(precision);
       } catch (err) {
         entry = { status: "failed", programs: null };
-        setStatus(false, "Playback unavailable: " + (err.message || err));
+        global.AppMessage.toast("Playback unavailable: " + (err.message || err));
       }
       playbackGpu.programs[precision] = entry;
     }
@@ -7110,7 +7121,7 @@
       }
     }
     if (!ensurePlaybackTextures(res.w, res.h, res.programs.layers)) {
-      setStatus(false, "Playback unavailable: not enough video memory for its state");
+      global.AppMessage.toast("Playback unavailable: not enough video memory for its state");
       stopTimelineClock();
       timeline.following = false;
       markDirty();
@@ -8093,7 +8104,7 @@
 
   // ---- The performance readout ----
   //
-  // Nerd Performance Stats: text over the map, meant to be screenshotted from a device
+  // Nerd Stats: text over the map, meant to be screenshotted from a device
   // without a debugger, so it favours WHY a render is slow. Gathered whether or not showing (perfStats).
   var PERF_READOUT_INTERVAL_MS = 250;
   var perfReadoutShown = perfReadoutCheckbox.checked; // off, unless switched on from the builder page
@@ -8193,6 +8204,7 @@
     lines.push("stall  long task max " + Math.round(longTask.longestMs) + "ms" + (longTask.lastMs > 0 ? " · last " + Math.round(longTask.lastMs) + "ms " + msText(performance.now() - longTask.lastAt) + " ago" : ""));
     var loss = contextLossLog[contextLossLog.length - 1];
     if (loss) lines = lines.concat(describeContextLoss(loss, contextLossLog.length));
+    lines = lines.concat(global.AppMessage.readoutLines());
     return lines.join("\n");
   }
   function updatePerfReadout(now) {
@@ -8331,7 +8343,6 @@
   // repeated losses stop the auto-reload and force float32.
   var contextLost = false;
   var contextLostEl = document.getElementById("grid-context-lost");
-  var contextLostText = document.getElementById("grid-context-lost-text");
   var contextLostReloadBtn = document.getElementById("grid-context-lost-reload");
   var CONTEXT_RESTORE_GRACE_MS = 2000;
 
@@ -8433,11 +8444,12 @@
     entry.lowered = lowerSettingsForReload();
     saveContextLossLog();
     showDebugLog(contextLossReportText());
-    contextLostEl.hidden = false;
     if (rec.n > CONTEXT_LOSS_MAX_AUTO_RELOADS) {
-      contextLostText.textContent = "The browser keeps resetting this page\u2019s graphics, which usually means the device is out of graphics memory. Closing other tabs or apps may help.";
-      return; // the button is the only way on from here
+      global.AppMessage.alert("The browser keeps resetting this page\u2019s graphics, which usually means the device is out of graphics memory. Closing other tabs or apps may help.",
+        reloadToCurrentAddress);
+      return; // OK is the only way on from here
     }
+    contextLostEl.hidden = false;
     scheduleContextRecovery();
   });
   canvas.addEventListener("webglcontextrestored", function () {
