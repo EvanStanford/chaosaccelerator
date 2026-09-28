@@ -51,7 +51,7 @@
   }
 
   // ---- Timings ---- the long version tiles a frozen frame of the scene; the short one only zooms and fades.
-  var FULL_MS = 2400;
+  var FULL_MS = 7200;
   var QUICK_MS = 500;
   var MIN_LEGIBLE_CELL_PX = 22;
 
@@ -75,6 +75,18 @@
     return Math.pow(startPx, 1 - ease(u));
   }
 
+  // Where the zoom leaves the copies too small to read (the side panel's fade starts there too):
+  // the copies fade from this point to the very end.
+  function tileFadeStart(startPx) {
+    var lo = 0, hi = 1;
+    for (var i = 0; i < 30; i++) {
+      var mid = (lo + hi) / 2;
+      if (cellPxAt(mid, startPx) > MIN_LEGIBLE_CELL_PX + startPx * 0.25) lo = mid;
+      else hi = mid;
+    }
+    return lo;
+  }
+
   function nudgeLayout() {
     global.dispatchEvent(new Event("resize"));
   }
@@ -87,6 +99,7 @@
     if (editorPanel) {
       editorPanel.style.opacity = "";
     }
+    editorView.style.removeProperty("--float-fade");
     current = which;
     if (global.FractalGrid.placeSettings) global.FractalGrid.placeSettings(which);
     nudgeLayout();
@@ -98,6 +111,7 @@
   var TILE_BORDER_PX = 3;
   var cellCanvas = null;
   var cellCtx = null;
+  var cellPattern = null;
 
   function ensureCellCanvas(scene) {
     var aspect = (scene.frameWidth || 1) / (scene.frameHeight || 1);
@@ -124,13 +138,15 @@
     cellCtx.setTransform(s, 0, 0, s, 0, 0);
     global.PhysicsUI.drawSceneBodies(cellCtx, scene.bodies);
     global.PhysicsUI.drawSceneSprings(cellCtx, scene);
+    cellPattern = ctx.createPattern(cellCanvas, "repeat");
   }
 
-  // Lattice centered on (centerX, centerY) = world (0, 0); a white backing rect gives every shared edge a seam.
+  // Lattice centered on (centerX, centerY) = world (0, 0), seams drawn over the cell edges. One
+  // pattern fill, not a drawImage per copy: late in the zoom the copies are a few pixels wide.
   function stampTiles(cellPx, alpha, viewW, viewH, dpr, centerX, centerY, clip) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (alpha <= 0) return;
+    if (alpha <= 0 || !cellPattern) return;
     ctx.save();
     ctx.beginPath();
     ctx.rect(clip.left, clip.top, clip.right - clip.left, clip.bottom - clip.top);
@@ -140,12 +156,32 @@
     var cx = centerX - cw / 2, cy = centerY - ch / 2;
     var firstX = cx - Math.ceil((cx + cw) / cw) * cw;
     var firstY = cy - Math.ceil((cy + ch) / ch) * ch;
-    var border = Math.min(TILE_BORDER_PX * (dpr || 1), cw / 2, ch / 2);
-    ctx.fillStyle = "#ffffff";
-    for (var y = firstY; y < viewH; y += ch) {
-      for (var x = firstX; x < viewW; x += cw) {
-        if (border > 0) ctx.fillRect(x, y, cw, ch);
-        ctx.drawImage(cellCanvas, x + border, y + border, Math.max(0, cw - border * 2), Math.max(0, ch - border * 2));
+    cellPattern.setTransform(new DOMMatrix([cw / cellCanvas.width, 0, 0, ch / cellCanvas.height, firstX, firstY]));
+    ctx.fillStyle = cellPattern;
+    ctx.fillRect(0, 0, viewW, viewH);
+    // A few px wide, but a small share of each copy as the copies shrink, so they stay visible.
+    // Drawn however thin they get: a cutoff would snap the purple away mid-fade.
+    var border = Math.min(TILE_BORDER_PX * (dpr || 1), cw * 0.05);
+    if (border > 0) {
+      ctx.beginPath();
+      for (var gx = firstX; gx <= viewW + cw; gx += cw) { ctx.moveTo(gx, 0); ctx.lineTo(gx, viewH); }
+      for (var gy = firstY; gy <= viewH + ch; gy += ch) { ctx.moveTo(0, gy); ctx.lineTo(viewW, gy); }
+      if (document.documentElement.classList.contains("eighties-off")) {
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = border * 2;
+        ctx.stroke();
+      } else {
+        // The '80s theme: purple seams with a glow and a thin white core, like the landing page's grid.
+        ctx.strokeStyle = "#a855ff";
+        ctx.lineWidth = border * 2;
+        ctx.shadowColor = "#9933ff";
+        ctx.shadowBlur = Math.min(border * 6, cw * 0.15);
+        ctx.stroke();
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = border * 0.7;
+        ctx.stroke();
       }
     }
     ctx.restore();
@@ -221,6 +257,7 @@
     var startPx = origin.startPx;
     var clip = origin;
     var defaultScale = global.FractalGrid.defaultScale();
+    var fadeFrom = tileFadeStart(startPx);
 
     if (opts.tiled) drawCell(opts.scene);
 
@@ -243,7 +280,10 @@
       global.FractalGrid.setScale(defaultScale / Math.max(1, cellPx));
       global.FractalGrid.renderNow();
 
+      // The side panel goes once the copies are too small to read; the copies themselves fade
+      // from there, slowly, until the very end.
       var fade = Math.min(1, Math.max(0, (cellPx - MIN_LEGIBLE_CELL_PX) / (startPx * 0.25)));
+      var tileFade = 1 - ease(Math.min(1, Math.max(0, (u - fadeFrom) / (1 - fadeFrom))));
 
       // Pan is LINEAR in u, not eased or tied to fade: otherwise it sits frozen
       // while the shrink is already underway, then catches up in a visible kink.
@@ -254,7 +294,7 @@
 
       if (opts.tiled) {
         // cellPx is already device px: no dpr scale here, only on the border.
-        stampTiles(cellPx, fade, dims.w, dims.h, dims.dpr, centerX, centerY, clip);
+        stampTiles(cellPx, tileFade, dims.w, dims.h, dims.dpr, centerX, centerY, clip);
       } else {
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -267,6 +307,9 @@
       if (editorPanel) {
         editorPanel.style.opacity = String(fade);
       }
+      // The builder's floating controls sit above the transition layer (app-shell.css) and follow this:
+      // gone early going out, back only at the very end.
+      editorView.style.setProperty("--float-fade", String(1 - ease(Math.min(1, u / 0.25))));
 
       lastFrameInfo = { raw: raw, cellPx: cellPx, gridScale: defaultScale / Math.max(1, cellPx) };
       return raw >= 1;

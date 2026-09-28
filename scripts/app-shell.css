@@ -35,6 +35,12 @@
   position: relative;
   z-index: 4;
 }
+/* The builder's floating controls go above the transition layer and fade on --float-fade (transition.js),
+   so the tiles fading away at the end cannot show them again. A closed settings card stays closed. */
+#editor-view.is-transitioning :is(#fractalize-wrap, #btn-home, #playback-toolbar, #btn-settings, #settings-panel.open, #speed-popup, #editor-topbar) {
+  z-index: 51;
+  opacity: var(--float-fade, 1);
+}
 
 /* ---- The transition layer: above both views; the grid shows through as its canvas fades out ---- */
 #transition-layer {

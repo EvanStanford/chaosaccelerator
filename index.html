@@ -15,15 +15,15 @@
   // Before first paint, so a page with the '80s switched off never flashes them.
   try { if (localStorage.getItem("eightiesOff") === "1") document.documentElement.classList.add("eighties-off"); } catch (e) {}
 </script>
-<link rel="stylesheet" href="scripts/landing.css?v=m70">
-<link rel="stylesheet" href="scripts/eighties.css?v=m70">
-<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m70" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="scripts/landing.css?v=m76">
+<link rel="stylesheet" href="scripts/eighties.css?v=m76">
+<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m76" as="font" type="font/woff2" crossorigin>
 </head>
 <body class="landing eighties">
 <canvas class="ride" id="ride" aria-hidden="true"></canvas>
 <main class="screen">
 
-  <script src="scripts/corner-menu.js?v=m70"></script>
+  <script src="scripts/corner-menu.js?v=m76"></script>
 
   <header class="sky">
     <div class="sun" id="sun">
@@ -62,7 +62,7 @@
       <article class="tour-slide" aria-label="Step 1">
         <a class="tour-link" href="chaos.html">
         <div class="tour-media">
-          <img src="assets/builder.png?v=m70" width="1556" height="874" alt="The scene builder, with a scene laid out on its dark grid">
+          <img src="assets/builder.png?v=m76" width="1556" height="874" alt="The scene builder, with a scene laid out on its dark grid">
           <span class="tour-step">Step 1:</span>
         </div>
         <div class="tour-caption">
@@ -75,7 +75,7 @@
       <article class="tour-slide" aria-label="Step 2">
         <a class="tour-link" href="chaos.html">
         <div class="tour-media">
-          <img src="assets/map.jpg?v=m70" width="1556" height="874" alt="The map a scene makes: bands and folds of rainbow color, each pixel one run of the scene from a slightly different start">
+          <img src="assets/map.jpg?v=m76" width="1556" height="874" alt="The map a scene makes: bands and folds of rainbow color, each pixel one run of the scene from a slightly different start">
           <span class="tour-step">Step 2:</span>
         </div>
         <div class="tour-caption">
@@ -118,8 +118,8 @@
   <span class="toggle-switch"><input type="checkbox" checked><span class="toggle-slider"></span></span>
   <span class="eighties-toggle-label">Disable '80s</span>
 </label>
-<script src="scripts/eighties-ride.js?v=m70"></script>
-<script src="scripts/eighties-theme.js?v=m70"></script>
+<script src="scripts/eighties-ride.js?v=m76"></script>
+<script src="scripts/eighties-theme.js?v=m76"></script>
 <script>
   // ---- The tour ----
   var tour = (function () {

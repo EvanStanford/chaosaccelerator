@@ -1,0 +1,36 @@
+/* CPAL-1.0 License. See chaosaccelerator.com/license.html */
+
+/* The eighties theme in the app, kept mild: Saira everywhere, square buttons in the builder and
+   Fractal-ize in the landing page's Launch look. Loaded last so it wins the cascade. */
+@font-face {
+  font-family: "Saira";
+  src: url("../assets/fonts/saira-latin.woff2?v=m76") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+html,
+body,
+#watermark { font-family: "Saira", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+
+/* Fractal-ize in the landing page's Launch look; the gray not-ready state stays as it is. */
+html:not(.eighties-off) .fractalize-btn {
+  border-radius: 0;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  text-indent: 0.22em;
+  text-transform: uppercase;
+}
+html:not(.eighties-off) .fractalize-btn:not(.not-ready),
+html:not(.eighties-off) .fractalize-btn:not(.not-ready):hover {
+  color: #000;
+  background: linear-gradient(#ffed59, #ff941f 50%, #ff3369);
+  animation-name: eightiesPulse;
+}
+html:not(.eighties-off) .fractalize-btn:not(.not-ready):hover { box-shadow: 0 0 30px rgba(255, 51, 105, 0.9); }
+@keyframes eightiesPulse {
+  0%, 100% { box-shadow: 0 0 14px rgba(255, 51, 105, 0.55); }
+  50% { box-shadow: 0 0 28px rgba(255, 51, 105, 0.9); }
+}
+
+/* Square corners on every button, as on the landing page. */
+html:not(.eighties-off) #editor-view :is(button, .tool-btn, .icon-button, select, .floating-home-btn) { border-radius: 0; }

@@ -8,18 +8,22 @@
 <meta name="theme-color" content="#14161c">
 <title>Chaos Accelerator</title>
 <!-- Both views share this document so transition.js can show them at once. -->
-<link rel="stylesheet" href="scripts/physics.css?v=m70">
-<link rel="stylesheet" href="scripts/fractal-grid.css?v=m70">
-<link rel="stylesheet" href="scripts/app-shell.css?v=m70">
-<link rel="stylesheet" href="scripts/fractal-stats.css?v=m70">
-<link rel="stylesheet" href="scripts/responsive-layout.css?v=m70">
-<!-- mobile.css last: it must win the cascade without !important. -->
-<link rel="stylesheet" href="scripts/mobile.css?v=m70">
+<link rel="stylesheet" href="scripts/physics.css?v=m76">
+<link rel="stylesheet" href="scripts/fractal-grid.css?v=m76">
+<link rel="stylesheet" href="scripts/app-shell.css?v=m76">
+<link rel="stylesheet" href="scripts/fractal-stats.css?v=m76">
+<link rel="stylesheet" href="scripts/responsive-layout.css?v=m76">
+<!-- mobile.css after the app sheets: it must win their cascade without !important. -->
+<link rel="stylesheet" href="scripts/mobile.css?v=m76">
+<link rel="stylesheet" href="scripts/eighties-app.css?v=m76">
+<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m76" as="font" type="font/woff2" crossorigin>
 <!-- In <head> on purpose: both views measure their canvas area as they start. -->
-<script src="scripts/layout-mode.js?v=m70"></script>
+<script src="scripts/layout-mode.js?v=m76"></script>
 <!-- A #map/ link should open on the map: hide the editor (still laid out) until transition.js picks the view. -->
 <script>
   if (/^#map\//.test(location.hash)) document.documentElement.classList.add("opening-map");
+  // The site-wide '80s switch (eighties-theme.js on the other pages).
+  try { if (localStorage.getItem("eightiesOff") === "1") document.documentElement.classList.add("eighties-off"); } catch (e) {}
 </script>
 </head>
 <body class="page-grid">
@@ -194,7 +198,7 @@
           </div>
           <div id="fractalize-wrap">
             <p class="readout" id="send-to-grid-error"></p>
-            <button id="btn-send-to-grid" class="fractalize-btn">Fractal-ize!</button>
+            <button id="btn-send-to-grid" class="fractalize-btn">Fractal-ize</button>
           </div>
           <!-- Touch shows no title tooltips, so showToolHint (physics-ui.js) shows the picked tool's title here. -->
           <div id="editor-hint-toast" class="editor-hint-toast" role="status"></div>
@@ -394,6 +398,13 @@
                       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5z"></path><path class="vol-arc-1" d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path class="vol-arc-2" d="M19.07 4.93a10 10 0 0 1 0 14.14"></path><g class="vol-mute-x"><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></g></svg>
                     </span>
                     <input type="range" id="grid-sound-volume-slider" min="0" max="100" step="1" value="0" aria-label="Sound volume">
+                  </label>
+                  <label class="toggle-field">
+                    <span class="eighties-toggle-label">Disable '80s</span>
+                    <span class="toggle-switch">
+                      <input type="checkbox" id="eighties-checkbox" checked>
+                      <span class="toggle-slider"></span>
+                    </span>
                   </label>
                   <label class="field">
                     <span>Inspection Line Sample Count: <b id="inspect-line-sample-count-readout">30</b></span>
@@ -719,20 +730,39 @@
 
 </div>
 
-<script src="scripts/physics-engine.js?v=m70"></script>
-<script src="scripts/physics-coords.js?v=m70"></script>
-<script src="scripts/share-url.js?v=m70"></script>
-<script src="scripts/movie-path.js?v=m70"></script>
-<script src="scripts/physics-sound.js?v=m70"></script>
-<script src="scripts/physics-hinge-geometry.js?v=m70"></script>
-<script src="scripts/physics-df.js?v=m70"></script>
-<script src="scripts/physics-gpu.js?v=m70"></script>
-<script src="scripts/physics-gpu-df.js?v=m70"></script>
-<script src="scripts/physics-grid-codegen.js?v=m70"></script>
-<script src="scripts/physics-ui.js?v=m70"></script>
-<script src="scripts/fractal-stats.js?v=m70"></script>
-<script src="scripts/fractal-stats-panel.js?v=m70"></script>
-<script src="scripts/fractal-grid.js?v=m70"></script>
-<script src="scripts/transition.js?v=m70"></script>
+<script src="scripts/physics-engine.js?v=m76"></script>
+<script src="scripts/physics-coords.js?v=m76"></script>
+<script src="scripts/share-url.js?v=m76"></script>
+<script src="scripts/movie-path.js?v=m76"></script>
+<script src="scripts/physics-sound.js?v=m76"></script>
+<script src="scripts/physics-hinge-geometry.js?v=m76"></script>
+<script src="scripts/physics-df.js?v=m76"></script>
+<script src="scripts/physics-gpu.js?v=m76"></script>
+<script src="scripts/physics-gpu-df.js?v=m76"></script>
+<script src="scripts/physics-grid-codegen.js?v=m76"></script>
+<script src="scripts/physics-ui.js?v=m76"></script>
+<script src="scripts/fractal-stats.js?v=m76"></script>
+<script src="scripts/fractal-stats-panel.js?v=m76"></script>
+<script src="scripts/fractal-grid.js?v=m76"></script>
+<script src="scripts/transition.js?v=m76"></script>
+<script>
+  // ---- The '80s switch: the same saved setting as the other pages (eighties-theme.js) ----
+  (function () {
+    var root = document.documentElement;
+    var box = document.getElementById("eighties-checkbox");
+    var label = box.closest(".toggle-field").querySelector(".eighties-toggle-label");
+    function show() {
+      var on = !root.classList.contains("eighties-off");
+      box.checked = on;
+      label.textContent = on ? "Disable '80s" : "Enable '80s";
+    }
+    box.addEventListener("change", function () {
+      root.classList.toggle("eighties-off", !box.checked);
+      try { localStorage.setItem("eightiesOff", box.checked ? "0" : "1"); } catch (e) {}
+      show();
+    });
+    show();
+  })();
+</script>
 </body>
 </html>

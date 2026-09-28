@@ -1120,7 +1120,7 @@
       drawOffscreenArrow(pointer, body.isAnchored ? "#7a8199" : "#7ea0ff");
     });
 
-    ctx.font = "bold 12px sans-serif";
+    ctx.font = "bold 12px Saira, sans-serif";
     ctx.textAlign = "center";
     Object.keys(byBody).forEach(function (key) {
       var group = byBody[key];
