@@ -58,7 +58,7 @@
   window.addEventListener("hashchange", function () { location.reload(); });
 
   // ---- The screen ---- one canvas, stage-sized in device px; whatever is shown is drawn to fit inside it whole.
-  var shown = null; // the last thing drawn, for redrawing after a resize
+  var shown = null, shownFrame = 0; // the last thing drawn and its frame, for redrawing after a resize
 
   function fitScreen() {
     var rect = stage.getBoundingClientRect();
@@ -68,17 +68,19 @@
       screen.width = w;
       screen.height = h;
     }
-    if (shown) show(shown);
+    if (shown) show(shown, shownFrame);
   }
-  function show(image) {
+  function show(image, frame) {
     shown = image;
+    shownFrame = frame;
     var scale = Math.min(screen.width / image.width, screen.height / image.height);
-    var w = image.width * scale, h = image.height * scale;
+    var w = image.width * scale, h = image.height * scale, x = (screen.width - w) / 2, y = (screen.height - h) / 2;
     screenCtx.fillStyle = "#000";
     screenCtx.fillRect(0, 0, screen.width, screen.height);
     screenCtx.imageSmoothingEnabled = true;
     screenCtx.imageSmoothingQuality = "high";
-    screenCtx.drawImage(image, (screen.width - w) / 2, (screen.height - h) / 2, w, h);
+    screenCtx.drawImage(image, x, y, w, h);
+    if (inspection && inspectCorner.value !== "off") drawInspection(screenCtx, inspectCanvas, image.width, image.height, x, y, scale, frames[frame].step);
   }
   new ResizeObserver(fitScreen).observe(stage);
   fitScreen();
@@ -104,18 +106,22 @@
   var endedEarly = false;
 
   // The app's watermark, drawn INTO every frame so it survives download. Sized against the frame, not fixed px.
+  var WATERMARK = "chaosaccelerator.com";
+  function watermarkFont(height) {
+    var size = Math.max(7, Math.round(height * 0.022));
+    return { size: size, inset: size, font: size + "px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" };
+  }
   function stampWatermark() {
-    var size = Math.max(7, Math.round(copy.height * 0.022));
-    var inset = Math.round(size);
+    var mark = watermarkFont(copy.height), size = mark.size, inset = mark.inset;
     copyCtx.save();
-    copyCtx.font = size + "px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+    copyCtx.font = mark.font;
     copyCtx.textAlign = "right";
     copyCtx.textBaseline = "alphabetic";
     copyCtx.shadowColor = "rgba(0, 0, 0, 0.8)";
     copyCtx.shadowBlur = Math.max(2, size / 4);
     copyCtx.shadowOffsetY = Math.max(1, size / 12);
     copyCtx.fillStyle = "#fff";
-    copyCtx.fillText("chaosaccelerator.com", copy.width - inset, copy.height - inset);
+    copyCtx.fillText(WATERMARK, copy.width - inset, copy.height - inset);
     copyCtx.restore();
   }
 
@@ -202,7 +208,8 @@
         return;
       }
       blobs = all;
-      engine.remove();
+      // The renderer stays for the Inspect overlay; a last still 16 px across lets its canvas go.
+      engineGrid.renderStill({ center: frames[0].center, scale: frames[0].scale, step: 0, antialias: false, width: 16, height: 16 }, function () {});
       beginPlayback();
     });
   }
@@ -269,7 +276,7 @@
           packedBytes += blob.size;
           packedFrames += 1;
         });
-        show(copy);
+        show(copy, i);
         noteFrameTime(frameCosts[i], performance.now() - frameStartedAt);
         // The first frame sets the file's size, so the encoder is chosen now.
         if (i === 0) openVideo(w, h).then(function () { frameDone(grid, 0); });
@@ -281,6 +288,7 @@
   }
 
   function beginRender(grid) {
+    engineGrid = grid;
     var defaultScale = grid.defaultScale();
     log10DefaultScale = Math.log10(defaultScale);
     var lastStep = link.scene.simulationSteps;
@@ -323,6 +331,73 @@
       scene: link.scene,
       view: { display: link.view.display, lowSaturation: link.view.lowSaturation, precision: link.view.precision },
     });
+  }
+
+  // ---- Inspect point ---- the Inspect preview of the center of the most zoomed-in keyframe (the last, if
+  // several tie), drawn into a corner of every frame at that frame's Map Evolution frame, and into a download.
+  var inspectField = $("inspect-field"), inspectCorner = $("inspect-corner"), inspectTitle = inspectField.title;
+  var engineGrid = null;
+  var inspection = null; // FractalGrid.inspection(), made the first time a corner is picked
+  var inspectCanvas = document.createElement("canvas");
+
+  function inspectKeyframe() {
+    return movie.keyframes.reduce(function (best, k) { return k.zoom >= best.zoom ? k : best; });
+  }
+
+  inspectCorner.addEventListener("change", function () {
+    if (inspectCorner.value === "off" || inspection) {
+      if (shown) show(shown, shownFrame);
+      return;
+    }
+    // Simulating can take seconds (building a high precision's program): painted as such before it blocks.
+    inspectCorner.disabled = true;
+    inspectField.firstElementChild.textContent = "Simulating";
+    requestAnimationFrame(function () { setTimeout(simulateInspection); });
+  });
+
+  function simulateInspection() {
+    var k = inspectKeyframe();
+    try {
+      var precision = engineGrid.stillPrecision({ center: k.center, scale: engineGrid.defaultScale() / k.zoom, width: movieSize.width, height: movieSize.height });
+      inspection = engineGrid.inspection(k.center, precision.name);
+    } catch (err) {
+      inspection = null;
+    }
+    inspectCorner.disabled = false;
+    inspectField.firstElementChild.textContent = "Inspect point";
+    inspectField.title = inspection ? inspectTitle : "This point couldn't be simulated.";
+    if (!inspection) inspectCorner.value = "off";
+    if (shown) show(shown, shownFrame);
+  }
+
+  // Into ctx, where a frame of width x height is drawn at (x, y) times `scale`: a corner of it, above the
+  // watermark where they'd meet. The overlay is drawn in `scratch` first.
+  function drawInspection(ctx, scratch, width, height, x, y, scale, step) {
+    var w = width * scale, h = height * scale;
+    var ih = Math.round(h * 0.3), iw = Math.round(ih * inspection.aspect);
+    if (iw > w * 0.45) {
+      iw = Math.round(w * 0.45);
+      ih = Math.round(iw / inspection.aspect);
+    }
+    var margin = Math.round(h * 0.025), corner = inspectCorner.value;
+    var ix = corner.indexOf("left") >= 0 ? x + margin : x + w - margin - iw;
+    var iy = corner.indexOf("top") === 0 ? y + margin : y + h - margin - ih;
+    var mark = watermarkFont(height);
+    copyCtx.save();
+    copyCtx.font = mark.font;
+    var markLeft = x + (width - mark.inset - copyCtx.measureText(WATERMARK).width) * scale - margin;
+    var markTop = y + (height - mark.inset - mark.size) * scale - margin;
+    copyCtx.restore();
+    if (ix + iw > markLeft && iy + ih > markTop) iy = markTop - ih;
+    if (scratch.width !== iw || scratch.height !== ih) {
+      scratch.width = iw;
+      scratch.height = ih;
+    }
+    inspection.draw(scratch.getContext("2d"), iw, ih, step);
+    ctx.drawImage(scratch, ix, iy);
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.35)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(ix + 0.5, iy + 0.5, iw - 1, ih - 1);
   }
 
   // ---- The sound ---- a Shepard tone following the zoom: three orders of magnitude
@@ -479,7 +554,7 @@
     keepAhead();
     var index = indexAt(position), bitmap = decoded[index];
     if (index !== shownIndex && bitmap && bitmap !== true) {
-      show(bitmap);
+      show(bitmap, index);
       shownIndex = index;
     }
     if (liveTone) liveTone.setPitch(pitchOf(index));
@@ -528,6 +603,7 @@
       else if (event.key === "Home") seek(0);
     });
 
+    inspectField.hidden = false;
     btnDownload.hidden = false;
     if (videoProblem) {
       btnDownload.textContent = videoProblem;
@@ -553,7 +629,7 @@
   var FILE_BOXES = [[4096, 2304], [3840, 2160], [1920, 1080]];
   var SOUND_RATE = 48000;
 
-  var videoEncoder = null, videoFile = null; // videoFile: { mux, width, height }
+  var videoEncoder = null, videoFile = null; // videoFile: { mux, width, height, config }
   var videoChunks = [], videoMeta = null;
   var videoProblem = null; // why there is no file to save
   var shrunk = null, shrunkCtx = null;
@@ -594,7 +670,7 @@
         videoProblem = "Saving isn't supported in this browser";
         return;
       }
-      videoFile = { mux: pick.mux, width: pick.config.width, height: pick.config.height };
+      videoFile = { mux: pick.mux, width: pick.config.width, height: pick.config.height, config: pick.config };
       videoEncoder = new VideoEncoder({
         output: function (chunk, meta) {
           if (!videoMeta && meta && meta.decoderConfig) videoMeta = meta;
@@ -629,14 +705,78 @@
       shrunkCtx.drawImage(copy, 0, 0, shrunk.width, shrunk.height);
       source = shrunk;
     }
-    var frame = null;
     try {
-      frame = new VideoFrame(source, { timestamp: Math.round(i * 1e6 / FPS), duration: Math.round(1e6 / FPS) });
-      videoEncoder.encode(frame, { keyFrame: i % KEYFRAME_EVERY === 0 });
+      encodeCanvas(videoEncoder, source, i);
     } catch (err) {
       dropVideo(err);
     }
-    if (frame) frame.close();
+  }
+
+  // `source` as frame i of the movie.
+  function encodeCanvas(encoder, source, i) {
+    var frame = new VideoFrame(source, { timestamp: Math.round(i * 1e6 / FPS), duration: Math.round(1e6 / FPS) });
+    try {
+      encoder.encode(frame, { keyFrame: i % KEYFRAME_EVERY === 0 });
+    } finally {
+      frame.close();
+    }
+  }
+
+  // The movie again with the Inspect overlay drawn on, from the frames' JPEGs (the sharper copy); the next few
+  // are unpacked while one encodes. A repeated frame is already on the canvas, overlay and all.
+  function encodeWithOverlay(onProgress) {
+    var chunks = [], meta = null;
+    var encoder = new VideoEncoder({
+      output: function (chunk, m) {
+        if (!meta && m && m.decoderConfig) meta = m;
+        chunks.push(chunk);
+      },
+      error: function () {}, // flush() rejects with it
+    });
+    encoder.configure(videoFile.config);
+    var film = document.createElement("canvas"), scratch = document.createElement("canvas");
+    film.width = videoFile.width;
+    film.height = videoFile.height;
+    var filmCtx = film.getContext("2d");
+    filmCtx.imageSmoothingQuality = "high";
+    var unpacking = {};
+    function unpack(i) {
+      if (i < blobs.length && !unpacking[i] && (i === 0 || blobs[i] !== blobs[i - 1])) unpacking[i] = createImageBitmap(blobs[i]);
+    }
+    return new Promise(function (resolve, reject) {
+      var i = 0;
+      function fail(err) {
+        if (encoder.state !== "closed") encoder.close();
+        reject(err);
+      }
+      function next() {
+        if (i >= blobs.length) {
+          encoder.flush().then(function () {
+            encoder.close();
+            resolve({ chunks: chunks, meta: meta });
+          }, fail);
+          return;
+        }
+        if (encoder.encodeQueueSize > 2) {
+          setTimeout(next, 4);
+          return;
+        }
+        for (var ahead = i; ahead < i + 4; ahead++) unpack(ahead);
+        (unpacking[i] || Promise.resolve(null)).then(function (bitmap) {
+          if (bitmap) {
+            delete unpacking[i];
+            filmCtx.drawImage(bitmap, 0, 0, film.width, film.height);
+            bitmap.close();
+            drawInspection(filmCtx, scratch, frameWidth, frameHeight, 0, 0, film.width / frameWidth, frames[i].step);
+          }
+          encodeCanvas(encoder, film, i);
+          i++;
+          if (i % 15 === 0) onProgress(i / blobs.length);
+          next();
+        }).catch(fail);
+      }
+      next();
+    });
   }
 
   // Holds the next render while the encoder is behind: each frame waiting on it is a whole picture in memory.
@@ -695,10 +835,15 @@
 
   function downloadMovie() {
     if (btnDownload.disabled) return;
-    var withSound = soundOn;
+    var withSound = soundOn, withOverlay = !!inspection && inspectCorner.value !== "off";
     btnDownload.disabled = true;
+    inspectCorner.disabled = true;
     btnDownload.textContent = "Saving";
-    (withSound ? soundTrack() : Promise.resolve(null)).then(function (sound) {
+    var picture = withOverlay
+      ? encodeWithOverlay(function (done) { btnDownload.textContent = "Saving " + Math.round(done * 100) + "%"; })
+      : Promise.resolve({ chunks: videoChunks, meta: videoMeta });
+    Promise.all([picture, withSound ? soundTrack() : Promise.resolve(null)]).then(function (done) {
+      var video = done[0], sound = done[1];
       // The file in pieces as written; the one write back over earlier bytes is the mdat's size.
       var parts = [], size = 0;
       var target = new Mp4Muxer.StreamTarget({
@@ -725,12 +870,12 @@
       });
       // In time order, so the two tracks interleave.
       var audio = sound ? sound.chunks : [], v = 0, a = 0;
-      while (v < videoChunks.length || a < audio.length) {
-        if (a < audio.length && (v >= videoChunks.length || audio[a].timestamp < videoChunks[v].timestamp)) {
+      while (v < video.chunks.length || a < audio.length) {
+        if (a < audio.length && (v >= video.chunks.length || audio[a].timestamp < video.chunks[v].timestamp)) {
           muxer.addAudioChunk(audio[a], a === 0 ? sound.meta : undefined);
           a++;
         } else {
-          muxer.addVideoChunk(videoChunks[v], v === 0 ? videoMeta : undefined);
+          muxer.addVideoChunk(video.chunks[v], v === 0 ? video.meta : undefined);
           v++;
         }
       }
@@ -743,10 +888,11 @@
       save.remove();
       setTimeout(function () { URL.revokeObjectURL(save.href); }, 60000);
       btnDownload.textContent = withSound && !sound ? "Saved without sound: not supported in this browser" : DOWNLOAD_LABEL;
-      btnDownload.disabled = false;
     }).catch(function (err) {
       btnDownload.textContent = "Saving failed: " + ((err && err.message) || err);
+    }).then(function () {
       btnDownload.disabled = false;
+      inspectCorner.disabled = false;
     });
   }
 

@@ -4798,7 +4798,7 @@
   }
 
   // One fixed camera from the authored scene, so hover points are comparable and a big swing moves off-canvas instead of re-fitting.
-  var hoverFit = (function computeFixedHoverFit() {
+  function fitScene(width, height) {
     var minX, maxX, minY, maxY;
     if (scene.frameWidth && scene.frameHeight) {
       // A locked frame is a real wrap boundary: fit it so a wrap shows as a body reappearing on the far edge.
@@ -4814,13 +4814,14 @@
       });
     }
     var w = Math.max(1, maxX - minX), h = Math.max(1, maxY - minY);
-    var scale = 0.85 * Math.min(hoverCanvas.width / w, hoverCanvas.height / h);
+    var scale = 0.85 * Math.min(width / w, height / h);
     return {
       scale: scale,
-      offsetX: hoverCanvas.width / 2 - scale * (minX + maxX) / 2,
-      offsetY: hoverCanvas.height / 2 - scale * (minY + maxY) / 2,
+      offsetX: width / 2 - scale * (minX + maxX) / 2,
+      offsetY: height / 2 - scale * (minY + maxY) / 2,
     };
-  })();
+  }
+  var hoverFit = fitScene(hoverCanvas.width, hoverCanvas.height);
 
   // drawHoverBody: type/isAnchored come from the authored scene, x/y/angle/half from the trajectory row;
   // colorOverride replaces the isAnchored colors so an inspected point reads as "the other scene".
@@ -5213,6 +5214,33 @@
     return (1000 / HOVER_MS_PER_FRAME) * playbackSpeed;
   }
 
+  // A replay at trajectory row `step`; Sticky Edges freeze it at its effectiveMaxStep.
+  function replayFrame(replay, step) {
+    var hoveredStep = Math.min(replay.effectiveMaxStep - 1, step);
+    return { step: hoveredStep, row: replay.trajectory[hoveredStep], isFinal: hoveredStep >= replay.effectiveMaxStep - 1 };
+  }
+  function drawReplayFrame(replay, frame) {
+    var row = frame.row, effectiveRow = [], shownRows = [], tracked = trackedBodySlots(replay.lineageSlots);
+    for (var i = 0; i < row.length; i++) {
+      var bodyRow = (frame.isFinal && replay.wrapOverride && i === replay.wrapOverride.bodyIndex)
+        ? { x: replay.wrapOverride.x, y: replay.wrapOverride.y, angle: replay.wrapOverride.angle, half: row[i].half }
+        : row[i];
+      if (!hoverRowIsLive(i, row)) continue;
+      effectiveRow.push(bodyRow);
+      shownRows[i] = bodyRow;
+      drawHoverBody(hoverBodySpec(i), bodyRow, undefined, isHollow(tracked, i));
+    }
+    drawHoverSprings(shownRows);
+    drawOffscreenMappingArrows(effectiveRow);
+  }
+  // Lifespan is one fact about the whole run (known since findWrapStopStep): held for every frame.
+  function replayBackground(replay, frame) {
+    var v = replay.lifespanValue !== null ? replay.lifespanValue
+      : replay.bounceCounts ? replay.bounceCounts[Math.min(frame.step, replay.bounceCounts.length - 1)]
+      : hoverOutputValue(frame.row, replay.lineageSlots, replay.wrapOverride, frame.isFinal, replay.extraWrapOverrides);
+    return frame.isFinal ? hoverOutputColorFinal(outputColorT(v)) : hoverOutputColor(outputColorT(v));
+  }
+
   // One frame at `playbackStep`, shared by the rAF loop and slider scrubs. An entry Sticky Edges stopped
   // early freezes at its effectiveMaxStep while the readout keeps the full length and the rest keeps going.
   function renderPlaybackFrame() {
@@ -5222,42 +5250,21 @@
     hoverCtx.setTransform(hoverFit.scale, 0, 0, hoverFit.scale, hoverFit.offsetX, hoverFit.offsetY);
     drawFrameBoundary();
 
-    var row, hoveredStep, isFinalFrame;
-    if (activeReplay) {
-      var effectiveMaxStep = activeReplay.effectiveMaxStep;
-      hoveredStep = Math.min(effectiveMaxStep - 1, step);
-      row = activeReplay.trajectory[hoveredStep];
-      isFinalFrame = hoveredStep >= effectiveMaxStep - 1;
-      var effectiveRow = [], shownRows = [], replayTracked = trackedBodySlots(activeReplay.lineageSlots);
-      for (var i = 0; i < row.length; i++) {
-        var bodyRow = (isFinalFrame && activeReplay.wrapOverride && i === activeReplay.wrapOverride.bodyIndex)
-          ? { x: activeReplay.wrapOverride.x, y: activeReplay.wrapOverride.y, angle: activeReplay.wrapOverride.angle, half: row[i].half }
-          : row[i];
-        if (!hoverRowIsLive(i, row)) continue;
-        effectiveRow.push(bodyRow);
-        shownRows[i] = bodyRow;
-        drawHoverBody(hoverBodySpec(i), bodyRow, undefined, isHollow(replayTracked, i));
-      }
-      drawHoverSprings(shownRows);
-      drawOffscreenMappingArrows(effectiveRow);
-    }
+    var shown = activeReplay ? replayFrame(activeReplay, step) : null;
+    if (shown) drawReplayFrame(activeReplay, shown);
 
     // step, not the capped hoveredStep: an inspected point keeps playing after the hovered scene froze.
     drawInspectedAtStep(step);
 
     if (inspectedGroups.length > 0) {
       hoverCanvas.style.backgroundColor = "";
-    } else if (activeReplay) {
-      // Lifespan is one fact about the whole run (known since findWrapStopStep): held for every frame.
-      var v = activeReplay.lifespanValue !== null ? activeReplay.lifespanValue
-        : activeReplay.bounceCounts ? activeReplay.bounceCounts[Math.min(hoveredStep, activeReplay.bounceCounts.length - 1)]
-        : hoverOutputValue(row, activeReplay.lineageSlots, activeReplay.wrapOverride, isFinalFrame, activeReplay.extraWrapOverrides);
-      hoverCanvas.style.backgroundColor = isFinalFrame ? hoverOutputColorFinal(outputColorT(v)) : hoverOutputColor(outputColorT(v));
+    } else if (shown) {
+      hoverCanvas.style.backgroundColor = replayBackground(activeReplay, shown);
     }
 
-    if (activeReplay) {
+    if (shown) {
       hoverReadout.textContent = "X: " + activeReplay.worldPoint.x.toFixed(5) + ", Y: " + activeReplay.worldPoint.y.toFixed(5) +
-        " - step " + (hoveredStep + 1) + " / " + activeReplay.trajectory.length;
+        " - step " + (shown.step + 1) + " / " + activeReplay.trajectory.length;
     } else {
       var overallMaxStep = playbackClockCeiling();
       var inspectedCount = totalInspectedPointCount();
@@ -5485,19 +5492,12 @@
     return heads.length ? total / heads.length : 0;
   }
 
-  function runHoverAt(worldPoint) {
-    var compiled, trajectory;
+  // The replay of `worldPoint` at `precision`. Throws if the GPU run does; no bodies gives an empty trajectory.
+  function replayAt(worldPoint, precision) {
     var steps = hoverStepCount();
-    try {
-      // At the grid's current precision, so the replay is of the pixel under the cursor, not a float32 approximation.
-      compiled = PhysicsGridCodegen.compileHoverTrajectoryGLSL(scene, worldPoint.x, worldPoint.y, steps, effectivePrecision(), worldPoint.xLo, worldPoint.yLo);
-      trajectory = PhysicsGPU.runCompiledTrajectoryOnGPU(compiled, steps);
-    } catch (err) {
-      global.AppMessage.toast("Couldn't replay this point: " + (err.message || err));
-      showHoverEmpty();
-      return;
-    }
-    if (trajectory.length === 0) { global.AppMessage.toast("This scene has no bodies to replay."); showHoverEmpty(); return; }
+    var compiled = PhysicsGridCodegen.compileHoverTrajectoryGLSL(scene, worldPoint.x, worldPoint.y, steps, precision, worldPoint.xLo, worldPoint.yLo);
+    var trajectory = PhysicsGPU.runCompiledTrajectoryOnGPU(compiled, steps);
+    if (trajectory.length === 0) return { trajectory: trajectory };
     var isLifespan = scene.output.property === "lifespan";
     var stopStep = null, wrapOverride = null, lifespanValue = simulationSteps;
     var extraWrapOverrides = [];
@@ -5519,7 +5519,7 @@
       }
     }
     var effectiveMaxStep = stopStep != null ? Math.min(trajectory.length, stopStep) : trajectory.length;
-    beginPlaybackSession({
+    return {
       trajectory: trajectory,
       worldPoint: worldPoint,
       effectiveMaxStep: effectiveMaxStep,
@@ -5529,8 +5529,22 @@
       lineageSlots: isLifespan || isBouncesOutput ? null : outputLineageSlotsAt(worldPoint, steps),
       extraWrapOverrides: extraWrapOverrides,
       bounceEvents: bounceEventsAt(worldPoint, steps),
-      // With Map Evolution open a run is user-started: land on the first frame and wait.
-    }, /* autoplay */ !playbackMenu.isOpen());
+    };
+  }
+
+  function runHoverAt(worldPoint) {
+    var replay;
+    try {
+      // At the grid's current precision, so the replay is of the pixel under the cursor, not a float32 approximation.
+      replay = replayAt(worldPoint, effectivePrecision());
+    } catch (err) {
+      global.AppMessage.toast("Couldn't replay this point: " + (err.message || err));
+      showHoverEmpty();
+      return;
+    }
+    if (replay.trajectory.length === 0) { global.AppMessage.toast("This scene has no bodies to replay."); showHoverEmpty(); return; }
+    // With Map Evolution open a run is user-started: land on the first frame and wait.
+    beginPlaybackSession(replay, /* autoplay */ !playbackMenu.isOpen());
   }
 
   // Cursor off the grid with points inspected: keep playing them together instead of the empty state.
@@ -7847,6 +7861,35 @@
     var spacing = clamp(spec.scale, MIN_SCALE, MAX_SCALE) / (spec.height || referenceHeightPx());
     var precision = precisionMode === "auto" ? precisionForSpacing(spacing, spec.center) : precisionMode;
     return { name: precision, slowdown: PRECISION_SLOWDOWN[precision] || 1 };
+  };
+
+  // The Inspect replay of `world` (double-double) at `precision`, for the movie player's overlay, or null if the
+  // scene has no bodies. draw() paints Map Evolution frame `frame` into the player's canvas as the preview would.
+  global.FractalGrid.inspection = function (world, precision) {
+    var replay = replayAt(world, precision);
+    if (!replay.trajectory.length) return null;
+    return {
+      aspect: scene.frameWidth && scene.frameHeight ? scene.frameWidth / scene.frameHeight : hoverCanvas.width / hoverCanvas.height,
+      draw: function (ctx, width, height, frame) {
+        // Frame N is the state after N steps: row N - 1.
+        var shown = replayFrame(replay, Math.max(0, frame - 1));
+        // The preview's drawing goes to hoverCtx at hoverFit: pointed at the player's canvas for this one frame.
+        var savedCtx = hoverCtx, savedFit = hoverFit;
+        hoverCtx = ctx;
+        hoverFit = fitScene(width, height);
+        try {
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.fillStyle = replayBackground(replay, shown);
+          ctx.fillRect(0, 0, width, height);
+          ctx.setTransform(hoverFit.scale, 0, 0, hoverFit.scale, hoverFit.offsetX, hoverFit.offsetY);
+          drawFrameBoundary();
+          drawReplayFrame(replay, shown);
+        } finally {
+          hoverCtx = savedCtx;
+          hoverFit = savedFit;
+        }
+      },
+    };
   };
 
   // ---- The address bar ----

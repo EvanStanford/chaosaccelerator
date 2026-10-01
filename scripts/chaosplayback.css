@@ -65,6 +65,26 @@ button.bar-link:disabled {
   border-color: var(--accent);
 }
 
+.bar-select {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.bar-select[hidden] {
+  display: none;
+}
+.bar-select select {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 8px;
+}
+
 #movie-facts {
   margin-left: auto;
   color: var(--text-dim);
@@ -84,7 +104,7 @@ button.bar-link:disabled {
   overflow: hidden;
 }
 
-/* The renderer: the app itself, sized in px by chaosplayback.js to the movie's resolution.
+/* The renderer: the app itself, whose stills take the movie's resolution whatever this box's size.
    Painted (it only renders inside animation frames) but under #screen, out of reach of pointer and Tab. */
 #engine {
   position: absolute;

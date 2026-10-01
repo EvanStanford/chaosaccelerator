@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#1b1e27">
 <title>Physics Fractal: Movie</title>
-<link rel="stylesheet" href="scripts/chaosplayback.css?v=m81">
+<link rel="stylesheet" href="scripts/chaosplayback.css?v=m82">
 </head>
 <body>
 
@@ -17,6 +17,16 @@
 <header id="player-bar">
   <a id="back-to-map" class="bar-link" href="chaos.html">&larr; Back to map</a>
   <span id="movie-facts"></span>
+  <label id="inspect-field" class="bar-select" hidden title="Show the simulation at the center of the most zoomed-in keyframe, in step with the movie.">
+    <span>Inspect point</span>
+    <select id="inspect-corner">
+      <option value="off" selected>Off</option>
+      <option value="top-left">Top left</option>
+      <option value="top-right">Top right</option>
+      <option value="bottom-left">Bottom left</option>
+      <option value="bottom-right">Bottom right</option>
+    </select>
+  </label>
   <button id="download" class="bar-link" type="button" hidden title="Save the movie as an MP4 video, with the sound if it is on.">Download</button>
 </header>
 
@@ -65,9 +75,9 @@
   </button>
 </footer>
 
-<script src="scripts/share-url.js?v=m81"></script>
-<script src="scripts/movie-path.js?v=m81"></script>
-<script src="scripts/mp4-muxer.js?v=m81"></script>
-<script src="scripts/chaosplayback.js?v=m81"></script>
+<script src="scripts/share-url.js?v=m82"></script>
+<script src="scripts/movie-path.js?v=m82"></script>
+<script src="scripts/mp4-muxer.js?v=m82"></script>
+<script src="scripts/chaosplayback.js?v=m82"></script>
 </body>
 </html>
