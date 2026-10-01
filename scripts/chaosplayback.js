@@ -149,7 +149,8 @@
 
   function finishRender() {
     renderStatus.textContent = "Finishing\u2026";
-    Promise.all(blobPromises).then(function (all) {
+    Promise.all([Promise.all(blobPromises), finishVideo()]).then(function (done) {
+      var all = done[0];
       if (all.some(function (blob) { return !blob; })) {
         fail("This browser couldn't store a frame that size. Try a lower resolution in the Movie card.");
         return;
@@ -183,6 +184,13 @@
   });
   btnEndEarlyYes.addEventListener("click", endEarly);
 
+  // Frame i is in `copy`: into the video file, then on to the next.
+  function frameDone(grid, i) {
+    encodeFrame(i);
+    reportProgress(i + 1);
+    whenEncoderReady(function () { renderFrame(grid, i + 1); });
+  }
+
   function renderFrame(grid, i) {
     if (endedEarly) return;
     if (i >= frames.length) {
@@ -191,8 +199,7 @@
     }
     if (i > 0 && frameKey(frames[i]) === frameKey(frames[i - 1])) {
       blobPromises[i] = blobPromises[i - 1];
-      reportProgress(i + 1);
-      renderFrame(grid, i + 1);
+      frameDone(grid, i);
       return;
     }
     frameStartedAt = performance.now();
@@ -201,9 +208,11 @@
       // Called from inside the renderer's own frame: anything thrown here would end its render loop.
       if (endedEarly) return; // this frame was given up on
       try {
-        if (copy.width !== canvas.width || copy.height !== canvas.height) {
-          copy.width = frameWidth = canvas.width;
-          copy.height = frameHeight = canvas.height;
+        // Video encoders need even sizes, and Chrome garbles a canvas frame whose width isn't a multiple of 4.
+        var w = canvas.width - canvas.width % 4, h = canvas.height - canvas.height % 2;
+        if (copy.width !== w || copy.height !== h) {
+          copy.width = frameWidth = w;
+          copy.height = frameHeight = h;
         }
         copyCtx.drawImage(canvas, 0, 0);
         stampWatermark();
@@ -216,8 +225,9 @@
         show(copy);
         recentFrameMs.push(performance.now() - frameStartedAt);
         if (recentFrameMs.length > 12) recentFrameMs.shift();
-        reportProgress(i + 1);
-        renderFrame(grid, i + 1);
+        // The first frame sets the file's size, so the encoder is chosen now.
+        if (i === 0) openVideo(w, h).then(function () { frameDone(grid, 0); });
+        else frameDone(grid, i);
       } catch (err) {
         fail("Rendering stopped: " + (err.message || err));
       }
@@ -306,9 +316,10 @@
       if (a >= TONE_HALF_WIDTH) return 0;
       return 0.5 * (1 + Math.cos(Math.PI * (a - TONE_FLAT) / (TONE_HALF_WIDTH - TONE_FLAT)));
     }
+    // `at`: when, in ctx's time; now if left out. A saved file's tone is scheduled ahead.
     return {
-      setPitch: function (octaves) {
-        var now = ctx.currentTime;
+      setPitch: function (octaves, at) {
+        var now = at === undefined ? ctx.currentTime : at;
         partials.forEach(function (p) {
           var x = place(octaves, p.k);
           var hz = TONE_CENTER_HZ * Math.pow(2, x);
@@ -321,12 +332,8 @@
           p.x = x;
         });
       },
-      setLevel: function (level) {
-        master.gain.setTargetAtTime(TONE_LEVEL * level, ctx.currentTime, TONE_FADE_S);
-      },
-      stop: function () {
-        partials.forEach(function (p) { p.osc.stop(); });
-        master.disconnect();
+      setLevel: function (level, at) {
+        master.gain.setTargetAtTime(TONE_LEVEL * level, at === undefined ? ctx.currentTime : at, TONE_FADE_S);
       },
     };
   }
@@ -474,98 +481,224 @@
     });
 
     btnDownload.hidden = false;
+    if (videoProblem) {
+      btnDownload.textContent = videoProblem;
+      btnDownload.disabled = true;
+    }
     btnDownload.addEventListener("click", downloadMovie);
 
     setPlaying(true);
     requestAnimationFrame(tick);
   }
 
-  // ---- Saving it as a file ---- the frames are replayed once, off screen, into a canvas
-  // MediaRecorder is filming, so it takes as long as the movie and produces whatever this
-  // browser records (WebM in Chrome/Firefox, MP4 in Safari). Paced against the clock, not by
-  // counting timeouts. With sound on, a second tone plays into the recording alone.
+  // ---- Saving it as a file ---- every frame is encoded (WebCodecs) as soon as it is rendered,
+  // straight from the picture on screen; Download puts the chunks in an MP4 (mp4-muxer.js), with the tone if sound is on.
   var DOWNLOAD_LABEL = "Download";
-  function downloadMovie() {
-    if (btnDownload.disabled) return;
-    if (typeof MediaRecorder !== "function" || !HTMLCanvasElement.prototype.captureStream) {
-      btnDownload.textContent = "Not supported in this browser";
-      btnDownload.disabled = true;
-      return;
+  var KEYFRAME_EVERY = FPS; // so players can seek
+  // H.264 plays everywhere, so it is tried at every size before VP9 or AV1. High profile, levels 4.0 to 5.2.
+  var VIDEO_CODECS = [
+    ["avc", ["avc1.640028", "avc1.64002a", "avc1.640032", "avc1.640033", "avc1.640034"]],
+    ["vp9", ["vp09.00.51.08"]],
+    ["av1", ["av01.0.13M.08"]],
+  ];
+  // A frame no encoder takes whole is shrunk into these in turn (long side, short side).
+  var FILE_BOXES = [[4096, 2304], [3840, 2160], [1920, 1080]];
+  var SOUND_RATE = 48000;
+
+  var videoEncoder = null, videoFile = null; // videoFile: { mux, width, height }
+  var videoChunks = [], videoMeta = null;
+  var videoProblem = null; // why there is no file to save
+  var shrunk = null, shrunkCtx = null;
+
+  // The first of `tries` ({ config }) that `Codec` accepts, or null.
+  function firstSupported(Codec, tries, i) {
+    i = i || 0;
+    if (i >= tries.length) return Promise.resolve(null);
+    return Codec.isConfigSupported(tries[i].config).then(function (answer) {
+      return answer.supported ? tries[i] : firstSupported(Codec, tries, i + 1);
+    }, function () { return firstSupported(Codec, tries, i + 1); });
+  }
+
+  function openVideo(width, height) {
+    if (typeof VideoEncoder !== "function") {
+      videoProblem = "Saving isn't supported in this browser";
+      return Promise.resolve();
     }
-    var film = document.createElement("canvas");
-    film.width = frameWidth;
-    film.height = frameHeight;
-    var filmCtx = film.getContext("2d");
-    var withSound = soundOn && !!audioCtx;
-    var types = withSound
-      ? ["video/mp4;codecs=avc1,mp4a.40.2", "video/mp4", "video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"]
-      : ["video/mp4;codecs=avc1", "video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
-    var type = types.filter(function (t) { return MediaRecorder.isTypeSupported(t); })[0];
-    var recorder, filmTone = null;
-    try {
-      var stream = film.captureStream(FPS);
-      if (withSound) {
-        var sink = audioCtx.createMediaStreamDestination();
-        filmTone = new ShepardTone(audioCtx, sink);
-        stream.addTrack(sink.stream.getAudioTracks()[0]);
-      }
-      // Generous: fine noise turns to mush at a default bitrate.
-      recorder = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: Math.min(60e6, Math.max(8e6, frameWidth * frameHeight * 12)), audioBitsPerSecond: 128000 });
-    } catch (err) {
-      if (filmTone) filmTone.stop();
-      btnDownload.textContent = "Not supported in this browser";
-      btnDownload.disabled = true;
-      return;
-    }
-    var chunks = [];
-    recorder.ondataavailable = function (event) { if (event.data && event.data.size) chunks.push(event.data); };
-    recorder.onstop = function () {
-      if (filmTone) filmTone.stop();
-      var file = new Blob(chunks, { type: recorder.mimeType || type });
-      var a = document.createElement("a");
-      a.href = URL.createObjectURL(file);
-      a.download = "chaosaccelerator-movie." + (/mp4/.test(file.type) ? "mp4" : "webm");
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(function () { URL.revokeObjectURL(a.href); }, 60000);
-      btnDownload.textContent = DOWNLOAD_LABEL;
-      btnDownload.disabled = false;
-    };
-    btnDownload.disabled = true;
-    var startedAt = 0;
-    function formatRecorded(seconds) {
-      seconds = Math.floor(seconds);
-      var m = Math.floor(seconds / 60), s = seconds % 60;
-      return m ? m + "m" + (s < 10 ? "0" : "") + s + "s" : s + "s";
-    }
-    var movieLength = formatRecorded(blobs.length / FPS);
-    function film1(i) {
-      if (i >= blobs.length) {
-        // One more frame's time, or the last frame is cut short; with sound, long enough to fade.
-        if (filmTone) filmTone.setLevel(0);
-        setTimeout(function () { recorder.stop(); }, filmTone ? Math.max(1000 / FPS, 1000 * TONE_FADE_S * 4) : 1000 / FPS);
+    var sizes = [[width, height]];
+    FILE_BOXES.forEach(function (box) {
+      var s = Math.min(box[0] / Math.max(width, height), box[1] / Math.min(width, height));
+      if (s < 1) sizes.push([4 * Math.floor(width * s / 4), 2 * Math.floor(height * s / 2)]);
+    });
+    var tries = [];
+    VIDEO_CODECS.forEach(function (family) {
+      sizes.forEach(function (size) {
+        family[1].forEach(function (codec) {
+          tries.push({ mux: family[0], config: {
+            codec: codec, width: size[0], height: size[1], framerate: FPS,
+            // Generous: fine noise turns to mush at a default bitrate.
+            bitrate: Math.min(60e6, Math.max(8e6, size[0] * size[1] * 12)),
+          } });
+        });
+      });
+    });
+    return firstSupported(VideoEncoder, tries).then(function (pick) {
+      if (!pick) {
+        videoProblem = "Saving isn't supported in this browser";
         return;
       }
-      createImageBitmap(blobs[i]).then(function (bitmap) {
-        var due = startedAt + i * 1000 / FPS;
-        setTimeout(function () {
-          filmCtx.drawImage(bitmap, 0, 0);
-          bitmap.close();
-          if (filmTone) filmTone.setPitch(pitchOf(i));
-          btnDownload.textContent = "Recording in real time " + formatRecorded((i + 1) / FPS) + " out of " + movieLength;
-          film1(i + 1);
-        }, Math.max(0, due - performance.now()));
-      }, function () { recorder.stop(); });
+      videoFile = { mux: pick.mux, width: pick.config.width, height: pick.config.height };
+      videoEncoder = new VideoEncoder({
+        output: function (chunk, meta) {
+          if (!videoMeta && meta && meta.decoderConfig) videoMeta = meta;
+          videoChunks.push(chunk);
+        },
+        error: dropVideo,
+      });
+      videoEncoder.configure(pick.config);
+    }).catch(dropVideo);
+  }
+
+  function dropVideo(err) {
+    if (videoProblem) return;
+    videoProblem = "Saving failed: " + ((err && err.message) || err);
+    videoChunks = [];
+    if (videoEncoder && videoEncoder.state !== "closed") videoEncoder.close();
+    videoEncoder = null;
+  }
+
+  // Frame i, from `copy`, shrunk first if the file is smaller.
+  function encodeFrame(i) {
+    if (!videoEncoder) return;
+    var source = copy;
+    if (copy.width !== videoFile.width || copy.height !== videoFile.height) {
+      if (!shrunk) {
+        shrunk = document.createElement("canvas");
+        shrunk.width = videoFile.width;
+        shrunk.height = videoFile.height;
+        shrunkCtx = shrunk.getContext("2d");
+        shrunkCtx.imageSmoothingQuality = "high";
+      }
+      shrunkCtx.drawImage(copy, 0, 0, shrunk.width, shrunk.height);
+      source = shrunk;
     }
-    // First frame on the canvas before filming starts, so the file doesn't open on a blank.
-    createImageBitmap(blobs[0]).then(function (bitmap) {
-      filmCtx.drawImage(bitmap, 0, 0);
-      bitmap.close();
-      if (filmTone) { filmTone.setPitch(pitchOf(0)); filmTone.setLevel(1); }
-      recorder.start();
-      startedAt = performance.now();
-      film1(1);
+    var frame = null;
+    try {
+      frame = new VideoFrame(source, { timestamp: Math.round(i * 1e6 / FPS), duration: Math.round(1e6 / FPS) });
+      videoEncoder.encode(frame, { keyFrame: i % KEYFRAME_EVERY === 0 });
+    } catch (err) {
+      dropVideo(err);
+    }
+    if (frame) frame.close();
+  }
+
+  // Holds the next render while the encoder is behind: each frame waiting on it is a whole picture in memory.
+  function whenEncoderReady(then) {
+    if (videoEncoder && videoEncoder.encodeQueueSize > 2) setTimeout(whenEncoderReady, 10, then);
+    else then();
+  }
+
+  function finishVideo() {
+    if (!videoEncoder) return Promise.resolve();
+    return videoEncoder.flush().then(function () {
+      videoEncoder.close();
+      videoEncoder = null;
+    }).catch(dropVideo);
+  }
+
+  // The tone the player plays, rendered ahead and encoded; null where this browser can't.
+  function soundTrack() {
+    if (typeof AudioEncoder !== "function" || typeof OfflineAudioContext !== "function") return Promise.resolve(null);
+    var tries = [["aac", "mp4a.40.2"], ["opus", "opus"]].map(function (c) {
+      return { mux: c[0], config: { codec: c[1], sampleRate: SOUND_RATE, numberOfChannels: 1, bitrate: 128000 } };
+    });
+    return firstSupported(AudioEncoder, tries).then(function (pick) {
+      if (!pick) return null;
+      var seconds = frames.length / FPS;
+      var offline = new OfflineAudioContext(1, Math.ceil(seconds * SOUND_RATE), SOUND_RATE);
+      var tone = new ShepardTone(offline, offline.destination);
+      tone.setLevel(1, 0);
+      for (var i = 0; i < frames.length; i++) tone.setPitch(pitchOf(i), i / FPS);
+      tone.setLevel(0, Math.max(0, seconds - 4 * TONE_FADE_S)); // silent by the end
+      return offline.startRendering().then(function (buffer) {
+        var chunks = [], meta = null;
+        var encoder = new AudioEncoder({
+          output: function (chunk, m) {
+            if (!meta && m && m.decoderConfig) meta = m;
+            chunks.push(chunk);
+          },
+          error: function () {}, // flush() rejects with it
+        });
+        encoder.configure(pick.config);
+        var samples = buffer.getChannelData(0);
+        for (var at = 0; at < samples.length; at += SOUND_RATE) {
+          var part = samples.subarray(at, at + SOUND_RATE);
+          var data = new AudioData({ format: "f32-planar", sampleRate: SOUND_RATE, numberOfChannels: 1,
+            numberOfFrames: part.length, timestamp: Math.round(at * 1e6 / SOUND_RATE), data: part });
+          encoder.encode(data);
+          data.close();
+        }
+        return encoder.flush().then(function () {
+          encoder.close();
+          return { mux: pick.mux, chunks: chunks, meta: meta };
+        });
+      });
+    });
+  }
+
+  function downloadMovie() {
+    if (btnDownload.disabled) return;
+    var withSound = soundOn;
+    btnDownload.disabled = true;
+    btnDownload.textContent = "Saving";
+    (withSound ? soundTrack() : Promise.resolve(null)).then(function (sound) {
+      // The file in pieces as written; the one write back over earlier bytes is the mdat's size.
+      var parts = [], size = 0;
+      var target = new Mp4Muxer.StreamTarget({
+        onData: function (data, position) {
+          if (position === size) {
+            parts.push(data);
+            size += data.byteLength;
+            return;
+          }
+          var start = 0;
+          parts.forEach(function (part) {
+            var from = Math.max(position, start), to = Math.min(position + data.byteLength, start + part.byteLength);
+            if (from < to) part.set(data.subarray(from - position, to - position), from - start);
+            start += part.byteLength;
+          });
+        },
+      });
+      var muxer = new Mp4Muxer.Muxer({
+        target: target,
+        video: { codec: videoFile.mux, width: videoFile.width, height: videoFile.height, frameRate: FPS },
+        audio: sound ? { codec: sound.mux, numberOfChannels: 1, sampleRate: SOUND_RATE } : undefined,
+        fastStart: false,
+        firstTimestampBehavior: "offset",
+      });
+      // In time order, so the two tracks interleave.
+      var audio = sound ? sound.chunks : [], v = 0, a = 0;
+      while (v < videoChunks.length || a < audio.length) {
+        if (a < audio.length && (v >= videoChunks.length || audio[a].timestamp < videoChunks[v].timestamp)) {
+          muxer.addAudioChunk(audio[a], a === 0 ? sound.meta : undefined);
+          a++;
+        } else {
+          muxer.addVideoChunk(videoChunks[v], v === 0 ? videoMeta : undefined);
+          v++;
+        }
+      }
+      muxer.finalize();
+      var save = document.createElement("a");
+      save.href = URL.createObjectURL(new Blob(parts, { type: "video/mp4" }));
+      save.download = "chaosaccelerator-movie.mp4";
+      document.body.appendChild(save);
+      save.click();
+      save.remove();
+      setTimeout(function () { URL.revokeObjectURL(save.href); }, 60000);
+      btnDownload.textContent = withSound && !sound ? "Saved without sound: not supported in this browser" : DOWNLOAD_LABEL;
+      btnDownload.disabled = false;
+    }).catch(function (err) {
+      btnDownload.textContent = "Saving failed: " + ((err && err.message) || err);
+      btnDownload.disabled = false;
     });
   }
 
