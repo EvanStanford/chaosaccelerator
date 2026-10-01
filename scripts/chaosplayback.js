@@ -45,7 +45,7 @@
     return;
   }
   var movie = link.view.movie;
-  var quality = MoviePath.QUALITIES[Math.min(movie.quality, MoviePath.QUALITIES.length - 1)];
+  var movieSize = movie.size, antialias = movie.antialias;
 
   // The way back, keyframes included, so the Movie card comes up holding this movie.
   var first = movie.keyframes[0];
@@ -91,7 +91,6 @@
   var frameWidth = 0, frameHeight = 0;
   var copy = document.createElement("canvas");
   var copyCtx = copy.getContext("2d");
-  var recentFrameMs = [];
   // Packed so far, for the size estimate: counted per frame of the MOVIE, shared pictures included.
   var packedBytes = 0, packedFrames = 0;
   function formatBytes(bytes) {
@@ -127,6 +126,55 @@
     return (seconds / 3600).toFixed(1) + " h";
   }
 
+  // ---- Time left ---- the renderer draws once a display refresh, so a frame takes its work plus half a refresh
+  // on average, and at least one. Work is steps times a cost per step at the frame's precision: measured once frames
+  // render at it, and until then the last measured cost scaled by the precisions' slowdowns over float32 (10x, 40x, 70x).
+  var refreshMs = 1000 / 60;
+  var frameCosts = [];  // per frame { precision, slowdown, steps }; null where it repeats the frame before, which is free
+  var stepCosts = {};   // precision -> { slowdown, ms: recent ms per step }; the first frame at each may build its program, so is left out
+  var lastMeasured = null, measuredFrames = 0;
+
+  function measureRefresh() {
+    var stamps = [];
+    requestAnimationFrame(function sample(t) {
+      stamps.push(t);
+      if (stamps.length < 12) { requestAnimationFrame(sample); return; }
+      var gaps = stamps.slice(1).map(function (at, k) { return at - stamps[k]; }).sort(function (a, b) { return a - b; });
+      refreshMs = gaps[gaps.length >> 1];
+    });
+  }
+
+  function noteFrameTime(cost, ms) {
+    var known = stepCosts[cost.precision];
+    if (!known) {
+      stepCosts[cost.precision] = { slowdown: cost.slowdown, ms: [] };
+      return;
+    }
+    known.ms.push(Math.max(0, ms - refreshMs / 2) / cost.steps);
+    if (known.ms.length > 12) known.ms.shift();
+    lastMeasured = known;
+    measuredFrames += 1;
+  }
+
+  // null until a few frames have been measured.
+  function msLeft(from) {
+    if (measuredFrames < 3) return null;
+    function mean(list) { return list.reduce(function (a, b) { return a + b; }, 0) / list.length; }
+    var perStep = {};
+    Object.keys(stepCosts).forEach(function (precision) {
+      if (stepCosts[precision].ms.length) perStep[precision] = mean(stepCosts[precision].ms);
+    });
+    var perSlowdown = mean(lastMeasured.ms) / lastMeasured.slowdown;
+    var total = 0;
+    for (var i = from; i < frames.length; i++) {
+      var cost = frameCosts[i];
+      if (!cost) continue;
+      var rate = perStep[cost.precision] !== undefined ? perStep[cost.precision] : perSlowdown * cost.slowdown;
+      total += Math.max(refreshMs, refreshMs / 2 + rate * cost.steps);
+    }
+    return total;
+  }
+
   function reportProgress(done) {
     renderedCount = done;
     btnEndEarly.disabled = done < 1;
@@ -134,11 +182,9 @@
     renderStatus.textContent = "Rendering frame " + Math.min(done + 1, frames.length).toLocaleString() + " of " + frames.length.toLocaleString();
     renderBar.style.width = (fraction * 100).toFixed(1) + "%";
     progressEl.setAttribute("aria-valuenow", String(Math.round(fraction * 100)));
-    var detail = quality.label + "  \u00b7  " + frameWidth + " \u00d7 " + frameHeight;
-    if (recentFrameMs.length >= 3) {
-      var mean = recentFrameMs.reduce(function (a, b) { return a + b; }, 0) / recentFrameMs.length;
-      detail += "  \u00b7  about " + formatDuration(mean * (frames.length - done) / 1000) + " left";
-    }
+    var detail = movieSize.width + " \u00d7 " + movieSize.height + (antialias ? " with antialiasing" : "");
+    var left = msLeft(done);
+    if (left !== null) detail += "  \u00b7  about " + formatDuration(left / 1000) + " left";
     if (packedFrames > 0) detail += "  \u00b7  about " + formatBytes(packedBytes / packedFrames * frames.length) + " in all";
     renderDetail.textContent = detail + "  \u00b7  pauses while this tab is in the background";
   }
@@ -204,7 +250,8 @@
     }
     frameStartedAt = performance.now();
     var spec = frames[i];
-    grid.renderStill({ center: spec.center, scale: spec.scale, step: spec.step, antialias: quality.antialias }, function (canvas) {
+    grid.renderStill({ center: spec.center, scale: spec.scale, step: spec.step, antialias: antialias,
+      width: movieSize.width, height: movieSize.height }, function (canvas) {
       // Called from inside the renderer's own frame: anything thrown here would end its render loop.
       if (endedEarly) return; // this frame was given up on
       try {
@@ -223,8 +270,7 @@
           packedFrames += 1;
         });
         show(copy);
-        recentFrameMs.push(performance.now() - frameStartedAt);
-        if (recentFrameMs.length > 12) recentFrameMs.shift();
+        noteFrameTime(frameCosts[i], performance.now() - frameStartedAt);
         // The first frame sets the file's size, so the encoder is chosen now.
         if (i === 0) openVideo(w, h).then(function () { frameDone(grid, 0); });
         else frameDone(grid, i);
@@ -241,6 +287,11 @@
     frames = MoviePath.frames(movie.keyframes.map(function (k) {
       return { center: k.center, scale: defaultScale / k.zoom, step: Math.min(k.step, lastStep), seconds: k.seconds };
     }), movie.loop);
+    frameCosts = frames.map(function (f, i) {
+      if (i > 0 && frameKey(f) === frameKey(frames[i - 1])) return null;
+      var precision = grid.stillPrecision({ center: f.center, scale: f.scale, width: movieSize.width, height: movieSize.height });
+      return { precision: precision.name, slowdown: precision.slowdown, steps: Math.max(1, f.step) };
+    });
     blobPromises = new Array(frames.length);
     renderStartedAt = performance.now();
     movieFacts.textContent = frames.length.toLocaleString() + " frames  \u00b7  " + (frames.length / FPS).toFixed(1) + " s";
@@ -250,10 +301,7 @@
 
   function startEngine() {
     renderPanel.hidden = false;
-    var rect = stage.getBoundingClientRect();
-    // Sized ONCE: a renderer that followed the window would restart on every resize.
-    engine.style.width = Math.max(16, Math.round(rect.width / quality.divisor)) + "px";
-    engine.style.height = Math.max(16, Math.round(rect.height / quality.divisor)) + "px";
+    measureRefresh();
     engine.addEventListener("load", function () {
       // A map link starts the map on load (openAddress in transition.js), so by now it has or won't.
       var grid = null;

@@ -1797,8 +1797,9 @@
   function float32UlpAt(magnitude) {
     return Math.pow(2, Math.ceil(Math.log2(Math.max(magnitude, 1e-30))) - 24);
   }
-  // The FINEST spacing the view reaches, so the choice is stable across a run.
+  // The FINEST spacing the view reaches, so the choice is stable across a run. A movie still has its own height.
   function referenceHeightPx() {
+    if (stillSize) return stillSize.height;
     return Math.max(canvasArea.clientHeight * gridDpr(), canvas.height, 1);
   }
   // The distance in world units between two adjacent simulated points.
@@ -1807,9 +1808,10 @@
   function precisionUlpAt(precision, magnitude) {
     return float32UlpAt(magnitude) * Math.pow(2, -24 * (PhysicsDF.wordsFor(precision) - 1));
   }
-  // Coarsest rung with DF_SWITCH_MARGIN_ULPS of its own ULPs per `spacing`.
-  function precisionForSpacing(spacing) {
-    var magnitude = Math.max(Math.abs(view.center.x), Math.abs(view.center.y), sceneCoordinateSpan);
+  // Coarsest rung with DF_SWITCH_MARGIN_ULPS of its own ULPs per `spacing`, around `center` (the view's if left out).
+  function precisionForSpacing(spacing, center) {
+    center = center || view.center;
+    var magnitude = Math.max(Math.abs(center.x), Math.abs(center.y), sceneCoordinateSpan);
     for (var i = 0; i < PRECISION_LADDER.length; i++) {
       if (spacing >= precisionUlpAt(PRECISION_LADDER[i], magnitude) * DF_SWITCH_MARGIN_ULPS) return PRECISION_LADDER[i];
     }
@@ -3953,13 +3955,15 @@
     view.scale = newScale;
     updateZoomReadout();
   }
+  // A movie still's own size in pixels (renderStill), whatever the window; null follows the window.
+  var stillSize = null;
   function resizeCanvas() {
     if (canvasArea.clientWidth <= 0 || canvasArea.clientHeight <= 0) return;
     var dpr = gridDpr();
     // A capped backing store stretched by a non-integer ratio looks wrong pixelated: smooth-scale it instead.
     canvas.classList.toggle("is-upscaled", dpr < (window.devicePixelRatio || 1));
-    var w = Math.max(1, Math.round(canvasArea.clientWidth * dpr));
-    var h = Math.max(1, Math.round(canvasArea.clientHeight * dpr));
+    var w = stillSize ? stillSize.width : Math.max(1, Math.round(canvasArea.clientWidth * dpr));
+    var h = stillSize ? stillSize.height : Math.max(1, Math.round(canvasArea.clientHeight * dpr));
     if (canvas.width !== w || canvas.height !== h) {
       if (pinViewCornerOnResize) pinViewTopLeft(canvas.width, canvas.height, w, h);
       canvas.width = w;
@@ -7559,17 +7563,17 @@
   // between (movie-path.js). Done hands the list, in a link, to chaosplayback.html,
   // which loads this app in a frame and asks for one picture after another via renderStill.
 
-  var MOVIE_QUALITIES = MoviePath.QUALITIES;
-  // keyframes: movie-path.js's shape, [{ center, scale, step, seconds }], seconds null until typed.
-  var movie = { keyframes: [], quality: MOVIE_QUALITIES.length - 1, loop: true };
+  // keyframes: movie-path.js's shape, [{ center, scale, step, seconds }], seconds null until typed. size: in pixels.
+  var movie = { keyframes: [], size: { width: 1280, height: 720 }, antialias: true, loop: true };
 
   var movieMenu = makeMenu("menu-movie", "grid-btn-movie", "movie");
   var challengesMenu = makeMenu("menu-challenges", "grid-btn-challenges", "movie");
   var movieHint = document.getElementById("movie-hint");
   var btnMovieAddKeyframe = document.getElementById("movie-add-keyframe");
   var movieKeyframeList = document.getElementById("movie-keyframe-list");
-  var movieQualitySlider = document.getElementById("movie-quality-slider");
-  var movieQualityReadout = document.getElementById("movie-quality-readout");
+  var movieWidthInput = document.getElementById("movie-width");
+  var movieHeightInput = document.getElementById("movie-height");
+  var movieAntialiasCheckbox = document.getElementById("movie-antialias-checkbox");
   var movieLoopCheckbox = document.getElementById("movie-loop-checkbox");
   var movieSummary = document.getElementById("movie-summary");
   var btnMovieDone = document.getElementById("movie-done");
@@ -7757,8 +7761,9 @@
     });
 
     movieHint.hidden = movie.keyframes.length > 0;
-    movieQualitySlider.value = String(movie.quality);
-    movieQualityReadout.textContent = MOVIE_QUALITIES[movie.quality].label;
+    movieWidthInput.value = String(movie.size.width);
+    movieHeightInput.value = String(movie.size.height);
+    movieAntialiasCheckbox.checked = movie.antialias;
     movieLoopCheckbox.checked = movie.loop;
     var seconds = MoviePath.totalSeconds(movie.keyframes, movie.loop);
     movieSummary.textContent = movie.keyframes.length < 2
@@ -7772,9 +7777,20 @@
     movie.keyframes.push(currentKeyframe());
     updateMovieUI();
   });
-  movieQualitySlider.addEventListener("input", function () {
-    movie.quality = clamp(Number(movieQualitySlider.value), 0, MOVIE_QUALITIES.length - 1);
-    movieQualityReadout.textContent = MOVIE_QUALITIES[movie.quality].label;
+  // Rounded down to what video encoders take (width a multiple of 4, height even), 16 to 4096 a side; anything else is put back.
+  function commitMovieSize() {
+    var w = Math.floor(Number(movieWidthInput.value.replace(/[\s,]/g, "")));
+    var h = Math.floor(Number(movieHeightInput.value.replace(/[\s,]/g, "")));
+    if (w > 0 && h > 0) movie.size = { width: clamp(w - w % 4, 16, 4096), height: clamp(h - h % 2, 16, 4096) };
+    movieWidthInput.value = String(movie.size.width);
+    movieHeightInput.value = String(movie.size.height);
+  }
+  [movieWidthInput, movieHeightInput].forEach(function (input) {
+    input.addEventListener("focus", function () { input.select(); });
+    input.addEventListener("change", commitMovieSize);
+  });
+  movieAntialiasCheckbox.addEventListener("change", function () {
+    movie.antialias = movieAntialiasCheckbox.checked;
   });
   movieLoopCheckbox.addEventListener("change", function () {
     movie.loop = movieLoopCheckbox.checked;
@@ -7809,9 +7825,11 @@
     stillJob = null;
     job.onDone(canvas);
   }
-  // spec: { center: { x, xLo, y, yLo }, scale, step, antialias }
+  // spec: { center: { x, xLo, y, yLo }, scale, step, antialias, width, height }; no width and height: the window's size.
   global.FractalGrid.renderStill = function (spec, onDone) {
     stillJob = { antialias: spec.antialias !== false, onDone: onDone };
+    stillSize = spec.width > 0 && spec.height > 0 ? { width: spec.width, height: spec.height } : null;
+    resizeCanvas();
     stopTimelineClock();
     unlinkMapWhereItIs();
     view.center.x = spec.center.x; view.center.xLo = spec.center.xLo || 0;
@@ -7822,6 +7840,13 @@
     updateZoomReadout();
     updateTimelineUI();
     markDirty();
+  };
+
+  // The precision renderStill(spec) draws at, with its cost over float32, for the movie player's time estimate.
+  global.FractalGrid.stillPrecision = function (spec) {
+    var spacing = clamp(spec.scale, MIN_SCALE, MAX_SCALE) / (spec.height || referenceHeightPx());
+    var precision = precisionMode === "auto" ? precisionForSpacing(spacing, spec.center) : precisionMode;
+    return { name: precision, slowdown: PRECISION_SLOWDOWN[precision] || 1 };
   };
 
   // ---- The address bar ----
@@ -7880,7 +7905,8 @@
           keyframes: movie.keyframes.map(function (k) {
             return { center: k.center, scale: k.scale, zoom: DEFAULT_SCALE / k.scale, step: k.step, seconds: k.seconds };
           }),
-          quality: movie.quality,
+          size: movie.size,
+          antialias: movie.antialias,
           loop: movie.loop,
         },
       },
@@ -7930,7 +7956,8 @@
         seconds: k.seconds,
       };
     });
-    movie.quality = clamp(shared.movie.quality, 0, MOVIE_QUALITIES.length - 1);
+    movie.size = shared.movie.size;
+    movie.antialias = shared.movie.antialias;
     movie.loop = shared.movie.loop;
     updateMovieUI();
 

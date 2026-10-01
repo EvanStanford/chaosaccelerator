@@ -23,7 +23,7 @@
   var DEFAULT_STEPS = 1000;
   var DEFAULT_MAX_BODIES = 20;
   var DEFAULT_EDGE = "sticky";
-  var DEFAULT_MOVIE_QUALITY = 4;
+  var DEFAULT_MOVIE_SIZE = { width: 1280, height: 720 };
 
   var TYPE_CODES = { circle: "ci", line: "ln", funnel: "fu", splitter: "sp" };
   var SIZE_FIELDS = { circle: "radius", line: "length", funnel: "size", splitter: "size" };
@@ -299,7 +299,7 @@
 
   // ---- The map's view ---- what FractalGrid.shareState() hands over and applyShareView()
   // takes back: { center: {x, xLo, y, yLo}, scale, zoom, display, lowSaturation, precision, speed,
-  // volume, inspect: [{type, a, b, count|size, twoPart}], movie: {keyframes, quality, loop} }.
+  // volume, inspect: [{type, a, b, count|size, twoPart}], movie: {keyframes, size: {width, height}, antialias, loop} }.
   // Inspect points are (u, v) in VIEW HEIGHTS FROM THE CENTER, not world coordinates.
 
   function uvNum(v) {
@@ -364,6 +364,14 @@
     };
   }
 
+  // "1920x1080": the movie's frame in pixels.
+  function parseMovieSize(text) {
+    var m = /^(\d+)x(\d+)$/.exec(text);
+    var width = m ? Number(m[1]) : 0, height = m ? Number(m[2]) : 0;
+    if (!(width >= 16 && width <= 4096 && height >= 16 && height <= 4096)) throw new Error("size must be pixels across and down, 16 to 4096 each");
+    return { width: width, height: height };
+  }
+
   function encodeView(view) {
     var fields = [];
     if (view.center) {
@@ -383,7 +391,9 @@
     var movie = view.movie;
     if (movie && movie.keyframes && movie.keyframes.length) {
       fields.push("kfrm:" + movie.keyframes.map(encodeKeyframe).join(";"));
-      if (movie.quality !== undefined && movie.quality !== DEFAULT_MOVIE_QUALITY) fields.push("qual:" + movie.quality);
+      var size = movie.size || DEFAULT_MOVIE_SIZE;
+      if (size.width !== DEFAULT_MOVIE_SIZE.width || size.height !== DEFAULT_MOVIE_SIZE.height) fields.push("size:" + size.width + "x" + size.height);
+      if (movie.antialias === false) fields.push("aa:f");
       if (movie.loop === false) fields.push("loop:f");
     }
     return fields;
@@ -407,7 +417,8 @@
       inspect: attempt("insp", function (t) { return splitList(t).map(decodeInspect); }, []),
       movie: {
         keyframes: attempt("kfrm", function (t) { return splitList(t).map(decodeKeyframe); }, []),
-        quality: attempt("qual", function (t) { return Math.min(DEFAULT_MOVIE_QUALITY, parseIndex(t, "qual")); }, DEFAULT_MOVIE_QUALITY),
+        size: attempt("size", parseMovieSize, { width: DEFAULT_MOVIE_SIZE.width, height: DEFAULT_MOVIE_SIZE.height }),
+        antialias: attempt("aa", function (t) { return parseBool(t, "aa"); }, true),
         loop: attempt("loop", function (t) { return parseBool(t, "loop"); }, true),
       },
     };

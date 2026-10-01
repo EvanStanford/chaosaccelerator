@@ -8,17 +8,17 @@
 <meta name="theme-color" content="#14161c">
 <title>Chaos Accelerator</title>
 <!-- Both views share this document so transition.js can show them at once. -->
-<link rel="stylesheet" href="scripts/physics.css?v=m76">
-<link rel="stylesheet" href="scripts/fractal-grid.css?v=m76">
-<link rel="stylesheet" href="scripts/app-shell.css?v=m76">
-<link rel="stylesheet" href="scripts/fractal-stats.css?v=m76">
-<link rel="stylesheet" href="scripts/responsive-layout.css?v=m76">
+<link rel="stylesheet" href="scripts/physics.css?v=m80">
+<link rel="stylesheet" href="scripts/fractal-grid.css?v=m80">
+<link rel="stylesheet" href="scripts/app-shell.css?v=m80">
+<link rel="stylesheet" href="scripts/fractal-stats.css?v=m80">
+<link rel="stylesheet" href="scripts/responsive-layout.css?v=m80">
 <!-- mobile.css after the app sheets: it must win their cascade without !important. -->
-<link rel="stylesheet" href="scripts/mobile.css?v=m76">
-<link rel="stylesheet" href="scripts/eighties-app.css?v=m76">
-<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m76" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="scripts/mobile.css?v=m80">
+<link rel="stylesheet" href="scripts/eighties-app.css?v=m80">
+<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m80" as="font" type="font/woff2" crossorigin>
 <!-- In <head> on purpose: both views measure their canvas area as they start. -->
-<script src="scripts/layout-mode.js?v=m76"></script>
+<script src="scripts/layout-mode.js?v=m80"></script>
 <!-- A #map/ link should open on the map: hide the editor (still laid out) until transition.js picks the view. -->
 <script>
   if (/^#map\//.test(location.hash)) document.documentElement.classList.add("opening-map");
@@ -593,9 +593,20 @@
                   <p class="readout hint" id="movie-hint">Pan and zoom to a view, pick a frame in Map Evolution if you like, then add it. The camera travels smoothly from each keyframe to the next.</p>
                   <button id="movie-add-keyframe" type="button">Add Keyframe</button>
                   <ol id="movie-keyframe-list"></ol>
-                  <label class="field">
-                    <span>Resolution: <b id="movie-quality-readout">Full + antialiasing</b></span>
-                    <input type="range" id="movie-quality-slider" min="0" max="4" step="1" value="4" aria-label="Movie resolution">
+                  <div class="field" title="Width and height in pixels, up to 4096 each. Video needs the width a multiple of 4 and the height even, so a size rounds down to those.">
+                    <span>Resolution</span>
+                    <div class="movie-size">
+                      <input type="text" id="movie-width" value="1280" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Movie width in pixels">
+                      &times;
+                      <input type="text" id="movie-height" value="720" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Movie height in pixels">
+                    </div>
+                  </div>
+                  <label class="toggle-field" title="Averages four simulations per pixel, each offset by a fraction of a pixel: smoother fine detail, and less shimmer while the camera moves.">
+                    <span>Antialiasing<span class="field-hint">Up to 4x rendering time</span></span>
+                    <span class="toggle-switch">
+                      <input type="checkbox" id="movie-antialias-checkbox" checked>
+                      <span class="toggle-slider"></span>
+                    </span>
                   </label>
                   <label class="toggle-field" title="Adds one more move at the end, from the last keyframe back to the first, so the movie plays on a loop without a jump.">
                     <span>Return to First Keyframe</span>
@@ -733,22 +744,22 @@
 
 </div>
 
-<script src="scripts/app-message.js?v=m76"></script>
-<script src="scripts/physics-engine.js?v=m76"></script>
-<script src="scripts/physics-coords.js?v=m76"></script>
-<script src="scripts/share-url.js?v=m76"></script>
-<script src="scripts/movie-path.js?v=m76"></script>
-<script src="scripts/physics-sound.js?v=m76"></script>
-<script src="scripts/physics-hinge-geometry.js?v=m76"></script>
-<script src="scripts/physics-df.js?v=m76"></script>
-<script src="scripts/physics-gpu.js?v=m76"></script>
-<script src="scripts/physics-gpu-df.js?v=m76"></script>
-<script src="scripts/physics-grid-codegen.js?v=m76"></script>
-<script src="scripts/physics-ui.js?v=m76"></script>
-<script src="scripts/fractal-stats.js?v=m76"></script>
-<script src="scripts/fractal-stats-panel.js?v=m76"></script>
-<script src="scripts/fractal-grid.js?v=m76"></script>
-<script src="scripts/transition.js?v=m76"></script>
+<script src="scripts/app-message.js?v=m80"></script>
+<script src="scripts/physics-engine.js?v=m80"></script>
+<script src="scripts/physics-coords.js?v=m80"></script>
+<script src="scripts/share-url.js?v=m80"></script>
+<script src="scripts/movie-path.js?v=m80"></script>
+<script src="scripts/physics-sound.js?v=m80"></script>
+<script src="scripts/physics-hinge-geometry.js?v=m80"></script>
+<script src="scripts/physics-df.js?v=m80"></script>
+<script src="scripts/physics-gpu.js?v=m80"></script>
+<script src="scripts/physics-gpu-df.js?v=m80"></script>
+<script src="scripts/physics-grid-codegen.js?v=m80"></script>
+<script src="scripts/physics-ui.js?v=m80"></script>
+<script src="scripts/fractal-stats.js?v=m80"></script>
+<script src="scripts/fractal-stats-panel.js?v=m80"></script>
+<script src="scripts/fractal-grid.js?v=m80"></script>
+<script src="scripts/transition.js?v=m80"></script>
 <script>
   // ---- The '80s switch: the same saved setting as the other pages (eighties-theme.js) ----
   (function () {

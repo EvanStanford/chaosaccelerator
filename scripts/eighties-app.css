@@ -4,7 +4,7 @@
    Fractal-ize in the landing page's Launch look. Loaded last so it wins the cascade. */
 @font-face {
   font-family: "Saira";
-  src: url("../assets/fonts/saira-latin.woff2?v=m76") format("woff2");
+  src: url("../assets/fonts/saira-latin.woff2?v=m80") format("woff2");
   font-weight: 100 900;
   font-display: swap;
 }

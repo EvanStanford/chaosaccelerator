@@ -9,14 +9,6 @@
   var FPS = 30;
   var RHO = Math.SQRT2; // van Wijk & Nuij's recommended trade-off between zooming and panning
 
-  var QUALITIES = [
-    { label: "1/8 resolution", divisor: 8, antialias: false },
-    { label: "1/4 resolution", divisor: 4, antialias: false },
-    { label: "1/2 resolution", divisor: 2, antialias: false },
-    { label: "Full resolution", divisor: 1, antialias: false },
-    { label: "Full + antialiasing", divisor: 1, antialias: true },
-  ];
-
   var SECONDS_PER_PATH_UNIT = 1.4;
   var STEPS_PER_SECOND = 120;
   var MIN_SECONDS = 1;
@@ -37,50 +29,67 @@
     return { x: x[0], xLo: x[1], y: y[0], yLo: y[1] };
   }
 
+  // The quintic's end-speed terms: zero, with no acceleration, at both ends; slope 1 at one end, 0 at the other.
+  function startSlope(t) { var t3 = t * t * t; return t - 6 * t3 + 8 * t3 * t - 3 * t3 * t * t; }
+  function endSlope(t) { var t3 = t * t * t; return -4 * t3 + 7 * t3 * t - 3 * t3 * t * t; }
+
   // Quintic Hermite from speed m0 to m1 (1 = the move's average, 0 = rest), no acceleration at either end.
   var MAX_END_SPEED = 2.5;
   function ease(t, m0, m1) {
     t = clamp(t, 0, 1);
-    m0 = clamp(m0 || 0, 0, MAX_END_SPEED);
-    m1 = clamp(m1 || 0, 0, MAX_END_SPEED);
-    var t2 = t * t, t3 = t2 * t, t4 = t3 * t, t5 = t4 * t;
-    return (6 * t5 - 15 * t4 + 10 * t3) + m0 * (t - 6 * t3 + 8 * t4 - 3 * t5) + m1 * (-4 * t3 + 7 * t4 - 3 * t5);
+    var t3 = t * t * t;
+    return t3 * (10 - 15 * t + 6 * t * t) + clamp(m0 || 0, 0, MAX_END_SPEED) * startSlope(t) + clamp(m1 || 0, 0, MAX_END_SPEED) * endSlope(t);
   }
 
-  // Unit direction at one end of a move, in van Wijk & Nuij's measure, so arriving and leaving compare.
-  function direction(route, key, atStart) {
+  // ---- Smooth through keyframes ---- velocities are [views across, views up, ln of the zoom], per
+  // second unless said otherwise. Every keyframe gets one velocity, and both moves meeting there leave and
+  // arrive with it: the part along a move's route rides its ease, the rest is an offset zero at both ends.
+
+  // View q relative to view p, measured at `scale`.
+  function screenDelta(p, q, scale) {
+    return [
+      ((q.center.x - p.center.x) + ((q.center.xLo || 0) - (p.center.xLo || 0))) / scale,
+      ((q.center.y - p.center.y) + ((q.center.yLo || 0) - (p.center.yLo || 0))) / scale,
+      Math.log(q.scale / p.scale),
+    ];
+  }
+
+  // A route's velocity at one end, per unit of path.
+  function endVelocity(route, atStart) {
     var e = 1e-3;
     var p = route.at(atStart ? 0 : 1 - e), q = route.at(atStart ? e : 1);
-    var v = [
-      RHO * ((q.center.x - p.center.x) + ((q.center.xLo || 0) - (p.center.xLo || 0))) / key.scale,
-      RHO * ((q.center.y - p.center.y) + ((q.center.yLo || 0) - (p.center.yLo || 0))) / key.scale,
-      Math.log(q.scale / p.scale) / RHO,
-    ];
-    var n = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
-    return n > 0 ? [v[0] / n, v[1] / n, v[2] / n] : [0, 0, 0];
+    return screenDelta(p, q, atStart ? p.scale : q.scale).map(function (v) { return v / e; });
   }
-  function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
 
-  // End speeds per move (multiples of its average): a keyframe's velocity is the mean of arriving and leaving.
-  function endSpeeds(list, keyframes, loop) {
-    var n = keyframes.length;
-    var velocity = keyframes.map(function (key, i) {
-      var arriving = i > 0 ? list[i - 1] : (loop && n > 1 ? list[list.length - 1] : null);
+  // van Wijk & Nuij's measure, so panning and zooming compare.
+  function wijkDot(a, b) { return RHO * RHO * (a[0] * b[0] + a[1] * b[1]) + a[2] * b[2] / (RHO * RHO); }
+
+  // The mean of the moves arriving and leaving, axis by axis, steps included; zero on an axis where they
+  // disagree in sign (the camera turns round there, so it rests), at a movie's ends, and beside a hold.
+  function keyframeVelocities(list, keyframes, loop) {
+    return keyframes.map(function (key, i) {
+      var arriving = i > 0 ? list[i - 1] : (loop && list.length ? list[list.length - 1] : null);
       var leaving = i < list.length ? list[i] : null;
-      if (!arriving || !leaving || !(arriving.route.length > 0) || !(leaving.route.length > 0)) return [0, 0, 0];
-      var vin = direction(arriving.route, key, false), vout = direction(leaving.route, key, true);
-      var sin = arriving.route.length / arriving.seconds, sout = leaving.route.length / leaving.seconds;
-      return [0, 1, 2].map(function (c) { return (vin[c] * sin + vout[c] * sout) / 2; });
+      var out = { view: [0, 0, 0], steps: 0 };
+      if (!arriving || !leaving) return out;
+      if (arriving.route.length > 0 && leaving.route.length > 0) {
+        out.view = [0, 1, 2].map(function (c) {
+          var a = arriving.end[c] / arriving.seconds, b = leaving.start[c] / leaving.seconds;
+          return a * b < 0 ? 0 : (a + b) / 2;
+        });
+      }
+      if (arriving.stepRate * leaving.stepRate > 0) out.steps = (arriving.stepRate + leaving.stepRate) / 2;
+      return out;
     });
-    return list.map(function (move, j) {
-      var length = move.route.length;
-      if (!(length > 0)) return { m0: 0, m1: 0 };
-      var perUnit = move.seconds / length;
-      return {
-        m0: Math.max(0, dot(velocity[j], direction(move.route, move.from, true)) * perUnit),
-        m1: Math.max(0, dot(velocity[(j + 1) % n], direction(move.route, move.to, false)) * perUnit),
-      };
-    });
+  }
+
+  // `velocity` split for one end of a move, per unit of its time: m, the speed along its route for ease,
+  // and the rest, for the offset.
+  function splitVelocity(velocity, routeVelocity, seconds) {
+    var want = velocity.map(function (v) { return v * seconds; });
+    var norm = wijkDot(routeVelocity, routeVelocity);
+    var m = norm > 0 ? clamp(wijkDot(want, routeVelocity) / norm, 0, MAX_END_SPEED) : 0;
+    return { m: m, rest: want.map(function (w, c) { return w - m * routeVelocity[c]; }) };
   }
 
   // van Wijk & Nuij's path (2003) from a to b: { length, at(u) }, u along the PATH, not through time.
@@ -155,15 +164,28 @@
   function frames(keyframes, loop) {
     var out = [];
     var list = moves(keyframes, loop);
-    list.forEach(function (move) { move.route = path(move.from, move.to); });
-    var speeds = endSpeeds(list, keyframes, loop);
+    list.forEach(function (move) {
+      move.route = path(move.from, move.to);
+      move.start = endVelocity(move.route, true);
+      move.end = endVelocity(move.route, false);
+      move.stepRate = (move.to.step - move.from.step) / move.seconds;
+    });
+    var velocities = keyframeVelocities(list, keyframes, loop);
     list.forEach(function (move, j) {
-      var route = move.route;
+      var v0 = velocities[j], v1 = velocities[(j + 1) % keyframes.length];
+      var a = splitVelocity(v0.view, move.start, move.seconds), b = splitVelocity(v1.view, move.end, move.seconds);
+      var stepChange = move.to.step - move.from.step;
+      var stepRest0 = v0.steps * move.seconds - stepChange * a.m, stepRest1 = v1.steps * move.seconds - stepChange * b.m;
       var count = Math.max(1, Math.round(move.seconds * FPS));
       for (var k = 0; k < count; k++) {
-        var u = ease(k / count, speeds[j].m0, speeds[j].m1);
-        var view = route.at(u);
-        out.push({ center: view.center, scale: view.scale, step: Math.round(move.from.step + (move.to.step - move.from.step) * u) });
+        var t = k / count, u = ease(t, a.m, b.m), s0 = startSlope(t), s1 = endSlope(t);
+        var view = move.route.at(u);
+        var offset = [0, 1, 2].map(function (c) { return s0 * a.rest[c] + s1 * b.rest[c]; });
+        out.push({
+          center: offsetCenter(view.center, offset[0] * view.scale, offset[1] * view.scale),
+          scale: view.scale * Math.exp(offset[2]),
+          step: Math.max(0, Math.round(move.from.step + stepChange * u + s0 * stepRest0 + s1 * stepRest1)),
+        });
       }
     });
     if (keyframes.length && !(loop && keyframes.length > 1)) {
@@ -178,7 +200,6 @@
 
   global.MoviePath = {
     FPS: FPS,
-    QUALITIES: QUALITIES,
     ease: ease,
     path: path,
     autoSeconds: autoSeconds,

@@ -5017,7 +5017,7 @@
 
   addTest(
     "A movie passes through a keyframe on its way at full speed, and comes to rest at one it turns round at",
-    "movie-path.js's frames() - a movie that stopped dead at every keyframe would make 1x -> 100x -> 10000x a zoom in two lurches. Each keyframe is given the mean of the velocities arriving and leaving, as vectors: on the way somewhere they agree and the camera sails through at speed, and where the camera turns round (in to 1e8x, back out to 1e4x) they cancel and it eases to a halt. The first and last keyframes of a movie that doesn't loop are always at rest",
+    "movie-path.js's frames() - a movie that stopped dead at every keyframe would make 1x -> 100x -> 10000x a zoom in two lurches. Each keyframe is given the mean of the velocities arriving and leaving, axis by axis: on the way somewhere they agree and the camera sails through at speed, and on an axis where the camera turns round (in to 1e8x, back out to 1e4x) it eases to a halt. The first and last keyframes of a movie that doesn't loop are always at rest",
     function () {
       function zoomKeyframe(zoom) { return movieKeyframe(0, 0, 1 / zoom, 0); }
       // The zoom's slope, in decades per second, either side of each keyframe.
@@ -5053,10 +5053,10 @@
 
   addTest(
     "A movie's link carries its keyframes, each with the digits its own zoom can use",
-    "share-url.js's kfrm/qual/loop - the player renders from its address alone, so the keyframes are the movie, and how the map is drawn (display mode, Low Saturation) rides along with them. A keyframe's center is written to the precision of THAT keyframe's zoom, which is what keeps a movie that dives to 1e8x from costing thirty digits on its wide shots; and a movie link has no view of its own, so none of the map's view fields belong in it",
+    "share-url.js's kfrm/size/aa/loop - the player renders from its address alone, so the keyframes are the movie, and how the map is drawn (display mode, Low Saturation) rides along with them. A keyframe's center is written to the precision of THAT keyframe's zoom, which is what keeps a movie that dives to 1e8x from costing thirty digits on its wide shots; and a movie link has no view of its own, so none of the map's view fields belong in it",
     function () {
       var deep = PhysicsDF.twoSum64(213.41826094537, 3.1e-15);
-      var movie = { quality: 2, loop: false, keyframes: [
+      var movie = { size: { width: 1080, height: 1920 }, antialias: false, loop: false, keyframes: [
         { center: { x: 0, xLo: 0, y: 0, yLo: 0 }, scale: 200 / 0.17, zoom: 1, step: 1000, seconds: null },
         { center: { x: deep[0], xLo: deep[1], y: -88.0421795513, yLo: 0 }, scale: 1e-5, zoom: (200 / 0.17) / 1e-5, step: 500, seconds: 4.26 },
       ] };
@@ -5067,17 +5067,20 @@
       var keyframesOk = k.length === 2 && k[0].zoom === 1 && k[0].step === 1000 && k[0].seconds === null &&
         k[1].step === 500 && k[1].seconds === 4.3 && Math.abs(k[1].zoom / movie.keyframes[1].zoom - 1) < 1e-9 &&
         Math.abs((k[1].center.x - deep[0]) + (k[1].center.xLo - deep[1])) < 1e-14;
-      var settingsOk = back.page === "movi" && back.view.movie.quality === 2 && back.view.movie.loop === false &&
+      var settingsOk = back.page === "movi" && back.view.movie.size.width === 1080 && back.view.movie.size.height === 1920 &&
+        back.view.movie.antialias === false && back.view.movie.loop === false &&
         back.view.display === "laplacian" && back.view.lowSaturation === true && back.view.precision === "auto" && canonicalJSON(back.scene) === canonicalJSON(scene);
       var noViewFields = !/ctrx|ctry|zoom:|insp/.test(fragment);
       // The map's own link keeps the keyframes, and says nothing about movies while there are none.
       var mapView = { center: { x: 0, xLo: 0, y: 0, yLo: 0 }, scale: 200 / 0.17, zoom: 1, movie: movie };
       var mapKeeps = ShareUrl.decode(ShareUrl.encode({ page: "map", scene: scene, view: mapView })).view.movie.keyframes.length === 2;
-      mapView.movie = { keyframes: [], quality: 1, loop: false };
-      var silent = !/kfrm|qual|loop/.test(ShareUrl.encode({ page: "map", scene: scene, view: mapView }));
+      mapView.movie = { keyframes: [], size: { width: 640, height: 360 }, antialias: false, loop: false };
+      var silent = !/kfrm|size|aa:|loop/.test(ShareUrl.encode({ page: "map", scene: scene, view: mapView }));
       var defaults = ShareUrl.decode("#map/body:ci:0:0:0:30").view.movie;
+      var badSize = ShareUrl.decode("#map/body:ci:0:0:0:30,size:20000x10").view.movie.size;
       return {
-        pass: keyframesOk && settingsOk && noViewFields && mapKeeps && silent && defaults.quality === 4 && defaults.loop === true && defaults.keyframes.length === 0,
+        pass: keyframesOk && settingsOk && noViewFields && mapKeeps && silent && defaults.size.width === 1280 && defaults.size.height === 720 &&
+          defaults.antialias === true && defaults.loop === true && defaults.keyframes.length === 0 && badSize.width === 1280 && badSize.height === 720,
         detail: "keyframes " + (keyframesOk ? "exact" : "DIFFER: " + JSON.stringify(k)) + "; settings and scene=" + settingsOk +
           "; no map-view fields in a movie link=" + noViewFields + "; a map link keeps them=" + mapKeeps + " and is silent without any=" + silent +
           "; " + fragment.slice(fragment.indexOf("kfrm")),
@@ -5085,7 +5088,44 @@
     }
   );
 
-    // ---- Springs: the engine's only torque source, implemented in the JS engine, float32 GLSL and
+    addTest(
+    "A movie keeps its velocity through a keyframe where it changes direction",
+    "movie-path.js's frames() - each move is its own zoom-and-pan route, and two routes meet at a keyframe at an angle. Both moves leave and arrive with the keyframe's one velocity: the part along each route rides its ease, the rest is an offset that is zero at both keyframes. So the camera rounds a corner with no jump in pan or zoom, at any depth, and still lands on every keyframe",
+    function () {
+      // Pan in views and zoom in ln, per frame, from frame p to frame q.
+      function velocity(p, q) {
+        return [((q.center.x - p.center.x) + (q.center.xLo - p.center.xLo)) / q.scale,
+          ((q.center.y - p.center.y) + (q.center.yLo - p.center.yLo)) / q.scale, Math.log(q.scale / p.scale)];
+      }
+      // Worst change of velocity across a keyframe, as a share of the speed there, and worst miss of one.
+      function corners(keys, loop) {
+        var frames = MoviePath.frames(keys, loop), moves = MoviePath.moves(keys, loop), n = frames.length;
+        var at = 0, jump = 0, miss = 0;
+        moves.forEach(function (move, j) {
+          at += Math.round(move.seconds * MoviePath.FPS);
+          if (!loop && j === moves.length - 1) return; // the movie's end, at rest
+          var i = at % n, key = keys[(j + 1) % keys.length];
+          var before = velocity(frames[(i + n - 1) % n], frames[i]), after = velocity(frames[i], frames[(i + 1) % n]);
+          var speed = Math.max(Math.hypot.apply(null, before), Math.hypot.apply(null, after));
+          jump = Math.max(jump, Math.hypot(after[0] - before[0], after[1] - before[1], after[2] - before[2]) / speed);
+          miss = Math.max(miss, viewDistance(frames[i].center, key.center) / key.scale, Math.abs(frames[i].scale / key.scale - 1));
+        });
+        return { jump: jump, miss: miss };
+      }
+      var cases = [
+        ["5 views right, then 5 up", corners([movieKeyframe(0, 0, 100), movieKeyframe(500, 0, 100), movieKeyframe(500, 500, 100)], false)],
+        ["in to 1e8x, then 5 views across", corners([movieKeyframe(0, 0, 1), movieKeyframe(0.3, 0.2, 1e-8), movieKeyframe(0.3 + 5e-8, 0.2, 1e-8)], false)],
+        ["a square, looped", corners([movieKeyframe(0, 0, 100), movieKeyframe(500, 0, 100), movieKeyframe(500, 500, 100), movieKeyframe(0, 500, 100)], true)],
+      ];
+      var bad = cases.filter(function (c) { return !(c[1].jump < 0.05 && c[1].miss < 1e-9); });
+      return {
+        pass: bad.length === 0,
+        detail: cases.map(function (c) { return c[0] + ": velocity change " + (100 * c[1].jump).toFixed(1) + "% of the speed, miss " + c[1].miss.toExponential(1) + " views"; }).join("; "),
+      };
+    }
+  );
+
+  // ---- Springs: the engine's only torque source, implemented in the JS engine, float32 GLSL and
     // multi-float GLSL (plus anchor-follows-resize in physics-hinge-geometry.js and physics-grid-codegen.js).
     // Each test holds one copy to another, or the engine to physics. ----
 
