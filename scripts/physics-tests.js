@@ -5125,6 +5125,47 @@
     }
   );
 
+  addTest(
+    "A movie's simulation frames move at whole rates between -2 and 2, held in runs, and meet every keyframe's step",
+    "movie-path.js's frames() - a frame shows a whole simulation frame, so a smooth rate of 0.5 per frame rounded frame by frame comes out 0, 1, 0, 1: a stutter. Between -2 and 2 the rate is held at a whole number for runs (Viterbi, with a cost per switch); above 2 it may vary frame to frame. Every keyframe's step is still met",
+    function () {
+      function keyframe(step, seconds) { return movieKeyframe(0, 0, 100, step, seconds); }
+      // Stutters (a rate under 2 either way held under 4 frames, not on its way from one rate to another) and keyframe steps met.
+      function check(keys, loop) {
+        var frames = MoviePath.frames(keys, loop), moves = MoviePath.moves(keys, loop);
+        var at = 0, exact = frames[0].step === keys[0].step;
+        moves.forEach(function (move, j) {
+          at += Math.round(move.seconds * MoviePath.FPS);
+          if (at < frames.length) exact = exact && frames[at].step === keys[(j + 1) % keys.length].step;
+        });
+        var runs = [];
+        for (var k = 1; k < frames.length; k++) {
+          var d = frames[k].step - frames[k - 1].step, last = runs[runs.length - 1];
+          if (last && last.rate === d) last.length++; else runs.push({ rate: d, length: 1 });
+        }
+        var stutters = 0;
+        for (var i = 1; i < runs.length - 1; i++) {
+          var a = runs[i - 1].rate, b = runs[i].rate, c = runs[i + 1].rate;
+          if (Math.abs(b) < 2 && runs[i].length < 4 && !((a < b && b < c) || (a > b && b > c))) stutters++;
+        }
+        return { exact: exact, stutters: stutters, runs: runs.length };
+      }
+      var rewind = [keyframe(600), keyframe(570, 2), keyframe(540, 2), keyframe(510, 2)];
+      var cases = [
+        ["rewind at about -0.5", check(rewind, false)],
+        ["the same, looped", check(rewind, true)],
+        ["speed up, then slow down", check([keyframe(0), keyframe(100, 3), keyframe(700, 3), keyframe(750, 3)], false)],
+        ["forward, rewind, forward", check([keyframe(200), keyframe(400, 2), keyframe(300, 2), keyframe(330, 3)], false)],
+        ["10 frames in 10 seconds", check([keyframe(1000), keyframe(1010, 10)], false)],
+      ];
+      var bad = cases.filter(function (c) { return !(c[1].exact && c[1].stutters === 0); });
+      return {
+        pass: bad.length === 0,
+        detail: cases.map(function (c) { return c[0] + ": keyframes met=" + c[1].exact + ", " + c[1].runs + " runs, " + c[1].stutters + " stutters"; }).join("; "),
+      };
+    }
+  );
+
   // ---- Springs: the engine's only torque source, implemented in the JS engine, float32 GLSL and
     // multi-float GLSL (plus anchor-follows-resize in physics-hinge-geometry.js and physics-grid-codegen.js).
     // Each test holds one copy to another, or the engine to physics. ----
