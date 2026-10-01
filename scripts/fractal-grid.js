@@ -879,8 +879,10 @@
         declarations.push("  bool wrapStopped = false;");
         declarations.push("  float lifespanValue = " + loop.budget + ";");
         bounceInitLines.forEach(function (l) { declarations.push(l); });
+        // A pixel resumed already stopped must skip the loop: on Apple GPUs, leaving it on the first
+        // test while others in its SIMD group run on corrupts the whole group.
+        lines.push("  if (!wrapStopped) {");
         lines.push("  for (int i = 0; i < " + loop.bound + "; i++) {");
-        lines.push("    if (wrapStopped) break;");
         lines.push("    " + stepOnceCall);
         bounceStepLines.forEach(function (l) { lines.push(l); });
         // DT+1.0: above any real tFrac. tFracHi carries the pass's precision; bestTFrac is its float32 shadow.
@@ -932,6 +934,8 @@
         });
         lines.push("      hasPrevFrozen = true;");
         lines.push("    }");
+        lines.push("    if (wrapStopped) break;");
+        lines.push("  }");
         lines.push("  }");
         return { declarations: declarations, loop: lines };
       }
@@ -7580,7 +7584,7 @@
   // keyframes: movie-path.js's shape, [{ center, scale, step, seconds }], seconds null until typed. size: in pixels.
   var movie = { keyframes: [], size: { width: 1280, height: 720 }, antialias: true, loop: true };
 
-  var movieMenu = makeMenu("menu-movie", "grid-btn-movie", "movie");
+  var movieMenu = makeMenu("menu-movie", "grid-btn-movie", "movie", function (open) { if (open) checkPausedRender(); });
   var challengesMenu = makeMenu("menu-challenges", "grid-btn-challenges", "movie");
   var movieHint = document.getElementById("movie-hint");
   var btnMovieAddKeyframe = document.getElementById("movie-add-keyframe");
@@ -7786,6 +7790,39 @@
         Math.round(seconds * MoviePath.FPS).toLocaleString() + " frames to render";
     btnMovieDone.disabled = movie.keyframes.length < 2;
   }
+
+  // A render left unfinished (movie-store.js): the player saves after every frame, so closing it mid-render
+  // leaves a job to resume or discard here. One still running in another tab holds a lock.
+  var pausedEl = document.getElementById("movie-paused");
+  var pausedText = document.getElementById("movie-paused-text");
+  var btnPausedDiscard = document.getElementById("movie-paused-discard");
+  var btnPausedResume = document.getElementById("movie-paused-resume");
+  var pausedJob = null;
+
+  function checkPausedRender() {
+    if (!global.MovieStore) return;
+    Promise.all([global.MovieStore.load(), global.MovieStore.running()]).then(function (found) {
+      var saved = found[0], running = found[1];
+      pausedJob = saved;
+      pausedEl.hidden = !saved;
+      if (!saved) return;
+      var percent = Math.floor(100 * saved.done / Math.max(1, saved.total)) + "%";
+      pausedText.textContent = "Render In Progress: " + (running ? "Running in another tab at " : "Paused at ") + percent;
+      btnPausedDiscard.disabled = btnPausedResume.disabled = running;
+    }).catch(function () { pausedEl.hidden = true; });
+  }
+  btnPausedDiscard.addEventListener("click", function () {
+    global.AppMessage.prompt("Discard the paused render? The frames rendered so far are deleted.", ["Cancel", "Yes, discard"], "Yes, discard",
+      function (answer) {
+        if (answer === "Yes, discard") global.MovieStore.discard().then(checkPausedRender, checkPausedRender);
+      });
+  });
+  btnPausedResume.addEventListener("click", function () {
+    if (!pausedJob) return;
+    if (global.AppShell && global.AppShell.syncAddress) global.AppShell.syncAddress();
+    global.location.href = "chaosplayback.html#" + pausedJob.link;
+  });
+  checkPausedRender();
 
   btnMovieAddKeyframe.addEventListener("click", function () {
     movie.keyframes.push(currentKeyframe());

@@ -8,17 +8,17 @@
 <meta name="theme-color" content="#14161c">
 <title>Chaos Accelerator</title>
 <!-- Both views share this document so transition.js can show them at once. -->
-<link rel="stylesheet" href="scripts/physics.css?v=m82">
-<link rel="stylesheet" href="scripts/fractal-grid.css?v=m82">
-<link rel="stylesheet" href="scripts/app-shell.css?v=m82">
-<link rel="stylesheet" href="scripts/fractal-stats.css?v=m82">
-<link rel="stylesheet" href="scripts/responsive-layout.css?v=m82">
+<link rel="stylesheet" href="scripts/physics.css?v=m84">
+<link rel="stylesheet" href="scripts/fractal-grid.css?v=m84">
+<link rel="stylesheet" href="scripts/app-shell.css?v=m84">
+<link rel="stylesheet" href="scripts/fractal-stats.css?v=m84">
+<link rel="stylesheet" href="scripts/responsive-layout.css?v=m84">
 <!-- mobile.css after the app sheets: it must win their cascade without !important. -->
-<link rel="stylesheet" href="scripts/mobile.css?v=m82">
-<link rel="stylesheet" href="scripts/eighties-app.css?v=m82">
-<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m82" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="scripts/mobile.css?v=m84">
+<link rel="stylesheet" href="scripts/eighties-app.css?v=m84">
+<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m84" as="font" type="font/woff2" crossorigin>
 <!-- In <head> on purpose: both views measure their canvas area as they start. -->
-<script src="scripts/layout-mode.js?v=m82"></script>
+<script src="scripts/layout-mode.js?v=m84"></script>
 <!-- A #map/ link should open on the map: hide the editor (still laid out) until transition.js picks the view. -->
 <script>
   if (/^#map\//.test(location.hash)) document.documentElement.classList.add("opening-map");
@@ -590,6 +590,13 @@
                   <button id="grid-btn-movie-close" class="icon-button menu-collapse" type="button" title="Collapse Movie" aria-label="Collapse Movie">&#9660;</button>
                 </div>
                 <div class="menu-card-body">
+                  <div id="movie-paused" hidden>
+                    <p id="movie-paused-text"></p>
+                    <div class="field-row">
+                      <button id="movie-paused-discard" type="button" class="secondary">Discard</button>
+                      <button id="movie-paused-resume" type="button">Resume</button>
+                    </div>
+                  </div>
                   <p class="readout hint" id="movie-hint">Pan and zoom to a view, pick a frame in Map Evolution if you like, then add it. The camera travels smoothly from each keyframe to the next.</p>
                   <button id="movie-add-keyframe" type="button">Add Keyframe</button>
                   <ol id="movie-keyframe-list"></ol>
@@ -744,22 +751,23 @@
 
 </div>
 
-<script src="scripts/app-message.js?v=m82"></script>
-<script src="scripts/physics-engine.js?v=m82"></script>
-<script src="scripts/physics-coords.js?v=m82"></script>
-<script src="scripts/share-url.js?v=m82"></script>
-<script src="scripts/movie-path.js?v=m82"></script>
-<script src="scripts/physics-sound.js?v=m82"></script>
-<script src="scripts/physics-hinge-geometry.js?v=m82"></script>
-<script src="scripts/physics-df.js?v=m82"></script>
-<script src="scripts/physics-gpu.js?v=m82"></script>
-<script src="scripts/physics-gpu-df.js?v=m82"></script>
-<script src="scripts/physics-grid-codegen.js?v=m82"></script>
-<script src="scripts/physics-ui.js?v=m82"></script>
-<script src="scripts/fractal-stats.js?v=m82"></script>
-<script src="scripts/fractal-stats-panel.js?v=m82"></script>
-<script src="scripts/fractal-grid.js?v=m82"></script>
-<script src="scripts/transition.js?v=m82"></script>
+<script src="scripts/app-message.js?v=m84"></script>
+<script src="scripts/physics-engine.js?v=m84"></script>
+<script src="scripts/physics-coords.js?v=m84"></script>
+<script src="scripts/share-url.js?v=m84"></script>
+<script src="scripts/movie-path.js?v=m84"></script>
+<script src="scripts/movie-store.js?v=m84"></script>
+<script src="scripts/physics-sound.js?v=m84"></script>
+<script src="scripts/physics-hinge-geometry.js?v=m84"></script>
+<script src="scripts/physics-df.js?v=m84"></script>
+<script src="scripts/physics-gpu.js?v=m84"></script>
+<script src="scripts/physics-gpu-df.js?v=m84"></script>
+<script src="scripts/physics-grid-codegen.js?v=m84"></script>
+<script src="scripts/physics-ui.js?v=m84"></script>
+<script src="scripts/fractal-stats.js?v=m84"></script>
+<script src="scripts/fractal-stats-panel.js?v=m84"></script>
+<script src="scripts/fractal-grid.js?v=m84"></script>
+<script src="scripts/transition.js?v=m84"></script>
 <script>
   // ---- The '80s switch: the same saved setting as the other pages (eighties-theme.js) ----
   (function () {

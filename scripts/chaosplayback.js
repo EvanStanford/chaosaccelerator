@@ -192,6 +192,7 @@
     var left = msLeft(done);
     if (left !== null) detail += "  \u00b7  about " + formatDuration(left / 1000) + " left";
     if (packedFrames > 0) detail += "  \u00b7  about " + formatBytes(packedBytes / packedFrames * frames.length) + " in all";
+    if (progressNote) detail += "  \u00b7  " + progressNote;
     renderDetail.textContent = detail + "  \u00b7  pauses while this tab is in the background";
   }
 
@@ -208,9 +209,17 @@
         return;
       }
       blobs = all;
+      closeJob();
       // The renderer stays for the Inspect overlay; a last still 16 px across lets its canvas go.
       engineGrid.renderStill({ center: frames[0].center, scale: frames[0].scale, step: 0, antialias: false, width: 16, height: 16 }, function () {});
-      beginPlayback();
+      if (videoFile || videoProblem) return beginPlayback();
+      // Resumed with nothing left to render: the file's size from a saved frame.
+      createImageBitmap(blobs[0]).then(function (bitmap) {
+        frameWidth = bitmap.width;
+        frameHeight = bitmap.height;
+        bitmap.close();
+        return openVideo(frameWidth, frameHeight, false);
+      }).then(beginPlayback);
     });
   }
 
@@ -240,6 +249,7 @@
   // Frame i is in `copy`: into the video file, then on to the next.
   function frameDone(grid, i) {
     encodeFrame(i);
+    saveFrame(i);
     reportProgress(i + 1);
     whenEncoderReady(function () { renderFrame(grid, i + 1); });
   }
@@ -278,9 +288,14 @@
         });
         show(copy, i);
         noteFrameTime(frameCosts[i], performance.now() - frameStartedAt);
-        // The first frame sets the file's size, so the encoder is chosen now.
-        if (i === 0) openVideo(w, h).then(function () { frameDone(grid, 0); });
-        else frameDone(grid, i);
+        // The first frame rendered sets the file's size, so the encoder is chosen now; a resumed render
+        // encodes nothing yet (its earlier frames exist only as JPEGs).
+        if (!videoChosen) {
+          videoChosen = true;
+          openVideo(w, h, resumedFrom === 0).then(function () { frameDone(grid, i); });
+        } else {
+          frameDone(grid, i);
+        }
       } catch (err) {
         fail("Rendering stopped: " + (err.message || err));
       }
@@ -301,10 +316,95 @@
       return { precision: precision.name, slowdown: precision.slowdown, steps: Math.max(1, f.step) };
     });
     blobPromises = new Array(frames.length);
-    renderStartedAt = performance.now();
     movieFacts.textContent = frames.length.toLocaleString() + " frames  \u00b7  " + (frames.length / FPS).toFixed(1) + " s";
-    reportProgress(0);
-    renderFrame(grid, 0);
+    openJob().then(function (from) {
+      resumedFrom = from;
+      renderStartedAt = performance.now();
+      reportProgress(from);
+      renderFrame(grid, from);
+    });
+  }
+
+  // ---- Saved progress ---- (movie-store.js) every finished frame is saved, so a closed player can resume, two
+  // frames back in case either was bad. This render goes unsaved while another tab renders or another movie is paused.
+  var address = ShareUrl.cleanFragment(location.hash);
+  var job = null; // the progress this page saves, or null
+  var saving = Promise.resolve(), saveFailed = false;
+  var resumedFrom = 0, priorMs = 0, progressNote = "", releaseLock = null, videoChosen = false;
+
+  function openJob() {
+    return Promise.all([MovieStore.load(), MovieStore.running()]).then(function (found) {
+      var saved = found[0];
+      if (found[1]) {
+        progressNote = "progress isn't saved while another tab renders";
+        return 0;
+      }
+      if (saved && saved.link === address) return resumeJob(saved);
+      if (saved) {
+        progressNote = "progress isn't saved while another render is paused";
+        return 0;
+      }
+      var fresh = { link: address, total: frames.length, done: 0, ms: 0 };
+      return MovieStore.begin(fresh).then(function () {
+        job = fresh;
+        return 0;
+      });
+    }).catch(function () {
+      job = null;
+      progressNote = "progress can't be saved in this browser";
+      return 0;
+    }).then(function (from) {
+      if (job) releaseLock = MovieStore.hold();
+      return from;
+    });
+  }
+
+  // A saved frame that no longer matches its frame (the code changed since) ends the reuse there.
+  function resumeJob(saved) {
+    var upTo = Math.max(0, Math.min(saved.done, frames.length) - 2);
+    return MovieStore.frames(upTo).then(function (stored) {
+      var from = 0;
+      while (from < upTo && stored[from] && stored[from].i === from && stored[from].key === frameKey(frames[from]) &&
+        (stored[from].blob || from > 0)) {
+        var blob = stored[from].blob;
+        blobPromises[from] = blob ? Promise.resolve(blob) : blobPromises[from - 1];
+        if (blob) {
+          packedBytes += blob.size;
+          packedFrames += 1;
+        }
+        from++;
+      }
+      job = saved;
+      job.total = frames.length;
+      job.done = from;
+      priorMs = saved.ms || 0;
+      if (from > 0) progressNote = "resumed at frame " + (from + 1).toLocaleString();
+      return from;
+    });
+  }
+
+  // After a failed save the job stays as last saved, and is still cleared when the render ends.
+  function saveFrame(i) {
+    if (!job || saveFailed) return;
+    var repeat = i > 0 && blobPromises[i] === blobPromises[i - 1];
+    saving = saving.then(function () { return blobPromises[i]; }).then(function (blob) {
+      if (!job || saveFailed) return;
+      job.done = i + 1;
+      job.ms = priorMs + performance.now() - renderStartedAt;
+      return MovieStore.saveFrame(i, frameKey(frames[i]), repeat ? null : blob, job);
+    }).catch(function () {
+      saveFailed = true;
+      progressNote = "progress stopped being saved";
+    });
+  }
+
+  // The render is over (all of it, or ended early): nothing left to resume.
+  function closeJob() {
+    if (!job) return;
+    job = null;
+    saving = saving.then(function () { return MovieStore.discard(); }).catch(function () {}).then(function () {
+      if (releaseLock) releaseLock();
+    });
   }
 
   function startEngine() {
@@ -573,7 +673,7 @@
     maxDecoded = Math.min(90, Math.max(8, Math.floor(DECODED_BUDGET_BYTES / (frameWidth * frameHeight * 4))));
     movieFacts.textContent = frames.length.toLocaleString() + " frames  \u00b7  " + (frames.length / FPS).toFixed(1) + " s  \u00b7  " +
       frameWidth + " \u00d7 " + frameHeight + "  \u00b7  " +
-      formatBytes(blobs.reduce(function (sum, blob) { return sum + blob.size; }, 0)) + "  \u00b7  rendered in " + formatDuration((performance.now() - renderStartedAt) / 1000) +
+      formatBytes(blobs.reduce(function (sum, blob) { return sum + blob.size; }, 0)) + "  \u00b7  rendered in " + formatDuration((priorMs + performance.now() - renderStartedAt) / 1000) +
       (endedEarly ? "  \u00b7  ended early" : "");
     scrubber.max = String(frames.length - 1);
     [btnPlayPause, scrubber, btnSpeed, btnLoop, btnRestart, btnSound].forEach(function (control) { control.disabled = false; });
@@ -643,7 +743,8 @@
     }, function () { return firstSupported(Codec, tries, i + 1); });
   }
 
-  function openVideo(width, height) {
+  // live false: settle the file's size and codec only, for a file encoded later from the JPEGs.
+  function openVideo(width, height, live) {
     if (typeof VideoEncoder !== "function") {
       videoProblem = "Saving isn't supported in this browser";
       return Promise.resolve();
@@ -671,6 +772,7 @@
         return;
       }
       videoFile = { mux: pick.mux, width: pick.config.width, height: pick.config.height, config: pick.config };
+      if (!live) return;
       videoEncoder = new VideoEncoder({
         output: function (chunk, meta) {
           if (!videoMeta && meta && meta.decoderConfig) videoMeta = meta;
@@ -722,9 +824,10 @@
     }
   }
 
-  // The movie again with the Inspect overlay drawn on, from the frames' JPEGs (the sharper copy); the next few
-  // are unpacked while one encodes. A repeated frame is already on the canvas, overlay and all.
-  function encodeWithOverlay(onProgress) {
+  // The movie from the frames' JPEGs (the sharper copy), the Inspect overlay drawn on if asked: for a download
+  // with the overlay, and for a resumed render, whose earlier frames were never encoded. The next few are
+  // unpacked while one encodes; a repeated frame is already on the canvas, overlay and all.
+  function encodeFromJpegs(withOverlay, onProgress) {
     var chunks = [], meta = null;
     var encoder = new VideoEncoder({
       output: function (chunk, m) {
@@ -767,7 +870,7 @@
             delete unpacking[i];
             filmCtx.drawImage(bitmap, 0, 0, film.width, film.height);
             bitmap.close();
-            drawInspection(filmCtx, scratch, frameWidth, frameHeight, 0, 0, film.width / frameWidth, frames[i].step);
+            if (withOverlay) drawInspection(filmCtx, scratch, frameWidth, frameHeight, 0, 0, film.width / frameWidth, frames[i].step);
           }
           encodeCanvas(encoder, film, i);
           i++;
@@ -839,8 +942,8 @@
     btnDownload.disabled = true;
     inspectCorner.disabled = true;
     btnDownload.textContent = "Saving";
-    var picture = withOverlay
-      ? encodeWithOverlay(function (done) { btnDownload.textContent = "Saving " + Math.round(done * 100) + "%"; })
+    var picture = withOverlay || resumedFrom > 0
+      ? encodeFromJpegs(withOverlay, function (done) { btnDownload.textContent = "Saving " + Math.round(done * 100) + "%"; })
       : Promise.resolve({ chunks: videoChunks, meta: videoMeta });
     Promise.all([picture, withSound ? soundTrack() : Promise.resolve(null)]).then(function (done) {
       var video = done[0], sound = done[1];

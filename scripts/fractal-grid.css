@@ -1138,6 +1138,21 @@ input[type="range"] {
 #movie-summary {
   margin: 10px 0;
 }
+#movie-paused {
+  margin: 0 0 12px 0;
+  padding: 10px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--bg-input);
+}
+#movie-paused[hidden] {
+  display: none;
+}
+#movie-paused p {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  color: var(--text);
+}
 .movie-size {
   display: flex;
   align-items: center;
