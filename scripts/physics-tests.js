@@ -1601,13 +1601,13 @@
       PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(scene)), "",
       "const " + B.scalar + " worldX = " + B.lit(worldX) + ";",
       "const " + B.scalar + " worldY = " + B.lit(worldY) + ";", "",
-      PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), initial.spawnBase), "",
+      PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene)), "",
       "void main() {",
       "  " + initial.declarationLines.join("\n  "),
       "  " + PhysicsGridCodegen.generateCanonicalBodyDeclarationsGLSL(initial).split("\n").join("\n  "),
       "  " + PhysicsGPU.generateHingeAnchorLocalsGLSL(initial.hingeAnchors, precision).split("\n").join("\n  "),
       "  for (int i = 0; i < " + steps + "; i++) { stepOnce(" +
-        PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, precision, initial.spawnBase) + "); }",
+        PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, precision) + "); }",
       "  fragColor = vec4(" + residual("x", ref.x) + ", " + residual("y", ref.y) + ", " +
         residual("angle", ref.angle) + ", 1.0);",
       "}",
@@ -1628,7 +1628,7 @@
     var src = [
       "#version 300 es", "precision highp float;", "out vec4 fragColor;", "",
       PhysicsGPU.libraryGLSL("df", PhysicsEngine.speedCapFor(scene)), "",
-      PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, "df", scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), initial.spawnBase), "",
+      PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, "df", scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene)), "",
       "void main() {",
       // k*dx may be float32; the ADD onto x0 is what needs df, as in the grid shader.
       "  vec2 worldX = dfAddFloat(" + B.lit(x0) + ", (gl_FragCoord.x - 0.5) * " + PhysicsGPU.fnum(dx) + ");",
@@ -1637,7 +1637,7 @@
       "  " + PhysicsGridCodegen.generateCanonicalBodyDeclarationsGLSL(initial).split("\n").join("\n  "),
       "  " + PhysicsGPU.generateHingeAnchorLocalsGLSL(initial.hingeAnchors, "df").split("\n").join("\n  "),
       "  for (int i = 0; i < " + steps + "; i++) { stepOnce(" +
-        PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, "df", initial.spawnBase) + "); }",
+        PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, "df") + "); }",
       "  fragColor = vec4(" + residual("x", ref.x) + ", " + residual("y", ref.y) + ", " +
         residual("angle", ref.angle) + ", 1.0);",
       "}",
@@ -1937,7 +1937,7 @@
     var src = [
       "#version 300 es", "precision highp float;", "out vec4 fragColor;", "",
       PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(scene)), "",
-      PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), initial.spawnBase), "",
+      PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene)), "",
       "void main() {",
       "  int texel = int(gl_FragCoord.x); int k = texel % " + count + "; bool wantY = texel >= " + count + ";",
       "  float nudge = 0.0;",
@@ -1948,7 +1948,7 @@
       "  " + PhysicsGridCodegen.generateCanonicalBodyDeclarationsGLSL(initial).split("\n").join("\n  "),
       "  " + PhysicsGPU.generateHingeAnchorLocalsGLSL(initial.hingeAnchors, precision).split("\n").join("\n  "),
       "  for (int i = 0; i < " + steps + "; i++) { stepOnce(" +
-        PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, precision, initial.spawnBase) + "); }",
+        PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, precision) + "); }",
       "  fragColor = wantY ? " + wordsOf("dbody" + bodyIndex + ".y") + " : " + wordsOf("dbody" + bodyIndex + ".x") + ";",
       "}",
     ]).join("\n");
@@ -2811,407 +2811,6 @@
     }
   );
 
-    // ---- Funnel: the mouth teleports a circle to the throat, legs/throat bounce like a line.
-    // Pac-Man edge mode + standard gravity only: see physics-engine.js's Funnel header. ----
-
-  addTest(
-    "Funnel mass/inertia are derived from size the same closed form the engine hardcodes",
-    "FUNNEL_MASS_COEFF/FUNNEL_INERTIA_COEFF must match createFunnel's actual computeMass output, not just look plausible",
-    function () {
-      var size = 120;
-      var f = PhysicsEngine.createFunnel(0, 0, size, 0, false);
-      var expectedMass = PhysicsEngine.LINE_LINEAR_DENSITY * PhysicsEngine.FUNNEL_MASS_COEFF * size;
-      var expectedInertia = PhysicsEngine.LINE_LINEAR_DENSITY * PhysicsEngine.FUNNEL_INERTIA_COEFF * size * size * size;
-      var massErr = Math.abs(f.mass - expectedMass);
-      var inertiaErr = Math.abs(f.inertia - expectedInertia);
-      var anchored = PhysicsEngine.createFunnel(0, 0, size, 0, true);
-      var detail = "mass=" + f.mass.toFixed(3) + " (expected " + expectedMass.toFixed(3) + "), inertia=" +
-        f.inertia.toFixed(1) + " (expected " + expectedInertia.toFixed(1) + "); anchored funnel mass/invMass=" +
-        anchored.mass + "/" + anchored.invMass;
-      return {
-        pass: massErr < 1e-6 && inertiaErr < 1e-3 && anchored.mass === 0 && anchored.invMass === 0,
-        detail: detail,
-      };
-    }
-  );
-
-  addTest(
-    "A circle touching a funnel's mouth teleports to the throat center with its velocity unchanged",
-    "the mouth (length-3 side) is a teleport trigger, not a wall: see collideFunnelMouthTHit and step()'s teleportWins handling",
-    function () {
-      // Angle 0: mouth faces up, throat down; a ball dropped on the centerline reappears at the throat, still falling.
-      var scene = {
-        bodies: [
-          PhysicsEngine.createFunnel(400, 400, 120, 0, true),
-          PhysicsEngine.createCircle(400, 250, 10, false),
-        ],
-        hinges: [], frameWidth: 1200, frameHeight: 900, edgeMode: "wrap",
-      };
-      var edges = PhysicsEngine.getFunnelEdges(scene.bodies[0]);
-      var teleportStep = -1, vyBefore = null, vyAfter = null, yBefore = null, yAfter = null;
-      for (var i = 0; i < 100 && teleportStep < 0; i++) {
-        var prevY = scene.bodies[1].y, prevVy = scene.bodies[1].vy;
-        PhysicsEngine.step(scene, DT);
-        var b = scene.bodies[1];
-        if (Math.abs(b.y - prevY) > 50) { // a real per-step move under this gravity/dt is well under 20px
-          teleportStep = i; vyBefore = prevVy; vyAfter = b.vy; yBefore = prevY; yAfter = b.y;
-        }
-      }
-      var reachedThroat = teleportStep >= 0 &&
-        Math.abs(scene.bodies[1].x - edges.throatCenter.x) < 1 &&
-        Math.abs(scene.bodies[1].y - edges.throatCenter.y) < 20; // leg 2 keeps falling a bit further this same step
-      // vy must continue its gravity sequence across the jump: not reflected, not reset.
-      var velocityContinuous = teleportStep >= 0 && vyAfter > vyBefore - 1 && vyAfter < vyBefore + 20;
-      var detail = "teleport detected at step " + teleportStep + ": y " + (yBefore && yBefore.toFixed(2)) +
-        " -> " + (yAfter && yAfter.toFixed(2)) + " (throat center y=" + edges.throatCenter.y.toFixed(2) +
-        "), vy " + (vyBefore && vyBefore.toFixed(2)) + " -> " + (vyAfter && vyAfter.toFixed(2)) + " (should be continuous, not reflected)";
-      return { pass: teleportStep >= 0 && reachedThroat && velocityContinuous, detail: detail };
-    }
-  );
-
-  addTest(
-    "A circle hitting the middle of a funnel's leg bounces like a line, without teleporting",
-    "the 2 legs (and the throat) are solid capsule colliders (see collideFunnelCircle), only the mouth teleports",
-    function () {
-      // Angle 0: leg2 runs (490, 348.04) -> (430, 451.96). The ball starts well inside the funnel's
-      // vertical span, just inside leg2 (x=460 at y=400), so it can only ever hit leg2's flat side.
-      var scene = {
-        bodies: [
-          PhysicsEngine.createFunnel(400, 400, 120, 0, true),
-          PhysicsEngine.createCircle(450, 400, 8, false),
-        ],
-        hinges: [], frameWidth: 1200, frameHeight: 900, edgeMode: "wrap",
-      };
-      var bounced = false, teleported = false;
-      var prevVy = scene.bodies[1].vy;
-      for (var i = 0; i < 60 && !bounced && !teleported; i++) {
-        var prevY = scene.bodies[1].y;
-        PhysicsEngine.step(scene, DT);
-        var b = scene.bodies[1];
-        if (Math.abs(b.y - prevY) > 50) teleported = true;
-        else if (prevVy > 50 && b.vy < prevVy - 50) bounced = true;
-        prevVy = b.vy;
-      }
-      var detail = "first event: bounced=" + bounced + ", teleported=" + teleported +
-        " (want a bounce off the leg: the ball's path never reaches the mouth)";
-      return { pass: bounced && !teleported, detail: detail };
-    }
-  );
-
-  addTest(
-    "A rotated, anchored funnel teleports along its own rotated axis, not the world axis",
-    "getFunnelEdges/collideFunnelMouthTHit rotate every vertex by body.angle: a scene with angle=0 in every other test would not catch a sign/axis error here",
-    function () {
-      var angle = Math.PI / 2; // mouth now faces -x instead of -y
-      var scene = {
-        bodies: [
-          PhysicsEngine.createFunnel(400, 400, 120, angle, true),
-          PhysicsEngine.createCircle(400, 400, 10, false),
-        ],
-        hinges: [], frameWidth: 1200, frameHeight: 900, edgeMode: "wrap",
-      };
-      // Starts dead center, moving toward the rotated mouth; must reappear at the rotated throat.
-      var mouthDir = PhysicsEngine.rotateVec({ x: 0, y: -1 }, angle);
-      scene.bodies[1].vx = mouthDir.x * 300;
-      scene.bodies[1].vy = mouthDir.y * 300;
-      var edges = PhysicsEngine.getFunnelEdges(scene.bodies[0]);
-      var teleported = false;
-      for (var i = 0; i < 60 && !teleported; i++) {
-        var prevX = scene.bodies[1].x, prevY = scene.bodies[1].y;
-        PhysicsEngine.step(scene, DT);
-        var b = scene.bodies[1];
-        if (dist(prevX, prevY, b.x, b.y) > 50) teleported = true;
-      }
-      var b = scene.bodies[1];
-      var landedAtThroat = dist(b.x, b.y, edges.throatCenter.x, edges.throatCenter.y) < 20;
-      var detail = "rotated 90deg: throat center=(" + edges.throatCenter.x.toFixed(1) + "," + edges.throatCenter.y.toFixed(1) +
-        "), ball landed at (" + b.x.toFixed(1) + "," + b.y.toFixed(1) + ") after teleport=" + teleported;
-      return { pass: teleported && landedAtThroat, detail: detail };
-    }
-  );
-
-  addTest(
-    "A funnel next to a line or a second funnel doesn't crash (unsupported pair, not a wrong answer)",
-    "collidePair has no funnel<->line or funnel<->funnel model yet - it must return null there instead of falling through to collideLineLine and reading a funnel's undefined .length",
-    function () {
-      var scene = {
-        bodies: [
-          PhysicsEngine.createFunnel(300, 300, 100, 0, true),
-          PhysicsEngine.createFunnel(700, 300, 100, 0.4, false),
-          PhysicsEngine.createLine(500, 600, 200, 0, true),
-        ],
-        hinges: [], frameWidth: 1200, frameHeight: 900, edgeMode: "wrap",
-      };
-      for (var i = 0; i < 60; i++) PhysicsEngine.step(scene, DT);
-      var allFinite = scene.bodies.every(function (b) { return isFinite(b.x) && isFinite(b.y) && isFinite(b.vx) && isFinite(b.vy); });
-      var detail = "after 60 steps, bodies: " + scene.bodies.map(function (b) { return "(" + b.x.toFixed(1) + "," + b.y.toFixed(1) + ")"; }).join(" ");
-      return { pass: allFinite, detail: detail };
-    }
-  );
-
-  addTest(
-    "JS engine and GPU compiler agree on a funnel mouth teleport",
-    "keeps physics-engine.js's Funnel step() logic and physics-gpu.js's GLSL port (sweptCapsuleCircleContact, collideFunnelMouthTHit, the teleFound/teleWon codegen) in lockstep",
-    function () {
-      function buildScene() {
-        return {
-          mutualGravity: false,
-          bodies: [
-            PhysicsEngine.createFunnel(400, 400, 120, 0, true),
-            PhysicsEngine.createCircle(400, 250, 10, false),
-          ],
-          hinges: [],
-        };
-      }
-      var jsScene = buildScene();
-      var gpuScene = buildScene();
-      var maxSteps = 60;
-      var traj = PhysicsGPU.runSceneOnGPU(gpuScene, maxSteps);
-      var maxPosErr = 0;
-      for (var s = 0; s < maxSteps; s++) {
-        PhysicsEngine.step(jsScene, DT);
-        var row = traj[s];
-        for (var b = 0; b < jsScene.bodies.length; b++) {
-          maxPosErr = Math.max(maxPosErr, Math.abs(jsScene.bodies[b].x - row[b].x), Math.abs(jsScene.bodies[b].y - row[b].y));
-        }
-      }
-      var detail = "after " + maxSteps + " steps (includes a mouth teleport): max position error=" + maxPosErr.toFixed(5) +
-        "px; JS final=(" + jsScene.bodies[1].x.toFixed(2) + "," + jsScene.bodies[1].y.toFixed(2) +
-        "), GPU final=(" + traj[maxSteps - 1][1].x.toFixed(2) + "," + traj[maxSteps - 1][1].y.toFixed(2) + ")";
-      return { pass: maxPosErr < 0.01, detail: detail };
-    }
-  );
-
-  addTest(
-    "JS engine and GPU compiler agree on a funnel leg bounce",
-    "same lockstep concern as the mouth teleport test, for the 3 solid-edge Contact path instead of the MouthHit path",
-    function () {
-      function buildScene() {
-        return {
-          mutualGravity: false,
-          bodies: [
-            PhysicsEngine.createFunnel(400, 400, 120, 0, true),
-            PhysicsEngine.createCircle(450, 400, 8, false),
-          ],
-          hinges: [],
-        };
-      }
-      var jsScene = buildScene();
-      var gpuScene = buildScene();
-      var maxSteps = 60;
-      var traj = PhysicsGPU.runSceneOnGPU(gpuScene, maxSteps);
-      var maxPosErr = 0;
-      for (var s = 0; s < maxSteps; s++) {
-        PhysicsEngine.step(jsScene, DT);
-        var row = traj[s];
-        for (var b = 0; b < jsScene.bodies.length; b++) {
-          maxPosErr = Math.max(maxPosErr, Math.abs(jsScene.bodies[b].x - row[b].x), Math.abs(jsScene.bodies[b].y - row[b].y));
-        }
-      }
-      var detail = "after " + maxSteps + " steps (includes a leg bounce): max position error=" + maxPosErr.toFixed(5) + "px";
-      return { pass: maxPosErr < 0.01, detail: detail };
-    }
-  );
-
-  addTest(
-    "A funnel teleport and a leg bounce run in double-float, in step with the float64 engine",
-    "funnels and splitters used to be float32-only: a df compile threw, and the grid quietly fell back to float32 however deep the zoom. physics-gpu-df.js now ports the trapezoid functions (dfSweptCapsuleCircleContact, dfTrapezoid, dfCollideFunnelMouthTHit) and generateStepOnceGLSL emits its funnel block at either precision: this pins both halves of that block, the mouth teleport and the solid-edge contacts, against the JS engine, where a float32 stage left in the chain shows up as an error ~1000x larger",
-    function () {
-      function sceneWith(circleX, circleY, radius) {
-        return {
-          bodies: [
-            PhysicsEngine.createFunnel(400, 400, 120, 0, true),
-            PhysicsEngine.createCircle(circleX, circleY, radius, false),
-          ],
-          hinges: [], xInput: null, yInput: null, output: { body: 1, property: "y" },
-        };
-      }
-      var STEPS = 60;
-      function errorOf(scene, precision) {
-        var ref = cpuStateAt(scene, 0, 0, STEPS, 1);
-        return { err: gridResidualAtPoint(scene, STEPS, 0, 0, precision, 1, ref).err, ref: ref };
-      }
-      var teleport = errorOf(sceneWith(400, 250, 10), "df");
-      var bounce = errorOf(sceneWith(450, 400, 8), "df");
-      var bounce32 = errorOf(sceneWith(450, 400, 8), "f32");
-      // The ball starts 150px above the funnel's center; only a teleport can put it below.
-      var teleported = teleport.ref.y > 400;
-      return {
-        pass: teleported && teleport.err < 1e-6 && bounce.err < 1e-6 && bounce.err * 20 < bounce32.err,
-        detail: "after " + STEPS + " steps: teleport run off by " + teleport.err.toExponential(2) + "px in df (ball ended at y=" +
-          teleport.ref.y.toFixed(1) + ", past the funnel's center=" + teleported + "); leg bounce off by " +
-          bounce.err.toExponential(2) + "px in df vs " + bounce32.err.toExponential(2) + "px in float32",
-      };
-    }
-  );
-
-  addTest(
-    "A splitter scene runs in double-float, in step with the float64 engine",
-    "the splitter shares the funnel's trapezoid port, plus its own end-of-step machinery: spawn slots waking as DBody values, df alive-gating, the split offsets applied in df. The body checked is the one that stays in the parent's slot, so this passes only if the split itself landed where the JS engine put it",
-    function () {
-      // Slot ceiling pulled down: each spawn slot is a whole extra body of df work under the GPU watchdog.
-      var scene = buildSplitterScene(385);
-      scene.xInput = null; scene.yInput = null; scene.output = { body: 1, property: "y" };
-      scene.maxSimulationBodies = 4;
-      var STEPS = 40;
-      var js = PhysicsEngine.cloneScene(scene);
-      js.bodies.forEach(PhysicsEngine.computeMass);
-      for (var i = 0; i < STEPS; i++) PhysicsEngine.step(js, DT);
-      var ref = js.bodies[1];
-      var df = gridResidualAtPoint(scene, STEPS, 0, 0, "df", 1, ref);
-      return {
-        pass: js.bodies.length === 3 && df.err < 1e-6,
-        detail: "after " + STEPS + " steps the JS engine has " + js.bodies.length + " bodies (want 3: the ball split once); " +
-          "the df shader's parent half is off by " + df.err.toExponential(2) + "px",
-      };
-    }
-  );
-
-    // ---- Splitter: the short side turns one circle into two on the long side (parent's velocity kept);
-    // Output tracks the lineage AVERAGE. See physics-engine.js's createSplitter. ----
-
-    // The reported worked example: size=120 makes "1 unit" 60px (throat = size/2, mouth = 3*size/2,
-    // legs = size); angle=PI turns the short side up toward the falling ball.
-  function buildSplitterScene(ballX, ballRadius) {
-    return {
-      mutualGravity: false,
-      bodies: [
-        PhysicsEngine.createSplitter(400, 400, 120, Math.PI, true),
-        PhysicsEngine.createCircle(ballX, 250, ballRadius === undefined ? 4 : ballRadius, false),
-      ],
-      hinges: [], frameWidth: 1200, frameHeight: 900, edgeMode: "wrap",
-    };
-  }
-
-  addTest(
-    "A circle hitting a splitter's short side becomes two on the long side, 0.75/0.25 from their own edges",
-    "collideSplitterShortSideTHit's spawn rule: the contact's absolute distance from one corner is preserved from BOTH corners of the long side, which is what makes the pair land (mouthLen - throatLen) apart for any hit position",
-    function () {
-      // throat[0] is at x=430 and the throat is 60px long: 0.75 along it is x=385.
-      var scene = buildSplitterScene(385);
-      var split = null;
-      for (var i = 0; i < 60 && !split; i++) {
-        PhysicsEngine.step(scene, DT);
-        if (scene.bodies.length > 2) split = scene.bodies.slice(1);
-      }
-      if (!split) return { pass: false, detail: "the ball never split within 60 steps" };
-      var edges = PhysicsEngine.getFunnelEdges(scene.bodies[0]);
-      var unit = 120 / 2; // size/2 - "1 unit" in the 1 : 3 : 2 description
-      var fromEdge0 = Math.abs(split[0].x - edges.mouth[0].x) / unit;
-      var fromEdge1 = Math.abs(split[1].x - edges.mouth[1].x) / unit;
-      var separation = Math.abs(split[0].x - split[1].x) / unit;
-      var detail = "one ball " + fromEdge0.toFixed(4) + " units from its edge, the other " +
-        fromEdge1.toFixed(4) + " from its own (want 0.75 / 0.25), separation " + separation.toFixed(4) +
-        " units (want 2)";
-      return {
-        pass: Math.abs(fromEdge0 - 0.75) < 1e-6 && Math.abs(fromEdge1 - 0.25) < 1e-6 && Math.abs(separation - 2) < 1e-6,
-        detail: detail,
-      };
-    }
-  );
-
-  addTest(
-    "Both balls a splitter produces carry the parent's velocity unchanged",
-    "\"They each have the same velocity as the initial ball\": the split is a position/identity event, never an impulse",
-    function () {
-      var scene = buildSplitterScene(385);
-      var beforeV = null, split = null;
-      for (var i = 0; i < 60 && !split; i++) {
-        var prevV = { vx: scene.bodies[1].vx, vy: scene.bodies[1].vy };
-        PhysicsEngine.step(scene, DT);
-        if (scene.bodies.length > 2) { split = scene.bodies.slice(1); beforeV = prevV; }
-      }
-      if (!split) return { pass: false, detail: "the ball never split within 60 steps" };
-      var sameAsEachOther = Math.abs(split[0].vx - split[1].vx) < 1e-9 && Math.abs(split[0].vy - split[1].vy) < 1e-9;
-      // Only the split step's own gravity may separate the children's vy from the pre-step reading.
-      var expectedVy = beforeV.vy + PhysicsEngine.GRAVITY * DT;
-      var carriedThrough = Math.abs(split[0].vy - expectedVy) < 1e-6 && Math.abs(split[0].vx - beforeV.vx) < 1e-9;
-      var detail = "children v=(" + split[0].vx.toFixed(3) + "," + split[0].vy.toFixed(3) + ") and (" +
-        split[1].vx.toFixed(3) + "," + split[1].vy.toFixed(3) + "); parent entered the step at vy=" +
-        beforeV.vy.toFixed(3) + ", so one step of gravity gives " + expectedVy.toFixed(3);
-      return { pass: sameAsEachOther && carriedThrough, detail: detail };
-    }
-  );
-
-  addTest(
-    "Output tracks the AVERAGE over a split lineage, and that average is continuous through the split",
-    "computeOutputLineageAverage / lineageOf: the whole point of the mapping surviving a body becoming two",
-    function () {
-      var scene = buildSplitterScene(385);
-      var beforeX = null, afterX = null, beforeCount = 0, afterCount = 0;
-      for (var i = 0; i < 60 && afterX === null; i++) {
-        var prevX = PhysicsEngine.computeOutputLineageAverage(scene, 1, "x");
-        var prevCount = scene.bodies.length;
-        PhysicsEngine.step(scene, DT);
-        if (scene.bodies.length > prevCount) {
-          beforeX = prevX; beforeCount = prevCount - 1;
-          afterX = PhysicsEngine.computeOutputLineageAverage(scene, 1, "x");
-          afterCount = scene.bodies.length - 1;
-        }
-      }
-      if (afterX === null) return { pass: false, detail: "the ball never split within 60 steps" };
-      // Spawn points are symmetric about the hit point, so the averaged X must not jump at the split.
-      var lineageMembers = scene.bodies.filter(function (b, idx) { return PhysicsEngine.lineageOf(scene, idx) === 1; }).length;
-      var detail = "averaged X " + beforeX.toFixed(4) + " (over " + beforeCount + " ball) -> " +
-        afterX.toFixed(4) + " (over " + afterCount + "), lineage 1 now has " + lineageMembers + " members";
-      return { pass: Math.abs(afterX - beforeX) < 1e-6 && lineageMembers === 2 && afterCount === 2, detail: detail };
-    }
-  );
-
-  addTest(
-    "A splitter's long side and legs bounce like a funnel's, only the short side splits",
-    "collideSplitterCircle covers mouth + both legs; a ball arriving at the long side must not spawn anything",
-    function () {
-      // Angle 0 puts the LONG side up, which is the solid side on a splitter.
-      var scene = {
-        mutualGravity: false,
-        bodies: [
-          PhysicsEngine.createSplitter(400, 400, 120, 0, true),
-          PhysicsEngine.createCircle(400, 250, 10, false),
-        ],
-        hinges: [], frameWidth: 1200, frameHeight: 900, edgeMode: "wrap",
-      };
-      var bounced = false;
-      var prevVy = 0;
-      for (var i = 0; i < 60 && !bounced; i++) {
-        PhysicsEngine.step(scene, DT);
-        if (prevVy > 50 && scene.bodies[1].vy < prevVy - 50) bounced = true;
-        prevVy = scene.bodies[1].vy;
-      }
-      var detail = "after 60 steps: bodies=" + scene.bodies.length + " (want 2: no split), bounced off the long side=" + bounced;
-      return { pass: scene.bodies.length === 2 && bounced, detail: detail };
-    }
-  );
-
-  addTest(
-    "Splitting is recursive: a ball produced by a split can split again",
-    "each half keeps its lineage and is an ordinary circle afterward, so nothing special-cases it out of the next splitter it meets",
-    function () {
-      // Two stacked splitters: 1 -> 2 -> 3 balls, all in lineage 1.
-      var scene = {
-        mutualGravity: false,
-        bodies: [
-          PhysicsEngine.createSplitter(400, 400, 120, Math.PI, true),
-          PhysicsEngine.createCircle(400, 250, 4, false),
-          PhysicsEngine.createSplitter(460, 700, 120, Math.PI, true),
-        ],
-        hinges: [], frameWidth: 1200, frameHeight: 1400, edgeMode: "wrap",
-      };
-      var counts = [];
-      for (var i = 0; i < 120; i++) {
-        PhysicsEngine.step(scene, DT);
-        counts.push(scene.bodies.length);
-      }
-      var balls = scene.bodies.filter(function (b) { return b.type === "circle"; });
-      var allSameLineage = balls.every(function (b, idx) {
-        return PhysicsEngine.lineageOf(scene, scene.bodies.indexOf(b)) === 1;
-      });
-      var detail = "circles after 120 steps: " + balls.length + " (want >= 3 - one split, then a second on one half); " +
-        "all in lineage 1: " + allSameLineage;
-      return { pass: balls.length >= 3 && allSameLineage, detail: detail };
-    }
-  );
-
     // ---- Pair Outputs: average of two bodies, and distance between them (PhysicsEngine.computeOutputValue) ----
 
   function twoBallScene(edgeMode, ax, ay, bx, by) {
@@ -3271,26 +2870,6 @@
   );
 
   addTest(
-    "A pair Output weighs each half once, however many times either has split",
-    "each half is its own lineage average FIRST, then the two are averaged, flattening every body into one mean instead would let whichever ball split more times drag the answer toward itself, which is not what \"the average of object 1 and object 2\" means",
-    function () {
-      var scene = twoBallScene("infinite", 0, 0, 200, 0);
-      // A third ball tagged as a split child of body 0.
-      var child = PhysicsEngine.createCircle(100, 0, 10, false);
-      child.lineage = 0;
-      scene.bodies.push(child);
-      PhysicsEngine.computeMass(child);
-      var got = PhysicsEngine.computeOutputValue(scene, { body: 0, bodyB: 1, property: "x" });
-      // lineage 0 averages to 50, lineage 1 is 200, pair is 125; a flat mean over three bodies would be 100.
-      var flat = (0 + 200 + 100) / 3;
-      return {
-        pass: Math.abs(got - 125) < 1e-9,
-        detail: "pair average = " + got + " (want 125 - lineage 0 averages to 50, lineage 1 is 200); a flat mean over all three bodies would give " + flat.toFixed(1),
-      };
-    }
-  );
-
-  addTest(
     "Output survives a Play/Reset round trip with its second body intact",
     "PhysicsEngine.cloneScene is what physics-ui.js round-trips the live scene through on every Play and Reset: an omitted field there silently resets mid-edit, which is how simulationSteps and edgeMode each got lost once, and a dropped bodyB would quietly turn a pair Output back into a one-body one",
     function () {
@@ -3341,409 +2920,6 @@
         : good.length + " valid shapes accepted; " + bad.length + " invalid ones rejected, e.g. \"" +
           E.outputMappingError(bad[0][1], N) + "\" for the one that broke the page";
       return { pass: wronglyRejected.length === 0 && wronglyAccepted.length === 0, detail: detail };
-    }
-  );
-
-  addTest(
-    "Every body type has a finite rendered half-extent, including a trapezoid",
-    "fractal-grid.js's instant hover preview asked for `body.length / 2`, and a funnel/splitter has no `length` at all: undefined/2 is NaN, and a NaN coordinate makes canvas draw nothing silently. Reported as \"the preview doesn't show the funnel or splitter until the replay loads\": the GPU trajectory carries a real half in its alpha channel, so the shape appeared the moment the replay took over. Both paths read PhysicsGPU.shapeHalf now, so they cannot disagree again.",
-    function () {
-      var bodies = [
-        PhysicsEngine.createCircle(100, 100, 17, false),
-        PhysicsEngine.createLine(100, 100, 300, 0.4, true), // (x, y, LENGTH, angle)
-        PhysicsEngine.createFunnel(400, 400, 120, 0, true),
-        PhysicsEngine.createSplitter(400, 400, 140, Math.PI, true),
-      ];
-      var want = [17, 150, 60, 70]; // radius, length/2, size/2, size/2
-      var got = bodies.map(function (b) { return PhysicsGPU.shapeHalf([b], 0); });
-      var ok = got.every(function (v, i) { return isFinite(v) && Math.abs(v - want[i]) < 1e-9; });
-      var detail = bodies.map(function (b, i) {
-        return b.type + ": " + got[i] + " (want " + want[i] + ")";
-      }).join("; ");
-      return { pass: ok, detail: detail };
-    }
-  );
-
-  addTest(
-    "A trapezoid's outline can be rebuilt from just (x, y, angle, half), what the hover preview draws from",
-    "the preview has a trajectory ROW, not a body: x/y/angle and the one packed half. Drawing the four corners from that has to land on the same trapezoid the engine collides against, or the preview would show a shape the simulation isn't using.",
-    function () {
-      var body = PhysicsEngine.createSplitter(437, 618, 140, 0.7, true);
-      var real = PhysicsEngine.getFunnelEdges(body);
-      // Exactly what fractal-grid.js's traceTrapezoid reconstructs from.
-      var half = PhysicsGPU.shapeHalf([body], 0);
-      var rebuilt = PhysicsEngine.getFunnelEdges({ x: body.x, y: body.y, angle: body.angle, size: half * 2 });
-      var corners = [["mouth", 0], ["mouth", 1], ["throat", 0], ["throat", 1]];
-      var worst = 0;
-      corners.forEach(function (c) {
-        var a = real[c[0]][c[1]], b = rebuilt[c[0]][c[1]];
-        worst = Math.max(worst, dist(a.x, a.y, b.x, b.y));
-        if (!isFinite(b.x) || !isFinite(b.y)) worst = Infinity;
-      });
-      return {
-        pass: worst < 1e-9,
-        detail: "worst corner disagreement " + worst.toFixed(12) + "px across all four corners (want 0: the rebuilt outline IS the collided one)",
-      };
-    }
-  );
-
-  addTest(
-    "A ball entering a splitter off-center isn't bounced by the splitter it's passing through",
-    "a splitter's mouth and legs are solid, and their capsules reach LINE_THICKNESS/2 PAST the short side's own corners - so a ball entering anywhere near a corner clips a leg end-cap on the very step it splits, and the split then carries that bounce's velocity out with it. Reported as \"the balls come out at weird angles\"; measured, a ball entering 2px from a corner at vy=+373 came out at vy=-332 (reflected backwards) with 102px/s of sideways drift it never had. step() now drops those contacts, exactly as it already did for a funnel teleport.",
-    function () {
-      // Throat spans x 370..430: 372 and 428 hug a corner, 400 is dead center. Straight drops, so any vx is invented.
-      function dropAt(x) {
-        var scene = buildSplitterScene(x);
-        for (var i = 0; i < 80; i++) {
-          var before = scene.bodies.length;
-          PhysicsEngine.step(scene, DT);
-          if (scene.bodies.length > before) {
-            var a = scene.bodies[1], b = scene.bodies[scene.bodies.length - 1];
-            return { x: x, vx: a.vx, vy: a.vy, matched: Math.abs(a.vx - b.vx) < 1e-9 && Math.abs(a.vy - b.vy) < 1e-9 };
-          }
-        }
-        return null;
-      }
-      var entries = [372, 385, 400, 415, 428].map(dropAt);
-      if (entries.some(function (e) { return e === null; })) {
-        return { pass: false, detail: "a ball failed to split within 80 steps" };
-      }
-      // All five must carry the parent's velocity: vx exactly 0, one identical positive vy.
-      var vy0 = entries[2].vy; // the dead-center drop, which never touched a leg
-      var clean = entries.every(function (e) {
-        return e.matched && Math.abs(e.vx) < 1e-9 && Math.abs(e.vy - vy0) < 1e-9;
-      });
-      var detail = entries.map(function (e) {
-        return "x=" + e.x + ": v=(" + e.vx.toFixed(3) + ", " + e.vy.toFixed(1) + ")";
-      }).join("; ") + " - want vx=0 and vy=" + vy0.toFixed(1) + " for every entry point";
-      return { pass: clean, detail: detail };
-    }
-  );
-
-  addTest(
-    "The split is a pure translation, so the ball's own overshoot survives it",
-    "collideSplitterShortSideTHit returns offsets, not points on the long side: an absolute landing point would discard how far past the short side the ball actually got and replace it with a constant, which is a discontinuity in exactly the variable the fractal grid is a picture of",
-    function () {
-      // Different drop heights leave different depths past the short side; a snap onto the long side would erase them.
-      function depthAfterSplit(startY) {
-        var scene = buildSplitterScene(385);
-        scene.bodies[1].y = startY;
-        for (var i = 0; i < 120; i++) {
-          var before = scene.bodies.length;
-          PhysicsEngine.step(scene, DT);
-          if (scene.bodies.length > before) return scene.bodies[1].y;
-        }
-        return null;
-      }
-      var a = depthAfterSplit(250), b = depthAfterSplit(250.9);
-      if (a === null || b === null) return { pass: false, detail: "one of the two balls never split within 120 steps" };
-      var spread = Math.abs(a - b);
-      var detail = "post-split y: " + a.toFixed(4) + " vs " + b.toFixed(4) + ", spread " + spread.toFixed(4) +
-        "px (want > 0 - a snap onto the long side would make both exactly equal)";
-      return { pass: spread > 1e-6, detail: detail };
-    }
-  );
-
-  addTest(
-    "Both halves emerge clear of the long side instead of trapped inside the trapezoid",
-    "the swept trigger fires while the ball is still (halfThickness + radius) short of the short side's centerline, so translating by the bare leg vector leaves it that far short of the LONG side's centerline - i.e. embedded in its wall, bouncing back inside forever. collideSplitterShortSideTHit's clearance term is what matches the two SURFACES up instead of the two centerlines.",
-    function () {
-      var scene = buildSplitterScene(385);
-      var split = null;
-      for (var i = 0; i < 60 && !split; i++) {
-        PhysicsEngine.step(scene, DT);
-        if (scene.bodies.length > 2) split = scene.bodies.slice(1);
-      }
-      if (!split) return { pass: false, detail: "the ball never split within 60 steps" };
-      var edges = PhysicsEngine.getFunnelEdges(scene.bodies[0]);
-      // angle=PI puts the mouth below the throat, so "clear" is y past it.
-      var mouthY = edges.mouth[0].y, radius = split[0].radius;
-      var clearOf = PhysicsEngine.LINE_THICKNESS / 2 + radius;
-      var d0 = split[0].y - mouthY, d1 = split[1].y - mouthY;
-      var detail = "halves sit " + d0.toFixed(2) + " and " + d1.toFixed(2) +
-        "px past the long side's centerline (want >= " + clearOf.toFixed(2) + ", the wall's own half-thickness plus the radius)";
-      return { pass: d0 >= clearOf - 1e-6 && d1 >= clearOf - 1e-6, detail: detail };
-    }
-  );
-
-  addTest(
-    "At the body ceiling a ball still passes through the splitter, it just stops duplicating",
-    "PhysicsEngine.MAX_SIMULATION_BODIES: the old rule skipped the whole split, leaving the ball behind on the short side. Being at the ceiling is a fact about the scene, not a reason to stop the warp, and `continue` rather than `break`, so a later ball that hit a splitter this same step isn't skipped along with it.",
-    function () {
-      // MAX balls already in the scene: nothing can be added, but the ball must still pass through.
-      var cap = PhysicsEngine.MAX_SIMULATION_BODIES;
-      var scene = buildSplitterScene(385);
-      while (scene.bodies.length < cap) {
-        // Parked far from the splitter, only occupying slots.
-        scene.bodies.push(PhysicsEngine.createCircle(50 + scene.bodies.length * 25, 850, 4, true));
-      }
-      var edges = PhysicsEngine.getFunnelEdges(scene.bodies[0]);
-      var crossed = false, countAfter = null;
-      for (var i = 0; i < 60 && !crossed; i++) {
-        PhysicsEngine.step(scene, DT);
-        if (scene.bodies[1].y > edges.mouth[0].y) { crossed = true; countAfter = scene.bodies.length; }
-      }
-      var detail = crossed
-        ? "ball reached y=" + scene.bodies[1].y.toFixed(1) + ", past the long side at " + edges.mouth[0].y.toFixed(1) +
-          "; bodies " + countAfter + " (capped at " + cap + ", so no duplicate)"
-        : "the ball never got past the long side: it was left behind on the short side";
-      return { pass: crossed && countAfter === cap, detail: detail };
-    }
-  );
-
-  addTest(
-    "A scene's own maxSimulationBodies caps the run, and the GPU pads to exactly that",
-    "the ceiling is a per-scene control (#editor-view's Max Objects), not a constant, and it decides the compiled shader's whole size, so the JS engine's ball count and the GPU's slot count have to come from the same number or the grid renders a different scene than it plays back",
-    function () {
-      function cascade(cap) {
-        var scene = {
-          mutualGravity: false,
-          bodies: [
-            PhysicsEngine.createSplitter(400, 400, 120, Math.PI, true),
-            PhysicsEngine.createCircle(400, 250, 4, false),
-            PhysicsEngine.createSplitter(460, 700, 120, Math.PI, true),
-          ],
-          hinges: [], frameWidth: 1200, frameHeight: 1400, edgeMode: "wrap",
-        };
-        if (cap !== null) scene.maxSimulationBodies = cap;
-        return scene;
-      }
-      var results = [5, 8, null].map(function (cap) {
-        var scene = cascade(cap);
-        var rows = PhysicsEngine.runTrajectory(PhysicsEngine.cloneScene(scene), 400, DT);
-        var grew = rows[rows.length - 1].length;
-        var slots = PhysicsGPU.padSceneForSplitting(scene).scene.bodies.length;
-        var want = PhysicsEngine.maxSimulationBodiesFor(scene);
-        return { cap: cap, grew: grew, slots: slots, want: want };
-      });
-      // The uncapped run must grow PAST both low caps, or "stopped at 5" and "ran out of splits" look the same.
-      // Not asserted to reach the default ceiling: this cascade runs out of splitters first.
-      var uncapped = results[2];
-      var ok = results.every(function (r) { return r.grew <= r.want && r.slots === r.want; }) &&
-        uncapped.grew > 8 &&
-        results[0].grew === 5 && results[1].grew === 8;
-      var detail = results.map(function (r) {
-        return (r.cap === null ? "default" : "cap " + r.cap) + ": JS grew to " + r.grew +
-          ", GPU padded to " + r.slots + " slots (ceiling " + r.want + ")";
-      }).join("; ");
-      return { pass: ok, detail: detail };
-    }
-  );
-
-  addTest(
-    "maxSimulationBodies is clamped, never trusted, and survives a Play/Reset round trip",
-    "it arrives from hand-edited JSON and from a slider, and PhysicsEngine.cloneScene is what physics-ui.js round-trips the live scene through on every Play and Reset: an omission there silently resets the ceiling mid-edit, which is exactly how simulationSteps and edgeMode each got lost once",
-    function () {
-      var F = PhysicsEngine.maxSimulationBodiesFor;
-      var LO = PhysicsEngine.MIN_SIMULATION_BODIES, HI = PhysicsEngine.MAX_SIMULATION_BODIES_LIMIT;
-      var clamps = [
-        [{}, PhysicsEngine.MAX_SIMULATION_BODIES],
-        [{ maxSimulationBodies: 0 }, PhysicsEngine.MAX_SIMULATION_BODIES],
-        [{ maxSimulationBodies: "nonsense" }, PhysicsEngine.MAX_SIMULATION_BODIES],
-        [{ maxSimulationBodies: 1 }, LO],
-        [{ maxSimulationBodies: 99999 }, HI],
-        [{ maxSimulationBodies: 7.6 }, 8],
-        [{ maxSimulationBodies: 12 }, 12],
-      ];
-      var bad = clamps.filter(function (c) { return F(c[0]) !== c[1]; });
-      var round = PhysicsEngine.cloneScene({
-        bodies: [], hinges: [], maxSimulationBodies: 6,
-        xInput: null, yInput: null, output: null,
-      });
-      var survived = round.maxSimulationBodies === 6;
-      var detail = "clamping: " + (bad.length ? bad.length + " wrong (" + JSON.stringify(bad[0]) + ")" : "all " + clamps.length + " correct") +
-        "; cloneScene round trip kept " + round.maxSimulationBodies + " (want 6)";
-      return { pass: bad.length === 0 && survived, detail: detail };
-    }
-  );
-
-  addTest(
-    "A ceiling too high to compile is refused with a readable message, not a driver error",
-    "stepOnce() takes 4 parameters per authored body and 6 per spawn slot against GLSL's hard limit of 256: the slider's own max is set below that for any authorable scene, but a hand-edited scene can ask for more, and the driver's own answer is \"'stepOnce' : Function has too many parameters\" against a line number in generated code",
-    function () {
-      function attempt(authored, total) {
-        var bodies = [];
-        for (var i = 0; i < authored; i++) bodies.push(PhysicsEngine.createCircle(i * 40, 100, 10, false));
-        for (var j = authored; j < total; j++) bodies.push(PhysicsEngine.createCircle(0, 0, 0, false));
-        var consts = bodies.map(PhysicsGPU.bodyConst);
-        try {
-          PhysicsGPU.generateStepOnceGLSL(total, consts, [], [], undefined, "f32", false, true, authored);
-          return null;
-        } catch (err) { return err.message; }
-      }
-      // The slider's ceiling must compile for the worst authorable scene (MAX_BODIES bodies).
-      var atSliderMax = attempt(PhysicsGPU.MAX_BODIES, PhysicsEngine.MAX_SIMULATION_BODIES_LIMIT);
-      var pastIt = attempt(4, 44);
-      var readable = pastIt && /parameters/.test(pastIt) && /Max Objects/.test(pastIt);
-      var detail = "at the slider's max (" + PhysicsEngine.MAX_SIMULATION_BODIES_LIMIT + " slots, " + PhysicsGPU.MAX_BODIES +
-        " authored): " + (atSliderMax ? "REFUSED - " + atSliderMax : "compiles") +
-        "; at 44 slots: " + (pastIt ? "refused with \"" + pastIt + "\"" : "did NOT refuse");
-      return { pass: atSliderMax === null && readable, detail: detail };
-    }
-  );
-
-  addTest(
-    "The GPU runs a splitter scene, and agrees with the JS engine step for step",
-    "a split adds a body, which a compiled fixed-body shader cannot do, so PhysicsGPU.padSceneForSplitting pre-allocates spawn slots up to MAX_SIMULATION_BODIES and a split wakes one instead of creating one. This is the check that the two engines' splitting agrees: same trigger step, same two halves, same recursion.",
-    function () {
-      var STEPS = 90;
-      var scene = buildSplitterScene(385);
-      var rows = PhysicsEngine.runTrajectory(PhysicsEngine.cloneScene(scene), STEPS, DT);
-      var traj = PhysicsGPU.runSceneOnGPU(scene, STEPS);
-      // A GPU row is always MAX_SIMULATION_BODIES long (dead slots have half = 0); compare over what JS says is alive.
-      var worst = 0, worstAt = -1, jsBornStep = -1, gpuBornStep = -1;
-      for (var stepIdx = 0; stepIdx < STEPS; stepIdx++) {
-        var jsRow = rows[stepIdx], gpuRow = traj[stepIdx];
-        if (jsBornStep === -1 && jsRow.length > rows[0].length) jsBornStep = stepIdx;
-        var gpuAlive = gpuRow.filter(function (b) { return b.half > 0; }).length;
-        if (gpuBornStep === -1 && gpuAlive > jsRow.length - (jsBornStep === -1 ? 0 : 1)) { /* noop */ }
-        for (var b = 0; b < jsRow.length; b++) {
-          var e = dist(jsRow[b].x, jsRow[b].y, gpuRow[b].x, gpuRow[b].y);
-          if (e > worst) { worst = e; worstAt = stepIdx; }
-        }
-      }
-      for (var g = 0; g < STEPS && gpuBornStep === -1; g++) {
-        if (traj[g].filter(function (b) { return b.half > 0; }).length > traj[0].filter(function (b) { return b.half > 0; }).length) gpuBornStep = g;
-      }
-      var detail = "worst position disagreement " + worst.toFixed(5) + "px (at step " + worstAt + ") over " +
-        STEPS + " steps; split fired at step " + jsBornStep + " in JS and step " + gpuBornStep + " on the GPU; " +
-        "JS grew " + rows[0].length + " -> " + rows[rows.length - 1].length + " bodies";
-      return { pass: worst < 0.01 && jsBornStep >= 0 && jsBornStep === gpuBornStep, detail: detail };
-    }
-  );
-
-  addTest(
-    "The fractal grid's own per-pixel codegen splits too, and matches the JS engine for that pixel",
-    "the grid builds each pixel's scene symbolically (generateGridInitialStateGLSL) and hands it to the shared step loop: a different declaration path from compileSceneToTrajectoryGLSL's baked literals, so the spawn slots it emits (and the padding that has to leave every authored body's index alone) need their own check. This is the path the fractal image is actually made of.",
-    function () {
-      var STEPS = 90, WORLD_X = 12;
-      var scene = {
-        mutualGravity: false,
-        bodies: [
-          PhysicsEngine.createSplitter(400, 400, 120, Math.PI, true),
-          PhysicsEngine.createCircle(385, 250, 4, false),
-        ],
-        hinges: [], frameWidth: 1200, frameHeight: 900, edgeMode: "wrap",
-        xInput: { body: 1, property: "x" },
-        yInput: null,
-        output: { body: 1, property: "y" },
-      };
-      var compiled = PhysicsGridCodegen.compileHoverTrajectoryGLSL(scene, WORLD_X, 0, STEPS, "f32");
-      var traj = PhysicsGPU.runCompiledTrajectoryOnGPU(compiled, STEPS);
-      var jsScene = PhysicsGridCodegen.computeOffsetSceneNumeric(scene, WORLD_X, 0);
-      var worst = 0, jsBornStep = -1, gpuBornStep = -1;
-      var startBodies = jsScene.bodies.length;
-      var gpuStartAlive = null;
-      for (var i = 0; i < STEPS; i++) {
-        PhysicsEngine.step(jsScene, PhysicsGPU.FIXED_DT);
-        if (jsBornStep === -1 && jsScene.bodies.length > startBodies) jsBornStep = i;
-        var alive = traj[i].filter(function (b) { return b.half > 0; }).length;
-        if (gpuStartAlive === null) gpuStartAlive = alive;
-        if (gpuBornStep === -1 && alive > gpuStartAlive) gpuBornStep = i;
-        for (var b = 0; b < jsScene.bodies.length; b++) {
-          worst = Math.max(worst, dist(jsScene.bodies[b].x, jsScene.bodies[b].y, traj[i][b].x, traj[i][b].y));
-        }
-      }
-      var detail = "worst disagreement " + worst.toFixed(5) + "px over " + STEPS + " steps at worldX=" + WORLD_X +
-        "; split fired at step " + jsBornStep + " in JS and step " + gpuBornStep + " on the grid's shader; " +
-        "JS ended with " + jsScene.bodies.length + " bodies";
-      return { pass: worst < 0.01 && jsBornStep >= 0 && jsBornStep === gpuBornStep && jsScene.bodies.length === 3, detail: detail };
-    }
-  );
-
-  addTest(
-    "The GPU agrees with JS through a RECURSIVE split, with two lineage members live at once",
-    "one split is a single woken slot; a second split off one half exercises liveCount's ordering, a spawn slot being itself splittable, and a woken slot inheriting its parent's lineage rather than its own index",
-    function () {
-      var STEPS = 130;
-      var scene = {
-        mutualGravity: false,
-        bodies: [
-          PhysicsEngine.createSplitter(400, 400, 120, Math.PI, true),
-          PhysicsEngine.createCircle(400, 250, 4, false),
-          PhysicsEngine.createSplitter(460, 700, 120, Math.PI, true),
-        ],
-        hinges: [], frameWidth: 1200, frameHeight: 1400, edgeMode: "wrap",
-      };
-      var rows = PhysicsEngine.runTrajectory(PhysicsEngine.cloneScene(scene), STEPS, DT);
-      var traj = PhysicsGPU.runSceneOnGPU(scene, STEPS);
-      var worst = 0, worstAt = -1;
-      for (var stepIdx = 0; stepIdx < STEPS; stepIdx++) {
-        for (var b = 0; b < rows[stepIdx].length; b++) {
-          var e = dist(rows[stepIdx][b].x, rows[stepIdx][b].y, traj[stepIdx][b].x, traj[stepIdx][b].y);
-          if (e > worst) { worst = e; worstAt = stepIdx; }
-        }
-      }
-      var jsFinal = rows[rows.length - 1].length;
-      var gpuFinal = traj[STEPS - 1].filter(function (b) { return b.half > 0; }).length;
-      // A trapezoid reports half = size/2 > 0, so the splitters count as alive on both sides.
-      var detail = "worst disagreement " + worst.toFixed(5) + "px (at step " + worstAt + "); final bodies: JS " +
-        jsFinal + ", GPU " + gpuFinal + " (want equal, and >= 5 - two splitters plus three balls)";
-      return { pass: worst < 0.01 && jsFinal === gpuFinal && jsFinal >= 5, detail: detail };
-    }
-  );
-
-  addTest(
-    "Mutual Gravity with a funnel or splitter stays finite (it used to go NaN and hang the tab)",
-    "gravitationalMass/halfExtent read body.length, which a trapezoid doesn't have - the NaN that produced made every 'dist >= rsum' test false, so every swept test reported contact, so a splitter split its ball EVERY step and the body count doubled until the tab died (reported as 'when I press play it crashes')",
-    function () {
-      var scene = {
-        mutualGravity: true,
-        bodies: [
-          PhysicsEngine.createCircle(1027, 140, 11, false),
-          PhysicsEngine.createSplitter(688, 492, 120, 0, true),
-        ],
-        hinges: [], frameWidth: 1192, frameHeight: 809, edgeMode: "infinite",
-      };
-      scene.bodies[0].vx = 14; scene.bodies[0].vy = 41;
-      var started = Date.now();
-      var rows = PhysicsEngine.runTrajectory(scene, 1000, DT);
-      var elapsed = Date.now() - started;
-      var last = rows[rows.length - 1];
-      var allFinite = last.every(function (b) { return isFinite(b.x) && isFinite(b.y); });
-      var maxBodies = rows.reduce(function (m, r) { return Math.max(m, r.length); }, 0);
-      // A funnel under Mutual Gravity has to stay finite too.
-      var fScene = {
-        mutualGravity: true,
-        bodies: [
-          PhysicsEngine.createCircle(500, 200, 10, false),
-          PhysicsEngine.createFunnel(500, 500, 120, 0, true),
-        ],
-        hinges: [], frameWidth: 1200, frameHeight: 900, edgeMode: "wrap",
-      };
-      runJS(fScene, 300);
-      var funnelFinite = isFinite(fScene.bodies[0].x) && isFinite(fScene.bodies[0].y);
-      var detail = "1000 steps in " + elapsed + "ms, bodies peaked at " + maxBodies +
-        " (cap " + PhysicsEngine.MAX_SIMULATION_BODIES + "), all positions finite=" + allFinite +
-        "; funnel under Mutual Gravity finite=" + funnelFinite;
-      return { pass: allFinite && funnelFinite && maxBodies <= PhysicsEngine.MAX_SIMULATION_BODIES && elapsed < 5000, detail: detail };
-    }
-  );
-
-  addTest(
-    "A circle resting against a splitter's short side never splits",
-    "only a FRESH crossing splits: a circle already inside the trigger capsule at the start of a step would otherwise re-split every step, which is exponential in steps rather than an occasional extra ball",
-    function () {
-      // Short side vertical at x=448 (y 470-530); the ball rests on a floor 12px to its left, inside the
-      // trigger capsule (18px = LINE_THICKNESS/2 + radius) without ever having crossed into it.
-      var scene = {
-        bodies: [
-          PhysicsEngine.createSplitter(500, 500, 120, Math.PI / 2, true),
-          PhysicsEngine.createLine(300, 518, 300, 0, true),
-          PhysicsEngine.createCircle(436, 500, 8, false),
-        ],
-        hinges: [], frameWidth: 1200, frameHeight: 900, edgeMode: "infinite",
-      };
-      var firstSplit = 0;
-      for (var i = 0; i < 400; i++) {
-        PhysicsEngine.step(scene, DT);
-        if (!firstSplit && scene.bodies.length > 3) firstSplit = i + 1;
-      }
-      var circles = scene.bodies.filter(function (b) { return b.type === "circle"; }).length;
-      var detail = "after 400 steps resting against the short side: " + circles +
-        " circle(s) (want exactly 1: it never crossed in, so it never splits)" +
-        (firstSplit ? "; first split at step " + firstSplit : "");
-      return { pass: circles === 1, detail: detail };
     }
   );
 
@@ -3843,7 +3019,7 @@
 
   addTest(
     "collisionsEnabled:false lets a body pass straight through a wall it would otherwise bounce off",
-    "the Collisions toggle: every detection loop in step() (ordinary contacts, funnel mouth, splitter short side) is gated on PhysicsEngine.collisionsEnabled",
+    "the Collisions toggle: step()'s detection loop is gated on PhysicsEngine.collisionsEnabled",
     function () {
       function scene(collisionsEnabled) {
         var s = {
@@ -3871,31 +3047,6 @@
         "without: final y=" + without.bodies[0].y.toFixed(1) + " (want > 700, i.e. fell straight through); " +
         "default (field omitted)=" + (defaultIsOn ? "on" : "off");
       return { pass: bouncedOff && passedThrough && defaultIsOn, detail: detail };
-    }
-  );
-
-  addTest(
-    "collisionsEnabled:false also passes a circle through a funnel and a splitter, not just ordinary bodies",
-    "\"objects can pass right through each other\" was read as applying uniformly: a funnel/splitter's solid edges and triggers use the exact same swept detection as an ordinary bounce, so leaving them collidable while turning off everything else would be an inconsistent carve-out",
-    function () {
-      var funnelScene = {
-        mutualGravity: false, collisionsEnabled: false,
-        bodies: [
-          PhysicsEngine.createCircle(400, 250, 10, false),
-          PhysicsEngine.createFunnel(400, 400, 120, 0, true),
-        ],
-        hinges: [], frameWidth: 1200, frameHeight: 900, edgeMode: "wrap",
-      };
-      for (var i = 0; i < 60; i++) PhysicsEngine.step(funnelScene, DT);
-      var noTeleport = funnelScene.bodies.length === 2 && funnelScene.bodies[0].y > 460; // fell straight past the throat, no snap
-      // buildSplitterScene(385) is proven to split within 60 steps with collisions on: a real negative control.
-      var splitterScene = buildSplitterScene(385);
-      splitterScene.collisionsEnabled = false;
-      for (var j = 0; j < 60; j++) PhysicsEngine.step(splitterScene, DT);
-      var noSplit = splitterScene.bodies.length === 2; // circle + splitter, unchanged
-      var detail = "funnel: bodies=" + funnelScene.bodies.length + ", ball y=" + funnelScene.bodies[0].y.toFixed(1) +
-        " (no teleport happened=" + noTeleport + "); splitter: bodies=" + splitterScene.bodies.length + " (no split happened=" + noSplit + ")";
-      return { pass: noTeleport && noSplit, detail: detail };
     }
   );
 
@@ -4577,7 +3728,7 @@
       PhysicsGridCodegen.generatePlaybackStateOutputsGLSL(layersPerGroup).join("\n"), "",
       PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(scene)), "",
       PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision,
-        scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), initial.spawnBase), "",
+        scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene)), "",
       "void main() {",
       // A different start per texel, so state crossing between texels shows up too.
       "  " + B.scalar + " worldX = " + B.fromFloat("(gl_FragCoord.x - 0.5) * 7.0") + ";",
@@ -4589,7 +3740,7 @@
       indent(PhysicsGridCodegen.generatePlaybackStateLoadGLSL(vars, "u_state", "ivec2(gl_FragCoord.xy)")),
       "  }",
       "  for (int i = 0; i < u_steps; i++) { stepOnce(" +
-        PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, precision, initial.spawnBase) + "); }",
+        PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, precision) + "); }",
       indent(PhysicsGridCodegen.generatePlaybackStateStoreGLSL(vars, "u_group", layersPerGroup)),
       "}",
     ].join("\n");
@@ -4717,17 +3868,6 @@
   );
 
   addTest(
-    "Grid playback: a splitter scene's spawn slots survive the round trip",
-    "A split rewrites a spawn slot's size, mass, alive flag and lineage mid-run, and liveCount decides which slot the next split takes: all of it has to be state",
-    function () {
-      var scene = buildSplitterScene(385);
-      scene.xInput = { body: 1, property: "x" };
-      scene.output = { body: 1, property: "x" };
-      return comparePlaybackLegs(scene, "f32", 90, [20, 20, 50], 8);
-    }
-  );
-
-  addTest(
     "Grid playback: mutual gravity's state round trip is exact",
     "Mutual Gravity's pull is recomputed from the positions every step: stateless by design, so nothing beyond the six accumulators should need carrying",
     function () {
@@ -4763,7 +3903,7 @@
     });
   }
 
-    // One of everything a scene can hold: all four shapes, anchors, velocities, both hinge kinds,
+    // One of everything a scene can hold: both shapes, anchors, velocities, both hinge kinds,
     // both spring kinds, a pair Output, and every setting off its default.
   function everythingScene() {
     return {
@@ -4771,21 +3911,20 @@
       bodies: [
         { type: "circle", x: -132.1042, y: 321.4385, angle: 0.0021, isAnchored: false, radius: 30, vx: 0, vy: 0, w: 0 },
         { type: "line", x: -334, y: -173.5, angle: -0.7679, isAnchored: true, length: 479, vx: 0, vy: 0, w: 0 },
-        { type: "funnel", x: 260.5, y: -160.5, angle: 0.6632, isAnchored: true, size: 120, vx: 0, vy: 0, w: 0 },
-        { type: "splitter", x: 0, y: 0, angle: 3.1416, isAnchored: false, size: 95.5, vx: 12.5, vy: 0, w: 0 },
+        { type: "line", x: 0, y: 0, angle: 3.1416, isAnchored: false, length: 95.5, vx: 12.5, vy: 0, w: 0 },
         { type: "circle", x: 410.0625, y: 288.125, angle: 0, isAnchored: false, radius: 18.5, vx: 0, vy: 44, w: -0.12 },
       ],
       hinges: [
         { bodyA: null, bodyB: 0, localAnchorA: { x: -188, y: 51.5 }, localAnchorB: { x: -70, y: 1 } },
-        { bodyA: 0, bodyB: 4, localAnchorA: { x: 70, y: 0 }, localAnchorB: { x: -71.25, y: 1 } },
+        { bodyA: 0, bodyB: 3, localAnchorA: { x: 70, y: 0 }, localAnchorB: { x: -71.25, y: 1 } },
       ],
       springs: [
-        { bodyA: null, bodyB: 3, localAnchorA: { x: 40.5, y: 220 }, localAnchorB: { x: 0, y: 0 }, stiffness: 112000, restLength: 187.25 },
-        { bodyA: 3, bodyB: 4, localAnchorA: { x: -12, y: 8.5 }, localAnchorB: { x: 0, y: -18.5 }, stiffness: 2530, restLength: 0 },
+        { bodyA: null, bodyB: 2, localAnchorA: { x: 40.5, y: 220 }, localAnchorB: { x: 0, y: 0 }, stiffness: 112000, restLength: 187.25 },
+        { bodyA: 2, bodyB: 3, localAnchorA: { x: -12, y: 8.5 }, localAnchorB: { x: 0, y: -18.5 }, stiffness: 2530, restLength: 0 },
       ],
-      xInput: { body: 0, property: "vx" }, yInput: { body: 4, property: "radius" },
-      output: { body: 0, bodyB: 4, property: "distance" },
-      frameWidth: 1192, frameHeight: 809, edgeMode: "infinite", maxSimulationBodies: 7,
+      xInput: { body: 0, property: "vx" }, yInput: { body: 3, property: "radius" },
+      output: { body: 0, bodyB: 3, property: "distance" },
+      frameWidth: 1192, frameHeight: 809, edgeMode: "infinite",
     };
   }
 
@@ -4815,14 +3954,14 @@
     "share-url.js's wire defaults: a field at its default is left out of a link, so what 'left out' means is fixed by every link already shared. decode() fills each one in explicitly so that nothing downstream can substitute a newer default of its own",
     function () {
       var decoded = ShareUrl.decode("#bldr/body:ci:0:0:0:30,frmw:900,frmh:600").scene;
-      var want = { mutualGravity: false, collisionsEnabled: true, simulationSteps: 1000, edgeMode: "sticky", maxSimulationBodies: 20 };
+      var want = { mutualGravity: false, collisionsEnabled: true, simulationSteps: 1000, edgeMode: "sticky" };
       var wrong = Object.keys(want).filter(function (k) { return decoded[k] !== want[k]; });
       var body = decoded.bodies[0];
       var restOk = body.vx === 0 && body.vy === 0 && body.w === 0 && body.isAnchored === false &&
         decoded.hinges.length === 0 && decoded.springs.length === 0 && decoded.xInput === null && decoded.yInput === null && decoded.output === null;
       return {
         pass: wrong.length === 0 && restOk,
-        detail: wrong.length ? "wrong defaults for: " + wrong.join(", ") : "all five settings, the three velocities, anchoring and the mappings come back explicit",
+        detail: wrong.length ? "wrong defaults for: " + wrong.join(", ") : "all four settings, the three velocities, anchoring and the mappings come back explicit",
       };
     }
   );
@@ -5570,7 +4709,7 @@
       var df = PhysicsGPU.compileSceneToTrajectoryGLSL(circles(), 10, "df").fragmentSource;
       var hinged = PhysicsGPU.compileSceneToTrajectoryGLSL(pendulum, 10, "f32").fragmentSource;
       var free = PhysicsGPU.compileSceneToTrajectoryGLSL(circles(false), 10, "f32").fragmentSource;
-      var f32Gone = ["collideLineCircle", "collideLineLine", "funnelVertices", "collideSplitterShortSideTHit", "solveHingeVelocity", "solve2x2", "lineEndpoint0", "FunnelVerts"];
+      var f32Gone = ["collideLineCircle", "collideLineLine", "solveHingeVelocity", "solve2x2", "lineEndpoint0"];
       var f32Kept = ["collideCircleCircle", "solveContactVelocity", "solveContactPosition", "advanceVelocity"];
       var dfGone = ["struct Body", "collideCircleCircle", "dfCollideLineCircle", "dfSinCos", "dfSolveHingeVelocity", "dfMod"];
       var dfKept = ["dfCollideCircleCircle", "dfSolveContactVelocity", "dfAdvanceVelocityGravity"];
@@ -5582,8 +4721,8 @@
       // Contact flags: one body's, and only for a caller that asks (the map's Bounce Count).
       var consts = circles().bodies.map(PhysicsGPU.bodyConst);
       var pairs = PhysicsGPU.collisionPairs(2, consts, []);
-      var silent = PhysicsGPU.generateStepOnceGLSL(2, consts, pairs, [], undefined, "f32", false, true, null, []);
-      var flagged = PhysicsGPU.generateStepOnceGLSL(2, consts, pairs, [], undefined, "f32", false, true, null, [], { contactBody: 1 });
+      var silent = PhysicsGPU.generateStepOnceGLSL(2, consts, pairs, [], undefined, "f32", false, true, []);
+      var flagged = PhysicsGPU.generateStepOnceGLSL(2, consts, pairs, [], undefined, "f32", false, true, [], { contactBody: 1 });
       var flagsOk = !/g_contact/.test(silent) && /bool g_contact1/.test(flagged) && !/g_contact0/.test(flagged);
       var noLoops = !/for \(int iter/.test(free);
       var runs = [circles(), circles(false), pendulum].every(function (scene) {

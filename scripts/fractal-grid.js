@@ -783,20 +783,9 @@
     // Circular outputs use the full 360; capped ranges stop at 300 so the ends differ.
     var isCircularOutput = outProp === "angle" || ((outProp === "x" || outProp === "y") && sceneToCompile.edgeMode === "wrap");
     var hueRangeMax = isCircularOutput ? 360 : 300;
-    // Read bodyN (the loop mutates it) at the pass's precision: folding in float32
-    // first wastes the df budget. Lineage average when the scene has a splitter.
+    // Read bodyN (the loop mutates it) at the pass's precision: folding in float32 first wastes the df budget.
     function emitBodyValue(name, bodyIdx, prop) {
-      var bodyVar = df ? "dbody" : "body";
-      var hasSpawn = initial.spawnBase !== null && initial.spawnBase !== undefined;
-      var out = ["  " + B.scalar + " " + name + " = " + bodyVar + bodyIdx + "." + prop + ";"];
-      if (!hasSpawn) return out;
-      out.push("  float " + name + "_n = 1.0;");
-      for (var sp = initial.spawnBase; sp < initial.n; sp++) {
-        out.push("  if (alive" + sp + " && lineage" + sp + " == " + bodyIdx + ") { " +
-          name + " = " + B.add(name, bodyVar + sp + "." + prop) + "; " + name + "_n += 1.0; }");
-      }
-      out.push("  " + name + " = " + B.div(name, B.fromFloat(name + "_n")) + ";");
-      return out;
+      return "  " + B.scalar + " " + name + " = " + (df ? "dbody" : "body") + bodyIdx + "." + prop + ";";
     }
 
     var outputLines;
@@ -806,11 +795,10 @@
       outputLines = ["  outputValue = bounceCount;"];
     } else if (isDistance) {
       // Twin of shortestSeparation, at the pass's precision: derived modes difference it.
-      outputLines = [];
-      emitBodyValue("outAx", outputBodies[0], "x").forEach(function (l) { outputLines.push(l); });
-      emitBodyValue("outAy", outputBodies[0], "y").forEach(function (l) { outputLines.push(l); });
-      emitBodyValue("outBx", outputBodies[1], "x").forEach(function (l) { outputLines.push(l); });
-      emitBodyValue("outBy", outputBodies[1], "y").forEach(function (l) { outputLines.push(l); });
+      outputLines = [
+        emitBodyValue("outAx", outputBodies[0], "x"), emitBodyValue("outAy", outputBodies[0], "y"),
+        emitBodyValue("outBx", outputBodies[1], "x"), emitBodyValue("outBy", outputBodies[1], "y"),
+      ];
       outputLines.push("  " + B.scalar + " outDx = " + B.sub("outBx", "outAx") + ";");
       outputLines.push("  " + B.scalar + " outDy = " + B.sub("outBy", "outAy") + ";");
       if (PhysicsEngine.wrapsAtEdges(sceneToCompile)) {
@@ -821,19 +809,16 @@
       }
       outputLines.push("  outputValue = " + (df ? "dv2Length(dv2(outDx, outDy))" : "length(vec2(outDx, outDy))") + ";");
     } else if (outputBodies.length === 2) {
-      outputLines = [];
-      emitBodyValue("outA", outputBodies[0], outProp).forEach(function (l) { outputLines.push(l); });
-      emitBodyValue("outB", outputBodies[1], outProp).forEach(function (l) { outputLines.push(l); });
+      outputLines = [emitBodyValue("outA", outputBodies[0], outProp), emitBodyValue("outB", outputBodies[1], outProp)];
       outputLines.push("  outputValue = " + B.mul(B.add("outA", "outB"), B.lit(0.5)) + ";");
     } else {
-      outputLines = emitBodyValue("outOne", outputBodies[0], outProp);
-      outputLines.push("  outputValue = outOne;");
+      outputLines = [emitBodyValue("outOne", outputBodies[0], outProp), "  outputValue = outOne;"];
     }
     var frame = PhysicsEngine.wrapsAtEdges(sceneToCompile)
       ? { width: sceneToCompile.frameWidth, height: sceneToCompile.frameHeight } : undefined;
-    var stepOnceSource = PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, sceneToCompile.mutualGravity, PhysicsEngine.collisionsEnabled(sceneToCompile), initial.spawnBase, initial.springs,
+    var stepOnceSource = PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, sceneToCompile.mutualGravity, PhysicsEngine.collisionsEnabled(sceneToCompile), initial.springs,
       { contactBody: isBounces ? sceneToCompile.output.body : null, touchBody: goalOrder ? outputBodies[0] : null });
-    var stepOnceCall = "stepOnce(" + PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, precision, initial.spawnBase, initial.springs) + ");";
+    var stepOnceCall = "stepOnce(" + PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, precision, initial.springs) + ");";
 
     // "Stop on wrap": each pixel freezes the first step ANY watched body would cross
     // a frame edge. The discrete step index alone puts a spurious jump wherever
@@ -4898,34 +4883,14 @@
     hoverCtx.restore();
   }
 
-  // Splitter rows are MAX_SIMULATION_BODIES wide: a slot past the authored bodies is a ball some split woke, half = 0 until then.
-  function hoverBodySpec(i) {
-    return scene.bodies[i] || { type: "circle", isAnchored: false };
-  }
-  function hoverRowIsLive(i, row) {
-    return i < scene.bodies.length || row[i].half > 0;
-  }
-
-  function isTrapezoidType(type) { return type === "funnel" || type === "splitter"; }
-
-  // A funnel/splitter's corners from the engine's own geometry; a trapezoid's `half` is size/2.
-  function traceTrapezoid(row) {
-    var e = PhysicsEngine.getFunnelEdges({ x: row.x, y: row.y, angle: row.angle, size: row.half * 2 });
-    var corners = [e.mouth[0], e.mouth[1], e.throat[1], e.throat[0]];
-    hoverCtx.beginPath();
-    hoverCtx.moveTo(corners[0].x, corners[0].y);
-    for (var i = 1; i < corners.length; i++) hoverCtx.lineTo(corners[i].x, corners[i].y);
-    hoverCtx.closePath();
-  }
-
   // ---- Solid for the Output's body, an outline for everything else ----
-  // Two identical balls passing through each other are otherwise indistinguishable. Tracked slots: the Output's
-  // bodies, or the whole lineage with a splitter; null when the Output names no body, and then nothing is hollowed.
-  function trackedBodySlots(lineageSlots) {
+  // Two identical balls passing through each other are otherwise indistinguishable. Tracked: the Output's
+  // bodies; null when the Output names no body, and then nothing is hollowed.
+  function trackedBodySlots() {
     var heads = PhysicsEngine.outputBodyIndices(scene.output);
     if (!heads.length) return null;
     var tracked = {};
-    (lineageSlots ? [].concat.apply([], lineageSlots) : heads).forEach(function (slot) { tracked[slot] = true; });
+    heads.forEach(function (slot) { tracked[slot] = true; });
     return tracked;
   }
   function isHollow(tracked, i) { return !!tracked && !tracked[i]; }
@@ -4971,8 +4936,6 @@
         hoverCtx.strokeStyle = outline;
         hoverCtx.lineWidth = HOLLOW_OUTLINE_WIDTH;
         hoverCtx.stroke();
-      } else if (isTrapezoidType(spec.type)) {
-        strokeHollow(function () { traceTrapezoid(row); }, outline);
       } else {
         var ox = Math.cos(row.angle) * row.half, oy = Math.sin(row.angle) * row.half;
         strokeHollow(function () {
@@ -4990,21 +4953,6 @@
       // Display floor only; the simulation used the real radius. A line's `half` is half-LENGTH, left alone.
       hoverCtx.arc(row.x, row.y, Math.max(row.half, MIN_DISPLAY_RADIUS), 0, Math.PI * 2);
       hoverCtx.fill();
-      hoverCtx.stroke();
-    } else if (isTrapezoidType(spec.type)) {
-      hoverCtx.lineCap = "round";
-      hoverCtx.lineJoin = "round";
-      if (colorOverride) {
-        hoverCtx.strokeStyle = colorOverride.stroke;
-        hoverCtx.lineWidth = PhysicsEngine.LINE_THICKNESS + 2;
-        traceTrapezoid(row);
-        hoverCtx.stroke();
-        hoverCtx.strokeStyle = colorOverride.fill;
-      } else {
-        hoverCtx.strokeStyle = stroke;
-      }
-      hoverCtx.lineWidth = PhysicsEngine.LINE_THICKNESS;
-      traceTrapezoid(row);
       hoverCtx.stroke();
     } else {
       var hx = Math.cos(row.angle) * row.half;
@@ -5035,8 +4983,7 @@
     }
   }
 
-  // `rows` is indexed by AUTHORED body (a split ball keeps its spring on the slot it kept). An anchor
-  // scales with a size-linked body: the row's half over the authored one.
+  // `rows` is indexed by body. An anchor scales with a size-linked body: the row's half over the authored one.
   function drawHoverSprings(rows, colorOverride) {
     PhysicsEngine.sceneSprings(scene).forEach(function (sp) {
       function end(bodyIndex, anchor) {
@@ -5066,18 +5013,15 @@
         var isFinalFrame = s >= entry.effectiveMaxStep - 1;
         var row = entry.trajectory[s];
         var color = entry.color;
-        var effective = [], shown = [], tracked = trackedBodySlots(entry.lineageSlots);
+        var shown = [], tracked = trackedBodySlots();
         for (var i = 0; i < row.length; i++) {
-          var bodyRow = (isFinalFrame && entry.wrapOverride && entry.wrapOverride.bodyIndex === i)
+          shown[i] = (isFinalFrame && entry.wrapOverride && entry.wrapOverride.bodyIndex === i)
             ? { x: entry.wrapOverride.x, y: entry.wrapOverride.y, angle: entry.wrapOverride.angle, half: row[i].half }
             : row[i];
-          if (!hoverRowIsLive(i, row)) continue;
-          effective.push(bodyRow);
-          shown[i] = bodyRow;
-          drawHoverBody(hoverBodySpec(i), bodyRow, color, isHollow(tracked, i));
+          drawHoverBody(scene.bodies[i], shown[i], color, isHollow(tracked, i));
         }
         drawHoverSprings(shown, color);
-        drawOffscreenMappingArrows(effective, color);
+        drawOffscreenMappingArrows(shown, color);
       });
     });
 
@@ -5184,13 +5128,13 @@
     hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);
     hoverCtx.setTransform(hoverFit.scale, 0, 0, hoverFit.scale, hoverFit.offsetX, hoverFit.offsetY);
     drawFrameBoundary();
-    var previewTracked = trackedBodySlots(null);
+    var previewTracked = trackedBodySlots();
     offsetScene.bodies.forEach(function (body, i) {
-      drawHoverBody(hoverBodySpec(i), {
+      drawHoverBody(scene.bodies[i], {
         x: body.x,
         y: body.y,
         angle: body.angle,
-        // PhysicsGPU.shapeHalf, the quantity the shader packs into alpha; a trapezoid has no `length` (NaN drew nothing).
+        // PhysicsGPU.shapeHalf, the quantity the shader packs into alpha.
         half: PhysicsGPU.shapeHalf([body], 0),
       }, undefined, isHollow(previewTracked, i));
     });
@@ -5224,24 +5168,21 @@
     return { step: hoveredStep, row: replay.trajectory[hoveredStep], isFinal: hoveredStep >= replay.effectiveMaxStep - 1 };
   }
   function drawReplayFrame(replay, frame) {
-    var row = frame.row, effectiveRow = [], shownRows = [], tracked = trackedBodySlots(replay.lineageSlots);
+    var row = frame.row, shownRows = [], tracked = trackedBodySlots();
     for (var i = 0; i < row.length; i++) {
-      var bodyRow = (frame.isFinal && replay.wrapOverride && i === replay.wrapOverride.bodyIndex)
+      shownRows[i] = (frame.isFinal && replay.wrapOverride && i === replay.wrapOverride.bodyIndex)
         ? { x: replay.wrapOverride.x, y: replay.wrapOverride.y, angle: replay.wrapOverride.angle, half: row[i].half }
         : row[i];
-      if (!hoverRowIsLive(i, row)) continue;
-      effectiveRow.push(bodyRow);
-      shownRows[i] = bodyRow;
-      drawHoverBody(hoverBodySpec(i), bodyRow, undefined, isHollow(tracked, i));
+      drawHoverBody(scene.bodies[i], shownRows[i], undefined, isHollow(tracked, i));
     }
     drawHoverSprings(shownRows);
-    drawOffscreenMappingArrows(effectiveRow);
+    drawOffscreenMappingArrows(shownRows);
   }
   // Lifespan is one fact about the whole run (known since findWrapStopStep): held for every frame.
   function replayBackground(replay, frame) {
     var v = replay.lifespanValue !== null ? replay.lifespanValue
       : replay.bounceCounts ? replay.bounceCounts[Math.min(frame.step, replay.bounceCounts.length - 1)]
-      : hoverOutputValue(frame.row, replay.lineageSlots, replay.wrapOverride, frame.isFinal, replay.extraWrapOverrides);
+      : hoverOutputValue(frame.row, replay.wrapOverride, frame.isFinal, replay.extraWrapOverrides);
     return frame.isFinal ? hoverOutputColorFinal(outputColorT(v)) : hoverOutputColor(outputColorT(v));
   }
 
@@ -5443,48 +5384,16 @@
     }
   }
 
-  // Which slots are in the Output's lineage: null without a splitter. The shader colors a splitter pixel by
-  // the lineage AVERAGE, so the replay must too; the GPU trajectory carries no lineage tag, so the JS
-  // engine supplies WHICH slots (the averaged values stay the GPU's).
-  function outputLineageSlotsAt(worldPoint, steps) {
-    var heads = PhysicsEngine.outputBodyIndices(scene.output);
-    if (!PhysicsGPU.sceneHasSplitter(scene) || !heads.length) return null;
-    try {
-      var offsetScene = PhysicsGridCodegen.computeOffsetSceneNumeric(scene, worldPoint.x, worldPoint.y);
-      var rows = PhysicsEngine.runTrajectory(offsetScene, steps, PhysicsGPU.FIXED_DT);
-      var last = rows[rows.length - 1];
-      // Grouped BY HEAD: a pair Output is the mean of two lineage averages, not a flat mean.
-      var groups = heads.map(function (head) {
-        var slots = [];
-        for (var b = 0; b < last.length; b++) if (last[b].lineage === head) slots.push(b);
-        return slots.length ? slots : [head];
-      });
-      return groups;
-    } catch (err) {
-      return null;
-    }
-  }
-
-  // The Output value for one frame: a single read without a lineage, else the mean over members woken
-  // so far (half = 0 until a split fills a slot).
-  function hoverOutputValue(row, lineageGroups, wrapOverride, isFinalFrame, extraWrapOverrides) {
+  // The Output value for one frame; on a wrap-stopped final frame the continuous reconstruction.
+  function hoverOutputValue(row, wrapOverride, isFinalFrame, extraWrapOverrides) {
     var prop = scene.output.property;
     var heads = PhysicsEngine.outputBodyIndices(scene.output);
     var overrides = {};
     if (isFinalFrame && wrapOverride) overrides[wrapOverride.bodyIndex] = wrapOverride;
     (extraWrapOverrides || []).forEach(function (o) { if (isFinalFrame && o) overrides[o.bodyIndex] = o; });
-    // Per authored head: its lineage average; on a wrap-stopped final frame the continuous reconstruction.
     function valueFor(headPos, axis) {
-      var slots = lineageGroups ? lineageGroups[headPos] : [heads[headPos]];
-      var sum = 0, count = 0;
-      for (var i = 0; i < slots.length; i++) {
-        var idx = slots[i];
-        if (!row[idx]) continue;
-        if (idx >= scene.bodies.length && !(row[idx].half > 0)) continue; // not woken yet at this step
-        sum += overrides[idx] ? overrides[idx][axis] : row[idx][axis];
-        count++;
-      }
-      return count > 0 ? sum / count : 0;
+      var idx = heads[headPos];
+      return overrides[idx] ? overrides[idx][axis] : row[idx][axis];
     }
     if (prop === "distance") {
       var d = PhysicsEngine.shortestSeparation(scene,
@@ -5530,7 +5439,6 @@
       wrapOverride: wrapOverride,
       lifespanValue: isLifespan ? lifespanValue : null,
       bounceCounts: isBouncesOutput ? bounceCountsAt(worldPoint, steps) : null,
-      lineageSlots: isLifespan || isBouncesOutput ? null : outputLineageSlotsAt(worldPoint, steps),
       extraWrapOverrides: extraWrapOverrides,
       bounceEvents: bounceEventsAt(worldPoint, steps),
     };
@@ -6565,9 +6473,8 @@
 
   // ---- Float32, when its whole run is too long for one draw ----
   //
-  // The limit above is not about precision (a splitter's 20 body slots cost
-  // ~0.4ms a step in float32), so float32 is timed too, once per scene and
-  // display mode; a run that won't fit comfortably in one draw is sliced as well.
+  // The limit above is not about precision, so float32 is timed too, once per scene
+  // and display mode; a run that won't fit comfortably in one draw is sliced as well.
   function f32SingleDrawLimitMs() { return 2.4 * sliceTargetMs(); }
   var f32StepMs = {};   // by variant; emptied with the scene (releaseAllSliceStates)
   function measureF32StepMs() {

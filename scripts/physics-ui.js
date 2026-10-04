@@ -47,9 +47,6 @@
   var speedValueEl = document.getElementById("speed-value");
   var btnReset = document.getElementById("btn-reset");
   var edgeModeSelect = document.getElementById("edge-mode-select");
-  var maxBodiesSlider = document.getElementById("max-bodies-slider");
-  var maxBodiesReadout = document.getElementById("max-bodies-readout");
-  var maxBodiesField = document.getElementById("max-bodies-field");
   var mutualGravityCheckbox = document.getElementById("mutual-gravity-checkbox");
   var collisionsCheckbox = document.getElementById("collisions-checkbox");
   var simulationStepsSlider = document.getElementById("simulation-steps-slider");
@@ -106,23 +103,6 @@
       { key: "vx", label: "Starting X Velocity" },
       { key: "vy", label: "Starting Y Velocity" },
     ],
-    funnel: [
-      { key: "x", label: "Center X" },
-      { key: "y", label: "Center Y" },
-      { key: "angle", label: "Rotation" },
-      { key: "size", label: "Size" },
-      { key: "vx", label: "Starting X Velocity" },
-      { key: "vy", label: "Starting Y Velocity" },
-    ],
-    // Same trapezoid as a funnel; only the special edge differs (createSplitter).
-    splitter: [
-      { key: "x", label: "Center X" },
-      { key: "y", label: "Center Y" },
-      { key: "angle", label: "Rotation" },
-      { key: "size", label: "Size" },
-      { key: "vx", label: "Starting X Velocity" },
-      { key: "vy", label: "Starting Y Velocity" },
-    ],
   };
   // Output-only: bounces are accumulated over a run (PhysicsEngine.step's contactFlags).
   var OUTPUT_PROPERTIES = [
@@ -158,7 +138,6 @@
     frameHeight: 0,
     // Stop-at-edge vs wrap: serialized with the scene, since it changes how Output reads.
     edgeMode: PhysicsEngine.DEFAULT_EDGE_MODE,
-    maxSimulationBodies: PhysicsEngine.MAX_SIMULATION_BODIES,
   };
   var initialScene = null;
   var selectedIndex = -1;
@@ -184,7 +163,6 @@
   var CLICK_DRAG_THRESHOLD = 6;
   var DEFAULT_CIRCLE_RADIUS = 30;
   var DEFAULT_LINE_LENGTH = 140;
-  var DEFAULT_FUNNEL_SIZE = 120;
   // Bounds the on-canvas resize handle's drag to a sane range.
   var RADIUS_MIN = 5, RADIUS_MAX = 300;
   var LENGTH_MIN = 10, LENGTH_MAX = 800;
@@ -225,28 +203,6 @@
     return isPlaying ? Math.max(radius, MIN_PLAYBACK_DISPLAY_RADIUS) : radius;
   }
 
-  // Trapezoid corners in path order (mouthLeft, throatLeft, throatRight, mouthRight).
-  var FUNNEL_MOUTH_COLOR = "#2dd4bf"; // teal: the funnel's teleporting long side
-  var SPLITTER_SHORT_COLOR = "#f0883e"; // amber: the splitter's splitting short side
-  function funnelPathVertices(x, y, angle, size) {
-    var v = PhysicsEngine.getFunnelVertices({ x: x, y: y, angle: angle, size: size });
-    return [v.mouthLeft, v.throatLeft, v.throatRight, v.mouthRight];
-  }
-
-  // The special (non-wall) edge: funnel = long mouth (3->0), splitter = short throat (1->2).
-  function trapezoidEdgeRoles(type) {
-    var isSplitter = type === "splitter";
-    var special = isSplitter ? [1, 2] : [3, 0];
-    var all = [[0, 1], [1, 2], [2, 3], [3, 0]];
-    return {
-      special: special,
-      specialColor: isSplitter ? SPLITTER_SHORT_COLOR : FUNNEL_MOUTH_COLOR,
-      solid: all.filter(function (e) { return e[0] !== special[0]; }),
-    };
-  }
-
-  function isTrapezoidType(type) { return type === "funnel" || type === "splitter"; }
-
   function drawBody(body, selected) {
     ctx.save();
     ctx.fillStyle = body.isAnchored ? "#5a6178" : "#3a63d1";
@@ -263,29 +219,6 @@
       ctx.strokeStyle = "rgba(255,255,255,0.35)";
       ctx.lineWidth = 1.5;
       ctx.stroke();
-    } else if (isTrapezoidType(body.type)) {
-      var pts = funnelPathVertices(body.x, body.y, body.angle, body.size);
-      var roles = trapezoidEdgeRoles(body.type);
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      function strokeEdges(edgeList) {
-        ctx.beginPath();
-        edgeList.forEach(function (e) {
-          ctx.moveTo(pts[e[0]].x, pts[e[0]].y);
-          ctx.lineTo(pts[e[1]].x, pts[e[1]].y);
-        });
-        ctx.stroke();
-      }
-      if (selected) {
-        ctx.lineWidth = PhysicsEngine.LINE_THICKNESS + 4;
-        ctx.strokeStyle = "#ffcf4d";
-        strokeEdges(roles.solid.concat([roles.special]));
-      }
-      ctx.lineWidth = PhysicsEngine.LINE_THICKNESS;
-      ctx.strokeStyle = body.isAnchored ? "#5a6178" : "#3a63d1";
-      strokeEdges(roles.solid);
-      ctx.strokeStyle = roles.specialColor;
-      strokeEdges([roles.special]);
     } else {
       var endpoints = PhysicsEngine.getLineEndpoints(body);
       ctx.lineCap = "round";
@@ -310,13 +243,11 @@
     var dx = endPoint.x - start.x, dy = endPoint.y - start.y;
     var dist = Math.sqrt(dx * dx + dy * dy);
     if (dist < CLICK_DRAG_THRESHOLD) {
-      if (shape.tool === "circle") return { x: start.x, y: start.y, radius: DEFAULT_CIRCLE_RADIUS, angle: 0, length: 0, size: 0 };
-      if (shape.tool === "funnel" || shape.tool === "splitter") return { x: start.x, y: start.y, radius: 0, angle: 0, length: 0, size: DEFAULT_FUNNEL_SIZE };
-      return { x: start.x, y: start.y, radius: 0, angle: 0, length: DEFAULT_LINE_LENGTH, size: 0 };
+      if (shape.tool === "circle") return { x: start.x, y: start.y, radius: DEFAULT_CIRCLE_RADIUS, angle: 0, length: 0 };
+      return { x: start.x, y: start.y, radius: 0, angle: 0, length: DEFAULT_LINE_LENGTH };
     }
-    if (shape.tool === "circle") return { x: start.x, y: start.y, radius: dist, angle: 0, length: 0, size: 0 };
-    if (shape.tool === "funnel" || shape.tool === "splitter") return { x: start.x, y: start.y, radius: 0, angle: 0, length: 0, size: dist };
-    return { x: (start.x + endPoint.x) / 2, y: (start.y + endPoint.y) / 2, radius: 0, angle: Math.atan2(dy, dx), length: dist, size: 0 };
+    if (shape.tool === "circle") return { x: start.x, y: start.y, radius: dist, angle: 0, length: 0 };
+    return { x: (start.x + endPoint.x) / 2, y: (start.y + endPoint.y) / 2, radius: 0, angle: Math.atan2(dy, dx), length: dist };
   }
 
   function drawShapePreview(shape) {
@@ -329,23 +260,6 @@
     if (shape.tool === "circle") {
       ctx.beginPath();
       ctx.arc(params.x, params.y, params.radius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.beginPath();
-      ctx.arc(shape.start.x, shape.start.y, 3, 0, Math.PI * 2);
-      ctx.fillStyle = "#ffcf4d";
-      ctx.fill();
-    } else if (isTrapezoidType(shape.tool)) {
-      var pts = funnelPathVertices(params.x, params.y, params.angle, params.size);
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      ctx.beginPath();
-      ctx.moveTo(pts[0].x, pts[0].y);
-      ctx.lineTo(pts[1].x, pts[1].y);
-      ctx.lineTo(pts[2].x, pts[2].y);
-      ctx.lineTo(pts[3].x, pts[3].y);
-      ctx.closePath();
       ctx.fill();
       ctx.stroke();
       ctx.setLineDash([]);
@@ -368,10 +282,6 @@
     var params = computeShapeParams(shape, endPoint);
     if (shape.tool === "circle") {
       scene.bodies.push(PhysicsEngine.createCircle(params.x, params.y, params.radius, false));
-    } else if (shape.tool === "splitter") {
-      scene.bodies.push(PhysicsEngine.createSplitter(params.x, params.y, params.size, params.angle, false));
-    } else if (shape.tool === "funnel") {
-      scene.bodies.push(PhysicsEngine.createFunnel(params.x, params.y, params.size, params.angle, false));
     } else {
       scene.bodies.push(PhysicsEngine.createLine(params.x, params.y, params.length, params.angle, false));
     }
@@ -701,18 +611,16 @@
     selectSpring(scene.springs.length - 1);
   }
 
-  // ---- Radius/Length/Size drag handle ----
+  // ---- Radius/Length drag handle ----
   // Gap from shape edge to handle center, per shape: a line's end reads closer than a curved edge.
   var RESIZE_HANDLE_GAP_CIRCLE = 32;
   var RESIZE_HANDLE_GAP_LINE = 52;
-  var RESIZE_HANDLE_GAP_FUNNEL = 32;
   var RESIZE_HANDLE_LENGTH = 34; // capsule long axis
   var RESIZE_HANDLE_WIDTH = 16; // capsule short axis
   var RESIZE_HANDLE_HIT_PAD = 6; // grabbable area extends this far past the visual capsule
-  var SIZE_MIN = 10, SIZE_MAX = 400;
 
   function resizeHandleSupported(body) {
-    return !!body && (body.type === "circle" || body.type === "line" || isTrapezoidType(body.type));
+    return !!body && (body.type === "circle" || body.type === "line");
   }
 
   // Pivot for resize/rotate (what applyBodyEditPreservingHinge keeps fixed): hinge world point if any, else center.
@@ -728,12 +636,11 @@
     if (!resizeHandleSupported(body)) return null;
     var ownHinge = PhysicsHingeGeometry.findOwnHinge(scene, bodyIndex);
 
-    if (body.type === "circle" || isTrapezoidType(body.type)) {
+    if (body.type === "circle") {
       var ref = handlePivot(bodyIndex);
-      // Fixed 45 degrees up-right (screen space): halfExtent's trapezoid reach is the max over all directions.
+      // Fixed 45 degrees up-right (screen space).
       var dirX = Math.SQRT1_2, dirY = -Math.SQRT1_2;
-      var gap = body.type === "circle" ? RESIZE_HANDLE_GAP_CIRCLE : RESIZE_HANDLE_GAP_FUNNEL;
-      var dist = PhysicsEngine.halfExtent(body) + gap;
+      var dist = body.radius + RESIZE_HANDLE_GAP_CIRCLE;
       return { refX: ref.x, refY: ref.y, dirX: dirX, dirY: dirY, x: ref.x + dirX * dist, y: ref.y + dirY * dist };
     }
 
@@ -843,11 +750,6 @@
       applyBodyEditPreservingHinge(scene, bodyIndex, true, function () {
         body.radius = newRadius; PhysicsEngine.computeMass(body);
       });
-    } else if (isTrapezoidType(body.type)) {
-      var newSize = clamp(proj - RESIZE_HANDLE_GAP_FUNNEL, SIZE_MIN, SIZE_MAX);
-      applyBodyEditPreservingHinge(scene, bodyIndex, true, function () {
-        body.size = newSize; PhysicsEngine.computeMass(body);
-      });
     } else {
       var newLength = clamp((proj - RESIZE_HANDLE_GAP_LINE) * 2, LENGTH_MIN, LENGTH_MAX);
       applyBodyEditPreservingHinge(scene, bodyIndex, true, function () {
@@ -857,7 +759,7 @@
     render();
   }
 
-  // ---- Rotation drag handle (line and funnel/splitter; a circle has no angle) ----
+  // ---- Rotation drag handle (line only; a circle has no angle) ----
   // Same ray as the resize handle, farther out, turned 90 degrees: it drags along an arc around the pivot.
   var ROTATION_HANDLE_GAP = 14; // beyond the resize handle's own far edge
   // Cosmetic only: a true-scale arc over ~30px would look straight.
@@ -865,7 +767,7 @@
   var ROTATION_ARC_HALF_ANGLE = 0.7; // radians; sets the arc's chord to ~match the resize handle's own arrow span
 
   function rotationHandleSupported(body) {
-    return !!body && (body.type === "line" || isTrapezoidType(body.type));
+    return !!body && body.type === "line";
   }
 
   // Reuses resizeHandleGeometry's ref point and end; dirX/dirY here is the TANGENT (dir rotated a quarter turn).
@@ -1586,10 +1488,6 @@
       // Placement happens on release (finalizeShapeDrawing); this just starts the drag.
       drawingShape = { tool: "circle", start: p, current: p };
       render();
-    } else if (activeTool === "funnel" || activeTool === "splitter") {
-      if (!canAddBody()) return;
-      drawingShape = { tool: activeTool, start: p, current: p };
-      render();
     } else if (activeTool === "line") {
       if (!canAddBody()) return;
       drawingShape = { tool: "line", start: p, current: p };
@@ -1926,28 +1824,6 @@
     applyEdgeMode(edgeModeSelect.value);
   });
 
-  // ---- Max Objects ----
-  // How many bodies a splitter may grow the scene to; shown only when the scene has one. The grid
-  // shader checks every slot against every other per pixel per step (quadratic): the biggest lever on GPU hangs.
-  maxBodiesSlider.min = String(PhysicsEngine.MIN_SIMULATION_BODIES);
-  maxBodiesSlider.max = String(PhysicsEngine.MAX_SIMULATION_BODIES_LIMIT);
-
-  function setMaxBodiesUI(value) {
-    maxBodiesSlider.value = String(value);
-    maxBodiesReadout.textContent = String(value);
-  }
-
-  function refreshMaxBodiesVisibility() {
-    maxBodiesField.hidden = !sceneHasSplitter(scene);
-  }
-
-  maxBodiesSlider.addEventListener("input", function () {
-    scene.maxSimulationBodies = Number(maxBodiesSlider.value);
-    maxBodiesReadout.textContent = String(scene.maxSimulationBodies);
-    // render() (unlike the duration slider) so the value autosaves the moment it's set.
-    render();
-  });
-
   // ---- X / Y input mapping ----
 
   function bodyOptionLabel(body, index) {
@@ -2006,7 +1882,6 @@
     populatePropertySelect(yInputPropertySelect, scene.yInput ? scene.yInput.body : null, scene.yInput ? scene.yInput.property : null);
     populateBodySelect(outputBodySelect, scene.output, true);
     refreshOutputPairUI();
-    refreshMaxBodiesVisibility();
   }
 
   function reindexMappingAfterDelete(mapping, deletedIndex) {
@@ -2242,7 +2117,6 @@
       bodies: scene.bodies.map(function (b) {
         var out = { type: b.type, x: roundNum(b.x), y: roundNum(b.y), angle: roundNum(b.angle), isAnchored: !!b.isAnchored };
         if (b.type === "circle") out.radius = roundNum(b.radius);
-        else if (isTrapezoidType(b.type)) out.size = roundNum(b.size);
         else out.length = roundNum(b.length);
         out.vx = roundNum(b.vx);
         out.vy = roundNum(b.vy);
@@ -2277,7 +2151,6 @@
       frameWidth: roundNum(scene.frameWidth),
       frameHeight: roundNum(scene.frameHeight),
       edgeMode: PhysicsEngine.edgeModeOf(scene),
-      maxSimulationBodies: PhysicsEngine.maxSimulationBodiesFor(scene),
     };
   }
 
@@ -2297,12 +2170,8 @@
         if (b.angle !== undefined) body.angle = Number(b.angle);
       } else if (b.type === "line") {
         body = PhysicsEngine.createLine(Number(b.x), Number(b.y), Number(b.length), Number(b.angle) || 0, !!b.isAnchored);
-      } else if (b.type === "funnel") {
-        body = PhysicsEngine.createFunnel(Number(b.x), Number(b.y), Number(b.size), Number(b.angle) || 0, !!b.isAnchored);
-      } else if (b.type === "splitter") {
-        body = PhysicsEngine.createSplitter(Number(b.x), Number(b.y), Number(b.size), Number(b.angle) || 0, !!b.isAnchored);
       } else {
-        throw new Error('bodies[' + i + "]: type must be \"circle\", \"line\", \"funnel\", or \"splitter\"");
+        throw new Error('bodies[' + i + "]: type must be \"circle\" or \"line\"");
       }
       // An anchored body's velocity would make it a moving wall in the contact solver (see computeMass).
       if (!body.isAnchored) {
@@ -2404,7 +2273,6 @@
       output: parseMapping(parsed.output, "output", OUTPUT_PROPERTIES, true),
       edgeMode: PhysicsEngine.edgeModeOf(parsed),
       mutualGravity: parsed.mutualGravity === true,
-      maxSimulationBodies: PhysicsEngine.maxSimulationBodiesFor(parsed),
       collisionsEnabled: PhysicsEngine.collisionsEnabled(parsed),
       // Kept exact (see clampSimulationSteps); the slider rests on the nearest hundred.
       simulationSteps: clampSimulationSteps(parsed.simulationSteps) || DEFAULT_SIMULATION_STEPS,
@@ -2419,13 +2287,11 @@
     scene.yInput = data.yInput;
     scene.output = data.output;
     scene.edgeMode = data.edgeMode;
-    scene.maxSimulationBodies = data.maxSimulationBodies;
     scene.mutualGravity = !!data.mutualGravity;
     scene.collisionsEnabled = data.collisionsEnabled !== false;
     scene.simulationSteps = data.simulationSteps;
 
     edgeModeSelect.value = scene.edgeMode;
-    setMaxBodiesUI(scene.maxSimulationBodies);
     mutualGravityCheckbox.checked = scene.mutualGravity;
     collisionsCheckbox.checked = scene.collisionsEnabled;
     simulationStepsSlider.value = String(simulationStepsNotch(scene.simulationSteps));
@@ -2598,7 +2464,7 @@
     btnExportScene, btnImportScene,
     btnSampleDoublePendulum, btnSamplePinball, btnSampleBinaryStar, btnClearAll,
     mutualGravityCheckbox, collisionsCheckbox,
-    edgeModeSelect, maxBodiesSlider, simulationStepsSlider, simulationStepsReadout,
+    edgeModeSelect, simulationStepsSlider, simulationStepsReadout,
     xInputBodySelect, yInputBodySelect, outputBodySelect,
     xInputPropertySelect, yInputPropertySelect, outputPropertySelect,
   ]);
@@ -2824,14 +2690,7 @@
     var body = scene.bodies[output.body];
     if (!body) return;
     var px = 1 / (displayScale || 1); // one screen pixel, in frame units
-    var reach;
-    if (body.type === "circle") reach = playbackDisplayRadius(body.radius);
-    else if (isTrapezoidType(body.type)) {
-      reach = 0;
-      funnelPathVertices(body.x, body.y, body.angle, body.size).forEach(function (v) {
-        reach = Math.max(reach, Math.hypot(v.x - body.x, v.y - body.y));
-      });
-    } else reach = body.length / 2;
+    var reach = body.type === "circle" ? playbackDisplayRadius(body.radius) : body.length / 2;
     var radius = reach + OUTPUT_KEY_RING_GAP_PX * px;
     ctx.save();
     ctx.globalAlpha = 0.5;
@@ -2915,33 +2774,16 @@
     }
   }
 
-  function sceneHasSplitter(s) {
-    return s.bodies.some(function (b) { return b.type === "splitter"; });
-  }
-
-  // The Output value at one frame: the AVERAGE over the body's lineage, so a split ball tracks all its pieces.
+  // The Output value at one frame.
   function outputValueAtFrame(frame, output) {
     // Wrapped into a scene shape so PhysicsEngine.computeOutputValue stays the one JS definition.
-    var asScene = {
-      bodies: frame.map(function (b, i) {
-        return { x: b.x, y: b.y, angle: b.angle, lineage: b.lineage !== undefined ? b.lineage : i };
-      }),
-      frameWidth: scene.frameWidth, frameHeight: scene.frameHeight, edgeMode: scene.edgeMode,
-    };
+    var asScene = { bodies: frame, frameWidth: scene.frameWidth, frameHeight: scene.frameHeight, edgeMode: scene.edgeMode };
     return PhysicsEngine.computeOutputValue(asScene, output);
   }
 
   // stepCount is 1-indexed; trajectory[] is 0-indexed, so the lookup is stepCount - 1.
   function applyTrajectoryStep(stepCount) {
     var frame = trajectory[stepCount - 1];
-    // A splitter's run has more bodies in later frames: grow or shrink the scene to match the frame.
-    while (scene.bodies.length < frame.length) {
-      var born = frame[scene.bodies.length];
-      var extra = PhysicsEngine.createCircle(born.x, born.y, born.radius, false);
-      extra.lineage = born.lineage;
-      scene.bodies.push(extra);
-    }
-    if (scene.bodies.length > frame.length) scene.bodies.length = frame.length;
     for (var i = 0; i < scene.bodies.length; i++) {
       scene.bodies[i].x = frame[i].x;
       scene.bodies[i].y = frame[i].y;
@@ -3098,11 +2940,7 @@
   function startPlaybackFromScratch() {
     initialScene = PhysicsEngine.cloneScene(scene);
     try {
-      // A splitter grows bodies mid-run: the GPU pads rows to full width, but playback wants rows that GROW
-      // (applyTrajectoryStep sizes the scene per frame), so it runs on the JS engine. The suite checks the two agree.
-      trajectory = sceneHasSplitter(scene)
-        ? PhysicsEngine.runTrajectory(scene, scene.simulationSteps, PhysicsGPU.FIXED_DT)
-        : PhysicsGPU.runSceneOnGPU(scene, scene.simulationSteps);
+      trajectory = PhysicsGPU.runSceneOnGPU(scene, scene.simulationSteps);
     } catch (err) {
       AppMessage.toast(err.message || "GPU simulation failed");
       return false;
@@ -3210,7 +3048,7 @@
     resetToInitialScene();
     applySceneData({
       bodies: [], hinges: [], springs: [], xInput: null, yInput: null, output: null,
-      edgeMode: PhysicsEngine.DEFAULT_EDGE_MODE, maxSimulationBodies: PhysicsEngine.MAX_SIMULATION_BODIES,
+      edgeMode: PhysicsEngine.DEFAULT_EDGE_MODE,
       mutualGravity: false, collisionsEnabled: true, simulationSteps: DEFAULT_SIMULATION_STEPS,
     });
     seedDefaultScene();

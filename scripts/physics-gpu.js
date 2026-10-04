@@ -7,8 +7,6 @@
   "use strict";
 
   var MAX_BODIES = 6;
-  // GLSL ES 3.00's parameter-count ceiling; only stepOnce() approaches it.
-  var MAX_GLSL_FUNCTION_PARAMS = 256;
 
   var LINE_THICKNESS = 20;
   var LINE_PARALLEL_EPS = 0.05;
@@ -214,12 +212,9 @@
     "",
     "// Swept capsule (segment e0-e1, half-thickness halfThickness, moving at",
     "// constant velocity segVel, otherwise rigid: rotation during the step",
-    "// is ignored) vs. circle. Shared by collideLineCircle (segment = the",
-    "// line's own body, refCenter = its center) and every funnel edge",
-    "// (segment = one of the funnel's edges, refCenter = the FUNNEL's",
-    "// center, since rA is a lever arm on the whole funnel body, not on an",
-    "// implicit sub-body): same three sub-tests (flat side of the capsule",
-    "// plus a cap at each endpoint), earliest valid t wins.",
+    "// is ignored) vs. circle: three sub-tests (flat side of the capsule",
+    "// plus a cap at each endpoint), earliest valid t wins. refCenter is the",
+    "// line's center, since rA is a lever arm on its body.",
     "Contact sweptCapsuleCircleContact(vec2 e0, vec2 e1, vec2 segVel, vec2 refCenter, Body circle, float radius, float halfThickness) {",
     "  vec2 p0 = vec2(circle.x, circle.y);",
     "  vec2 vRel = vec2(circle.vx, circle.vy) - segVel;",
@@ -354,91 +349,6 @@
     "  result.c0.penetration = LINE_THICKNESS - dist2;",
     "  result.c0.tHit = 0.0;",
     "  return result;",
-    "}",
-    "",
-    "// ---- Funnel: a trapezoid (throat 1, mouth 3, legs 2 each, all scaled",
-    "// by `size`) that teleports a circle touching its mouth to the center",
-    "// of its throat, velocity unchanged: direct port of",
-    "// physics-engine.js's Funnel functions, see that file's header comment",
-    "// for the geometry. physics-gpu-df.js carries the df port of all of it.",
-    "const float FUNNEL_MOUTH_HALF = " + fnum(global.PhysicsEngine.FUNNEL_MOUTH_HALF) + ";",
-    "const float FUNNEL_THROAT_HALF = " + fnum(global.PhysicsEngine.FUNNEL_THROAT_HALF) + ";",
-    "const float FUNNEL_HALF_HEIGHT = " + fnum(global.PhysicsEngine.FUNNEL_HALF_HEIGHT) + ";",
-    "struct FunnelVerts { vec2 mouthLeft; vec2 mouthRight; vec2 throatLeft; vec2 throatRight; };",
-    "FunnelVerts funnelVertices(Body f, float size) {",
-    "  float mh = FUNNEL_MOUTH_HALF * size, th = FUNNEL_THROAT_HALF * size, hh = FUNNEL_HALF_HEIGHT * size;",
-    "  vec2 c = vec2(f.x, f.y);",
-    "  FunnelVerts v;",
-    "  v.mouthLeft = c + rotateVec(vec2(-mh, -hh), f.angle);",
-    "  v.mouthRight = c + rotateVec(vec2(mh, -hh), f.angle);",
-    "  v.throatLeft = c + rotateVec(vec2(-th, hh), f.angle);",
-    "  v.throatRight = c + rotateVec(vec2(th, hh), f.angle);",
-    "  return v;",
-    "}",
-    "",
-    "struct MouthHit { bool hit; float tHit; vec2 target; };",
-    "MouthHit noMouthHit() { MouthHit m; m.hit = false; m.tHit = 0.0; m.target = vec2(0.0); return m; }",
-    "",
-    "// Does circle's swept path touch funnel's mouth (the teleport trigger)",
-    "// this step? Only tHit/target matter: no impulse is ever applied for a",
-    "// teleport, unlike the 3 solid edges (see collideFunnelCircle in",
-    "// physics-engine.js: this is its GLSL twin, minus the Contact-array",
-    "// return since the caller here builds each edge separately). target is",
-    "// the funnel's own throat center, advanced by the funnel's velocity to",
-    "// the same tHit and rotated by its angle at the START of the step -",
-    "// rotation during the step is ignored, the same simplification every",
-    "// capsule test here already makes.",
-    "MouthHit collideFunnelMouthTHit(Body funnel, float size, Body circle, float radius) {",
-    "  FunnelVerts v = funnelVertices(funnel, size);",
-    "  Contact c = sweptCapsuleCircleContact(v.mouthLeft, v.mouthRight, vec2(funnel.vx, funnel.vy), vec2(funnel.x, funnel.y), circle, radius, LINE_THICKNESS * 0.5);",
-    "  MouthHit m = noMouthHit();",
-    "  if (!c.hit) return m;",
-    "  float hh = FUNNEL_HALF_HEIGHT * size;",
-    "  vec2 rotated = rotateVec(vec2(0.0, hh), funnel.angle);",
-    "  m.hit = true;",
-    "  m.tHit = c.tHit;",
-    "  m.target = vec2(funnel.x, funnel.y) + vec2(funnel.vx, funnel.vy) * c.tHit + rotated;",
-    "  return m;",
-    "}",
-    "",
-    "// ---- Splitter: the same trapezoid, with the roles of its two parallel",
-    "// sides swapped. The long mouth is a wall (see the solid-edge codegen",
-    "// in generateStepOnceGLSL) and the SHORT side is the trigger: a circle",
-    "// crossing it becomes two on the long side. GLSL twin of",
-    "// physics-engine.js's collideSplitterShortSideTHit: see that function",
-    "// for why the answer is two displacements (the trapezoid's own leg",
-    "// vectors) rather than two points on the long side.",
-    "struct SplitHit { bool hit; float tHit; vec2 offset1; vec2 offset2; };",
-    "SplitHit noSplitHit() { SplitHit s; s.hit = false; s.tHit = 0.0; s.offset1 = vec2(0.0); s.offset2 = vec2(0.0); return s; }",
-    "",
-    "SplitHit collideSplitterShortSideTHit(Body splitter, float size, Body circle, float radius) {",
-    "  FunnelVerts v = funnelVertices(splitter, size);",
-    "  SplitHit s = noSplitHit();",
-    "  // Only a FRESH crossing splits. A circle already inside the trigger's",
-    "  // capsule when the step began would otherwise re-split every step, and",
-    "  // since each split adds a body that is exponential growth measured in",
-    "  // steps. sweptCapsuleCircleContact reports exactly that case as a hit at",
-    "  // tHit = 0 (its own dist0 branch), so the guard has to be here, ahead of",
-    "  // it: the same order physics-engine.js uses.",
-    "  vec2 p0 = vec2(circle.x, circle.y);",
-    "  vec2 startClosest = closestPointOnSegment(v.throatLeft, v.throatRight, p0);",
-    "  if (length(p0 - startClosest) < LINE_THICKNESS * 0.5 + radius) return s;",
-    "  Contact c = sweptCapsuleCircleContact(v.throatLeft, v.throatRight, vec2(splitter.vx, splitter.vy), vec2(splitter.x, splitter.y), circle, radius, LINE_THICKNESS * 0.5);",
-    "  if (!c.hit) return s;",
-    "  // Leg vector plus one constant clearance out through the long side -",
-    "  // see physics-engine.js\'s collideSplitterShortSideTHit for why the",
-    "  // two SURFACES are matched up rather than the two centerlines (short",
-    "  // version: the swept trigger fires while the ball is still",
-    "  // halfThickness + radius short of the short side, and translating that",
-    "  // faithfully would leave it embedded in the long side\'s wall).",
-    "  vec2 exitDir = (v.mouthLeft + v.mouthRight) * 0.5 - (v.throatLeft + v.throatRight) * 0.5;",
-    "  float exitLen = length(exitDir);",
-    "  vec2 clear = (exitLen > 1e-9 ? exitDir / exitLen : vec2(0.0, 1.0)) * (LINE_THICKNESS + 2.0 * radius);",
-    "  s.hit = true;",
-    "  s.tHit = c.tHit;",
-    "  s.offset1 = v.mouthLeft - v.throatLeft + clear;",
-    "  s.offset2 = v.mouthRight - v.throatRight + clear;",
-    "  return s;",
     "}",
     "",
     "// invMass/invInertia are 0 for static bodies, which already makes every",
@@ -580,7 +490,6 @@
 
   function shapeHalf(consts, i) {
     if (consts[i].type === "circle") return consts[i].radius;
-    if (consts[i].type === "funnel" || consts[i].type === "splitter") return consts[i].size / 2;
     return consts[i].length / 2;
   }
 
@@ -595,16 +504,6 @@
       }
     }
     return pairs;
-  }
-
-  // Spawn slots: in a splitter scene every body from spawnBase up is a slot,
-  // dead until a circle splits into it. Its shape constants, alive flag and
-  // lineage persist across stepOnce() calls, so they are inout parameters.
-  function spawnSlotsFrom(n, spawnBase) {
-    if (spawnBase === undefined || spawnBase === null) return [];
-    var out = [];
-    for (var i = spawnBase; i < n; i++) out.push(i);
-    return out;
   }
 
   // ---- Springs, as the generators see them ----
@@ -645,21 +544,16 @@
     ].join("\n");
   }
 
-  function stepOnceParams(n, hingeAnchors, precision, spawnBase, springs) {
+  function stepOnceParams(n, hingeAnchors, precision, springs) {
     var df = global.PhysicsDF.isExtended(precision);
     // Parameter order is shared with stepOnceCallArgs. Hinge anchors are parameters,
     // not baked literals: a resize-linked anchor is a runtime expression only in
     // scope in main(). In df the shape constants are df too (per-pixel when linked).
     var sc = df ? "MF " : "float ";
-    var spawnSlots = spawnSlotsFrom(n, spawnBase);
-    var isSpawn = {};
-    spawnSlots.forEach(function (i) { isSpawn[i] = true; });
     var params = [];
     for (var i = 0; i < n; i++) {
-      var mut = isSpawn[i] ? "inout " : "";
       params.push((df ? "inout DBody dbody" : "inout Body body") + i,
-        mut + sc + "BODY" + i + "_INV_MASS", mut + sc + "BODY" + i + "_INV_INERTIA", mut + sc + "BODY" + i + "_HALF");
-      if (isSpawn[i]) params.push("inout bool alive" + i, "inout int lineage" + i);
+        sc + "BODY" + i + "_INV_MASS", sc + "BODY" + i + "_INV_INERTIA", sc + "BODY" + i + "_HALF");
     }
     (hingeAnchors || []).forEach(function (hg, h) {
       // A world hinge's anchor is wrapped in place by stepOnce(), so inout; a body-local one never is.
@@ -671,29 +565,18 @@
       if (springEndNeedsParam(sp, "A")) params.push((df ? "DVec2" : "vec2") + " SPRING" + s + "_A");
       if (springEndNeedsParam(sp, "B")) params.push((df ? "DVec2" : "vec2") + " SPRING" + s + "_B");
     });
-    // liveCount is threaded through the run, not recomputed from the alive flags.
-    if (spawnSlots.length) params.push("inout int liveCount");
-    // Counted here: the driver's own error for this names a line in generated code.
-    if (params.length > MAX_GLSL_FUNCTION_PARAMS) {
-      throw new Error("This scene needs " + params.length + " stepOnce() parameters, past GLSL's limit of " +
-        MAX_GLSL_FUNCTION_PARAMS + " - lower Max Objects (currently " + n + " slots) or remove a hinge or spring.");
-    }
     return params;
   }
 
   // hingeAnchors' text is already in the pass's precision; this just picks the constructor.
-  function stepOnceCallArgs(n, hingeAnchors, precision, spawnBase, springs) {
+  function stepOnceCallArgs(n, hingeAnchors, precision, springs) {
     var df = global.PhysicsDF.isExtended(precision);
     function localVec(a) {
       return df ? "dv2(" + a.x + ", " + a.y + ")" : "vec2(" + a.x + ", " + a.y + ")";
     }
-    var spawnSlots = spawnSlotsFrom(n, spawnBase);
-    var isSpawn = {};
-    spawnSlots.forEach(function (i) { isSpawn[i] = true; });
     var args = [];
     for (var i = 0; i < n; i++) {
       args.push((df ? "dbody" : "body") + i, "BODY" + i + "_INV_MASS", "BODY" + i + "_INV_INERTIA", "BODY" + i + "_HALF");
-      if (isSpawn[i]) args.push("alive" + i, "lineage" + i);
     }
     (hingeAnchors || []).forEach(function (hg, h) {
       // World hinge: by reference, so stepOnce()'s wrap persists across calls.
@@ -703,7 +586,6 @@
       if (springEndNeedsParam(sp, "A")) args.push(localVec(sp.localA));
       if (springEndNeedsParam(sp, "B")) args.push(localVec(sp.localB));
     });
-    if (spawnSlots.length) args.push("liveCount");
     return args.join(", ");
   }
 
@@ -725,55 +607,16 @@
     return global.PhysicsDF.isExtended(precision) ? "g_dfStaticGeomReady = false;" : "";
   }
 
-  // ---- Splitter scenes: pre-allocated spawn slots ----
-  // A compiled shader cannot create a body, so a splitter scene is padded up to
-  // its Max Objects with dead radius-0 circles (invMass = invInertia = 0) and a
-  // split wakes one. A dead slot still integrates and wraps: unobservable, cheaper than gating.
-  function sceneHasSplitter(scene) {
-    return scene.bodies.some(function (b) { return b.type === "splitter"; });
-  }
-
-  // A scene with no splitter is returned untouched with spawnBase null.
-  function padSceneForSplitting(scene) {
-    if (!sceneHasSplitter(scene)) return { scene: scene, spawnBase: null };
-    var authored = scene.bodies.length;
-    // The scene's own "Max Objects", which decides the compiled shader's size.
-    var cap = global.PhysicsEngine.maxSimulationBodiesFor(scene);
-    if (authored >= cap) return { scene: scene, spawnBase: authored };
-    var bodies = scene.bodies.slice();
-    for (var i = authored; i < cap; i++) {
-      bodies.push(global.PhysicsEngine.createCircle(0, 0, 0, false));
-    }
-    var padded = {};
-    for (var k in scene) if (Object.prototype.hasOwnProperty.call(scene, k)) padded[k] = scene[k];
-    padded.bodies = bodies;
-    return { scene: padded, spawnBase: authored };
-  }
-
-  // Per-spawn-slot persistent state plus liveCount; the slots' Body locals come from generateBodyLocalsGLSL.
-  function generateSpawnSlotLocalsGLSL(n, spawnBase) {
-    var slots = spawnSlotsFrom(n, spawnBase);
-    if (!slots.length) return "";
-    var lines = [];
-    slots.forEach(function (i) {
-      lines.push("bool alive" + i + " = false;");
-      // -1: a never-filled slot belongs to no lineage (the output average must not count it).
-      lines.push("int lineage" + i + " = -1;");
-    });
-    lines.push("int liveCount = " + spawnBase + ";");
-    return lines.join("\n");
-  }
-
   // The scene's specialized stepOnce(), taking bodies/masses as explicit
   // parameters: GLSL globals need constant initializers and the fractal grid's
   // initial state is per-pixel. One generator emits both float32 and multi-float.
   // frame { width, height }: wrap positions at the edges; omitted = unbounded fall.
   // precision: "f32" or "df"/"tf"/"qf" (see PhysicsDF). mutualGravity: n-body pull.
   // collisions: only Mutual Gravity's accel loop needs it (touching-bodies rule).
-  // spawnBase: see padSceneForSplitting. springs: see the Springs section above.
+  // springs: see the Springs section above.
   // flags { contactBody, touchBody }: g_contactN for that one body (the map's Bounce
   // Count) and g_touchK per other body for that one (the goal order); neither by default.
-  function generateStepOnceGLSL(n, consts, pairs, hingeAnchors, frame, precision, mutualGravity, collisions, spawnBase, springs, flags) {
+  function generateStepOnceGLSL(n, consts, pairs, hingeAnchors, frame, precision, mutualGravity, collisions, springs, flags) {
     var df = global.PhysicsDF.isExtended(precision);
     if (df) global.PhysicsDF.usePrecision(precision);
     var collisionsOn = collisions !== false;
@@ -788,101 +631,38 @@
     // One generator, two spellings: df has no operators, so dfAdd(a, b) where f32 says a + b.
     var E = df ? {
       body: "dbody", bodyType: "DBody", scalarType: "MF", vecType: "DVec2",
-      DT: "DF_DT", GRAVITY: "DF_GRAVITY",
-      zero: "DF_ZERO", one: "DF_ONE",
+      DT: "DF_DT",
+      zero: "DF_ZERO",
       vec: function (x, y) { return "dv2(" + x + ", " + y + ")"; },
       add: function (a, b) { return "dfAdd(" + a + ", " + b + ")"; },
       sub: function (a, b) { return "dfSub(" + a + ", " + b + ")"; },
       mul: function (a, b) { return "dfMul(" + a + ", " + b + ")"; },
       min: function (a, b) { return "dfMin(" + a + ", " + b + ")"; },
-      less: function (a, b) { return "dfLess(" + a + ", " + b + ")"; },
-      // a <= b, spelled as "not greater": the one the df library has.
-      lessEq: function (a, b) { return "!dfGreater(" + a + ", " + b + ")"; },
       negVec: function (v) { return "dv2Neg(" + v + ")"; },
       zeroVec: "dv2Zero()",
       advanceVelocity: "dfAdvanceVelocity", noContact: "dfNoContact()",
       contactType: "DContact", contactPairType: "DContactPair",
       collideCircleCircle: "dfCollideCircleCircle", collideLineCircle: "dfCollideLineCircle",
       collideLineLine: "dfCollideLineLine",
-      sweptCapsule: "dfSweptCapsuleCircleContact", halfThickness: "DF_HALF_LINE_THICKNESS",
-      mouthHitType: "DMouthHit", mouthHitFn: "dfCollideFunnelMouthTHit",
-      splitHitType: "DSplitHit", splitHitFn: "dfCollideSplitterShortSideTHit",
-      solveContactVelocity: "dfSolveContactVelocity", solveContactPosition: "dfSolveContactPosition",
       solveHingeVelocity: "dfSolveHingeVelocity", solveHingePosition: "dfSolveHingePosition",
     } : {
       body: "body", bodyType: "Body", scalarType: "float", vecType: "vec2",
-      DT: "DT", GRAVITY: "GRAVITY",
-      zero: "0.0", one: "1.0",
+      DT: "DT",
+      zero: "0.0",
       vec: function (x, y) { return "vec2(" + x + ", " + y + ")"; },
       add: function (a, b) { return "(" + a + ") + (" + b + ")"; },
       sub: function (a, b) { return "(" + a + ") - (" + b + ")"; },
       mul: function (a, b) { return "(" + a + ") * (" + b + ")"; },
       min: function (a, b) { return "min(" + a + ", " + b + ")"; },
-      less: function (a, b) { return "(" + a + ") < (" + b + ")"; },
-      lessEq: function (a, b) { return "(" + a + ") <= (" + b + ")"; },
       negVec: function (v) { return "-" + v; },
       zeroVec: "vec2(0.0)",
       advanceVelocity: "advanceVelocity", noContact: "noContact()",
       contactType: "Contact", contactPairType: "ContactPair",
       collideCircleCircle: "collideCircleCircle", collideLineCircle: "collideLineCircle",
       collideLineLine: "collideLineLine",
-      sweptCapsule: "sweptCapsuleCircleContact", halfThickness: "LINE_THICKNESS * 0.5",
-      mouthHitType: "MouthHit", mouthHitFn: "collideFunnelMouthTHit",
-      splitHitType: "SplitHit", splitHitFn: "collideSplitterShortSideTHit",
-      solveContactVelocity: "solveContactVelocity", solveContactPosition: "solveContactPosition",
       solveHingeVelocity: "solveHingeVelocity", solveHingePosition: "solveHingePosition",
     };
     function B(i) { return E.body + i; }
-
-    // Trapezoid<->circle pairs are pulled out of `pairs`: a teleport/split is not
-    // a Contact and 3 solid edges do not fit a ContactPair. Other trapezoid pairs are dropped.
-    function isTrapezoid(t) { return t === "funnel" || t === "splitter"; }
-    // Wall edges per kind: the funnel's short side is solid, the splitter's long side.
-    function wallsFor(kind) {
-      return kind === "splitter"
-        ? [["mouth", "mouthLeft", "mouthRight"], ["leg1", "mouthLeft", "throatLeft"], ["leg2", "mouthRight", "throatRight"]]
-        : [["throat", "throatLeft", "throatRight"], ["leg1", "mouthLeft", "throatLeft"], ["leg2", "mouthRight", "throatRight"]];
-    }
-    // A circle passing through this trapezoid (teleport/split) must not be pushed by its walls.
-    function trapezoidExclusion(fp, fi, ci) {
-      if (consts[ci].isAnchored) return "false";
-      if (fp.kind === "funnel") return "(teleWon_" + ci + " && teleFunnel_" + ci + " == " + fi + ")";
-      if (splittableCircles.indexOf(ci) === -1) return "false";
-      return "(splitFound_" + ci + " && splitBy_" + ci + " == " + fi + ")";
-    }
-    var trapezoidPairs = [];
-    var ordinaryPairs = pairs.filter(function (pair) {
-      var tA = consts[pair[0]].type, tB = consts[pair[1]].type;
-      if (!isTrapezoid(tA) && !isTrapezoid(tB)) return true;
-      if (isTrapezoid(tA) !== isTrapezoid(tB) && (tA === "circle" || tB === "circle")) {
-        var ti = isTrapezoid(tA) ? pair[0] : pair[1];
-        var ci = tA === "circle" ? pair[0] : pair[1];
-        trapezoidPairs.push({ trap: ti, circle: ci, kind: consts[ti].type, walls: wallsFor(consts[ti].type) });
-      }
-      return false;
-    });
-    var funnelPairs = trapezoidPairs.filter(function (tp) { return tp.kind === "funnel"; });
-    var splitterPairs = trapezoidPairs.filter(function (tp) { return tp.kind === "splitter"; });
-    // Ascending body index, the order the JS engine applies splits in (who gets the last slot).
-    var splittableCircles = [];
-    splitterPairs.forEach(function (sp) {
-      if (consts[sp.circle].isAnchored) return;
-      if (splittableCircles.indexOf(sp.circle) === -1) splittableCircles.push(sp.circle);
-    });
-    splittableCircles.sort(function (a, b) { return a - b; });
-    if (splitterPairs.length && (spawnBase === undefined || spawnBase === null)) {
-      throw new Error("A splitter scene must be compiled from a padded scene: see PhysicsGPU.padSceneForSplitting");
-    }
-    var spawnSlots = spawnSlotsFrom(n, spawnBase);
-    var isSpawnSlot = {};
-    spawnSlots.forEach(function (i) { isSpawnSlot[i] = true; });
-    // null when neither is a spawn slot, so ordinary scenes emit no test.
-    function bothAliveExpr(i, j) {
-      if (!isSpawnSlot[i] && !isSpawnSlot[j]) return null;
-      if (!isSpawnSlot[i]) return "alive" + j;
-      if (!isSpawnSlot[j]) return "alive" + i;
-      return "(alive" + i + " && alive" + j + ")";
-    }
 
     var lines = [];
     var contactBody = flags && typeof flags.contactBody === "number" ? flags.contactBody : -1;
@@ -892,15 +672,13 @@
 
     function moves(idx) { return consts[idx].isAnchored ? "false" : "true"; }
     // ---- df only: segment geometry, built as seldom as possible ----
-    // A df sin/cos is the dearest thing in that library. A movable line or trapezoid
-    // is built once per step; an anchored one once per run, into a global.
-    var segLines = {}, trapBodies = {};
-    ordinaryPairs.forEach(function (pair) {
+    // A df sin/cos is the dearest thing in that library. A movable line is built
+    // once per step; an anchored one once per run, into a global.
+    var segLines = {};
+    pairs.forEach(function (pair) {
       pair.forEach(function (idx) { if (consts[idx].type === "line") segLines[idx] = true; });
     });
-    trapezoidPairs.forEach(function (tp) { trapBodies[tp.trap] = true; });
     function segExpr(idx) { return consts[idx].isAnchored ? "g_dfSeg" + idx : "seg" + idx; }
-    function trapExpr(idx) { return consts[idx].isAnchored ? "g_dfTrap" + idx : "trap" + idx; }
     var staticGeomLines = [];
     if (df) {
       Object.keys(segLines).forEach(function (idx) {
@@ -908,15 +686,10 @@
         lines.push("DSegment g_dfSeg" + idx + ";");
         staticGeomLines.push("    g_dfSeg" + idx + " = dfLineSegment(" + B(idx) + ", BODY" + idx + "_HALF);");
       });
-      Object.keys(trapBodies).forEach(function (idx) {
-        if (!consts[idx].isAnchored) return;
-        lines.push("DTrapezoid g_dfTrap" + idx + ";");
-        staticGeomLines.push("    g_dfTrap" + idx + " = dfTrapezoid(" + B(idx) + ", dfMulPow2(BODY" + idx + "_HALF, 2.0));");
-      });
     }
     lines.push("");
     if (Object.keys(turned).length) lines.push(springSpinGLSL(df), "");
-    lines.push("void stepOnce(" + stepOnceParams(n, hingeAnchors, precision, spawnBase, springList).join(", ") + ") {");
+    lines.push("void stepOnce(" + stepOnceParams(n, hingeAnchors, precision, springList).join(", ") + ") {");
     if (staticGeomLines.length) {
       lines.push("  if (!g_dfStaticGeomReady) {");
       staticGeomLines.forEach(function (l) { lines.push(l); });
@@ -935,7 +708,6 @@
     // reach derive from BODYn_HALF (per-pixel when linked) via the engine's unit-HALF formulas.
     function unitBodyOf(c) {
       if (c.type === "circle") return { type: "circle", radius: 1, isAnchored: c.isAnchored };
-      if (c.type === "funnel" || c.type === "splitter") return { type: c.type, size: 2, isAnchored: c.isAnchored };
       return { type: "line", length: 2, isAnchored: c.isAnchored };
     }
 
@@ -944,11 +716,6 @@
       var gravK = consts.map(function (c) { return global.PhysicsEngine.gravitationalMass(unitBodyOf(c)); });
       var reachK = consts.map(function (c) { return global.PhysicsEngine.halfExtent(unitBodyOf(c)); });
       var GRAV_G = global.PhysicsEngine.MUTUAL_GRAVITY_CONSTANT;
-      // A dead spawn slot neither pulls nor is pulled: its pairs are skipped whole.
-      function pairOpen(i, j) {
-        var gate = bothAliveExpr(i, j);
-        return "  " + (gate ? "if (" + gate + ") " : "") + "{";
-      }
 
       if (df) {
         var dfnumG = global.PhysicsDF.num;
@@ -967,7 +734,7 @@
         for (var pa = 0; pa < n; pa++) {
           for (var pb = pa + 1; pb < n; pb++) {
             if (consts[pa].isAnchored && consts[pb].isAnchored) continue;
-            lines.push(pairOpen(pa, pb));
+            lines.push("  {");
             lines.push("    DVec2 gd = dv2(dfSub(dbody" + pb + ".x, dbody" + pa + ".x), dfSub(dbody" + pb + ".y, dbody" + pa + ".y));");
             lines.push("    MF gr2 = dv2LengthSq(gd);");
             lines.push("    MF gContact = dfAdd(gravReach" + pa + ", gravReach" + pb + ");");
@@ -1028,7 +795,7 @@
           for (var pb = pa + 1; pb < n; pb++) {
             if (consts[pa].isAnchored && consts[pb].isAnchored) continue;
             var aMoves = !consts[pa].isAnchored, bMoves = !consts[pb].isAnchored;
-            lines.push(pairOpen(pa, pb));
+            lines.push("  {");
             lines.push("    vec2 d = vec2(body" + pb + ".x - body" + pa + ".x, body" + pb + ".y - body" + pa + ".y);");
             // Touching bodies do not pull (PhysicsEngine.computeAccelerations); collisions off: smooth interior law.
             lines.push("    float contact = " + reachExpr[pa] + " + " + reachExpr[pb] + ";");
@@ -1206,15 +973,11 @@
 
     function probeRef(idx) { return consts[idx].isAnchored ? B(idx) : "probe" + idx; }
 
-    // df only: this step's geometry for every movable line/trapezoid, from its probe.
+    // df only: this step's geometry for every movable line, from its probe.
     if (df) {
       Object.keys(segLines).forEach(function (idx) {
         if (consts[idx].isAnchored) return;
         lines.push("  DSegment seg" + idx + " = dfLineSegment(probe" + idx + ", BODY" + idx + "_HALF);");
-      });
-      Object.keys(trapBodies).forEach(function (idx) {
-        if (consts[idx].isAnchored) return;
-        lines.push("  DTrapezoid trap" + idx + " = dfTrapezoid(probe" + idx + ", dfMulPow2(BODY" + idx + "_HALF, 2.0));");
       });
     }
     // A line's collide argument: half-length in float32, prebuilt segment in df.
@@ -1230,38 +993,34 @@
     }
 
     // Contacts are computed once per step and reused by every solver iteration.
-    // A pair with a dead spawn slot is not detected at all: it stays a miss.
-    function detected(type, name, expr, gate) {
-      if (!gate) return "  " + type + " " + name + " = " + expr + ";";
-      var miss = type === E.contactPairType ? E.contactPairType + "(" + E.noContact + ", " + E.noContact + ")" : E.noContact;
-      return "  " + type + " " + name + " = " + miss + ";\n  if (" + gate + ") " + name + " = " + expr + ";";
+    function detected(type, name, expr) {
+      return "  " + type + " " + name + " = " + expr + ";";
     }
-    ordinaryPairs.forEach(function (pair) {
+    pairs.forEach(function (pair) {
       var i = pair[0], j = pair[1];
       var tA = consts[i].type, tB = consts[j].type;
       var varName = "pair_" + i + "_" + j;
       var refI = probeRef(i), refJ = probeRef(j);
-      var gate = bothAliveExpr(i, j);
       if (tA === "circle" && tB === "circle") {
-        lines.push(detected(E.contactPairType, varName, E.contactPairType + "(" + E.collideCircleCircle + "(" + refI + ", BODY" + i + "_HALF, " + refJ + ", BODY" + j + "_HALF), " + E.noContact + ")", gate));
+        lines.push(detected(E.contactPairType, varName, E.contactPairType + "(" + E.collideCircleCircle + "(" + refI + ", BODY" + i + "_HALF, " + refJ + ", BODY" + j + "_HALF), " + E.noContact + ")"));
       } else if (tA === "line" && tB === "circle") {
-        lines.push(detected(E.contactPairType, varName, E.contactPairType + "(" + lineCircleCall(i, j) + ", " + E.noContact + ")", gate));
+        lines.push(detected(E.contactPairType, varName, E.contactPairType + "(" + lineCircleCall(i, j) + ", " + E.noContact + ")"));
       } else if (tA === "circle" && tB === "line") {
         // collideLineCircle takes (line, circle): swap rA/rB back and flip the normal.
-        lines.push(detected(E.contactType, varName + "_raw", lineCircleCall(j, i), gate));
+        lines.push(detected(E.contactType, varName + "_raw", lineCircleCall(j, i)));
         lines.push("  " + varName + "_raw.normal = " + E.negVec(varName + "_raw.normal") + ";");
         lines.push("  { " + E.vecType + " tmp_" + i + "_" + j + " = " + varName + "_raw.rA; " + varName + "_raw.rA = " + varName + "_raw.rB; " + varName + "_raw.rB = tmp_" + i + "_" + j + "; }");
         lines.push("  " + E.contactPairType + " " + varName + " = " + E.contactPairType + "(" + varName + "_raw, " + E.noContact + ");");
       } else {
-        lines.push(detected(E.contactPairType, varName, E.collideLineLine + "(" + refI + ", " + lineArg(i) + ", " + refJ + ", " + lineArg(j) + ")", gate));
+        lines.push(detected(E.contactPairType, varName, E.collideLineLine + "(" + refI + ", " + lineArg(i) + ", " + refJ + ", " + lineArg(j) + ")"));
       }
     });
-    // df only: per-contact constants no solver iteration changes (dfPrepareContact), after the gating.
+    // df only: per-contact constants no solver iteration changes (dfPrepareContact).
     function prepareContactLine(contactExpr, a, b) {
       return "  dfPrepareContact(" + contactExpr + ", BODY" + a + "_INV_MASS, BODY" + a + "_INV_INERTIA, " + moves(a) + ", BODY" + b + "_INV_MASS, BODY" + b + "_INV_INERTIA, " + moves(b) + ");";
     }
     if (df) {
-      ordinaryPairs.forEach(function (pair) {
+      pairs.forEach(function (pair) {
         pairSlots(pair).forEach(function (slot) {
           lines.push(prepareContactLine("pair_" + pair[0] + "_" + pair[1] + "." + slot, pair[0], pair[1]));
         });
@@ -1273,7 +1032,7 @@
     // bool is legal there, and no inout to thread.
     if (contactBody >= 0) {
       var touching = [];
-      ordinaryPairs.forEach(function (pair) {
+      pairs.forEach(function (pair) {
         if (pair[0] !== contactBody && pair[1] !== contactBody) return;
         var vn = "pair_" + pair[0] + "_" + pair[1];
         touching.push("(" + pairSlots(pair).map(function (slot) { return vn + "." + slot + ".hit"; }).join(" || ") + ")");
@@ -1283,7 +1042,7 @@
     for (var tk = 0; touchBody >= 0 && tk < n; tk++) {
       if (tk === touchBody) continue;
       var touchHits = [];
-      ordinaryPairs.forEach(function (pair) {
+      pairs.forEach(function (pair) {
         if (!((pair[0] === touchBody && pair[1] === tk) || (pair[0] === tk && pair[1] === touchBody))) return;
         var vn = "pair_" + pair[0] + "_" + pair[1];
         touchHits.push("(" + pairSlots(pair).map(function (slot) { return vn + "." + slot + ".hit"; }).join(" || ") + ")");
@@ -1295,8 +1054,7 @@
     // Per-body earliest contact tHit, default DT; folded only when a slot hit (a miss carries 0.0).
     // A body in no pair keeps the whole step: no tHit, vPre is vFull, and leg 2 is skipped.
     var paired = {};
-    ordinaryPairs.forEach(function (pair) { paired[pair[0]] = true; paired[pair[1]] = true; });
-    trapezoidPairs.forEach(function (tp) { paired[tp.trap] = true; paired[tp.circle] = true; });
+    pairs.forEach(function (pair) { paired[pair[0]] = true; paired[pair[1]] = true; });
     function contactTHitExpr(varName, slot) {
       return varName + "." + slot + ".hit ? " + varName + "." + slot + ".tHit : " + E.DT;
     }
@@ -1304,7 +1062,7 @@
       if (consts[q].isAnchored || !paired[q]) continue;
       lines.push("  " + E.scalarType + " body" + q + "THit = " + E.DT + ";");
     }
-    ordinaryPairs.forEach(function (pair) {
+    pairs.forEach(function (pair) {
       var i = pair[0], j = pair[1];
       var varName = "pair_" + i + "_" + j;
       var pairMin = pairSlots(pair).map(function (slot) { return contactTHitExpr(varName, slot); })
@@ -1318,115 +1076,13 @@
     });
     lines.push("");
 
-    // ---- Funnel/splitter <-> circle pairs ----
-    // Port of physics-engine.js's step(): fold the solid edges' tHit into both bodies,
-    // then resolve the teleport (a tie goes to it), then fold touching flags into g_contact.
-    var funnelPairsByCircle = {};
-    funnelPairs.forEach(function (fp) {
-      (funnelPairsByCircle[fp.circle] = funnelPairsByCircle[fp.circle] || []).push(fp.trap);
-    });
-    if (trapezoidPairs.length) {
-      trapezoidPairs.forEach(function (fp) {
-        var fi = fp.trap, ci = fp.circle;
-        var refF = probeRef(fi), refC = probeRef(ci);
-        var vn = "trap_" + fi + "_" + ci;
-        // A dead slot's pair is a miss without any test, so the solve loops keep their variables.
-        var gate = bothAliveExpr(fi, ci);
-        var sizeArg = df ? trapExpr(fi) : "BODY" + fi + "_HALF * 2.0";
-        if (!df) lines.push("  FunnelVerts " + vn + "_v = funnelVertices(" + refF + ", " + sizeArg + ");");
-        fp.walls.forEach(function (w) {
-          var segArgs = df ? trapExpr(fi) + "." + w[0] : vn + "_v." + w[1] + ", " + vn + "_v." + w[2];
-          lines.push(detected(E.contactType, vn + "_" + w[0], (isStatic(fi)
-            ? "dfSweptCapsuleCircleContactStatic(" + segArgs + ", " + E.vec(refF + ".x", refF + ".y")
-            : E.sweptCapsule + "(" + segArgs + ", " + E.vec(refF + ".vx", refF + ".vy") + ", " + E.vec(refF + ".x", refF + ".y")) +
-            ", " + refC + ", BODY" + ci + "_HALF, " + E.halfThickness + ")", gate));
-          // Trapezoid is side A, circle side B: the order both solve loops use.
-          if (df) lines.push(prepareContactLine(vn + "_" + w[0], fi, ci));
-        });
-        var hitCall = "(" + refF + ", " + sizeArg + ", " + refC + ", BODY" + ci + "_HALF)";
-        if (fp.kind === "funnel") {
-          var mouthFn = isStatic(fi) ? "dfCollideFunnelMouthTHitStatic" : E.mouthHitFn;
-          lines.push("  " + E.mouthHitType + " " + vn + "_mouth" + (gate ? "; if (" + gate + ") " + vn + "_mouth" : "") + " = " + mouthFn + hitCall + ";");
-          if (gate) lines.push("  else " + vn + "_mouth.hit = false;");
-        } else {
-          // Not folded into tHit: a split is applied at the end of the step, unlike a teleport.
-          var splitFn = isStatic(fi) ? "dfCollideSplitterShortSideTHitStatic" : E.splitHitFn;
-          lines.push("  " + E.splitHitType + " " + vn + "_split" + (gate ? "; if (" + gate + ") " + vn + "_split" : "") + " = " + splitFn + hitCall + ";");
-          if (gate) lines.push("  else " + vn + "_split.hit = false;");
-        }
-        var wallTHits = fp.walls.map(function (w) { return vn + "_" + w[0] + ".hit ? " + vn + "_" + w[0] + ".tHit : " + E.DT; });
-        lines.push("  " + E.scalarType + " " + vn + "_solidTHit = " + E.min(wallTHits[0], E.min(wallTHits[1], wallTHits[2])) + ";");
-        if (!consts[fi].isAnchored) lines.push("  body" + fi + "THit = " + E.min("body" + fi + "THit", vn + "_solidTHit") + ";");
-        if (!consts[ci].isAnchored) lines.push("  body" + ci + "THit = " + E.min("body" + ci + "THit", vn + "_solidTHit") + ";");
-      });
-      lines.push("");
-
-      Object.keys(funnelPairsByCircle).forEach(function (ciStr) {
-        var ci = Number(ciStr);
-        if (consts[ci].isAnchored) return;
-        // teleFound is its own flag: DT also means "no contact", so tHits alone would read as a teleport.
-        lines.push("  " + E.scalarType + " teleTHit_" + ci + " = " + E.DT + ";");
-        lines.push("  " + E.vecType + " teleTarget_" + ci + " = " + E.zeroVec + ";");
-        lines.push("  int teleFunnel_" + ci + " = -1;");
-        lines.push("  bool teleFound_" + ci + " = false;");
-        funnelPairsByCircle[ci].forEach(function (fi) {
-          var vn = "trap_" + fi + "_" + ci;
-          lines.push("  if (" + vn + "_mouth.hit && (!teleFound_" + ci + " || " + E.less(vn + "_mouth.tHit", "teleTHit_" + ci) + ")) { teleTHit_" + ci + " = " +
-            vn + "_mouth.tHit; teleTarget_" + ci + " = " + vn + "_mouth.target; teleFunnel_" + ci + " = " + fi + "; teleFound_" + ci + " = true; }");
-        });
-        lines.push("  bool teleWon_" + ci + " = teleFound_" + ci + " && " + E.lessEq("teleTHit_" + ci, "body" + ci + "THit") + ";");
-        lines.push("  if (teleWon_" + ci + ") body" + ci + "THit = teleTHit_" + ci + ";");
-      });
-      lines.push("");
-
-      // Which splitter each circle passes through, resolved here for the flags and solve loops; earliest wins.
-      splittableCircles.forEach(function (ci) {
-        lines.push("  bool splitFound_" + ci + " = false;");
-        lines.push("  int splitBy_" + ci + " = -1;");
-        lines.push("  " + E.scalarType + " splitTHit_" + ci + " = " + E.DT + ";");
-        lines.push("  " + E.vecType + " splitOff1_" + ci + " = " + E.zeroVec + ";");
-        lines.push("  " + E.vecType + " splitOff2_" + ci + " = " + E.zeroVec + ";");
-        splitterPairs.forEach(function (sp) {
-          if (sp.circle !== ci) return;
-          var vn = "trap_" + sp.trap + "_" + ci;
-          lines.push("  if (" + vn + "_split.hit && (!splitFound_" + ci + " || " + E.less(vn + "_split.tHit", "splitTHit_" + ci) + ")) { " +
-            "splitTHit_" + ci + " = " + vn + "_split.tHit; " +
-            "splitOff1_" + ci + " = " + vn + "_split.offset1; " +
-            "splitOff2_" + ci + " = " + vn + "_split.offset2; " +
-            "splitBy_" + ci + " = " + sp.trap + "; " +
-            "splitFound_" + ci + " = true; }");
-        });
-      });
-      if (splittableCircles.length) lines.push("");
-
-      trapezoidPairs.forEach(function (fp) {
-        var fi = fp.trap, ci = fp.circle;
-        var vn = "trap_" + fi + "_" + ci;
-        var excluded = trapezoidExclusion(fp, fi, ci);
-        var anyHit = "(" + fp.walls.map(function (w) { return vn + "_" + w[0] + ".hit"; }).join(" || ") + ")";
-        if (fi === contactBody) lines.push("  g_contact" + fi + " = g_contact" + fi + " || (!" + excluded + " && " + anyHit + ");");
-        if (ci === contactBody) lines.push("  g_contact" + ci + " = g_contact" + ci + " || (!" + excluded + " && " + anyHit + ");");
-        if (touchBody === ci) lines.push("  g_touch" + fi + " = g_touch" + fi + " || (!" + excluded + " && " + anyHit + ");");
-        if (touchBody === fi) lines.push("  g_touch" + ci + " = g_touch" + ci + " || (!" + excluded + " && " + anyHit + ");");
-      });
-      lines.push("");
-    }
-
     // Leg 1: move at vFull for tHit (matching detection), then drop velocity to vPre
     // (gravity only up to tHit): reflecting with a full step of gravity early or late differs by 2*(g.n)*DT.
     for (var g3 = 0; g3 < n; g3++) {
       if (consts[g3].isAnchored) continue;
       var t1 = paired[g3] ? "body" + g3 + "THit" : E.DT;
-      // A teleport winner's position is overridden to the throat center; velocity is unchanged.
-      if (funnelPairsByCircle[g3]) {
-        lines.push("  if (teleWon_" + g3 + ") { " + B(g3) + ".x = teleTarget_" + g3 + ".x; " + B(g3) + ".y = teleTarget_" + g3 + ".y; } else { " +
-          (df
-            ? B(g3) + ".x = " + E.add(B(g3) + ".x", E.mul("vFull" + g3 + ".x", t1)) + "; " + B(g3) + ".y = " + E.add(B(g3) + ".y", E.mul("vFull" + g3 + ".y", t1)) + "; }"
-            : B(g3) + ".x += vFull" + g3 + ".x * " + t1 + "; " + B(g3) + ".y += vFull" + g3 + ".y * " + t1 + "; }"));
-      } else {
-        lines.push("  " + B(g3) + ".x = " + E.add(B(g3) + ".x", E.mul("vFull" + g3 + ".x", t1)) + ";");
-        lines.push("  " + B(g3) + ".y = " + E.add(B(g3) + ".y", E.mul("vFull" + g3 + ".y", t1)) + ";");
-      }
+      lines.push("  " + B(g3) + ".x = " + E.add(B(g3) + ".x", E.mul("vFull" + g3 + ".x", t1)) + ";");
+      lines.push("  " + B(g3) + ".y = " + E.add(B(g3) + ".y", E.mul("vFull" + g3 + ".y", t1)) + ";");
       if (turned[g3]) {
         // Angular twin: rotate at the whole step's spin, leave w with the torque by tHit.
         lines.push("  " + B(g3) + ".angle = " + E.add(B(g3) + ".angle", E.mul(spinExpr(g3, E.DT), t1)) + ";");
@@ -1498,25 +1154,15 @@
         : "solveContactPosition(" + B(a) + ", BODY" + a + "_INV_MASS, " + B(b) + ", BODY" + b + "_INV_MASS, " + contactExpr + ");";
     }
 
-    var solves = hingeAnchors.length || ordinaryPairs.length || trapezoidPairs.length;
+    var solves = hingeAnchors.length || pairs.length;
     if (solves) lines.push("  for (int iter = 0; iter < " + VELOCITY_ITERATIONS + "; iter++) {");
     hingeAnchors.forEach(function (hg, hi) { lines.push("    " + hingeCall(hg, hi, "velocity")); });
-    ordinaryPairs.forEach(function (pair) {
+    pairs.forEach(function (pair) {
       var varName = "pair_" + pair[0] + "_" + pair[1];
       // c1 only for line<->line: elsewhere it is noContact() by construction.
       pairSlots(pair).forEach(function (slot) {
         lines.push("    " + contactVelocityCall(pair[0], pair[1], varName + "." + slot));
       });
-    });
-    trapezoidPairs.forEach(function (fp) {
-      var fi = fp.trap, ci = fp.circle;
-      var vn = "trap_" + fi + "_" + ci;
-      var excluded = trapezoidExclusion(fp, fi, ci);
-      lines.push("    if (!" + excluded + ") {");
-      fp.walls.forEach(function (w) {
-        lines.push("      " + contactVelocityCall(fi, ci, vn + "_" + w[0]));
-      });
-      lines.push("    }");
     });
     if (solves) lines.push("  }");
     lines.push("");
@@ -1541,21 +1187,11 @@
     lines.push("");
     if (solves) lines.push("  for (int iter = 0; iter < " + POSITION_ITERATIONS + "; iter++) {");
     hingeAnchors.forEach(function (hg, hi) { lines.push("    " + hingeCall(hg, hi, "position")); });
-    ordinaryPairs.forEach(function (pair) {
+    pairs.forEach(function (pair) {
       var varName = "pair_" + pair[0] + "_" + pair[1];
       pairSlots(pair).forEach(function (slot) {
         lines.push("    " + contactPositionCall(pair[0], pair[1], varName + "." + slot));
       });
-    });
-    trapezoidPairs.forEach(function (fp) {
-      var fi = fp.trap, ci = fp.circle;
-      var vn = "trap_" + fi + "_" + ci;
-      var excluded = trapezoidExclusion(fp, fi, ci);
-      lines.push("    if (!" + excluded + ") {");
-      fp.walls.forEach(function (w) {
-        lines.push("      " + contactPositionCall(fi, ci, vn + "_" + w[0]));
-      });
-      lines.push("    }");
     });
     if (solves) lines.push("  }");
 
@@ -1628,38 +1264,6 @@
       }
     }
 
-    // ---- Splitting: the very last thing the step does ----
-    // Each splitting circle is displaced from its end-of-step state; a slot woken here
-    // starts next step. The hit circle keeps its slot (offset1, lineage implicit); a spawn slot is the second.
-    if (splittableCircles.length) {
-      lines.push("");
-      splittableCircles.forEach(function (ci) {
-        var lineage = isSpawnSlot[ci] ? "lineage" + ci : String(ci);
-        lines.push("  if (splitFound_" + ci + ") {");
-        // Child position read before the parent moves: both offsets displace the pre-split position.
-        lines.push("    " + E.scalarType + " childX_" + ci + " = " + E.add(B(ci) + ".x", "splitOff2_" + ci + ".x") + ";");
-        lines.push("    " + E.scalarType + " childY_" + ci + " = " + E.add(B(ci) + ".y", "splitOff2_" + ci + ".y") + ";");
-        lines.push("    " + B(ci) + ".x = " + E.add(B(ci) + ".x", "splitOff1_" + ci + ".x") + ";");
-        lines.push("    " + B(ci) + ".y = " + E.add(B(ci) + ".y", "splitOff1_" + ci + ".y") + ";");
-        if (spawnSlots.length) {
-          // At the ceiling the ball still passes through; it just does not duplicate.
-          lines.push("    if (liveCount < " + n + ") {");
-          spawnSlots.forEach(function (k, si) {
-            lines.push("      " + (si === 0 ? "if" : "else if") + " (liveCount == " + k + ") { " +
-              B(k) + " = " + E.bodyType + "(childX_" + ci + ", childY_" + ci + ", " + B(ci) + ".angle, " + B(ci) + ".vx, " + B(ci) + ".vy, " + B(ci) + ".w); " +
-              // A split never changes size: the child's shape constants are the parent's.
-              "BODY" + k + "_HALF = BODY" + ci + "_HALF; " +
-              "BODY" + k + "_INV_MASS = BODY" + ci + "_INV_MASS; " +
-              "BODY" + k + "_INV_INERTIA = BODY" + ci + "_INV_INERTIA; " +
-              "alive" + k + " = true; lineage" + k + " = " + lineage + "; }");
-          });
-          lines.push("      liveCount += 1;");
-          lines.push("    }");
-        }
-        lines.push("  }");
-      });
-    }
-
     lines.push("}");
     return lines.join("\n");
   }
@@ -1706,14 +1310,14 @@
   // between the single-scene compiler and the grid's hover replay.
   // The most steps a chunk can ever be: the shader's own loop bound.
   var TRAJECTORY_MAX_CHUNK = 256;
-  // Steered chunk time: well under the limit, since a step can get dearer (splits).
+  // Steered chunk time: well under the limit.
   var TRAJECTORY_TARGET_MS = 4;
   // Written beside the data by every draw so a dropped draw is noticed.
   var TRAJECTORY_SENTINEL = 8191;
 
-  function trajectoryChunkInfo(n, consts, hingeAnchors, precision, spawnBase) {
+  function trajectoryChunkInfo(n, consts, hingeAnchors, precision) {
     // Anchored bodies are not carried: every invocation re-declares them from the scene.
-    var vars = playbackStateVariables({ precision: precision, n: n, consts: consts, spawnBase: spawnBase, hingeAnchors: hingeAnchors });
+    var vars = playbackStateVariables({ precision: precision, n: n, consts: consts, hingeAnchors: hingeAnchors });
     return {
       vars: vars,
       maxSteps: TRAJECTORY_MAX_CHUNK,
@@ -1734,12 +1338,10 @@
     ].join("\n");
   }
 
-  function generateTrajectoryMainGLSL(n, bodyDeclarationsGLSL, hingeAnchors, precision, spawnBase, chunk, springs) {
+  function generateTrajectoryMainGLSL(n, bodyDeclarationsGLSL, hingeAnchors, precision, chunk, springs) {
     var df = global.PhysicsDF.isExtended(precision);
-    var isSpawnSlot = {};
-    spawnSlotsFrom(n, spawnBase).forEach(function (i) { isSpawnSlot[i] = true; });
     function readField(i, field) { return df ? "dfToFloat(dbody" + i + "." + field + ")" : "body" + i + "." + field; }
-    var stepCall = "stepOnce(" + stepOnceCallArgs(n, hingeAnchors, precision, spawnBase, springs) + ");";
+    var stepCall = "stepOnce(" + stepOnceCallArgs(n, hingeAnchors, precision, springs) + ");";
     var lines = [];
     lines.push("void main() {");
     lines.push("  " + bodyDeclarationsGLSL.split("\n").join("\n  "));
@@ -1765,8 +1367,6 @@
     lines.push("  float outHalf = 0.0;");
     for (var o = 0; o < n; o++) {
       var half = df ? "dfToFloat(BODY" + o + "_HALF)" : "BODY" + o + "_HALF";
-      // A dead spawn slot reports size 0: what tells the replay to draw nothing.
-      if (isSpawnSlot[o]) half = "(alive" + o + " ? " + half + " : 0.0)";
       lines.push((o === 0 ? "  if" : "  else if") + " (bodyIdx == " + o + ") { outVal = vec3(" +
         readField(o, "x") + ", " + readField(o, "y") + ", " + readField(o, "angle") + "); outHalf = " + half + "; }");
     }
@@ -1785,14 +1385,9 @@
     if (scene.bodies.length > MAX_BODIES) {
       throw new Error("GPU physics supports at most " + MAX_BODIES + " bodies (scene has " + scene.bodies.length + ")");
     }
-    // The authored count is checked before padding: spawn slots are not user-drawn.
-    var padded = padSceneForSplitting(scene);
-    var spawnBase = padded.spawnBase;
-    scene = padded.scene;
     var bodies = scene.bodies;
     var n = bodies.length;
     var consts = bodies.map(bodyConst);
-    // Empty, not filtered: the funnel codegen pulls from this list, so none turns everything off at once.
     var pairs = PhysicsEngine.collisionsEnabled(scene) ? collisionPairs(n, consts, scene.hinges) : [];
     var hingeAnchors = scene.hinges.map(function (hg) {
       return {
@@ -1810,7 +1405,7 @@
 
     var lines = [];
     lines.push("#version 300 es");
-    var chunk = trajectoryChunkInfo(n, consts, hingeAnchors, precision, spawnBase);
+    var chunk = trajectoryChunkInfo(n, consts, hingeAnchors, precision);
     lines.push("precision highp float;");
     lines.push(generateTrajectoryHeaderGLSL(chunk));
     lines.push("");
@@ -1818,12 +1413,10 @@
     lines.push("");
     // Nothing here depends on maxSteps, so different run lengths reuse the program.
     var springs = springLinksFor(scene, df ? dfnum : fnum);
-    lines.push(generateStepOnceGLSL(n, consts, pairs, hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), spawnBase, springs));
+    lines.push(generateStepOnceGLSL(n, consts, pairs, hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), springs));
     lines.push("");
     var locals = generateBodyLocalsGLSL(consts, precision) + "\n" + generateHingeAnchorLocalsGLSL(hingeAnchors, precision);
-    var spawnLocals = generateSpawnSlotLocalsGLSL(n, spawnBase);
-    if (spawnLocals) locals += "\n" + spawnLocals;
-    lines.push(generateTrajectoryMainGLSL(n, locals, hingeAnchors, precision, spawnBase, chunk, springs));
+    lines.push(generateTrajectoryMainGLSL(n, locals, hingeAnchors, precision, chunk, springs));
 
     return { fragmentSource: pruneUnusedGLSL(lines.join("\n")), numBodies: n, precision: df ? precision : "f32", chunk: chunk };
   }
@@ -1866,17 +1459,6 @@
     for (var i = 0; i < result.n; i++) {
       if (result.consts[i].isAnchored && extra.indexOf(i) === -1) continue;
       vars.push({ name: (df ? "dbody" : "body") + i, type: df ? "DBody" : "Body" });
-    }
-    var hasSpawn = result.spawnBase !== null && result.spawnBase !== undefined;
-    if (hasSpawn) {
-      for (var k = result.spawnBase; k < result.n; k++) {
-        ["_INV_MASS", "_INV_INERTIA", "_HALF"].forEach(function (suffix) {
-          vars.push({ name: "BODY" + k + suffix, type: df ? "df" : "float" });
-        });
-        vars.push({ name: "alive" + k, type: "bool" });
-        vars.push({ name: "lineage" + k, type: "int" });
-      }
-      vars.push({ name: "liveCount", type: "int" });
     }
     result.hingeAnchors.forEach(function (hg, h) {
       if (hg.aIsWorld) vars.push({ name: "hingeAnchor" + h, type: df ? "DVec2" : "vec2" });
@@ -1963,7 +1545,7 @@
     return lines;
   }
 
-  // Strip store. Flat ifs, not else-if: a qf splitter scene has hundreds of layers.
+  // Strip store. Flat ifs, not else-if: a qf scene has dozens of layers.
   function generateStateStripStoreGLSL(vars, layerExpr, outName) {
     var floats = stateFloats(vars);
     var layers = playbackStateLayerCount(vars);
@@ -2296,9 +1878,6 @@
     bodyConst: bodyConst,
     shapeHalf: shapeHalf,
     collisionPairs: collisionPairs,
-    sceneHasSplitter: sceneHasSplitter,
-    padSceneForSplitting: padSceneForSplitting,
-    generateSpawnSlotLocalsGLSL: generateSpawnSlotLocalsGLSL,
     staticGeometryResetGLSL: staticGeometryResetGLSL,
     playbackStateVariables: playbackStateVariables,
     withWords: withWords,

@@ -25,7 +25,6 @@
       mul: function (a, b) { return "(" + a + ") * (" + b + ")"; },
       div: function (a, b) { return "(" + a + ") / (" + b + ")"; },
       abs: function (a) { return "abs(" + a + ")"; },
-      max: function (a, b) { return "max(" + a + ", " + b + ")"; },
       rotate: function (x, y, angle) { return "rotateVec(vec2(" + x + ", " + y + "), " + angle + ")"; },
       absCos: function (a) { return "abs(cos(" + a + "))"; },
       absSin: function (a) { return "abs(sin(" + a + "))"; },
@@ -46,7 +45,6 @@
       mul: function (a, b) { return "dfMul(" + a + ", " + b + ")"; },
       div: function (a, b) { return "dfDiv(" + a + ", " + b + ")"; },
       abs: function (a) { return "dfAbs(" + a + ")"; },
-      max: function (a, b) { return "dfMax(" + a + ", " + b + ")"; },
       rotate: function (x, y, angle) { return "dfRotate(" + x + ", " + y + ", " + angle + ")"; },
       absCos: function (a) { return "dfAbs(dfCos(" + a + "))"; },
       absSin: function (a) { return "dfAbs(dfSin(" + a + "))"; },
@@ -113,10 +111,6 @@
     if (scene.bodies.length > PhysicsGPU.MAX_BODIES) {
       throw new Error("GPU physics supports at most " + PhysicsGPU.MAX_BODIES + " bodies (scene has " + scene.bodies.length + ")");
     }
-    // Splitter padding appends dead spawn slots, so authored body indices are unchanged.
-    var padded = PhysicsGPU.padSceneForSplitting(scene);
-    var spawnBase = padded.spawnBase;
-    scene = padded.scene;
     var consts = scene.bodies.map(PhysicsGPU.bodyConst);
     var n = consts.length;
     var targets = resolveOffsetTargets(scene.xInput, scene.yInput, B);
@@ -194,7 +188,7 @@
     // hinge, then move each direct child by how far its own attachment point moved ----
     function applyResizeRotateTarget(bodyIndex, property, offsetExpr) {
       var ownHingeIdx = findOwnHingeIndex(scene, bodyIndex);
-      var isResize = property === "radius" || property === "length" || property === "size";
+      var isResize = property === "radius" || property === "length";
       var isAnchored = consts[bodyIndex].isAnchored;
       var oldAngle = state[bodyIndex].angle;
       var oldX = state[bodyIndex].x, oldY = state[bodyIndex].y;
@@ -219,7 +213,7 @@
           // inertia = mass * r^2 / 2  =>  invInertia = 2 * invMass / r^2
           shapeState[bodyIndex].invInertia = num(B.div(B.mul(B.lit(2), invMass), B.mul(newRadius, newRadius)));
         }
-      } else if (property === "length") {
+      } else {
         var newLen = num(B.abs(B.add(B.mul(B.lit(2), oldHalf), offsetExpr)));
         shapeState[bodyIndex].half = num(B.mul(newLen, B.lit(0.5)));
         if (!isAnchored) {
@@ -228,16 +222,6 @@
           shapeState[bodyIndex].invMass = invMassL;
           // inertia = mass * len^2 / 12  =>  invInertia = 12 / (mass * len^2)
           shapeState[bodyIndex].invInertia = num(B.div(B.lit(12), B.mul(B.mul(mass, newLen), newLen)));
-        }
-      } else { // size (funnel): same negative-magnitude guard as above.
-        var newSize = num(B.abs(B.add(B.mul(B.lit(2), oldHalf), offsetExpr)));
-        shapeState[bodyIndex].half = num(B.mul(newSize, B.lit(0.5)));
-        if (!isAnchored) {
-          var funnelMass = num(B.mul(B.lit(PhysicsEngine.LINE_LINEAR_DENSITY * PhysicsEngine.FUNNEL_MASS_COEFF), newSize));
-          var invMassF = num(B.div(B.lit(1), funnelMass));
-          shapeState[bodyIndex].invMass = invMassF;
-          var inertiaF = num(B.mul(B.mul(B.lit(PhysicsEngine.LINE_LINEAR_DENSITY * PhysicsEngine.FUNNEL_INERTIA_COEFF), newSize), B.mul(newSize, newSize)));
-          shapeState[bodyIndex].invInertia = num(B.div(B.lit(1), inertiaF));
         }
       }
 
@@ -290,7 +274,7 @@
     }
 
     // Resize/rotate first: their recenter is absolute and would discard a translate.
-    var resizeTargets = targets.filter(function (t) { return t.property === "radius" || t.property === "length" || t.property === "size" || t.property === "angle"; });
+    var resizeTargets = targets.filter(function (t) { return t.property === "radius" || t.property === "length" || t.property === "angle"; });
     var translateTargets = targets.filter(function (t) { return t.property === "x" || t.property === "y"; });
     var velocityTargets = targets.filter(function (t) { return t.property === "vx" || t.property === "vy"; });
     resizeTargets.forEach(function (t) { applyResizeRotateTarget(t.body, t.property, t.expr); });
@@ -320,18 +304,6 @@
           if (consts[wi].type === "circle") {
             halfX = shapeState[wi].half;
             halfY = shapeState[wi].half;
-          } else if (consts[wi].type === "funnel") {
-            // Max |x|/|y| over the rotated vertices (frameHalfExtent); a leading "-" negates a df too.
-            var fSize = num(B.mul(shapeState[wi].half, B.lit(2)));
-            var fMh = num(B.mul(B.lit(PhysicsEngine.FUNNEL_MOUTH_HALF), fSize));
-            var fTh = num(B.mul(B.lit(PhysicsEngine.FUNNEL_THROAT_HALF), fSize));
-            var fHh = num(B.mul(B.lit(PhysicsEngine.FUNNEL_HALF_HEIGHT), fSize));
-            var fv0 = rotateExpr({ x: "-" + fMh, y: "-" + fHh }, state[wi].angle);
-            var fv1 = rotateExpr({ x: fMh, y: "-" + fHh }, state[wi].angle);
-            var fv2 = rotateExpr({ x: "-" + fTh, y: fHh }, state[wi].angle);
-            var fv3 = rotateExpr({ x: fTh, y: fHh }, state[wi].angle);
-            halfX = num(B.max(B.max(B.abs(fv0.x), B.abs(fv1.x)), B.max(B.abs(fv2.x), B.abs(fv3.x))));
-            halfY = num(B.max(B.max(B.abs(fv0.y), B.abs(fv1.y)), B.max(B.abs(fv2.y), B.abs(fv3.y))));
           } else {
             halfX = num(B.mul(B.absCos(state[wi].angle), shapeState[wi].half));
             halfY = num(B.mul(B.absSin(state[wi].angle), shapeState[wi].half));
@@ -372,7 +344,6 @@
       pairs: pairs,
       hingeAnchors: hingeAnchors,
       springs: springs,
-      spawnBase: spawnBase,
       precision: global.PhysicsDF.isExtended(precision) ? precision : "f32",
     };
   }
@@ -396,8 +367,6 @@
       lines.push(scalarDecl + "BODY" + i + "_INV_INERTIA = " + sh.invInertia + ";");
       lines.push(scalarDecl + "BODY" + i + "_HALF = " + sh.half + ";");
     }
-    var spawnLocals = PhysicsGPU.generateSpawnSlotLocalsGLSL(result.n, result.spawnBase);
-    if (spawnLocals) lines.push(spawnLocals);
     // A fresh set of bodies is a fresh run: see staticGeometryResetGLSL.
     var geomReset = PhysicsGPU.staticGeometryResetGLSL(result.precision);
     if (geomReset) lines.push(geomReset);
@@ -419,12 +388,12 @@
     // One uniform per word (wordUniformDecls): a float32-rounded point would replay a different one at deep zoom.
     global.PhysicsDF.wordUniformDecls("u_hoverWorld").forEach(function (l) { lines.push(l); });
     // The chunked LOG / ADVANCE scheme: see PhysicsGPU.generateTrajectoryMainGLSL.
-    var chunk = PhysicsGPU.trajectoryChunkInfo(initial.n, initial.consts, initial.hingeAnchors, precision, initial.spawnBase);
+    var chunk = PhysicsGPU.trajectoryChunkInfo(initial.n, initial.consts, initial.hingeAnchors, precision);
     lines.push(PhysicsGPU.generateTrajectoryHeaderGLSL(chunk));
     lines.push("");
     lines.push(PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(scene)));
     lines.push("");
-    lines.push(PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), initial.spawnBase, initial.springs));
+    lines.push(PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), initial.springs));
     lines.push("");
     // Locals, declared first: a global's initializer must be constant, a uniform is not.
     var B = backendFor(precision);
@@ -432,7 +401,7 @@
       B.scalar + " worldY = " + global.PhysicsDF.wordUniformValue("u_hoverWorld", "y", precision) + ";";
     var bodyDecl = worldDecl + "\n" + initial.declarationLines.join("\n") + "\n" + generateCanonicalBodyDeclarationsGLSL(initial) +
       "\n" + PhysicsGPU.generateHingeAnchorLocalsGLSL(initial.hingeAnchors, precision);
-    lines.push(PhysicsGPU.generateTrajectoryMainGLSL(initial.n, bodyDecl, initial.hingeAnchors, precision, initial.spawnBase, chunk, initial.springs));
+    lines.push(PhysicsGPU.generateTrajectoryMainGLSL(initial.n, bodyDecl, initial.hingeAnchors, precision, chunk, initial.springs));
 
     var words = global.PhysicsDF.wordUniformValues(worldX, worldXLo, worldY, worldYLo);
     var uniforms = {};
@@ -470,7 +439,7 @@
     result.bodies.forEach(PhysicsEngine.computeMass);
 
     var targets = resolveOffsetTargetsNumeric(scene.xInput, scene.yInput, worldX, worldY);
-    var resizeTargets = targets.filter(function (t) { return t.property === "radius" || t.property === "length" || t.property === "size" || t.property === "angle"; });
+    var resizeTargets = targets.filter(function (t) { return t.property === "radius" || t.property === "length" || t.property === "angle"; });
     var translateTargets = targets.filter(function (t) { return t.property === "x" || t.property === "y"; });
     var velocityTargets = targets.filter(function (t) { return t.property === "vx" || t.property === "vy"; });
     resizeTargets.forEach(function (t) {
@@ -478,7 +447,6 @@
         var body = result.bodies[t.body];
         if (t.property === "radius") { body.radius = Math.abs(body.radius + t.value); PhysicsEngine.computeMass(body); }
         else if (t.property === "length") { body.length = Math.abs(body.length + t.value); PhysicsEngine.computeMass(body); }
-        else if (t.property === "size") { body.size = Math.abs(body.size + t.value); PhysicsEngine.computeMass(body); }
         else { body.angle += t.value; }
       });
     });

@@ -29,12 +29,10 @@
   }
 
   function shapeSize(body) {
-    if (body.type === "circle") return body.radius;
-    if (body.type === "funnel" || body.type === "splitter") return body.size;
-    return body.length;
+    return body.type === "circle" ? body.radius : body.length;
   }
 
-  // Circles and funnels scale uniformly; a line only along its local X (it has no thickness).
+  // A circle scales uniformly; a line only along its local X (it has no thickness).
   function scaleAnchorForResize(body, anchor, ratio) {
     return body.type === "line"
       ? { x: anchor.x * ratio, y: anchor.y }
@@ -130,15 +128,6 @@
 
   function frameHalfExtent(body) {
     if (body.type === "circle") return { x: body.radius, y: body.radius };
-    if (body.type === "funnel") {
-      var verts = global.PhysicsEngine.getFunnelVertices(body);
-      var maxX = 0, maxY = 0;
-      for (var k in verts) {
-        maxX = Math.max(maxX, Math.abs(verts[k].x - body.x));
-        maxY = Math.max(maxY, Math.abs(verts[k].y - body.y));
-      }
-      return { x: maxX, y: maxY };
-    }
     var half = body.length / 2;
     return { x: Math.abs(Math.cos(body.angle)) * half, y: Math.abs(Math.sin(body.angle)) * half };
   }

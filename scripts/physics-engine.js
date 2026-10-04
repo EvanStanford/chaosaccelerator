@@ -1,7 +1,7 @@
 // CPAL-1.0 License. See chaosaccelerator.com/license.html
 
-// Pure, DOM-free 2D rigid body engine: circles, capsule lines, funnels/splitters, pin
-// hinges, springs, anchors. A scene is plain data { bodies, hinges, springs, ... } and
+// Pure, DOM-free 2D rigid body engine: circles, capsule lines, pin hinges, springs,
+// anchors. A scene is plain data { bodies, hinges, springs, ... } and
 // step(scene, dt) mutates it in place.
 (function (global) {
   "use strict";
@@ -11,27 +11,6 @@
   // Collision/click thickness of a line: not physical, so not in mass or inertia.
   var LINE_THICKNESS = 20;
 
-  // ---- Funnel: trapezoid (throat 1, mouth 3, legs 2, times body.size), mouth at local -y and
-  // throat at +y; a circle touching the mouth teleports to the throat center, velocity kept.
-  var FUNNEL_MOUTH_HALF = 0.75;
-  var FUNNEL_THROAT_HALF = 0.25;
-  var FUNNEL_HALF_HEIGHT = Math.sqrt(3) / 4;
-  // Mass/inertia of the 3 solid edges only (the mouth is an opening): 2.5*size and size^3*37/48.
-  var FUNNEL_MASS_COEFF = 2.5;
-  var FUNNEL_INERTIA_COEFF = 37 / 48;
-
-  // Default ceiling on bodies a run may GROW to via splitters; it is also the GPU shader's slot
-  // count (cost is quadratic in it), so both engines must agree.
-  var MAX_SIMULATION_BODIES = 20;
-  // Override range: floor 2 (one split); past ~44 slots stepOnce() exceeds GLSL's 256 parameters.
-  var MIN_SIMULATION_BODIES = 2;
-  var MAX_SIMULATION_BODIES_LIMIT = 40;
-
-  function maxSimulationBodiesFor(scene) {
-    var v = scene && Number(scene.maxSimulationBodies);
-    if (!isFinite(v) || v <= 0) return MAX_SIMULATION_BODIES;
-    return Math.min(MAX_SIMULATION_BODIES_LIMIT, Math.max(MIN_SIMULATION_BODIES, Math.round(v)));
-  }
   // Speed cap. Tunneling is handled by the swept tests; this only trims energy above it.
   var MAX_SPEED = 2000;
   // A close perihelion pass legitimately reaches ~2000px/s; clamping it drops the orbit.
@@ -96,22 +75,15 @@
   // Tuned so an anchored default circle (radius 30) pulls at about GRAVITY from 300px.
   var MUTUAL_GRAVITY_CONSTANT = 2500;
 
-  // All four shapes: a trapezoid has no .length, and a NaN here makes every swept test fire.
   function gravitationalMass(body) {
     var density = body.isAnchored ? ANCHORED_GRAVITY_DENSITY : 1;
     if (body.type === "circle") return density * DENSITY * Math.PI * body.radius * body.radius;
-    if (body.type === "funnel" || body.type === "splitter") {
-      return density * LINE_LINEAR_DENSITY * FUNNEL_MASS_COEFF * body.size;
-    }
     return density * LINE_LINEAR_DENSITY * body.length;
   }
 
-  // Reach from center (radius, half length, mouth-corner distance): where inverse square stops.
-  var FUNNEL_CORNER_REACH = Math.sqrt(FUNNEL_MOUTH_HALF * FUNNEL_MOUTH_HALF + FUNNEL_HALF_HEIGHT * FUNNEL_HALF_HEIGHT);
+  // Reach from center (radius, half length): where inverse square stops.
   function halfExtent(body) {
-    if (body.type === "circle") return body.radius;
-    if (body.type === "funnel" || body.type === "splitter") return FUNNEL_CORNER_REACH * body.size;
-    return body.length / 2;
+    return body.type === "circle" ? body.radius : body.length / 2;
   }
 
   // Per-body acceleration this step. Uniform: (0, GRAVITY). Mutual: G*m/r^2 summed toward every
@@ -312,9 +284,6 @@
       var area = Math.PI * body.radius * body.radius;
       body.mass = DENSITY * area;
       body.inertia = body.mass * body.radius * body.radius / 2;
-    } else if (body.type === "funnel" || body.type === "splitter") {
-      body.mass = LINE_LINEAR_DENSITY * FUNNEL_MASS_COEFF * body.size;
-      body.inertia = LINE_LINEAR_DENSITY * FUNNEL_INERTIA_COEFF * body.size * body.size * body.size;
     } else {
       // Thin rod about its center: I = m*L^2/12.
       body.mass = LINE_LINEAR_DENSITY * body.length;
@@ -336,56 +305,10 @@
     return b;
   }
 
-  function createFunnel(x, y, size, angle, isAnchored) {
-    var b = { type: "funnel", x: x, y: y, angle: angle || 0, size: size, vx: 0, vy: 0, w: 0, isAnchored: !!isAnchored };
-    computeMass(b);
-    return b;
-  }
-
-  // Same trapezoid as a funnel with the trigger swapped: a circle touching the SHORT side splits.
-  function createSplitter(x, y, size, angle, isAnchored) {
-    var b = { type: "splitter", x: x, y: y, angle: angle || 0, size: size, vx: 0, vy: 0, w: 0, isAnchored: !!isAnchored };
-    computeMass(b);
-    return b;
-  }
-
   function getLineEndpoints(line) {
     var hx = Math.cos(line.angle) * line.length / 2;
     var hy = Math.sin(line.angle) * line.length / 2;
     return [{ x: line.x - hx, y: line.y - hy }, { x: line.x + hx, y: line.y + hy }];
-  }
-
-  // Corners in the local frame (unrotated, uncentered); physics-hinge-geometry.js uses them too.
-  function getFunnelLocalVertices(size) {
-    var mh = FUNNEL_MOUTH_HALF * size, th = FUNNEL_THROAT_HALF * size, hh = FUNNEL_HALF_HEIGHT * size;
-    return {
-      mouthLeft: { x: -mh, y: -hh },
-      mouthRight: { x: mh, y: -hh },
-      throatLeft: { x: -th, y: hh },
-      throatRight: { x: th, y: hh },
-    };
-  }
-
-  function getFunnelVertices(funnel) {
-    var local = getFunnelLocalVertices(funnel.size);
-    var out = {};
-    for (var k in local) {
-      var r = rotateVec(local[k], funnel.angle);
-      out[k] = { x: funnel.x + r.x, y: funnel.y + r.y };
-    }
-    return out;
-  }
-
-  // mouth: teleport trigger. throat/leg1/leg2: solid edges. throatCenter: teleport target.
-  function getFunnelEdges(funnel) {
-    var v = getFunnelVertices(funnel);
-    return {
-      mouth: [v.mouthLeft, v.mouthRight],
-      throat: [v.throatLeft, v.throatRight],
-      leg1: [v.mouthLeft, v.throatLeft],
-      leg2: [v.mouthRight, v.throatRight],
-      throatCenter: { x: (v.throatLeft.x + v.throatRight.x) / 2, y: (v.throatLeft.y + v.throatRight.y) / 2 },
-    };
   }
 
   function closestPointOnSegment(p1, p2, point) {
@@ -433,16 +356,6 @@
       return dx * dx + dy * dy <= body.radius * body.radius;
     }
     var r = LINE_THICKNESS / 2;
-    if (body.type === "funnel" || body.type === "splitter") {
-      var edges = getFunnelEdges(body);
-      var segs = [edges.mouth, edges.throat, edges.leg1, edges.leg2];
-      for (var i = 0; i < segs.length; i++) {
-        var c = closestPointOnSegment(segs[i][0], segs[i][1], { x: px, y: py });
-        var cdx = px - c.x, cdy = py - c.y;
-        if (cdx * cdx + cdy * cdy <= r * r) return true;
-      }
-      return false;
-    }
     var endpoints = getLineEndpoints(body);
     var closest = closestPointOnSegment(endpoints[0], endpoints[1], { x: px, y: py });
     var ddx = px - closest.x, ddy = py - closest.y;
@@ -584,76 +497,6 @@
     return c ? [c] : null;
   }
 
-  // funnel = A, circle = B: the 3 solid edges bounce; the mouth teleports instead (step()).
-  function collideFunnelCircle(funnel, circle, dt) {
-    var edges = getFunnelEdges(funnel);
-    var halfThickness = LINE_THICKNESS / 2;
-    var solidEdges = [edges.throat, edges.leg1, edges.leg2];
-    var contacts = [];
-    for (var i = 0; i < solidEdges.length; i++) {
-      var c = sweptCapsuleCircleContact(solidEdges[i][0], solidEdges[i][1], funnel.vx, funnel.vy, funnel.x, funnel.y, circle, halfThickness, dt);
-      if (c) contacts.push(c);
-    }
-    return contacts.length ? contacts : null;
-  }
-
-  // Circle's path vs. the mouth in [0, dt]; target is the throat center advanced to tHit.
-  function collideFunnelMouthTHit(funnel, circle, dt) {
-    var edges = getFunnelEdges(funnel);
-    var contact = sweptCapsuleCircleContact(edges.mouth[0], edges.mouth[1], funnel.vx, funnel.vy, funnel.x, funnel.y, circle, LINE_THICKNESS / 2, dt);
-    if (!contact) return null;
-    var th = contact.tHit;
-    var localThroatCenter = { x: 0, y: FUNNEL_HALF_HEIGHT * funnel.size };
-    var rotated = rotateVec(localThroatCenter, funnel.angle);
-    return {
-      tHit: th,
-      targetX: funnel.x + funnel.vx * th + rotated.x,
-      targetY: funnel.y + funnel.vy * th + rotated.y,
-    };
-  }
-
-  // splitter = A, circle = B: collideFunnelCircle with the trigger swapped (short side splits).
-  function collideSplitterCircle(splitter, circle, dt) {
-    var edges = getFunnelEdges(splitter);
-    var halfThickness = LINE_THICKNESS / 2;
-    var solidEdges = [edges.mouth, edges.leg1, edges.leg2];
-    var contacts = [];
-    for (var i = 0; i < solidEdges.length; i++) {
-      var c = sweptCapsuleCircleContact(solidEdges[i][0], solidEdges[i][1], splitter.vx, splitter.vy, splitter.x, splitter.y, circle, halfThickness, dt);
-      if (c) contacts.push(c);
-    }
-    return contacts.length ? contacts : null;
-  }
-
-  // Circle's path vs. the short side. Returns two DISPLACEMENTS: translations by each leg vector
-  // (throat corner -> mouth corner) plus 2*(halfThickness + radius), so a ball touching the entrance
-  // exits touching the exit from OUTSIDE. A translation, not a snap, keeps the split continuous.
-  function collideSplitterShortSideTHit(splitter, circle, dt) {
-    var edges = getFunnelEdges(splitter);
-    var throatLeft0 = edges.throat[0], throatRight0 = edges.throat[1];
-
-    // Only a FRESH crossing splits; a circle already inside the capsule would re-split every step.
-    var startClosest = closestPointOnSegment(throatLeft0, throatRight0, { x: circle.x, y: circle.y });
-    var sdx = circle.x - startClosest.x, sdy = circle.y - startClosest.y;
-    if (Math.sqrt(sdx * sdx + sdy * sdy) < LINE_THICKNESS / 2 + circle.radius) return null;
-
-    var contact = sweptCapsuleCircleContact(edges.throat[0], edges.throat[1], splitter.vx, splitter.vy, splitter.x, splitter.y, circle, LINE_THICKNESS / 2, dt);
-    if (!contact) return null;
-
-    var mouthLeft = edges.mouth[0], mouthRight = edges.mouth[1];
-    // Unit normal of the parallel sides, short side -> long side.
-    var exitX = (mouthLeft.x + mouthRight.x) / 2 - (throatLeft0.x + throatRight0.x) / 2;
-    var exitY = (mouthLeft.y + mouthRight.y) / 2 - (throatLeft0.y + throatRight0.y) / 2;
-    var exitLen = Math.sqrt(exitX * exitX + exitY * exitY) || 1;
-    var clearance = LINE_THICKNESS + 2 * circle.radius; // 2 * (halfThickness + radius)
-    var clearX = exitX / exitLen * clearance, clearY = exitY / exitLen * clearance;
-    return {
-      tHit: contact.tHit,
-      offset1: { x: mouthLeft.x - throatLeft0.x + clearX, y: mouthLeft.y - throatLeft0.y + clearY },
-      offset2: { x: mouthRight.x - throatRight0.x + clearX, y: mouthRight.y - throatRight0.y + clearY },
-    };
-  }
-
   // Near-parallel lines get contact at BOTH ends of their overlap, or a flat rod spins away.
   var LINE_PARALLEL_EPS = 0.05; // ~3 degrees
 
@@ -726,27 +569,8 @@
         cs[i].normal.x *= -1; cs[i].normal.y *= -1;
         var tmp = cs[i].rA; cs[i].rA = cs[i].rB; cs[i].rB = tmp;
       }
-    } else if (A.type === "funnel" && B.type === "circle") {
-      cs = collideFunnelCircle(A, B, dt);
-    } else if (A.type === "circle" && B.type === "funnel") {
-      cs = collideFunnelCircle(B, A, dt);
-      if (cs) for (var j = 0; j < cs.length; j++) {
-        cs[j].normal.x *= -1; cs[j].normal.y *= -1;
-        var tmp2 = cs[j].rA; cs[j].rA = cs[j].rB; cs[j].rB = tmp2;
-      }
-    } else if (A.type === "splitter" && B.type === "circle") {
-      cs = collideSplitterCircle(A, B, dt);
-    } else if (A.type === "circle" && B.type === "splitter") {
-      cs = collideSplitterCircle(B, A, dt);
-      if (cs) for (var k = 0; k < cs.length; k++) {
-        cs[k].normal.x *= -1; cs[k].normal.y *= -1;
-        var tmp3 = cs[k].rA; cs[k].rA = cs[k].rB; cs[k].rB = tmp3;
-      }
-    } else if (A.type === "line" && B.type === "line") {
-      cs = collideLineLine(A, B);
     } else {
-      // funnel/splitter vs line or each other: not modeled; null rather than crash on .length.
-      cs = null;
+      cs = collideLineLine(A, B);
     }
     return cs;
   }
@@ -922,12 +746,6 @@
     });
   }
 
-  // .lineage: the authored index a split-born body descends from (others: their own index).
-  function lineageOf(scene, index) {
-    var body = scene.bodies[index];
-    return body && body.lineage !== undefined && body.lineage !== null ? body.lineage : index;
-  }
-
   // ---- Two-body Outputs { body, bodyB, property }: x/y/angle become the pair's mean; adds "distance".
   function outputBodyIndices(output) {
     if (!output || typeof output.body !== "number") return [];
@@ -983,31 +801,16 @@
   function computeOutputValue(scene, output) {
     var indices = outputBodyIndices(output);
     if (!indices.length) return 0;
+    var bodies = scene.bodies;
     if (output.property === "distance") {
       if (indices.length < 2) return 0;
-      var ax = computeOutputLineageAverage(scene, indices[0], "x");
-      var ay = computeOutputLineageAverage(scene, indices[0], "y");
-      var bx = computeOutputLineageAverage(scene, indices[1], "x");
-      var by = computeOutputLineageAverage(scene, indices[1], "y");
-      var d = shortestSeparation(scene, bx - ax, by - ay);
+      var a = bodies[indices[0]], b = bodies[indices[1]];
+      var d = shortestSeparation(scene, b.x - a.x, b.y - a.y);
       return Math.sqrt(d.x * d.x + d.y * d.y);
     }
     var sum = 0;
-    for (var i = 0; i < indices.length; i++) {
-      sum += computeOutputLineageAverage(scene, indices[i], output.property);
-    }
+    for (var i = 0; i < indices.length; i++) sum += bodies[indices[i]][output.property];
     return sum / indices.length;
-  }
-
-  function computeOutputLineageAverage(scene, bodyIndex, property) {
-    var targetLineage = lineageOf(scene, bodyIndex);
-    var sum = 0, count = 0;
-    for (var i = 0; i < scene.bodies.length; i++) {
-      if (lineageOf(scene, i) !== targetLineage) continue;
-      sum += scene.bodies[i][property];
-      count++;
-    }
-    return count > 0 ? sum / count : 0;
   }
 
   function step(scene, dt, opts) {
@@ -1037,44 +840,7 @@
       probes[i] = bodies[i].isAnchored ? bodies[i] : Object.assign({}, bodies[i], { vx: vFull[i].x, vy: vFull[i].y });
     }
 
-    // Funnel teleports: a winner replaces leg 1's position update. Earliest mouth per circle wins.
-    var teleportTarget = new Array(bodies.length).fill(null);
-    if (collisionsEnabled(scene)) {
-      for (i = 0; i < bodies.length; i++) {
-        if (bodies[i].type !== "funnel") continue;
-        for (j = 0; j < bodies.length; j++) {
-          if (bodies[j].type !== "circle") continue;
-          if (hingeConnects(scene.hinges, i, j)) continue;
-          var mouthHit = collideFunnelMouthTHit(probes[i], probes[j], dt);
-          if (!mouthHit) continue;
-          if (!teleportTarget[j] || mouthHit.tHit < teleportTarget[j].tHit) {
-            teleportTarget[j] = { tHit: mouthHit.tHit, targetX: mouthHit.targetX, targetY: mouthHit.targetY, funnelIndex: i };
-          }
-        }
-      }
-    }
-
-    // Splitter hits: earliest per circle, APPLIED at the end of step() since a split adds a body.
-    var splitHit = new Array(bodies.length).fill(null);
-    if (collisionsEnabled(scene)) {
-      for (i = 0; i < bodies.length; i++) {
-        if (bodies[i].type !== "splitter") continue;
-        for (j = 0; j < bodies.length; j++) {
-          if (bodies[j].type !== "circle") continue;
-          // Never split an anchor: no position of its own, and invMass 0 can't be inherited.
-          if (bodies[j].isAnchored) continue;
-          if (hingeConnects(scene.hinges, i, j)) continue;
-          var shortHit = collideSplitterShortSideTHit(probes[i], probes[j], dt);
-          if (!shortHit) continue;
-          if (!splitHit[j] || shortHit.tHit < splitHit[j].tHit) {
-            shortHit.splitterIndex = i;
-            splitHit[j] = shortHit;
-          }
-        }
-      }
-    }
-
-    // Ordinary solid pairs. Empty with collisions off; every consumer handles "no contacts".
+    // Contacts. Empty with collisions off; every consumer handles "no contacts".
     var contacts = [];
     if (collisionsEnabled(scene)) {
       for (i = 0; i < bodies.length; i++) {
@@ -1096,33 +862,6 @@
       if (c.tHit < bodyTHit[c.b]) bodyTHit[c.b] = c.tHit;
     }
 
-    // A teleport wins when earliest on its body (ties to it); its contacts with that funnel are dropped.
-    var teleportWins = new Array(bodies.length).fill(false);
-    for (i = 0; i < bodies.length; i++) {
-      var tp = teleportTarget[i];
-      if (tp && tp.tHit <= bodyTHit[i]) {
-        bodyTHit[i] = tp.tHit;
-        teleportWins[i] = true;
-      }
-    }
-    if (contacts.length) {
-      contacts = contacts.filter(function (fc) {
-        var fi = bodies[fc.a].type === "funnel" ? fc.a : (bodies[fc.b].type === "funnel" ? fc.b : -1);
-        var ci = bodies[fc.a].type === "circle" ? fc.a : (bodies[fc.b].type === "circle" ? fc.b : -1);
-        if (fi === -1 || ci === -1) return true;
-        return !(teleportWins[ci] && teleportTarget[ci].funnelIndex === fi);
-      });
-    }
-    // Same for a splitter: a ball going THROUGH must not bounce off a leg end-cap. After the tHit fold.
-    if (contacts.length) {
-      contacts = contacts.filter(function (sc) {
-        var si = bodies[sc.a].type === "splitter" ? sc.a : (bodies[sc.b].type === "splitter" ? sc.b : -1);
-        var ci = bodies[sc.a].type === "circle" ? sc.a : (bodies[sc.b].type === "circle" ? sc.b : -1);
-        if (si === -1 || ci === -1) return true;
-        return !(splitHit[ci] && splitHit[ci].splitterIndex === si);
-      });
-    }
-
     // Opt-in per-body "touching this step" (Bounce Count's source; twin of the GPU's g_contactN).
     var contactFlags = opts.contactFlags;
     if (contactFlags) {
@@ -1141,17 +880,11 @@
 
     // Leg 1: move at vFull for tHit (matching detection), then set velocity to gravity applied only
     // up to tHit before the solve (reflecting v+g*dt vs v then adding g*dt differ by 2*(g.n)*dt).
-    // A teleport winner's position is OVERRIDDEN to the throat center; velocity is as any other.
     for (i = 0; i < bodies.length; i++) {
       var b1 = bodies[i];
       if (b1.isAnchored) continue;
       var th = bodyTHit[i];
-      if (teleportWins[i]) {
-        b1.x = teleportTarget[i].targetX;
-        b1.y = teleportTarget[i].targetY;
-      } else {
-        b1.x += vFull[i].x * th; b1.y += vFull[i].y * th;
-      }
+      b1.x += vFull[i].x * th; b1.y += vFull[i].y * th;
       // Angular twin: turn at the whole step's spin, keep only the torque acted by tHit.
       b1.angle += springSpin(b1.w, alpha[i], swing[i], dt) * th;
       b1.w = springSpin(b1.w, alpha[i], swing[i], th);
@@ -1212,23 +945,6 @@
         wrapTranslateAndCascade(scene, i, dx, dy, {});
       }
     }
-
-    // Splits last, from the final state; the parent KEEPS ITS SLOT (and lineage), the half is appended.
-    for (i = 0; i < splitHit.length; i++) {
-      var sh = splitHit[i];
-      if (!sh) continue;
-      var parent = bodies[i];
-      // Both offsets are from the pre-split position: read the child's before the parent moves.
-      var childX = parent.x + sh.offset2.x, childY = parent.y + sh.offset2.y;
-      parent.x += sh.offset1.x;
-      parent.y += sh.offset1.y;
-      // At the ceiling the ball still passes through, just without duplicating; continue, not break.
-      if (bodies.length >= maxSimulationBodiesFor(scene)) continue;
-      var child = createCircle(childX, childY, parent.radius, false);
-      child.vx = parent.vx; child.vy = parent.vy; child.w = parent.w; child.angle = parent.angle;
-      child.lineage = lineageOf(scene, i);
-      bodies.push(child);
-    }
   }
 
   function deleteBody(scene, index) {
@@ -1272,7 +988,6 @@
       collisionsEnabled: collisionsEnabled(scene),
       edgeMode: edgeModeOf(scene),
       simulationSteps: scene.simulationSteps,
-      maxSimulationBodies: maxSimulationBodiesFor(scene),
       bodies: scene.bodies.map(function (b) {
         var copy = {};
         for (var key in b) if (Object.prototype.hasOwnProperty.call(b, key)) copy[key] = b[key];
@@ -1295,8 +1010,7 @@
     };
   }
 
-  // runTrajectory: rows[i] is every body's state after i+1 steps, like PhysicsGPU.runSceneOnGPU's
-  // plus radius and lineage; rows grow as splitters add bodies (a GPU row is always full width).
+  // runTrajectory: rows[i] is every body's {x, y, angle} after i+1 steps, like PhysicsGPU.runSceneOnGPU's.
   // runBounceCounts: counts[i] is the body's bounces by the end of step i+1; a bounce is the
   // false->true edge of contactFlags, not every step spent touching. Both use a private clone.
   function runTrajectory(scene, steps, dt) {
@@ -1306,15 +1020,7 @@
     var rows = new Array(steps);
     for (var i = 0; i < steps; i++) {
       step(sim, dt);
-      var row = new Array(sim.bodies.length);
-      for (var b = 0; b < sim.bodies.length; b++) {
-        var body = sim.bodies[b];
-        row[b] = {
-          x: body.x, y: body.y, angle: body.angle,
-          radius: body.radius, lineage: lineageOf(sim, b),
-        };
-      }
-      rows[i] = row;
+      rows[i] = sim.bodies.map(function (body) { return { x: body.x, y: body.y, angle: body.angle }; });
     }
     return rows;
   }
@@ -1440,10 +1146,6 @@
     runTrajectory: runTrajectory,
     createCircle: createCircle,
     createLine: createLine,
-    createFunnel: createFunnel,
-    createSplitter: createSplitter,
-    lineageOf: lineageOf,
-    computeOutputLineageAverage: computeOutputLineageAverage,
     computeOutputValue: computeOutputValue,
     outputBodyIndices: outputBodyIndices,
     isPairOutput: isPairOutput,
@@ -1451,18 +1153,6 @@
     shortestSeparation: shortestSeparation,
     outputDistanceMax: outputDistanceMax,
     getLineEndpoints: getLineEndpoints,
-    FUNNEL_MOUTH_HALF: FUNNEL_MOUTH_HALF,
-    FUNNEL_THROAT_HALF: FUNNEL_THROAT_HALF,
-    FUNNEL_HALF_HEIGHT: FUNNEL_HALF_HEIGHT,
-    FUNNEL_MASS_COEFF: FUNNEL_MASS_COEFF,
-    MAX_SIMULATION_BODIES: MAX_SIMULATION_BODIES,
-    MIN_SIMULATION_BODIES: MIN_SIMULATION_BODIES,
-    MAX_SIMULATION_BODIES_LIMIT: MAX_SIMULATION_BODIES_LIMIT,
-    maxSimulationBodiesFor: maxSimulationBodiesFor,
-    FUNNEL_INERTIA_COEFF: FUNNEL_INERTIA_COEFF,
-    getFunnelLocalVertices: getFunnelLocalVertices,
-    getFunnelVertices: getFunnelVertices,
-    getFunnelEdges: getFunnelEdges,
     computeMass: computeMass,
     pointInBody: pointInBody,
     step: step,

@@ -21,14 +21,13 @@
   var PAGES = [PAGE_BUILDER, PAGE_MAP, PAGE_MOVIE];
 
   var DEFAULT_STEPS = 1000;
-  var DEFAULT_MAX_BODIES = 20;
   var DEFAULT_EDGE = "sticky";
   var DEFAULT_MOVIE_SIZE = { width: 1280, height: 720 };
 
-  var TYPE_CODES = { circle: "ci", line: "ln", funnel: "fu", splitter: "sp" };
-  var SIZE_FIELDS = { circle: "radius", line: "length", funnel: "size", splitter: "size" };
+  var TYPE_CODES = { circle: "ci", line: "ln" };
+  var SIZE_FIELDS = { circle: "radius", line: "length" };
   var PROPERTY_CODES = {
-    x: "x", y: "y", angle: "ang", radius: "rad", length: "len", size: "siz", vx: "vx", vy: "vy",
+    x: "x", y: "y", angle: "ang", radius: "rad", length: "len", vx: "vx", vy: "vy",
     bounces: "bnce", distance: "dist", lifespan: "life",
   };
   var EDGE_CODES = { sticky: "stik", wrap: "wrap", infinite: "infi" };
@@ -265,7 +264,6 @@
     if (scene.mutualGravity) fields.push("mgrv:t");
     if (scene.collisionsEnabled === false) fields.push("coll:f");
     if (scene.simulationSteps && scene.simulationSteps !== DEFAULT_STEPS) fields.push("step:" + scene.simulationSteps);
-    if (scene.maxSimulationBodies && scene.maxSimulationBodies !== DEFAULT_MAX_BODIES) fields.push("maxb:" + scene.maxSimulationBodies);
     fields.push("frmw:" + sceneNum(scene.frameWidth));
     fields.push("frmh:" + sceneNum(scene.frameHeight));
     return fields;
@@ -293,7 +291,6 @@
       frameWidth: fields.frmw === undefined ? 0 : parseNum(fields.frmw, "frmw"),
       frameHeight: fields.frmh === undefined ? 0 : parseNum(fields.frmh, "frmh"),
       edgeMode: fields.edge === undefined ? DEFAULT_EDGE : EDGES_BY_CODE[fields.edge],
-      maxSimulationBodies: fields.maxb === undefined ? DEFAULT_MAX_BODIES : parseNum(fields.maxb, "maxb"),
     };
   }
 

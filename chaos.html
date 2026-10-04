@@ -8,17 +8,17 @@
 <meta name="theme-color" content="#14161c">
 <title>Chaos Accelerator</title>
 <!-- Both views share this document so transition.js can show them at once. -->
-<link rel="stylesheet" href="scripts/physics.css?v=m86">
-<link rel="stylesheet" href="scripts/fractal-grid.css?v=m86">
-<link rel="stylesheet" href="scripts/app-shell.css?v=m86">
-<link rel="stylesheet" href="scripts/fractal-stats.css?v=m86">
-<link rel="stylesheet" href="scripts/responsive-layout.css?v=m86">
+<link rel="stylesheet" href="scripts/physics.css?v=m87">
+<link rel="stylesheet" href="scripts/fractal-grid.css?v=m87">
+<link rel="stylesheet" href="scripts/app-shell.css?v=m87">
+<link rel="stylesheet" href="scripts/fractal-stats.css?v=m87">
+<link rel="stylesheet" href="scripts/responsive-layout.css?v=m87">
 <!-- mobile.css after the app sheets: it must win their cascade without !important. -->
-<link rel="stylesheet" href="scripts/mobile.css?v=m86">
-<link rel="stylesheet" href="scripts/eighties-app.css?v=m86">
-<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m86" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="scripts/mobile.css?v=m87">
+<link rel="stylesheet" href="scripts/eighties-app.css?v=m87">
+<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m87" as="font" type="font/woff2" crossorigin>
 <!-- In <head> on purpose: both views measure their canvas area as they start. -->
-<script src="scripts/layout-mode.js?v=m86"></script>
+<script src="scripts/layout-mode.js?v=m87"></script>
 <!-- A #map/ link should open on the map: hide the editor (still laid out) until transition.js picks the view. -->
 <script>
   if (/^#map\//.test(location.hash)) document.documentElement.classList.add("opening-map");
@@ -64,15 +64,6 @@
               <button class="tool-btn" data-tool="spring" title="Drag from one object to another, or to the background, to join them with a spring. Click a spring to tune it; drag it onto the X to remove it">+ Spring</button>
               <button class="tool-btn" data-tool="velocity" title="Drag a non-anchored object: the drag's direction and length set its starting velocity">Set Velocity</button>
             </div>
-            <details class="collapsible">
-              <summary>Advanced</summary>
-              <div class="collapsible-body">
-                <div class="tool-grid">
-                  <button class="tool-btn" data-tool="funnel" title="Drag on canvas: start is the center, release sets the size. A ball hitting the wide mouth teleports to the narrow throat, same velocity.">+ Funnel</button>
-                  <button class="tool-btn" data-tool="splitter" title="Drag on canvas: start is the center, release sets the size. A ball hitting the narrow side becomes two balls on the wide side, both keeping its velocity.">+ Splitter</button>
-                </div>
-              </div>
-            </details>
           </section>
 
           <!-- Only while a spring is selected (refreshSpringPanel). The stiffness slider is a LOG-scale position; min/max are just its resolution. -->
@@ -160,10 +151,6 @@
                     <option value="wrap">Pac-Man Warp</option>
                     <option value="infinite">Infinite Space</option>
                   </select>
-                </label>
-                <label class="field" id="max-bodies-field">
-                  <span>Max Objects: <b id="max-bodies-readout">20</b></span>
-                  <input type="range" id="max-bodies-slider" min="2" max="40" value="20" title="The ceiling a splitter may grow the scene to. Every slot is compiled into the Fractal Grid's shader whether or not it fills, so this is the single biggest cost control for a splitter scene: start low and raise it.">
                 </label>
               </div>
             </details>
@@ -751,23 +738,23 @@
 
 </div>
 
-<script src="scripts/app-message.js?v=m86"></script>
-<script src="scripts/physics-engine.js?v=m86"></script>
-<script src="scripts/physics-coords.js?v=m86"></script>
-<script src="scripts/share-url.js?v=m86"></script>
-<script src="scripts/movie-path.js?v=m86"></script>
-<script src="scripts/movie-store.js?v=m86"></script>
-<script src="scripts/physics-sound.js?v=m86"></script>
-<script src="scripts/physics-hinge-geometry.js?v=m86"></script>
-<script src="scripts/physics-df.js?v=m86"></script>
-<script src="scripts/physics-gpu.js?v=m86"></script>
-<script src="scripts/physics-gpu-df.js?v=m86"></script>
-<script src="scripts/physics-grid-codegen.js?v=m86"></script>
-<script src="scripts/physics-ui.js?v=m86"></script>
-<script src="scripts/fractal-stats.js?v=m86"></script>
-<script src="scripts/fractal-stats-panel.js?v=m86"></script>
-<script src="scripts/fractal-grid.js?v=m86"></script>
-<script src="scripts/transition.js?v=m86"></script>
+<script src="scripts/app-message.js?v=m87"></script>
+<script src="scripts/physics-engine.js?v=m87"></script>
+<script src="scripts/physics-coords.js?v=m87"></script>
+<script src="scripts/share-url.js?v=m87"></script>
+<script src="scripts/movie-path.js?v=m87"></script>
+<script src="scripts/movie-store.js?v=m87"></script>
+<script src="scripts/physics-sound.js?v=m87"></script>
+<script src="scripts/physics-hinge-geometry.js?v=m87"></script>
+<script src="scripts/physics-df.js?v=m87"></script>
+<script src="scripts/physics-gpu.js?v=m87"></script>
+<script src="scripts/physics-gpu-df.js?v=m87"></script>
+<script src="scripts/physics-grid-codegen.js?v=m87"></script>
+<script src="scripts/physics-ui.js?v=m87"></script>
+<script src="scripts/fractal-stats.js?v=m87"></script>
+<script src="scripts/fractal-stats-panel.js?v=m87"></script>
+<script src="scripts/fractal-grid.js?v=m87"></script>
+<script src="scripts/transition.js?v=m87"></script>
 <script>
   // ---- The '80s switch: the same saved setting as the other pages (eighties-theme.js) ----
   (function () {
