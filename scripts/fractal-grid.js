@@ -7907,6 +7907,9 @@
     if (!replay.trajectory.length) return null;
     return {
       aspect: scene.frameWidth && scene.frameHeight ? scene.frameWidth / scene.frameHeight : hoverCanvas.width / hoverCanvas.height,
+      // The run's length, and how fast Inspect plays it at 1x.
+      steps: replay.trajectory.length,
+      stepsPerSecond: 1000 / HOVER_MS_PER_FRAME,
       draw: function (ctx, width, height, frame) {
         // Frame N is the state after N steps: row N - 1.
         var shown = replayFrame(replay, Math.max(0, frame - 1));

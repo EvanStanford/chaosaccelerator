@@ -80,7 +80,8 @@
     screenCtx.imageSmoothingEnabled = true;
     screenCtx.imageSmoothingQuality = "high";
     screenCtx.drawImage(image, x, y, w, h);
-    if (inspection && inspectCorner.value !== "off") drawInspection(screenCtx, inspectCanvas, image.width, image.height, x, y, scale, frames[frame].step);
+    var at = inspection && inspectCorner.value !== "off" ? inspectionAt(frame) : null;
+    if (at) drawInspection(screenCtx, inspectCanvas, image.width, image.height, x, y, scale, at);
   }
   new ResizeObserver(fitScreen).observe(stage);
   fitScreen();
@@ -435,6 +436,7 @@
 
   // ---- Inspect point ---- the Inspect preview of the center of the most zoomed-in keyframe (the last, if
   // several tie), drawn into a corner of every frame at that frame's Map Evolution frame, and into a download.
+  // A movie whose keyframes share one simulation frame plays the point's run once instead, then fades it out.
   var inspectField = $("inspect-field"), inspectCorner = $("inspect-corner"), inspectTitle = inspectField.title;
   var engineGrid = null;
   var inspection = null; // FractalGrid.inspection(), made the first time a corner is picked
@@ -470,9 +472,22 @@
     if (shown) show(shown, shownFrame);
   }
 
+  // The overlay at movie frame i, { step, alpha }, or null once it has faded out. The run plays at Inspect's 1x,
+  // or 2x or 4x if the movie is too short for it; still too short at 4x, it is cut off at the end.
+  var INSPECT_FADE_SECONDS = 0.5;
+  function inspectionAt(i) {
+    if (frames.some(function (f) { return f.step !== frames[0].step; })) return { step: frames[i].step, alpha: 1 };
+    var rate = inspection.stepsPerSecond, lastSecond = (frames.length - 1) / FPS;
+    if (inspection.steps / rate > lastSecond) rate *= 2;
+    if (inspection.steps / rate > lastSecond) rate *= 2;
+    var seconds = i / FPS, past = seconds - inspection.steps / rate;
+    if (past >= INSPECT_FADE_SECONDS) return null;
+    return { step: Math.min(inspection.steps, Math.round(seconds * rate)), alpha: past > 0 ? 1 - past / INSPECT_FADE_SECONDS : 1 };
+  }
+
   // Into ctx, where a frame of width x height is drawn at (x, y) times `scale`: a corner of it, above the
-  // watermark where they'd meet. The overlay is drawn in `scratch` first.
-  function drawInspection(ctx, scratch, width, height, x, y, scale, step) {
+  // watermark where they'd meet, as inspectionAt() says. The overlay is drawn in `scratch` first.
+  function drawInspection(ctx, scratch, width, height, x, y, scale, at) {
     var w = width * scale, h = height * scale;
     var ih = Math.round(h * 0.3), iw = Math.round(ih * inspection.aspect);
     if (iw > w * 0.45) {
@@ -493,11 +508,14 @@
       scratch.width = iw;
       scratch.height = ih;
     }
-    inspection.draw(scratch.getContext("2d"), iw, ih, step);
+    inspection.draw(scratch.getContext("2d"), iw, ih, at.step);
+    ctx.save();
+    ctx.globalAlpha = at.alpha;
     ctx.drawImage(scratch, ix, iy);
     ctx.strokeStyle = "rgba(255, 255, 255, 0.35)";
     ctx.lineWidth = 1;
     ctx.strokeRect(ix + 0.5, iy + 0.5, iw - 1, ih - 1);
+    ctx.restore();
   }
 
   // ---- The sound ---- a Shepard tone following the zoom: three orders of magnitude
@@ -826,7 +844,7 @@
 
   // The movie from the frames' JPEGs (the sharper copy), the Inspect overlay drawn on if asked: for a download
   // with the overlay, and for a resumed render, whose earlier frames were never encoded. The next few are
-  // unpacked while one encodes; a repeated frame is already on the canvas, overlay and all.
+  // unpacked while one encodes; a repeated frame is redrawn from the last picture only for the overlay.
   function encodeFromJpegs(withOverlay, onProgress) {
     var chunks = [], meta = null;
     var encoder = new VideoEncoder({
@@ -847,13 +865,16 @@
       if (i < blobs.length && !unpacking[i] && (i === 0 || blobs[i] !== blobs[i - 1])) unpacking[i] = createImageBitmap(blobs[i]);
     }
     return new Promise(function (resolve, reject) {
-      var i = 0;
+      var i = 0, held = null;
       function fail(err) {
         if (encoder.state !== "closed") encoder.close();
+        if (held) held.close();
         reject(err);
       }
       function next() {
         if (i >= blobs.length) {
+          if (held) held.close();
+          held = null;
           encoder.flush().then(function () {
             encoder.close();
             resolve({ chunks: chunks, meta: meta });
@@ -868,9 +889,13 @@
         (unpacking[i] || Promise.resolve(null)).then(function (bitmap) {
           if (bitmap) {
             delete unpacking[i];
-            filmCtx.drawImage(bitmap, 0, 0, film.width, film.height);
-            bitmap.close();
-            if (withOverlay) drawInspection(filmCtx, scratch, frameWidth, frameHeight, 0, 0, film.width / frameWidth, frames[i].step);
+            if (held) held.close();
+            held = bitmap;
+          }
+          if (bitmap || withOverlay) {
+            filmCtx.drawImage(held, 0, 0, film.width, film.height);
+            var at = withOverlay ? inspectionAt(i) : null;
+            if (at) drawInspection(filmCtx, scratch, frameWidth, frameHeight, 0, 0, film.width / frameWidth, at);
           }
           encodeCanvas(encoder, film, i);
           i++;
