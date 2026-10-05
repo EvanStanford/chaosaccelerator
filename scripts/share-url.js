@@ -24,8 +24,10 @@
   var DEFAULT_EDGE = "sticky";
   var DEFAULT_MOVIE_SIZE = { width: 1280, height: 720 };
 
-  var TYPE_CODES = { circle: "ci", line: "ln" };
-  var SIZE_FIELDS = { circle: "radius", line: "length" };
+  // A port hole's code carries its color.
+  var TYPE_CODES = { circle: "ci", line: "ln", "porthole orange": "po", "porthole green": "pg" };
+  var SIZE_FIELDS = { circle: "radius", line: "length", porthole: "length" };
+  function shapeKey(b) { return b.type === "porthole" ? "porthole " + b.color : b.type; }
   var PROPERTY_CODES = {
     x: "x", y: "y", angle: "ang", radius: "rad", length: "len", vx: "vx", vy: "vy",
     bounces: "bnce", distance: "dist", lifespan: "life",
@@ -166,7 +168,7 @@
 
   function encodeBody(b) {
     var parts = [
-      TYPE_CODES[b.type], sceneNum(b.x), sceneNum(b.y), sceneNum(b.angle), sceneNum(b[SIZE_FIELDS[b.type]]),
+      TYPE_CODES[shapeKey(b)], sceneNum(b.x), sceneNum(b.y), sceneNum(b.angle), sceneNum(b[SIZE_FIELDS[b.type]]),
       sceneNum(b.vx), sceneNum(b.vy), sceneNum(b.w),
     ];
     while (parts.length > 5 && parts[parts.length - 1] === "0") parts.pop();
@@ -176,9 +178,10 @@
     var what = "body " + (i + 1);
     var anchored = text.charAt(text.length - 1) === "!";
     var parts = (anchored ? text.slice(0, -1) : text).split(":");
-    var type = TYPES_BY_CODE[parts[0]];
-    if (!type) throw new Error(what + " has an unknown shape: \"" + parts[0] + "\"");
+    var shape = TYPES_BY_CODE[parts[0]];
+    if (!shape) throw new Error(what + " has an unknown shape: \"" + parts[0] + "\"");
     if (parts.length < 5 || parts.length > 8) throw new Error(what + " needs a shape, x, y, angle and size");
+    var type = shape.split(" ")[0];
     var body = {
       type: type,
       x: parseNum(parts[1], what + "'s x"),
@@ -186,6 +189,7 @@
       angle: parseNum(parts[3], what + "'s angle"),
       isAnchored: anchored,
     };
+    if (type === "porthole") body.color = shape.split(" ")[1];
     var size = parseNum(parts[4], what + "'s size");
     if (!(size > 0)) throw new Error(what + "'s size must be more than zero");
     body[SIZE_FIELDS[type]] = size;
@@ -278,11 +282,18 @@
   function decodeScene(fields) {
     if (!fields.body) return null;
     if (fields.edge !== undefined && !EDGES_BY_CODE[fields.edge]) throw new Error("edge is not a known mode: \"" + fields.edge + "\"");
+    var bodies = splitList(fields.body).map(decodeBody);
+    var portholes = {};
+    bodies.forEach(function (b, i) {
+      if (b.type !== "porthole") return;
+      if (portholes[b.color]) throw new Error("body " + (i + 1) + " is a second " + b.color + " port hole");
+      portholes[b.color] = true;
+    });
     return {
       mutualGravity: fields.mgrv === undefined ? false : parseBool(fields.mgrv, "mgrv"),
       collisionsEnabled: fields.coll === undefined ? true : parseBool(fields.coll, "coll"),
       simulationSteps: fields.step === undefined ? DEFAULT_STEPS : parseNum(fields.step, "step"),
-      bodies: splitList(fields.body).map(decodeBody),
+      bodies: bodies,
       hinges: splitList(fields.hnge || "").map(decodeHinge),
       springs: splitList(fields.sprg || "").map(decodeSpring),
       xInput: fields.xinp ? decodeMapping(fields.xinp, "xinp", false) : null,

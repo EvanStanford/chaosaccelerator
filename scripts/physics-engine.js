@@ -1,7 +1,7 @@
 // CPAL-1.0 License. See chaosaccelerator.com/license.html
 
-// Pure, DOM-free 2D rigid body engine: circles, capsule lines, pin hinges, springs,
-// anchors. A scene is plain data { bodies, hinges, springs, ... } and
+// Pure, DOM-free 2D rigid body engine: circles, capsule lines, port holes, pin hinges,
+// springs, anchors. A scene is plain data { bodies, hinges, springs, ... } and
 // step(scene, dt) mutates it in place.
 (function (global) {
   "use strict";
@@ -10,6 +10,17 @@
   var LINE_LINEAR_DENSITY = 8; // mass per unit length of a line body
   // Collision/click thickness of a line: not physical, so not in mass or inertia.
   var LINE_THICKNESS = 20;
+
+  // ---- Port holes: a pair of lines whose fronts are joined. The front half of the capsule lets a
+  // chain leader through, and it leaves the other port hole with its velocity and offset carried over
+  // into that port hole's frame. The back half, and a lone port hole, are a line.
+  var PORTHOLE_COLORS = ["orange", "green"];
+
+  // Tangent along the line; the front normal points up the screen at angle 0.
+  function portholeAxes(angle) {
+    var c = Math.cos(angle), s = Math.sin(angle);
+    return { tx: c, ty: s, nx: s, ny: -c };
+  }
 
   // Speed cap. Tunneling is handled by the swept tests; this only trims energy above it.
   var MAX_SPEED = 2000;
@@ -86,11 +97,28 @@
     return body.type === "circle" ? body.radius : body.length / 2;
   }
 
-  // Per-body acceleration this step. Uniform: (0, GRAVITY). Mutual: G*m/r^2 summed toward every
-  // other body (anchors pull, are never pulled). Touching bodies (r < combined halfExtent) get
-  // NO mutual gravity with collisions on: position correction would pump energy, and the contact
+  // Mutual Gravity's pull of bodyJ on a body of bodyI's shape sitting (dx, dy) short of it, as an
+  // acceleration: G*m/r^2 (anchors pull, are never pulled). Touching bodies (r < combined halfExtent)
+  // get NO pull with collisions on (null): position correction would pump energy, and the contact
   // force answers the pull. With collisions off bodies pass through, so inside the pull is a
   // polynomial in r^2 matching G*m/r^2 at the rim in value, slope AND curvature (less is a corner).
+  function mutualPull(scene, bodyI, bodyJ, dx, dy) {
+    var r2 = dx * dx + dy * dy;
+    var contact = halfExtent(bodyI) + halfExtent(bodyJ);
+    var pull;
+    if (r2 >= contact * contact) {
+      pull = MUTUAL_GRAVITY_CONSTANT * gravitationalMass(bodyJ) / (r2 * Math.sqrt(r2));
+    } else if (collisionsEnabled(scene)) {
+      return null;
+    } else {
+      var u2 = r2 / (contact * contact);
+      pull = MUTUAL_GRAVITY_CONSTANT * gravitationalMass(bodyJ) / (contact * contact * contact) *
+        (35 / 8 - 21 / 4 * u2 + 15 / 8 * u2 * u2);
+    }
+    return { x: pull * dx, y: pull * dy };
+  }
+
+  // Per-body acceleration this step: (0, GRAVITY), or under Mutual Gravity every other body's pull.
   function computeAccelerations(scene) {
     var bodies = scene.bodies, n = bodies.length, i, acc = new Array(n);
     if (!scene.mutualGravity) {
@@ -102,27 +130,26 @@
       if (!bodies[i].isAnchored) {
         for (var j = 0; j < n; j++) {
           if (j === i) continue;
-          var dx = bodies[j].x - bodies[i].x;
-          var dy = bodies[j].y - bodies[i].y;
-          var r2 = dx * dx + dy * dy;
-          var contact = halfExtent(bodies[i]) + halfExtent(bodies[j]);
-          var pull;
-          if (r2 >= contact * contact) {
-            pull = MUTUAL_GRAVITY_CONSTANT * gravitationalMass(bodies[j]) / (r2 * Math.sqrt(r2));
-          } else if (collisionsEnabled(scene)) {
-            continue; // touching: the contact force answers for it
-          } else {
-            var u2 = r2 / (contact * contact);
-            pull = MUTUAL_GRAVITY_CONSTANT * gravitationalMass(bodies[j]) / (contact * contact * contact) *
-              (35 / 8 - 21 / 4 * u2 + 15 / 8 * u2 * u2);
-          }
-          ax += pull * dx;
-          ay += pull * dy;
+          var p = mutualPull(scene, bodies[i], bodies[j], bodies[j].x - bodies[i].x, bodies[j].y - bodies[i].y);
+          if (p) { ax += p.x; ay += p.y; }
         }
       }
       acc[i] = { x: ax, y: ay };
     }
     return acc;
+  }
+
+  // The acceleration on port hole chain member m at (x, y) from outside its chain, the part that does
+  // not turn with it: gravity, or every body outside `members` pulling from its step-start pose.
+  function outsideAcceleration(scene, m, members, x, y, poses) {
+    if (!scene.mutualGravity) return { x: 0, y: GRAVITY };
+    var bodies = scene.bodies, ax = 0, ay = 0;
+    for (var j = 0; j < bodies.length; j++) {
+      if (members.indexOf(j) !== -1) continue;
+      var p = mutualPull(scene, bodies[m], bodies[j], poses[j].x - x, poses[j].y - y);
+      if (p) { ax += p.x; ay += p.y; }
+    }
+    return { x: ax, y: ay };
   }
 
   // ---- Springs: a FORCE, not a constraint (massless, collides with nothing). Shape:
@@ -236,25 +263,31 @@
     return total;
   }
 
+  // Union-find over every hinge and spring joining two bodies; links to the background are left out.
+  function linkedRoot(scene) {
+    var n = scene.bodies.length, parent = new Array(n), i;
+    for (i = 0; i < n; i++) parent[i] = i;
+    function find(x) { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
+    function union(a, b) { a = find(a); b = find(b); if (a !== b) parent[Math.max(a, b)] = Math.min(a, b); }
+    sceneSprings(scene).forEach(function (s) { if (s.bodyA !== null) union(s.bodyA, s.bodyB); });
+    scene.hinges.forEach(function (h) { if (h.bodyA !== null) union(h.bodyA, h.bodyB); });
+    return find;
+  }
+
   // ---- Springs and the frame's edges: a sprung set wraps together or not at all. GROUPS of
   // bodies joined by springs (directly or via hinges): `tethered` (a spring to the background, or
   // an anchored member) never wraps; else it wraps with its `leader`, the lowest free non-hinge-child.
   function springGroups(scene) {
     var springs = sceneSprings(scene);
     if (!springs.length) return null;
-    var n = scene.bodies.length, parent = new Array(n), i;
-    for (i = 0; i < n; i++) parent[i] = i;
-    function find(x) { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
-    function union(a, b) { a = find(a); b = find(b); if (a !== b) parent[Math.max(a, b)] = Math.min(a, b); }
+    var n = scene.bodies.length, find = linkedRoot(scene), i;
     var sprung = {};
     springs.forEach(function (s) {
       sprung[s.bodyB] = true;
-      if (s.bodyA !== null) { sprung[s.bodyA] = true; union(s.bodyA, s.bodyB); }
+      if (s.bodyA !== null) sprung[s.bodyA] = true;
     });
     var isHingeChild = {};
-    scene.hinges.forEach(function (h) {
-      if (h.bodyA !== null) { union(h.bodyA, h.bodyB); isHingeChild[h.bodyB] = true; }
-    });
+    scene.hinges.forEach(function (h) { if (h.bodyA !== null) isHingeChild[h.bodyB] = true; });
     var byRoot = {}, groups = [], groupOf = new Array(n);
     for (i = 0; i < n; i++) groupOf[i] = null;
     for (i = 0; i < n; i++) if (sprung[i] && !byRoot[find(i)]) {
@@ -271,6 +304,33 @@
     }
     springs.forEach(function (s) { if (s.bodyA === null) groupOf[s.bodyB].tethered = true; });
     return { groups: groups, groupOf: groupOf };
+  }
+
+  // ---- Port hole chains: bodies joined by hinges or springs go through together, led by the lowest
+  // free member that is no hinge child. A chain pinned or sprung to the background, or holding an
+  // anchor or a port hole, never goes through. Every body gets a group; a lone body leads its own.
+  function portholeGroups(scene) {
+    var n = scene.bodies.length, find = linkedRoot(scene), i;
+    var worldLinked = {}, isHingeChild = {};
+    scene.hinges.forEach(function (h) { if (h.bodyA === null) worldLinked[h.bodyB] = true; else isHingeChild[h.bodyB] = true; });
+    sceneSprings(scene).forEach(function (s) { if (s.bodyA === null) worldLinked[s.bodyB] = true; });
+    var byRoot = {}, groupOf = new Array(n);
+    for (i = 0; i < n; i++) {
+      var root = find(i), g = byRoot[root];
+      if (!g) g = byRoot[root] = { members: [], tethered: false, leader: -1 };
+      g.members.push(i);
+      if (scene.bodies[i].isAnchored || worldLinked[i] || scene.bodies[i].type === "porthole") g.tethered = true;
+      else if (g.leader === -1 && !isHingeChild[i]) g.leader = i;
+      groupOf[i] = g;
+    }
+    return groupOf;
+  }
+
+  // The two port holes' indices, or null: with one or none placed, a port hole is a line.
+  function portholePair(bodies) {
+    var found = [];
+    for (var i = 0; i < bodies.length; i++) if (bodies[i].type === "porthole") found.push(i);
+    return found.length === 2 ? found : null;
   }
 
   function computeMass(body) {
@@ -301,6 +361,12 @@
 
   function createLine(x, y, length, angle, isAnchored) {
     var b = { type: "line", x: x, y: y, angle: angle || 0, length: length, vx: 0, vy: 0, w: 0, isAnchored: !!isAnchored };
+    computeMass(b);
+    return b;
+  }
+
+  function createPorthole(x, y, length, angle, color, isAnchored) {
+    var b = { type: "porthole", color: color, x: x, y: y, angle: angle || 0, length: length, vx: 0, vy: 0, w: 0, isAnchored: !!isAnchored };
     computeMass(b);
     return b;
   }
@@ -559,10 +625,10 @@
 
   // A and B are PROBE bodies (velocity advanced by this step's gravity: see step()); tHit in [0, dt].
   function collidePair(A, B, dt) {
-    var cs;
-    if (A.type === "circle" && B.type === "circle") cs = collideCircleCircle(A, B, dt);
-    else if (A.type === "line" && B.type === "circle") cs = collideLineCircle(A, B, dt);
-    else if (A.type === "circle" && B.type === "line") {
+    var cs, aRound = A.type === "circle", bRound = B.type === "circle";
+    if (aRound && bRound) cs = collideCircleCircle(A, B, dt);
+    else if (!aRound && bRound) cs = collideLineCircle(A, B, dt);
+    else if (aRound && !bRound) {
       // Called as (line=B, circle=A): flip the normal and swap rA/rB back to this A/B order.
       cs = collideLineCircle(B, A, dt);
       if (cs) for (var i = 0; i < cs.length; i++) {
@@ -813,6 +879,67 @@
     return sum / indices.length;
   }
 
+  // A chain leader whose center was in front of a port hole's center line at the step's start and
+  // behind it at the end, crossing within its reach, leaves through the other one. The crossing point
+  // scales with the length ratio; the rest of the step's travel past it is kept as is, and velocities
+  // turn with the port holes, so the exit continues the entry. The share of the step past the crossing
+  // is then re-integrated on the exit side (outside forces from there, the chain's own turned with it),
+  // or the exit's gravity would start up to a step late, by an amount that saws with the start.
+  function applyPortholeTransports(scene, portals, groupOf, startPose, u, acc, dt, maxSpeed) {
+    var bodies = scene.bodies;
+    for (var i = 0; i < bodies.length; i++) {
+      var g = groupOf[i];
+      if (g.leader !== i || g.tethered) continue;
+      for (var k = 0; k < 2; k++) {
+        var P = bodies[portals[k]], Q = bodies[portals[1 - k]], O = bodies[i];
+        var startP = startPose[portals[k]], startO = startPose[i];
+        var a0 = portholeAxes(startP.angle), a1 = portholeAxes(P.angle);
+        var dx0 = startO.x - startP.x, dy0 = startO.y - startP.y, dx1 = O.x - P.x, dy1 = O.y - P.y;
+        var f0 = dx0 * a0.nx + dy0 * a0.ny, f1 = dx1 * a1.nx + dy1 * a1.ny;
+        if (!(f0 >= 0 && f1 < 0)) continue;
+        var lambda = f0 / (f0 - f1);
+        var s0 = dx0 * a0.tx + dy0 * a0.ty, s1 = dx1 * a1.tx + dy1 * a1.ty;
+        var sCross = s0 + (s1 - s0) * lambda;
+        // Anywhere the body could have touched the front: the capsule's reach plus the body's own.
+        if (Math.abs(sCross) > P.length / 2 + LINE_THICKNESS / 2 + halfExtent(O)) continue;
+        var aq = portholeAxes(Q.angle);
+        // The crossing point on the exit side, and the end-of-step position past it.
+        var crossX = Q.x - sCross * Q.length / P.length * aq.tx, crossY = Q.y - sCross * Q.length / P.length * aq.ty;
+        var exitX = crossX - (s1 - sCross) * aq.tx - f1 * aq.nx, exitY = crossY - (s1 - sCross) * aq.ty - f1 * aq.ny;
+        // The turn taking P's inward normal onto Q's outward one, from the two tangents.
+        var cs = -(aq.tx * a1.tx + aq.ty * a1.ty), sn = -(a1.tx * aq.ty - a1.ty * aq.tx);
+        var phi = Q.angle - P.angle + Math.PI;
+        var tStar = lambda * dt, tau = dt - tStar;
+        var leadX = O.x, leadY = O.y;
+        var leadStarX = startO.x + (O.x - startO.x) * lambda, leadStarY = startO.y + (O.y - startO.y) * lambda;
+        g.members.forEach(function (m) {
+          var b = bodies[m], s = startPose[m], a = acc[m];
+          // Where this member was at the crossing instant, and where that lands on the exit side.
+          var starX = s.x + (b.x - s.x) * lambda, starY = s.y + (b.y - s.y) * lambda;
+          var rx = starX - leadStarX, ry = starY - leadStarY;
+          var exitStarX = crossX + rx * cs - ry * sn, exitStarY = crossY + rx * sn + ry * cs;
+          var extIn = outsideAcceleration(scene, m, g.members, s.x, s.y, startPose);
+          var extOut = outsideAcceleration(scene, m, g.members, exitStarX, exitStarY, startPose);
+          var inX = a.x - extIn.x, inY = a.y - extIn.y;
+          var outX = inX * cs - inY * sn + extOut.x, outY = inX * sn + inY * cs + extOut.y;
+          // Two legs split at the crossing, turned there or not: their difference is what the step's
+          // whole-step velocity, and the travel it drove, got wrong.
+          var pre = advanceVelocity(u[m].x, u[m].y, tStar, a.x, a.y, maxSpeed);
+          var turned = advanceVelocity(pre.x * cs - pre.y * sn, pre.x * sn + pre.y * cs, tau, outX, outY, maxSpeed);
+          var straight = advanceVelocity(pre.x, pre.y, tau, a.x, a.y, maxSpeed);
+          var dvx = turned.x - (straight.x * cs - straight.y * sn), dvy = turned.y - (straight.x * sn + straight.y * cs);
+          var ox = b.x - leadX, oy = b.y - leadY, vx = b.vx, vy = b.vy;
+          b.x = exitX + ox * cs - oy * sn + dvx * tau;
+          b.y = exitY + ox * sn + oy * cs + dvy * tau;
+          b.angle += phi;
+          b.vx = vx * cs - vy * sn + dvx;
+          b.vy = vx * sn + vy * cs + dvy;
+        });
+        break;
+      }
+    }
+  }
+
   function step(scene, dt, opts) {
     opts = opts || {};
     var velIter = opts.velocityIterations || VELOCITY_ITERATIONS;
@@ -840,6 +967,20 @@
       probes[i] = bodies[i].isAnchored ? bodies[i] : Object.assign({}, bodies[i], { vx: vFull[i].x, vy: vFull[i].y });
     }
 
+    // Port holes: with both placed, a chain leader's center may pass the front of one and leave
+    // through the other at the end of the step; its contacts on that front are dropped.
+    var portals = portholePair(bodies);
+    var passGroup = portals ? portholeGroups(scene) : null;
+    var startPose = portals ? bodies.map(function (b) { return { x: b.x, y: b.y, angle: b.angle }; }) : null;
+    function onPortholeFront(c) {
+      var pi = bodies[c.a].type === "porthole" ? c.a : (bodies[c.b].type === "porthole" ? c.b : -1);
+      if (pi === -1) return false;
+      var oi = pi === c.a ? c.b : c.a;
+      if (passGroup[oi].leader !== oi || passGroup[oi].tethered) return false;
+      var r = pi === c.a ? c.rA : c.rB, axes = portholeAxes(startPose[pi].angle);
+      return r.x * axes.nx + r.y * axes.ny > 0;
+    }
+
     // Contacts. Empty with collisions off; every consumer handles "no contacts".
     var contacts = [];
     if (collisionsEnabled(scene)) {
@@ -853,6 +994,7 @@
         }
       }
     }
+    if (portals && contacts.length) contacts = contacts.filter(function (c) { return !onPortholeFront(c); });
 
     // Earliest contact instant per body; dt when none (leg 1 is the whole step, leg 2 a no-op).
     var bodyTHit = new Array(bodies.length).fill(dt);
@@ -871,6 +1013,9 @@
         contactFlags[contacts[i].b] = true;
       }
     }
+    // Opt-in per-body edge wrap this step: 1 along x, 2 along y (the trajectory's wrapX/wrapY).
+    var wrapFlags = opts.wrapFlags;
+    if (wrapFlags) for (i = 0; i < bodies.length; i++) wrapFlags[i] = 0;
     // Opt-in raw pair list for runBounceEvents' per-pair detection. Refilled in place.
     var contactsOut = opts.contactsOut;
     if (contactsOut) {
@@ -918,6 +1063,8 @@
       }
     }
 
+    if (portals) applyPortholeTransports(scene, portals, passGroup, startPose, u, acc, dt, maxSpeed);
+
     // Edge wrapping, last (matches the GLSL). Only roots decide; world-hinged by PIN; sprung by group.
     if (wrapsAtEdges(scene)) {
       var isHingeChild = {};
@@ -936,6 +1083,7 @@
         var ref = worldHinge ? worldHinge.localAnchorA : wb;
         var dx = wrapCoord(ref.x, scene.frameWidth) - ref.x;
         var dy = wrapCoord(ref.y, scene.frameHeight) - ref.y;
+        if (wrapFlags) wrapFlags[i] = (dx !== 0 ? 1 : 0) | (dy !== 0 ? 2 : 0);
         if (dx === 0 && dy === 0) continue;
         if (group) {
           translateSpringGroup(scene, group, dx, dy);
@@ -1010,17 +1158,20 @@
     };
   }
 
-  // runTrajectory: rows[i] is every body's {x, y, angle} after i+1 steps, like PhysicsGPU.runSceneOnGPU's.
+  // runTrajectory: rows[i] is every body's {x, y, angle, wrapX, wrapY} after i+1 steps, like
+  // PhysicsGPU.runSceneOnGPU's: the wrap flags say the body crossed that frame edge in that step.
   // runBounceCounts: counts[i] is the body's bounces by the end of step i+1; a bounce is the
   // false->true edge of contactFlags, not every step spent touching. Both use a private clone.
   function runTrajectory(scene, steps, dt) {
     var sim = cloneScene(scene);
     // A scene straight from JSON has no invMass/invInertia; stepping without them yields NaN.
     sim.bodies.forEach(computeMass);
-    var rows = new Array(steps);
+    var rows = new Array(steps), flags = new Array(sim.bodies.length);
     for (var i = 0; i < steps; i++) {
-      step(sim, dt);
-      rows[i] = sim.bodies.map(function (body) { return { x: body.x, y: body.y, angle: body.angle }; });
+      step(sim, dt, { wrapFlags: flags });
+      rows[i] = sim.bodies.map(function (body, b) {
+        return { x: body.x, y: body.y, angle: body.angle, wrapX: !!(flags[b] & 1), wrapY: !!(flags[b] & 2) };
+      });
     }
     return rows;
   }
@@ -1146,6 +1297,11 @@
     runTrajectory: runTrajectory,
     createCircle: createCircle,
     createLine: createLine,
+    createPorthole: createPorthole,
+    PORTHOLE_COLORS: PORTHOLE_COLORS,
+    portholeAxes: portholeAxes,
+    portholeGroups: portholeGroups,
+    portholePair: portholePair,
     computeOutputValue: computeOutputValue,
     outputBodyIndices: outputBodyIndices,
     isPairOutput: isPairOutput,

@@ -104,6 +104,8 @@
       { key: "vy", label: "Starting Y Velocity" },
     ],
   };
+  // A port hole has a line's shape, so a line's properties.
+  PROPERTIES_BY_TYPE.porthole = PROPERTIES_BY_TYPE.line;
   // Output-only: bounces are accumulated over a run (PhysicsEngine.step's contactFlags).
   var OUTPUT_PROPERTIES = [
     { key: "x", label: "Center X" },
@@ -163,6 +165,7 @@
   var CLICK_DRAG_THRESHOLD = 6;
   var DEFAULT_CIRCLE_RADIUS = 30;
   var DEFAULT_LINE_LENGTH = 140;
+  var DEFAULT_PORTHOLE_LENGTH = 200;
   // Bounds the on-canvas resize handle's drag to a sane range.
   var RADIUS_MIN = 5, RADIUS_MAX = 300;
   var LENGTH_MIN = 10, LENGTH_MAX = 800;
@@ -233,7 +236,32 @@
       ctx.lineWidth = PhysicsEngine.LINE_THICKNESS;
       ctx.strokeStyle = body.isAnchored ? "#5a6178" : "#3a63d1";
       ctx.stroke();
+      if (body.type === "porthole") drawPortholeBand(body.x, body.y, body.angle, body.length, body.color);
     }
+    ctx.restore();
+  }
+
+  // The front half of the capsule in the port hole's color, round ends included: the line split along
+  // its center line. What enters this half leaves the other port hole.
+  var PORTHOLE_PAINT = { orange: "#ff8a1f", green: "#36d399" };
+  function drawPortholeBand(x, y, angle, length, color) {
+    var a = PhysicsEngine.portholeAxes(angle);
+    var reach = length / 2 + PhysicsEngine.LINE_THICKNESS;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x - a.tx * reach, y - a.ty * reach);
+    ctx.lineTo(x + a.tx * reach, y + a.ty * reach);
+    ctx.lineTo(x + (a.tx + a.nx) * reach, y + (a.ty + a.ny) * reach);
+    ctx.lineTo(x + (a.nx - a.tx) * reach, y + (a.ny - a.ty) * reach);
+    ctx.closePath();
+    ctx.clip();
+    ctx.beginPath();
+    ctx.moveTo(x - a.tx * length / 2, y - a.ty * length / 2);
+    ctx.lineTo(x + a.tx * length / 2, y + a.ty * length / 2);
+    ctx.lineCap = "round";
+    ctx.lineWidth = PhysicsEngine.LINE_THICKNESS;
+    ctx.strokeStyle = PORTHOLE_PAINT[color] || PORTHOLE_PAINT.orange;
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -620,7 +648,7 @@
   var RESIZE_HANDLE_HIT_PAD = 6; // grabbable area extends this far past the visual capsule
 
   function resizeHandleSupported(body) {
-    return !!body && (body.type === "circle" || body.type === "line");
+    return !!body && (body.type === "circle" || body.type === "line" || body.type === "porthole");
   }
 
   // Pivot for resize/rotate (what applyBodyEditPreservingHinge keeps fixed): hinge world point if any, else center.
@@ -759,7 +787,7 @@
     render();
   }
 
-  // ---- Rotation drag handle (line only; a circle has no angle) ----
+  // ---- Rotation drag handle (lines and port holes; a circle has no angle) ----
   // Same ray as the resize handle, farther out, turned 90 degrees: it drags along an arc around the pivot.
   var ROTATION_HANDLE_GAP = 14; // beyond the resize handle's own far edge
   // Cosmetic only: a true-scale arc over ~30px would look straight.
@@ -767,7 +795,7 @@
   var ROTATION_ARC_HALF_ANGLE = 0.7; // radians; sets the arc's chord to ~match the resize handle's own arrow span
 
   function rotationHandleSupported(body) {
-    return !!body && body.type === "line";
+    return !!body && body.type !== "circle";
   }
 
   // Reuses resizeHandleGeometry's ref point and end; dirX/dirY here is the TANGENT (dir rotated a quarter turn).
@@ -1202,7 +1230,9 @@
 
   toolButtons.forEach(function (btn) {
     btn.addEventListener("click", function () {
-      setActiveTool(btn.getAttribute("data-tool"));
+      var tool = btn.getAttribute("data-tool");
+      if (tool === "porthole") { addPorthole(); return; }
+      setActiveTool(tool);
       if (lastPointerType === "touch") showToolHint(btn.getAttribute("title"));
     });
   });
@@ -1291,6 +1321,37 @@
       return false;
     }
     return true;
+  }
+
+  // ---- Port holes ----
+  // The button places the orange one (facing up), then the green one (facing down), and is spent
+  // once both exist; deleting either brings it back for that color.
+  var btnPorthole = document.querySelector('.tool-btn[data-tool="porthole"]');
+  var PORTHOLE_PLACEMENT = { orange: { y: 0.4, angle: 0 }, green: { y: 0.6, angle: Math.PI } };
+
+  function portholesPresent() {
+    var present = {};
+    scene.bodies.forEach(function (b) { if (b.type === "porthole") present[b.color] = true; });
+    return present;
+  }
+
+  function addPorthole() {
+    var present = portholesPresent();
+    var color = PhysicsEngine.PORTHOLE_COLORS.filter(function (c) { return !present[c]; })[0];
+    if (!color || !canAddBody()) return;
+    var w = scene.frameWidth || canvasArea.clientWidth || 1, h = scene.frameHeight || canvasArea.clientHeight || 1;
+    var place = PORTHOLE_PLACEMENT[color];
+    scene.bodies.push(PhysicsEngine.createPorthole(w / 2, h * place.y, DEFAULT_PORTHOLE_LENGTH, place.angle, color, false));
+    setActiveTool("select");
+    refreshMappingUI();
+    selectBody(scene.bodies.length - 1);
+  }
+
+  function refreshPortholeButton() {
+    var count = Object.keys(portholesPresent()).length;
+    btnPorthole.classList.toggle("porthole-one", count === 1);
+    btnPorthole.classList.toggle("porthole-two", count >= 2);
+    btnPorthole.disabled = count >= 2;
   }
 
   function addHingeAt(x, y) {
@@ -1827,7 +1888,7 @@
   // ---- X / Y input mapping ----
 
   function bodyOptionLabel(body, index) {
-    return "Body " + index + " (" + body.type + ")";
+    return "Body " + index + " (" + (body.type === "porthole" ? body.color + " port hole" : body.type) + ")";
   }
 
   function propsListFor(bodyIndex) {
@@ -1882,6 +1943,7 @@
     populatePropertySelect(yInputPropertySelect, scene.yInput ? scene.yInput.body : null, scene.yInput ? scene.yInput.property : null);
     populateBodySelect(outputBodySelect, scene.output, true);
     refreshOutputPairUI();
+    refreshPortholeButton();
   }
 
   function reindexMappingAfterDelete(mapping, deletedIndex) {
@@ -2118,6 +2180,7 @@
         var out = { type: b.type, x: roundNum(b.x), y: roundNum(b.y), angle: roundNum(b.angle), isAnchored: !!b.isAnchored };
         if (b.type === "circle") out.radius = roundNum(b.radius);
         else out.length = roundNum(b.length);
+        if (b.type === "porthole") out.color = b.color;
         out.vx = roundNum(b.vx);
         out.vy = roundNum(b.vy);
         out.w = roundNum(b.w);
@@ -2170,8 +2233,13 @@
         if (b.angle !== undefined) body.angle = Number(b.angle);
       } else if (b.type === "line") {
         body = PhysicsEngine.createLine(Number(b.x), Number(b.y), Number(b.length), Number(b.angle) || 0, !!b.isAnchored);
+      } else if (b.type === "porthole") {
+        if (PhysicsEngine.PORTHOLE_COLORS.indexOf(b.color) === -1) {
+          throw new Error('bodies[' + i + "]: a port hole's color must be \"orange\" or \"green\"");
+        }
+        body = PhysicsEngine.createPorthole(Number(b.x), Number(b.y), Number(b.length), Number(b.angle) || 0, b.color, !!b.isAnchored);
       } else {
-        throw new Error('bodies[' + i + "]: type must be \"circle\" or \"line\"");
+        throw new Error('bodies[' + i + "]: type must be \"circle\", \"line\" or \"porthole\"");
       }
       // An anchored body's velocity would make it a moving wall in the contact solver (see computeMass).
       if (!body.isAnchored) {
@@ -2180,6 +2248,12 @@
         if (b.w !== undefined) body.w = Number(b.w);
       }
       return body;
+    });
+    var portholeSeen = {};
+    newBodies.forEach(function (b, i) {
+      if (b.type !== "porthole") return;
+      if (portholeSeen[b.color]) throw new Error("bodies[" + i + "]: only one " + b.color + " port hole is allowed.");
+      portholeSeen[b.color] = true;
     });
 
     var newHinges = [];
@@ -3083,6 +3157,18 @@
       ctx = targetCtx;
       try {
         for (var i = 0; i < bodies.length; i++) drawBody(bodies[i], false);
+      } finally {
+        ctx = previous;
+      }
+    },
+    // A port hole's band into someone else's canvas (the map's replay draws the line itself).
+    drawPortholeBand: function (targetCtx, x, y, angle, length, color) {
+      var previous = ctx;
+      ctx = targetCtx;
+      try {
+        ctx.save();
+        drawPortholeBand(x, y, angle, length, color);
+        ctx.restore();
       } finally {
         ctx = previous;
       }

@@ -34,7 +34,7 @@
 
   // A circle scales uniformly; a line only along its local X (it has no thickness).
   function scaleAnchorForResize(body, anchor, ratio) {
-    return body.type === "line"
+    return body.type !== "circle"
       ? { x: anchor.x * ratio, y: anchor.y }
       : { x: anchor.x * ratio, y: anchor.y * ratio };
   }
@@ -189,8 +189,8 @@
   }
 
   // ---- "Stop on wrap": last good step before a watched body wraps ----
-  // Scans a logged trajectory (per-step {x, y, angle} rows per body) for the first step where a
-  // watched body jumps by over half the frame (per-step motion is tiny, so that is always a wrap).
+  // Scans a logged trajectory (per-step {x, y, angle, wrapX, wrapY} rows per body) for the first
+  // step where a watched body wrapped; the step itself says so, since a port hole moves a body as far.
   // Returns null, or { step, tFrac, tTarget, bodyIndex, x, y, angle }: step is the 1-indexed
   // stepCount to stop at, tFrac in [0, dt] is when within it the crossing happened, tTarget =
   // tFrac - dt, and x/y/angle are bodyIndex's state ONE STEP BEFORE the continuous crossing instant
@@ -211,13 +211,12 @@
       for (var k = 0; k < watchedBodyIndices.length; k++) {
         var idx = watchedBodyIndices[k];
         var cur = traj[i][idx];
+        if (!cur.wrapX && !cur.wrapY) continue;
         var p1 = prev[idx];
-        var dx = cur.x - p1.x, dy = cur.y - p1.y;
-        if (Math.abs(dx) <= frameWidth / 2 && Math.abs(dy) <= frameHeight / 2) continue;
         // Undo the step's wrap correction (exactly +-span) so finite difference gives a real velocity.
-        var axis = Math.abs(dx) > frameWidth / 2 ? "x" : "y";
+        var axis = cur.wrapX ? "x" : "y";
         var span = axis === "x" ? frameWidth : frameHeight;
-        var rawDelta = axis === "x" ? dx : dy;
+        var rawDelta = cur[axis] - p1[axis];
         var prewrap = rawDelta < 0 ? cur[axis] + span : cur[axis] - span;
         var vAxis = (prewrap - p1[axis]) / dt;
         var boundary = prewrap > span ? span : 0;

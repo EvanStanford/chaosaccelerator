@@ -52,6 +52,9 @@
     "  float c = cos(angle), s = sin(angle);",
     "  return vec2(v.x * c - v.y * s, v.x * s + v.y * c);",
     "}",
+    "vec2 rotateBy(vec2 v, float sn, float cs) {",
+    "  return vec2(v.x * cs - v.y * sn, v.x * sn + v.y * cs);",
+    "}",
     "",
     "vec2 lineEndpoint0(Body line, float halfLen) {",
     "  return vec2(line.x - cos(line.angle) * halfLen, line.y - sin(line.angle) * halfLen);",
@@ -664,11 +667,37 @@
     };
     function B(i) { return E.body + i; }
 
+    // ---- Port holes (PhysicsEngine.step's rules): both placed, and the chain leaders they take ----
+    var portals = PE.portholePair(consts);
+    var passGroup = portals ? PE.portholeGroups({
+      bodies: consts,
+      hinges: hingeAnchors.map(function (hg) { return { bodyA: hg.aIsWorld ? null : hg.a, bodyB: hg.b }; }),
+      springs: springList.map(function (sp) { return { bodyA: sp.aIsWorld ? null : sp.a, bodyB: sp.b }; }),
+    }) : null;
+    var leaders = [];
+    if (portals) for (var li = 0; li < n; li++) if (passGroup[li].leader === li && !passGroup[li].tethered) leaders.push(li);
+    if (!leaders.length) portals = null;
+    var phLit = df ? global.PhysicsDF.num : fnum;
+    // A port hole's tangent (the line's direction) and front normal (t.y, -t.x). An anchored one's
+    // frame is per run (df: once, into a global); a movable one's per step, at the start and the end.
+    function phT(idx, end) {
+      if (consts[idx].isAnchored) return df ? "g_dfPhT" + idx : "phT" + idx;
+      return "phT" + idx + (end ? "e" : "s");
+    }
+    function phNormal(t) { return df ? "dv2(" + t + ".y, dfNeg(" + t + ".x))" : "vec2(" + t + ".y, -" + t + ".x)"; }
+    function phTangentDecl(name, bodyVar) {
+      return df
+        ? "DVec2 " + name + "; { MF phSn, phCs; dfSinCos(" + bodyVar + ".angle, phSn, phCs); " + name + " = dv2(phCs, phSn); }"
+        : "vec2 " + name + " = vec2(cos(" + bodyVar + ".angle), sin(" + bodyVar + ".angle));";
+    }
+
     var lines = [];
     var contactBody = flags && typeof flags.contactBody === "number" ? flags.contactBody : -1;
     var touchBody = flags && typeof flags.touchBody === "number" ? flags.touchBody : -1;
     if (contactBody >= 0) lines.push("bool g_contact" + contactBody + " = false;");
     for (var td = 0; td < n; td++) if (touchBody >= 0 && td !== touchBody) lines.push("bool g_touch" + td + " = false;");
+    // The step's edge wrap per body, 0.0 or a frame span: the sticky stop and the trajectory log read these.
+    for (var wd = 0; wd < n; wd++) lines.push("float g_wrapDx" + wd + " = 0.0, g_wrapDy" + wd + " = 0.0;");
 
     function moves(idx) { return consts[idx].isAnchored ? "false" : "true"; }
     // ---- df only: segment geometry, built as seldom as possible ----
@@ -676,7 +705,7 @@
     // once per step; an anchored one once per run, into a global.
     var segLines = {};
     pairs.forEach(function (pair) {
-      pair.forEach(function (idx) { if (consts[idx].type === "line") segLines[idx] = true; });
+      pair.forEach(function (idx) { if (consts[idx].type !== "circle") segLines[idx] = true; });
     });
     function segExpr(idx) { return consts[idx].isAnchored ? "g_dfSeg" + idx : "seg" + idx; }
     var staticGeomLines = [];
@@ -685,6 +714,11 @@
         if (!consts[idx].isAnchored) return;
         lines.push("DSegment g_dfSeg" + idx + ";");
         staticGeomLines.push("    g_dfSeg" + idx + " = dfLineSegment(" + B(idx) + ", BODY" + idx + "_HALF);");
+      });
+      (portals || []).forEach(function (idx) {
+        if (!consts[idx].isAnchored) return;
+        lines.push("DVec2 g_dfPhT" + idx + ";");
+        staticGeomLines.push("    { MF phSn, phCs; dfSinCos(" + B(idx) + ".angle, phSn, phCs); g_dfPhT" + idx + " = dv2(phCs, phSn); }");
       });
     }
     lines.push("");
@@ -980,6 +1014,22 @@
         lines.push("  DSegment seg" + idx + " = dfLineSegment(probe" + idx + ", BODY" + idx + "_HALF);");
       });
     }
+    // Port hole frames at the step's start, and where every free body began.
+    if (portals) {
+      portals.forEach(function (idx) {
+        if (consts[idx].isAnchored) {
+          if (!df) lines.push("  " + phTangentDecl("phT" + idx, B(idx)));
+        } else {
+          lines.push("  " + phTangentDecl("phT" + idx + "s", B(idx)));
+          lines.push("  " + E.vecType + " phC" + idx + "s = " + E.vec(B(idx) + ".x", B(idx) + ".y") + ";");
+        }
+        lines.push("  " + E.vecType + " phN" + idx + "s = " + phNormal(phT(idx, false)) + ";");
+      });
+      for (var ps = 0; ps < n; ps++) {
+        if (!consts[ps].isAnchored) lines.push("  " + E.vecType + " phS" + ps + " = " + E.vec(B(ps) + ".x", B(ps) + ".y") + ";");
+      }
+      lines.push("");
+    }
     // A line's collide argument: half-length in float32, prebuilt segment in df.
     function lineArg(idx) { return df ? segExpr(idx) : "BODY" + idx + "_HALF"; }
     // df sweeps against an anchored segment skip its zero velocity; float32 folds it.
@@ -989,7 +1039,7 @@
     }
     // Only a line<->line pair can fill its second contact slot.
     function pairSlots(pair) {
-      return consts[pair[0]].type === "line" && consts[pair[1]].type === "line" ? ["c0", "c1"] : ["c0"];
+      return consts[pair[0]].type !== "circle" && consts[pair[1]].type !== "circle" ? ["c0", "c1"] : ["c0"];
     }
 
     // Contacts are computed once per step and reused by every solver iteration.
@@ -1003,9 +1053,9 @@
       var refI = probeRef(i), refJ = probeRef(j);
       if (tA === "circle" && tB === "circle") {
         lines.push(detected(E.contactPairType, varName, E.contactPairType + "(" + E.collideCircleCircle + "(" + refI + ", BODY" + i + "_HALF, " + refJ + ", BODY" + j + "_HALF), " + E.noContact + ")"));
-      } else if (tA === "line" && tB === "circle") {
+      } else if (tB === "circle") {
         lines.push(detected(E.contactPairType, varName, E.contactPairType + "(" + lineCircleCall(i, j) + ", " + E.noContact + ")"));
-      } else if (tA === "circle" && tB === "line") {
+      } else if (tA === "circle") {
         // collideLineCircle takes (line, circle): swap rA/rB back and flip the normal.
         lines.push(detected(E.contactType, varName + "_raw", lineCircleCall(j, i)));
         lines.push("  " + varName + "_raw.normal = " + E.negVec(varName + "_raw.normal") + ";");
@@ -1014,6 +1064,21 @@
       } else {
         lines.push(detected(E.contactPairType, varName, E.collideLineLine + "(" + refI + ", " + lineArg(i) + ", " + refJ + ", " + lineArg(j) + ")"));
       }
+    });
+    // A leader's contact on a port hole's front is no contact: its point (the port hole's lever arm)
+    // sits in front of the center line.
+    if (portals) pairs.forEach(function (pair) {
+      var pi = portals.indexOf(pair[0]) !== -1 ? pair[0] : (portals.indexOf(pair[1]) !== -1 ? pair[1] : -1);
+      if (pi === -1) return;
+      var oi = pi === pair[0] ? pair[1] : pair[0];
+      if (leaders.indexOf(oi) === -1) return;
+      var arm = pi === pair[0] ? "rA" : "rB";
+      pairSlots(pair).forEach(function (slot) {
+        var c = "pair_" + pair[0] + "_" + pair[1] + "." + slot, r = c + "." + arm;
+        lines.push(df
+          ? "  if (" + c + ".hit && dfGreater(dv2Dot(" + r + ", phN" + pi + "s), DF_ZERO)) " + c + ".hit = false;"
+          : "  if (" + c + ".hit && dot(" + r + ", phN" + pi + "s) > 0.0) " + c + ".hit = false;");
+      });
     });
     // df only: per-contact constants no solver iteration changes (dfPrepareContact).
     function prepareContactLine(contactExpr, a, b) {
@@ -1195,6 +1260,138 @@
     });
     if (solves) lines.push("  }");
 
+    // ---- Port holes: a leader that crossed a front band this step leaves through the other ----
+    // The crossing is read from the actual step (in front at its start, behind at its end) in the
+    // port hole's own frames at both ends; the mapping, and the re-integration of the step's share
+    // past the crossing on the exit side, are PhysicsEngine.applyPortholeTransports'.
+    if (portals) {
+      lines.push("");
+      portals.forEach(function (idx) {
+        if (!consts[idx].isAnchored) lines.push("  " + phTangentDecl("phT" + idx + "e", B(idx)));
+        lines.push("  " + E.vecType + " phN" + idx + "e = " + phNormal(phT(idx, true)) + ";");
+      });
+      function phRot(v) { return (df ? "dv2RotateBy(" : "rotateBy(") + v + ", phSn, phCs)"; }
+      function phPos(idx) { return consts[idx].isAnchored ? E.vec(B(idx) + ".x", B(idx) + ".y") : "phS" + idx; }
+      // Mutual Gravity's pull on member m at `pos` from every body outside its chain, at their step-start poses.
+      function outsidePullLines(target, m, members, pos) {
+        var out = [];
+        for (var j = 0; j < n; j++) {
+          if (members.indexOf(j) !== -1) continue;
+          if (df) {
+            out.push("      { DVec2 gd = dv2Sub(" + phPos(j) + ", " + pos + "); MF gr2 = dv2LengthSq(gd); MF gContact = dfAdd(gravReach" + m + ", gravReach" + j + "); MF gContact2 = dfSqr(gContact);");
+            if (collisionsOn) {
+              out.push("        if (!dfLess(gr2, gContact2)) { MF gk = dfDiv(DF_ONE, dfMul(gr2, dfSqrt(gr2))); " + target + " = dv2Add(" + target + ", dv2Scale(gd, dfMul(gravGM" + j + ", gk))); } }");
+            } else {
+              out.push("        MF gk; if (!dfLess(gr2, gContact2)) { gk = dfDiv(DF_ONE, dfMul(gr2, dfSqrt(gr2))); } else { MF gu2 = dfDiv(gr2, gContact2); MF gPoly = dfAdd(dfSub(" + dfnumG(35 / 8) + ", dfMul(" + dfnumG(21 / 4) + ", gu2)), dfMul(" + dfnumG(15 / 8) + ", dfSqr(gu2))); gk = dfDiv(gPoly, dfMul(gContact2, gContact)); }");
+              out.push("        " + target + " = dv2Add(" + target + ", dv2Scale(gd, dfMul(gravGM" + j + ", gk))); }");
+            }
+          } else {
+            out.push("      { vec2 d = " + phPos(j) + " - " + pos + "; float contact = " + reachExpr[m] + " + " + reachExpr[j] + "; float r2 = dot(d, d);");
+            if (collisionsOn) {
+              out.push("        if (r2 >= contact * contact) " + target + " += (" + fnum(GRAV_G) + " * gravMass" + j + " / (r2 * sqrt(r2))) * d; }");
+            } else {
+              out.push("        float u2 = r2 / (contact * contact); float poly = (35.0 / 8.0 - 21.0 / 4.0 * u2 + 15.0 / 8.0 * u2 * u2);");
+              out.push("        " + target + " += (r2 >= contact * contact ? " + fnum(GRAV_G) + " * gravMass" + j + " / (r2 * sqrt(r2)) : " +
+                fnum(GRAV_G) + " * gravMass" + j + " / (contact * contact * contact) * poly) * d; }");
+            }
+          }
+        }
+        return out;
+      }
+      var phOutsideInit = mutualGravity ? E.zeroVec : (df ? "dv2(DF_ZERO, DF_GRAVITY)" : "vec2(0.0, GRAVITY)");
+      leaders.forEach(function (oi) {
+        [0, 1].forEach(function (k) {
+          var pi = portals[k], t = "_" + oi + "_" + pi;
+          var startC = consts[pi].isAnchored ? E.vec(B(pi) + ".x", B(pi) + ".y") : "phC" + pi + "s";
+          var tS = phT(pi, false), tE = phT(pi, true);
+          if (df) {
+            lines.push("  DVec2 phD0" + t + " = dv2Sub(phS" + oi + ", " + startC + ");");
+            lines.push("  DVec2 phD1" + t + " = dv2(dfSub(" + B(oi) + ".x, " + B(pi) + ".x), dfSub(" + B(oi) + ".y, " + B(pi) + ".y));");
+            lines.push("  MF phF0" + t + " = dv2Dot(phD0" + t + ", phN" + pi + "s), phF1" + t + " = dv2Dot(phD1" + t + ", phN" + pi + "e);");
+            lines.push("  MF phS1" + t + " = dv2Dot(phD1" + t + ", " + tE + "), phSx" + t + " = DF_ZERO, phLam" + t + " = DF_ZERO;");
+            lines.push("  bool phCross" + t + " = false;");
+            lines.push("  if (!dfLess(phF0" + t + ", DF_ZERO) && dfLess(phF1" + t + ", DF_ZERO)) {");
+            lines.push("    phLam" + t + " = dfDiv(phF0" + t + ", dfSub(phF0" + t + ", phF1" + t + "));");
+            lines.push("    MF phS0 = dv2Dot(phD0" + t + ", " + tS + ");");
+            lines.push("    phSx" + t + " = dfAdd(phS0, dfMul(dfSub(phS1" + t + ", phS0), phLam" + t + "));");
+            lines.push("    phCross" + t + " = !dfGreater(dfAbs(phSx" + t + "), dfAdd(dfAdd(BODY" + pi + "_HALF, DF_HALF_LINE_THICKNESS), BODY" + oi + "_HALF));");
+            lines.push("  }");
+          } else {
+            lines.push("  vec2 phD0" + t + " = phS" + oi + " - " + startC + ";");
+            lines.push("  vec2 phD1" + t + " = vec2(" + B(oi) + ".x - " + B(pi) + ".x, " + B(oi) + ".y - " + B(pi) + ".y);");
+            lines.push("  float phF0" + t + " = dot(phD0" + t + ", phN" + pi + "s), phF1" + t + " = dot(phD1" + t + ", phN" + pi + "e);");
+            lines.push("  float phS1" + t + " = dot(phD1" + t + ", " + tE + "), phSx" + t + " = 0.0, phLam" + t + " = 0.0;");
+            lines.push("  bool phCross" + t + " = false;");
+            lines.push("  if (phF0" + t + " >= 0.0 && phF1" + t + " < 0.0) {");
+            lines.push("    phLam" + t + " = phF0" + t + " / (phF0" + t + " - phF1" + t + ");");
+            lines.push("    float phS0 = dot(phD0" + t + ", " + tS + ");");
+            lines.push("    phSx" + t + " = phS0 + (phS1" + t + " - phS0) * phLam" + t + ";");
+            lines.push("    phCross" + t + " = abs(phSx" + t + ") <= BODY" + pi + "_HALF + LINE_THICKNESS * 0.5 + BODY" + oi + "_HALF;");
+            lines.push("  }");
+          }
+        });
+        [0, 1].forEach(function (k) {
+          var pi = portals[k], qi = portals[1 - k], t = "_" + oi + "_" + pi;
+          var tP = phT(pi, true), tQ = phT(qi, true), members = passGroup[oi].members;
+          lines.push("  " + (k === 0 ? "if" : "else if") + " (phCross" + t + ") {");
+          if (df) {
+            lines.push("    DVec2 phCrossPt = dv2Sub(dv2(" + B(qi) + ".x, " + B(qi) + ".y), dv2Scale(" + tQ + ", dfMul(phSx" + t + ", dfDiv(BODY" + qi + "_HALF, BODY" + pi + "_HALF))));");
+            lines.push("    DVec2 phExit = dv2Sub(dv2Sub(phCrossPt, dv2Scale(" + tQ + ", dfSub(phS1" + t + ", phSx" + t + "))), dv2Scale(phN" + qi + "e, phF1" + t + "));");
+            lines.push("    MF phCs = dfNeg(dv2Dot(" + tQ + ", " + tP + ")), phSn = dfNeg(dv2Cross(" + tP + ", " + tQ + "));");
+            lines.push("    MF phPhi = dfAdd(dfSub(" + B(qi) + ".angle, " + B(pi) + ".angle), " + phLit(Math.PI) + ");");
+            lines.push("    MF phTs = dfMul(phLam" + t + ", DF_DT), phTau = dfSub(DF_DT, phTs);");
+            lines.push("    DVec2 phLead = dv2(" + B(oi) + ".x, " + B(oi) + ".y);");
+            lines.push("    DVec2 phLeadStar = dv2Add(phS" + oi + ", dv2Scale(dv2Sub(phLead, phS" + oi + "), phLam" + t + "));");
+          } else {
+            lines.push("    vec2 phCrossPt = vec2(" + B(qi) + ".x, " + B(qi) + ".y) - (phSx" + t + " * (BODY" + qi + "_HALF / BODY" + pi + "_HALF)) * " + tQ + ";");
+            lines.push("    vec2 phExit = phCrossPt - (phS1" + t + " - phSx" + t + ") * " + tQ + " - phF1" + t + " * phN" + qi + "e;");
+            lines.push("    float phCs = -dot(" + tQ + ", " + tP + "), phSn = -(" + tP + ".x * " + tQ + ".y - " + tP + ".y * " + tQ + ".x);");
+            lines.push("    float phPhi = " + B(qi) + ".angle - " + B(pi) + ".angle + " + fnum(Math.PI) + ";");
+            lines.push("    float phTs = phLam" + t + " * DT, phTau = DT - phTs;");
+            lines.push("    vec2 phLead = vec2(" + B(oi) + ".x, " + B(oi) + ".y);");
+            lines.push("    vec2 phLeadStar = phS" + oi + " + (phLead - phS" + oi + ") * phLam" + t + ";");
+          }
+          members.forEach(function (m) {
+            lines.push("    {");
+            if (df) {
+              lines.push("      DVec2 phHere = dv2(" + B(m) + ".x, " + B(m) + ".y);");
+              lines.push("      DVec2 phStar = dv2Add(phS" + m + ", dv2Scale(dv2Sub(phHere, phS" + m + "), phLam" + t + "));");
+              lines.push("      DVec2 phExitStar = dv2Add(phCrossPt, " + phRot("dv2Sub(phStar, phLeadStar)") + ");");
+            } else {
+              lines.push("      vec2 phHere = vec2(" + B(m) + ".x, " + B(m) + ".y);");
+              lines.push("      vec2 phStar = phS" + m + " + (phHere - phS" + m + ") * phLam" + t + ";");
+              lines.push("      vec2 phExitStar = phCrossPt + " + phRot("phStar - phLeadStar") + ";");
+            }
+            lines.push("      " + E.vecType + " phA = " + accelFor(m) + ";");
+            lines.push("      " + E.vecType + " phExtIn = " + phOutsideInit + ", phExtOut = " + phOutsideInit + ";");
+            if (mutualGravity) {
+              outsidePullLines("phExtIn", m, members, "phS" + m).forEach(function (l) { lines.push(l); });
+              outsidePullLines("phExtOut", m, members, "phExitStar").forEach(function (l) { lines.push(l); });
+            }
+            if (df) {
+              lines.push("      DVec2 phAOut = dv2Add(" + phRot("dv2Sub(phA, phExtIn)") + ", phExtOut);");
+              lines.push("      DVec2 phVPre = " + advance(m, "u" + m, "phTs") + ";");
+              lines.push("      DVec2 phDv = dv2Sub(" + E.advanceVelocity + "(" + phRot("phVPre") + ", phTau, phAOut), " + phRot(advance(m, "phVPre", "phTau")) + ");");
+              lines.push("      DVec2 phR = " + phRot("dv2Sub(phHere, phLead)") + ";");
+              lines.push("      " + B(m) + ".x = dfAdd(dfAdd(phExit.x, phR.x), dfMul(phDv.x, phTau)); " + B(m) + ".y = dfAdd(dfAdd(phExit.y, phR.y), dfMul(phDv.y, phTau));");
+              lines.push("      " + B(m) + ".angle = dfAdd(" + B(m) + ".angle, phPhi);");
+              lines.push("      DVec2 phV = dv2Add(" + phRot("dv2(" + B(m) + ".vx, " + B(m) + ".vy)") + ", phDv); " + B(m) + ".vx = phV.x; " + B(m) + ".vy = phV.y;");
+            } else {
+              lines.push("      vec2 phAOut = " + phRot("phA - phExtIn") + " + phExtOut;");
+              lines.push("      vec2 phVPre = " + advance(m, "u" + m, "phTs") + ";");
+              lines.push("      vec2 phDv = " + E.advanceVelocity + "(" + phRot("phVPre") + ", phTau, phAOut) - " + phRot(advance(m, "phVPre", "phTau")) + ";");
+              lines.push("      vec2 phR = " + phRot("phHere - phLead") + ";");
+              lines.push("      " + B(m) + ".x = phExit.x + phR.x + phDv.x * phTau; " + B(m) + ".y = phExit.y + phR.y + phDv.y * phTau;");
+              lines.push("      " + B(m) + ".angle += phPhi;");
+              lines.push("      vec2 phV = " + phRot("vec2(" + B(m) + ".vx, " + B(m) + ".vy)") + " + phDv; " + B(m) + ".vx = phV.x; " + B(m) + ".vy = phV.y;");
+            }
+            lines.push("    }");
+          });
+          lines.push("  }");
+        });
+      });
+    }
+
     // Frame wrap, last so it never feeds this step's position solve. Decided only
     // by a root body (free, or hinged to the world); hinge children follow their
     // parent. A world-hinged root wraps by its PIN (HINGEh_A, inout), which lives in frame space.
@@ -1237,6 +1434,7 @@
           lines.push("  if (" + refX + " > " + frameW + ") " + dxVar + " = -" + frameW + "; else if (" + refX + " < 0.0) " + dxVar + " = " + frameW + ";");
           lines.push("  if (" + refY + " > " + frameH + ") " + dyVar + " = -" + frameH + "; else if (" + refY + " < 0.0) " + dyVar + " = " + frameH + ";");
         }
+        lines.push("  g_wrapDx" + root + " = " + dxVar + "; g_wrapDy" + root + " = " + dyVar + ";");
         // What moves with this root: pin and hinge descendants, or the whole spring group and its pins.
         var movedPins = [], descendants = {};
         if (springGroup) {
@@ -1297,7 +1495,8 @@
   }
 
   // ---- The trajectory program: every body's state at every step ----
-  // Texel (b, r) of the output is body b after r + 1 steps. Running every texel
+  // Texel (b, r) of the output is body b after r + 1 steps, and the sentinel column past the
+  // bodies carries that step's wrap bits (x at bit 2b, y at bit 2b + 1). Running every texel
   // from step 0 is quadratic, and the last row's invocation runs the whole run,
   // which the OS's GPU watchdog aborts (zeros, no error). So it runs in CHUNKS,
   // carrying state in an RGBA32F strip (playbackStateVariables layout, texel
@@ -1370,8 +1569,12 @@
       lines.push((o === 0 ? "  if" : "  else if") + " (bodyIdx == " + o + ") { outVal = vec3(" +
         readField(o, "x") + ", " + readField(o, "y") + ", " + readField(o, "angle") + "); outHalf = " + half + "; }");
     }
-    // The column past the last body is each row's sentinel: see the runner.
-    lines.push("  if (bodyIdx == " + n + ") { outVal = vec3(gl_FragCoord.y + 0.5, TRAJECTORY_SENTINEL, 0.0); }");
+    // The column past the last body is each row's sentinel, with the step's wrap bits: see the runner.
+    var wrapBits = [];
+    for (var wb = 0; wb < n; wb++) {
+      wrapBits.push("(g_wrapDx" + wb + " != 0.0 ? " + fnum(Math.pow(2, 2 * wb)) + " : 0.0) + (g_wrapDy" + wb + " != 0.0 ? " + fnum(Math.pow(2, 2 * wb + 1)) + " : 0.0)");
+    }
+    lines.push("  if (bodyIdx == " + n + ") { outVal = vec3(gl_FragCoord.y + 0.5, TRAJECTORY_SENTINEL, " + wrapBits.join(" + ") + "); }");
     lines.push("  pbOut0 = vec4(outVal, outHalf);");
     lines.push("}");
     return lines.join("\n");
@@ -1839,12 +2042,15 @@
     var trajectory = new Array(maxSteps);
     for (var step = 0; step < maxSteps && !failure; step++) {
       var row = new Array(numBodies);
+      var mark = (step * logWidth + numBodies) * 4, wrapBits = pixels[mark + 2] | 0;
       for (var b = 0; b < numBodies; b++) {
         var idx = (step * logWidth + b) * 4;
-        row[b] = { x: pixels[idx], y: pixels[idx + 1], angle: pixels[idx + 2], half: pixels[idx + 3] };
+        row[b] = {
+          x: pixels[idx], y: pixels[idx + 1], angle: pixels[idx + 2], half: pixels[idx + 3],
+          wrapX: !!(wrapBits & (1 << (2 * b))), wrapY: !!(wrapBits & (2 << (2 * b))),
+        };
       }
       trajectory[step] = row;
-      var mark = (step * logWidth + numBodies) * 4;
       if (pixels[mark] !== step + 1 || pixels[mark + 1] !== TRAJECTORY_SENTINEL) failure = "step " + (step + 1) + " was never written";
     }
 

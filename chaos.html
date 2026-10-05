@@ -8,17 +8,17 @@
 <meta name="theme-color" content="#14161c">
 <title>Chaos Accelerator</title>
 <!-- Both views share this document so transition.js can show them at once. -->
-<link rel="stylesheet" href="scripts/physics.css?v=m87">
-<link rel="stylesheet" href="scripts/fractal-grid.css?v=m87">
-<link rel="stylesheet" href="scripts/app-shell.css?v=m87">
-<link rel="stylesheet" href="scripts/fractal-stats.css?v=m87">
-<link rel="stylesheet" href="scripts/responsive-layout.css?v=m87">
+<link rel="stylesheet" href="scripts/physics.css?v=m88">
+<link rel="stylesheet" href="scripts/fractal-grid.css?v=m88">
+<link rel="stylesheet" href="scripts/app-shell.css?v=m88">
+<link rel="stylesheet" href="scripts/fractal-stats.css?v=m88">
+<link rel="stylesheet" href="scripts/responsive-layout.css?v=m88">
 <!-- mobile.css after the app sheets: it must win their cascade without !important. -->
-<link rel="stylesheet" href="scripts/mobile.css?v=m87">
-<link rel="stylesheet" href="scripts/eighties-app.css?v=m87">
-<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m87" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="scripts/mobile.css?v=m88">
+<link rel="stylesheet" href="scripts/eighties-app.css?v=m88">
+<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m88" as="font" type="font/woff2" crossorigin>
 <!-- In <head> on purpose: both views measure their canvas area as they start. -->
-<script src="scripts/layout-mode.js?v=m87"></script>
+<script src="scripts/layout-mode.js?v=m88"></script>
 <!-- A #map/ link should open on the map: hide the editor (still laid out) until transition.js picks the view. -->
 <script>
   if (/^#map\//.test(location.hash)) document.documentElement.classList.add("opening-map");
@@ -59,6 +59,7 @@
             <div class="tool-grid">
               <button class="tool-btn" data-tool="circle" title="Drag on canvas: start is the center, release sets the radius">+ Circle</button>
               <button class="tool-btn" data-tool="line" title="Drag on canvas: start is one end, release is the other">+ Line</button>
+              <button class="tool-btn" data-tool="porthole" title="Places the orange port hole, then the green one. A free object entering the colored front of one comes out of the other at the same speed; the back and the ends bounce like a line">+ Port Hole</button>
               <button class="tool-btn" data-tool="anchor" title="Click an object to fix it in place">+ Anchor</button>
               <button class="tool-btn" data-tool="hinge" title="Click a point to pin objects there. Drag a hinge onto the X to remove it">+ Hinge</button>
               <button class="tool-btn" data-tool="spring" title="Drag from one object to another, or to the background, to join them with a spring. Click a spring to tune it; drag it onto the X to remove it">+ Spring</button>
@@ -738,23 +739,23 @@
 
 </div>
 
-<script src="scripts/app-message.js?v=m87"></script>
-<script src="scripts/physics-engine.js?v=m87"></script>
-<script src="scripts/physics-coords.js?v=m87"></script>
-<script src="scripts/share-url.js?v=m87"></script>
-<script src="scripts/movie-path.js?v=m87"></script>
-<script src="scripts/movie-store.js?v=m87"></script>
-<script src="scripts/physics-sound.js?v=m87"></script>
-<script src="scripts/physics-hinge-geometry.js?v=m87"></script>
-<script src="scripts/physics-df.js?v=m87"></script>
-<script src="scripts/physics-gpu.js?v=m87"></script>
-<script src="scripts/physics-gpu-df.js?v=m87"></script>
-<script src="scripts/physics-grid-codegen.js?v=m87"></script>
-<script src="scripts/physics-ui.js?v=m87"></script>
-<script src="scripts/fractal-stats.js?v=m87"></script>
-<script src="scripts/fractal-stats-panel.js?v=m87"></script>
-<script src="scripts/fractal-grid.js?v=m87"></script>
-<script src="scripts/transition.js?v=m87"></script>
+<script src="scripts/app-message.js?v=m88"></script>
+<script src="scripts/physics-engine.js?v=m88"></script>
+<script src="scripts/physics-coords.js?v=m88"></script>
+<script src="scripts/share-url.js?v=m88"></script>
+<script src="scripts/movie-path.js?v=m88"></script>
+<script src="scripts/movie-store.js?v=m88"></script>
+<script src="scripts/physics-sound.js?v=m88"></script>
+<script src="scripts/physics-hinge-geometry.js?v=m88"></script>
+<script src="scripts/physics-df.js?v=m88"></script>
+<script src="scripts/physics-gpu.js?v=m88"></script>
+<script src="scripts/physics-gpu-df.js?v=m88"></script>
+<script src="scripts/physics-grid-codegen.js?v=m88"></script>
+<script src="scripts/physics-ui.js?v=m88"></script>
+<script src="scripts/fractal-stats.js?v=m88"></script>
+<script src="scripts/fractal-stats-panel.js?v=m88"></script>
+<script src="scripts/fractal-grid.js?v=m88"></script>
+<script src="scripts/transition.js?v=m88"></script>
 <script>
   // ---- The '80s switch: the same saved setting as the other pages (eighties-theme.js) ----
   (function () {

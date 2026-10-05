@@ -141,7 +141,7 @@
     // Lines scale only along local X (PhysicsHingeGeometry.scaleAnchorForResize).
     function scaleAnchor(anchor, ratioExpr, bodyType) {
       var x = num(B.mul(anchor.x, ratioExpr));
-      var y = bodyType === "line" ? anchor.y : num(B.mul(anchor.y, ratioExpr));
+      var y = bodyType !== "circle" ? anchor.y : num(B.mul(anchor.y, ratioExpr));
       return { x: x, y: y };
     }
 

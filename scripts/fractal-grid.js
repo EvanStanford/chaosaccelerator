@@ -849,7 +849,6 @@
       var declarations = [];
       var lines = [];
       if (isStickyLoop) {
-        var halfW = PhysicsGPU.fnum(frame.width / 2), halfH = PhysicsGPU.fnum(frame.height / 2);
         var fullW = PhysicsGPU.fnum(frame.width), fullH = PhysicsGPU.fnum(frame.height);
         var bodyVar = df ? "dbody" : "body";
         trackedIndices.forEach(function (idx) {
@@ -873,12 +872,11 @@
         // DT+1.0: above any real tFrac. tFracHi carries the pass's precision; bestTFrac is its float32 shadow.
         lines.push("    float bestTFrac = DT + 1.0;");
         lines.push("    " + B.scalar + " bestTFracHi = " + B.zero + ";");
+        // The step's own wrap flags: a port hole moves a body as far as a wrap would.
         watchedIndices.forEach(function (idx) {
           lines.push("    {");
-          lines.push("      float wrapDx = " + B.toFloat(B.sub(bodyVar + idx + ".x", "frozenX" + idx)) + ";");
-          lines.push("      float wrapDy = " + B.toFloat(B.sub(bodyVar + idx + ".y", "frozenY" + idx)) + ";");
-          lines.push("      if (abs(wrapDx) > " + halfW + " || abs(wrapDy) > " + halfH + ") {");
-          lines.push("        bool xCrossed = abs(wrapDx) > " + halfW + ";");
+          lines.push("      if (g_wrapDx" + idx + " != 0.0 || g_wrapDy" + idx + " != 0.0) {");
+          lines.push("        bool xCrossed = g_wrapDx" + idx + " != 0.0;");
           lines.push("        float span = xCrossed ? " + fullW + " : " + fullH + ";");
           lines.push("        " + B.scalar + " vAxisHi = xCrossed ? " + bodyVar + idx + ".vx : " + bodyVar + idx + ".vy;");
           lines.push("        float vAxis = " + B.toFloat("vAxisHi") + ";");
@@ -4943,6 +4941,7 @@
           hoverCtx.moveTo(row.x - ox, row.y - oy);
           hoverCtx.lineTo(row.x + ox, row.y + oy);
         }, outline);
+        if (spec.type === "porthole") PhysicsUI.drawPortholeBand(hoverCtx, row.x, row.y, row.angle, row.half * 2, spec.color);
       }
       return;
     }
@@ -4980,6 +4979,7 @@
         hoverCtx.lineTo(row.x + hx, row.y + hy);
         hoverCtx.stroke();
       }
+      if (spec.type === "porthole") PhysicsUI.drawPortholeBand(hoverCtx, row.x, row.y, row.angle, row.half * 2, spec.color);
     }
   }
 
@@ -4992,7 +4992,7 @@
         if (!row) return null;
         var authoredHalf = PhysicsGPU.shapeHalf(scene.bodies, bodyIndex);
         var ratio = authoredHalf > 0 ? row.half / authoredHalf : 1;
-        var isLine = scene.bodies[bodyIndex].type === "line";
+        var isLine = scene.bodies[bodyIndex].type !== "circle";
         var r = PhysicsEngine.rotateVec({ x: anchor.x * ratio, y: anchor.y * (isLine ? 1 : ratio) }, row.angle);
         return { x: row.x + r.x, y: row.y + r.y };
       }

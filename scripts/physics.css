@@ -126,6 +126,12 @@ button.danger:hover { background: var(--danger); color: white; }
   border-color: var(--accent);
   color: white;
 }
+/* + Port Hole: half green once the orange one is placed, all green and spent once both are. */
+.tool-btn.porthole-one,
+.tool-btn.porthole-one:hover { background: linear-gradient(to right, #1f7a4f 50%, var(--bg-input) 50%); }
+.tool-btn.porthole-two,
+.tool-btn.porthole-two:hover { background: #1f7a4f; border-color: #36d399; }
+.tool-btn.porthole-two:disabled { opacity: 1; }
 
 /* Native <details>/<summary>, collapsed by default. Open, a dashed fieldset-style box
    with the summary as legend: pulled out of flow, background-matched to erase the line. */

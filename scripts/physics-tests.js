@@ -498,8 +498,9 @@
   function runGridSimulationAtPoint(scene, steps, worldX, worldY) {
     var initial = PhysicsGridCodegen.generateGridInitialStateGLSL(scene);
     var n = initial.n;
-    var stepOnceSrc = PhysicsGPU.generateStepOnceGLSL(n, initial.consts, initial.pairs, initial.hingeAnchors);
-    var stepCall = "stepOnce(" + PhysicsGPU.stepOnceCallArgs(n, initial.hingeAnchors) + ");";
+    var stepOnceSrc = PhysicsGPU.generateStepOnceGLSL(n, initial.consts, initial.pairs, initial.hingeAnchors, undefined, "f32",
+      scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), initial.springs);
+    var stepCall = "stepOnce(" + PhysicsGPU.stepOnceCallArgs(n, initial.hingeAnchors, "f32", initial.springs) + ");";
     var outputs = [];
     for (var i = 0; i < n; i++) {
       outputs.push((i === 0 ? "  if" : "  else if") + " (idx == " + i + ") outVal = vec3(body" + i + ".x, body" + i + ".y, body" + i + ".angle);");
@@ -1022,12 +1023,7 @@
     var offset = PhysicsGridCodegen.computeOffsetSceneNumeric(scene, worldX, worldY);
     var initialBody = { x: offset.bodies[0].x, y: offset.bodies[0].y, angle: offset.bodies[0].angle };
     offset.bodies.forEach(PhysicsEngine.computeMass);
-    var traj = [];
-    for (var i = 0; i < steps; i++) {
-      PhysicsEngine.step(offset, DT);
-      traj.push(offset.bodies.map(function (b) { return { x: b.x, y: b.y, angle: b.angle }; }));
-    }
-    return PhysicsHingeGeometry.findWrapStopStep(traj, [0], 0, scene.frameWidth, scene.frameHeight, [initialBody], DT);
+    return PhysicsHingeGeometry.findWrapStopStep(PhysicsEngine.runTrajectory(offset, steps, DT), [0], 0, scene.frameWidth, scene.frameHeight, [initialBody], DT);
   }
 
   addTest(
@@ -1086,7 +1082,6 @@
         var consts = scene.bodies.map(PhysicsGPU.bodyConst);
         var frame = { width: scene.frameWidth, height: scene.frameHeight };
         var stepOnceCall = "stepOnce(" + PhysicsGPU.stepOnceCallArgs(1, []) + ");";
-        var halfW = PhysicsGPU.fnum(frame.width / 2), halfH = PhysicsGPU.fnum(frame.height / 2);
         var fullW = PhysicsGPU.fnum(frame.width), fullH = PhysicsGPU.fnum(frame.height);
         var fs = [
           "#version 300 es", "precision highp float;", "out vec4 fragColor;", "",
@@ -1103,9 +1098,8 @@
           "  for (int i = 0; i < 500; i++) {",
           "    if (wrapStopped) break;",
           "    " + stepOnceCall,
-          "    float wrapDx = body0.x - frozenX; float wrapDy = body0.y - frozenY;",
-          "    if (abs(wrapDx) > " + halfW + " || abs(wrapDy) > " + halfH + ") {",
-          "      bool xCrossed = abs(wrapDx) > " + halfW + ";",
+          "    if (g_wrapDx0 != 0.0 || g_wrapDy0 != 0.0) {",
+          "      bool xCrossed = g_wrapDx0 != 0.0;",
           "      float span = xCrossed ? " + fullW + " : " + fullH + ";",
           "      float vAxis = xCrossed ? body0.vx : body0.vy;",
           "      float prevAxis = xCrossed ? frozenX : frozenY;",
@@ -1161,12 +1155,7 @@
         var initialBody = { x: s.bodies[0].x + worldX, y: s.bodies[0].y + worldY, angle: s.bodies[0].angle };
         s.bodies[0].x = initialBody.x; s.bodies[0].y = initialBody.y;
         s.bodies.forEach(PhysicsEngine.computeMass);
-        var traj = [];
-        for (var i = 0; i < steps; i++) {
-          PhysicsEngine.step(s, DT);
-          traj.push([{ x: s.bodies[0].x, y: s.bodies[0].y, angle: s.bodies[0].angle }]);
-        }
-        return PhysicsHingeGeometry.findWrapStopStep(traj, [0], 0, s.frameWidth, s.frameHeight, [initialBody], DT);
+        return PhysicsHingeGeometry.findWrapStopStep(PhysicsEngine.runTrajectory(s, steps, DT), [0], 0, s.frameWidth, s.frameHeight, [initialBody], DT);
       }
       var maxErr = 0;
       var detail = [];
@@ -1601,13 +1590,13 @@
       PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(scene)), "",
       "const " + B.scalar + " worldX = " + B.lit(worldX) + ";",
       "const " + B.scalar + " worldY = " + B.lit(worldY) + ";", "",
-      PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene)), "",
+      PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), initial.springs), "",
       "void main() {",
       "  " + initial.declarationLines.join("\n  "),
       "  " + PhysicsGridCodegen.generateCanonicalBodyDeclarationsGLSL(initial).split("\n").join("\n  "),
       "  " + PhysicsGPU.generateHingeAnchorLocalsGLSL(initial.hingeAnchors, precision).split("\n").join("\n  "),
       "  for (int i = 0; i < " + steps + "; i++) { stepOnce(" +
-        PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, precision) + "); }",
+        PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, precision, initial.springs) + "); }",
       "  fragColor = vec4(" + residual("x", ref.x) + ", " + residual("y", ref.y) + ", " +
         residual("angle", ref.angle) + ", 1.0);",
       "}",
@@ -1628,7 +1617,7 @@
     var src = [
       "#version 300 es", "precision highp float;", "out vec4 fragColor;", "",
       PhysicsGPU.libraryGLSL("df", PhysicsEngine.speedCapFor(scene)), "",
-      PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, "df", scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene)), "",
+      PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, "df", scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), initial.springs), "",
       "void main() {",
       // k*dx may be float32; the ADD onto x0 is what needs df, as in the grid shader.
       "  vec2 worldX = dfAddFloat(" + B.lit(x0) + ", (gl_FragCoord.x - 0.5) * " + PhysicsGPU.fnum(dx) + ");",
@@ -1637,7 +1626,7 @@
       "  " + PhysicsGridCodegen.generateCanonicalBodyDeclarationsGLSL(initial).split("\n").join("\n  "),
       "  " + PhysicsGPU.generateHingeAnchorLocalsGLSL(initial.hingeAnchors, "df").split("\n").join("\n  "),
       "  for (int i = 0; i < " + steps + "; i++) { stepOnce(" +
-        PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, "df") + "); }",
+        PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, "df", initial.springs) + "); }",
       "  fragColor = vec4(" + residual("x", ref.x) + ", " + residual("y", ref.y) + ", " +
         residual("angle", ref.angle) + ", 1.0);",
       "}",
@@ -1937,7 +1926,7 @@
     var src = [
       "#version 300 es", "precision highp float;", "out vec4 fragColor;", "",
       PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(scene)), "",
-      PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene)), "",
+      PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), initial.springs), "",
       "void main() {",
       "  int texel = int(gl_FragCoord.x); int k = texel % " + count + "; bool wantY = texel >= " + count + ";",
       "  float nudge = 0.0;",
@@ -1948,7 +1937,7 @@
       "  " + PhysicsGridCodegen.generateCanonicalBodyDeclarationsGLSL(initial).split("\n").join("\n  "),
       "  " + PhysicsGPU.generateHingeAnchorLocalsGLSL(initial.hingeAnchors, precision).split("\n").join("\n  "),
       "  for (int i = 0; i < " + steps + "; i++) { stepOnce(" +
-        PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, precision) + "); }",
+        PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, precision, initial.springs) + "); }",
       "  fragColor = wantY ? " + wordsOf("dbody" + bodyIndex + ".y") + " : " + wordsOf("dbody" + bodyIndex + ".x") + ";",
       "}",
     ]).join("\n");
@@ -2807,6 +2796,382 @@
           "; a body 0.0001px out gives length " + justOut.toExponential(1) +
           ", 4100px out gives " + p(5000, 300).length.toFixed(1) +
           ", 500,000px out gives " + p(5e5, 300).length.toFixed(2) + " (never reaching " + MAX + ")",
+      };
+    }
+  );
+
+    // ---- Port holes: what enters the front of one leaves the other, continuous in every state ----
+
+  // The orange one faces up at (400, 400), the green one faces down at (400, 700) unless `down` says otherwise; both anchored.
+  function portholeScene(bodies, down) {
+    down = down || {};
+    return {
+      mutualGravity: false,
+      bodies: [
+        PhysicsEngine.createPorthole(400, 400, 200, 0, "orange", true),
+        PhysicsEngine.createPorthole(down.x === undefined ? 400 : down.x, down.y === undefined ? 700 : down.y,
+          down.length || 200, down.angle === undefined ? Math.PI : down.angle, "green", true),
+      ].concat(bodies),
+      hinges: [], springs: [], frameWidth: 1200, frameHeight: 900, edgeMode: "infinite",
+    };
+  }
+  function plainScene(bodies) {
+    return { mutualGravity: false, bodies: bodies, hinges: [], springs: [], frameWidth: 1200, frameHeight: 900, edgeMode: "infinite" };
+  }
+
+  addTest(
+    "A port hole pair is transparent: a ball that enters one comes out of the other on the path it was on",
+    "the orange one faces up at (400, 400), the green one down at (400, 700): a ball through both is a ball that skipped 300px. The crossing point, the overshoot past the center line and the velocity all carry over, so from the crossing step on the run equals a port-hole-free fall shifted by (0, 300), to rounding",
+    function () {
+      function ball() { var b = PhysicsEngine.createCircle(410, 200, 10, false); b.vx = 3; return b; }
+      var withPort = portholeScene([ball()]), without = plainScene([ball()]);
+      var crossedAt = -1, worst = 0, speedErr = 0;
+      for (var i = 0; i < 90; i++) {
+        PhysicsEngine.step(withPort, DT);
+        PhysicsEngine.step(without, DT);
+        var a = withPort.bodies[2], b = without.bodies[0];
+        if (crossedAt < 0 && a.y > 600) crossedAt = i;
+        worst = Math.max(worst, Math.abs(a.x - b.x), Math.abs(a.y - (b.y + (crossedAt >= 0 ? 300 : 0))));
+        speedErr = Math.max(speedErr, Math.abs(a.vx - b.vx), Math.abs(a.vy - b.vy));
+      }
+      return {
+        pass: crossedAt > 0 && worst < 1e-6 && speedErr < 1e-6,
+        detail: "came out of the green port hole at step " + crossedAt + "; worst position difference from the shifted plain fall " +
+          worst.toExponential(2) + "px, velocity " + speedErr.toExponential(2) + "px/s",
+      };
+    }
+  );
+
+  addTest(
+    "A port hole turns what passes it: in straight down, out straight right, the offset and overshoot kept in the exit's frame",
+    "the velocity is re-expressed relative to the exit port hole, so a ball falling into an up-facing one leaves a right-facing one moving right at the speed it had when it crossed. The crossing point maps along the exit's line (20px right of center in becomes 20px toward its start end, the turn being rigid), the overshoot past the center line comes out in front of it, and the share of the step spent past the crossing gets its gravity on the exit side: that share of a step's fall, straight down again, plus the travel it drove",
+    function () {
+      var scene = portholeScene([PhysicsEngine.createCircle(420, 200, 10, false)], { x: 800, y: 300, angle: Math.PI / 2 });
+      var plain = plainScene([PhysicsEngine.createCircle(420, 200, 10, false)]);
+      var ball = scene.bodies[2], after = null, fall = null, before = null;
+      for (var i = 0; i < 90 && !after; i++) {
+        before = ball.y;
+        PhysicsEngine.step(scene, DT);
+        PhysicsEngine.step(plain, DT);
+        if (ball.x > 600) { after = { x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy }; fall = plain.bodies[0]; }
+      }
+      if (!after) return { pass: false, detail: "the ball never came out of the right-facing port hole" };
+      // The plain fall is the entry-side step: the crossing instant, the overshoot past the line, and the end velocity.
+      var tau = DT * (1 - (400 - before) / (fall.y - before)), over = fall.y - 400;
+      var share = (1 - PhysicsEngine.AIR_DRAG * tau) * PhysicsEngine.GRAVITY * tau;
+      var want = { x: 800 + over - share * tau, y: 280 + share * tau, vx: fall.vy - share, vy: share };
+      var err = Math.max(Math.abs(after.x - want.x), Math.abs(after.y - want.y), Math.abs(after.vx - want.vx), Math.abs(after.vy - want.vy));
+      return {
+        pass: err < 1e-9 && tau > 0 && tau < DT,
+        detail: "out at (" + after.x.toFixed(4) + ", " + after.y.toFixed(4) + ") moving (" + after.vx.toFixed(4) + ", " + after.vy.toFixed(4) +
+          "); from the plain fall's step, " + (tau * 1000).toFixed(2) + "ms of it past the crossing: want (" + want.x.toFixed(4) + ", " + want.y.toFixed(4) +
+          ") moving (" + want.vx.toFixed(4) + ", " + want.vy.toFixed(4) + "), worst difference " + err.toExponential(2),
+      };
+    }
+  );
+
+  addTest(
+    "A port hole pass is continuous where the crossing moves from one step to the next",
+    "reported from the map as a sawtooth: the crossing step's travel was integrated whole on the entry side and then turned, so the exit side's gravity began at the next step boundary, up to a step late by an amount that grew as the start moved and reset when the crossing jumped a step. Each scene bisects the start height to the exact tooth, then compares the two sides of it after the same number of steps: under gravity, under Mutual Gravity (the outside pull taken from each side of the warp), and for a sprung pair (its own force turned with it)",
+    function () {
+      function family(name, build, N) {
+        function run(startY) {
+          var scene = build(startY), ball = scene.bodies[2], out = -1;
+          for (var i = 0; i < N; i++) {
+            PhysicsEngine.step(scene, DT);
+            if (out < 0 && ball.x > 800) out = i;
+          }
+          return { out: out, x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy };
+        }
+        // Lower start (larger y) crosses earlier; find a start height either side of which the crossing step differs.
+        var lo = 150, hi = 260, outLo = run(lo).out, outHi = run(hi).out;
+        if (outLo < 0 || outHi < 0 || outLo === outHi) return { name: name, detail: "no tooth between the two starts (steps " + outLo + " and " + outHi + ")", pass: false };
+        for (var k = 0; k < 50; k++) {
+          var mid = (lo + hi) / 2;
+          if (run(mid).out === outLo) lo = mid; else hi = mid;
+        }
+        var a = run(lo - 1e-7), b = run(hi + 1e-7);
+        var dp = Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)), dv = Math.max(Math.abs(a.vx - b.vx), Math.abs(a.vy - b.vy));
+        return { name: name, pass: a.out !== b.out && dp < 1e-4 && dv < 1e-3, detail: name + ": tooth between steps " + a.out + " and " + b.out + " at y=" + lo.toFixed(6) + ", the two sides differ by " + dp.toExponential(2) + "px and " + dv.toExponential(2) + "px/s" };
+      }
+      var exit = { x: 800, y: 300, angle: Math.PI / 2 };
+      var results = [
+        family("gravity", function (y) { return portholeScene([PhysicsEngine.createCircle(420, y, 10, false)], exit); }, 60),
+        family("mutual gravity", function (y) {
+          var s = portholeScene([PhysicsEngine.createCircle(420, y, 10, false)], exit);
+          s.mutualGravity = true;
+          return s;
+        }, 60),
+        family("sprung pair", function (y) {
+          var s = portholeScene([PhysicsEngine.createCircle(420, y, 10, false), PhysicsEngine.createCircle(420, y - 90, 10, false)], exit);
+          s.springs.push({ bodyA: 2, bodyB: 3, localAnchorA: { x: 0, y: 0 }, localAnchorB: { x: 0, y: 0 }, stiffness: 5000, restLength: 90 });
+          return s;
+        }, 60),
+      ];
+      return { pass: results.every(function (r) { return r.pass; }), detail: results.map(function (r) { return r.detail; }).join("; ") };
+    }
+  );
+
+  addTest(
+    "The whole front face lets a ball through, round ends included; the back and a lone port hole are a line",
+    "the colored half is the front of the capsule, nothing less: a ball meeting the front of a rounded end goes through like one meeting the middle, a ball that clears the end entirely touches nothing, a ball onto the back bounces, and so does one onto the only port hole in the scene",
+    function () {
+      function drop(scene, ballIndex) {
+        var lowest = -Infinity, bounced = false, warped = false, prevVy = 0, prevY = scene.bodies[ballIndex].y;
+        for (var i = 0; i < 90; i++) {
+          PhysicsEngine.step(scene, DT);
+          var b = scene.bodies[ballIndex];
+          lowest = Math.max(lowest, b.y);
+          if (prevVy > 50 && b.vy < 0) bounced = true;
+          if (Math.abs(b.y - prevY) > 100) warped = true;
+          prevVy = b.vy; prevY = b.y;
+        }
+        return { stayedAbove: lowest < 400, bounced: bounced, warped: warped };
+      }
+      var back = portholeScene([PhysicsEngine.createCircle(400, 200, 10, false)]);
+      back.bodies[0].angle = Math.PI; // faces down: the ball from above meets its back
+      var onBack = drop(back, 2);
+      // 112px off center: past the 100px half-length and the 10px cap, but the ball's own 10px reaches the cap's front.
+      var onEnd = drop(portholeScene([PhysicsEngine.createCircle(512, 200, 10, false)]), 2);
+      // 125px: past all of that, touching nothing.
+      var clear = drop(portholeScene([PhysicsEngine.createCircle(525, 200, 10, false)]), 2);
+      var lone = portholeScene([PhysicsEngine.createCircle(400, 200, 10, false)]);
+      lone.bodies.splice(1, 1);
+      var alone = drop(lone, 1);
+      var ok = onBack.stayedAbove && onBack.bounced && !onBack.warped && onEnd.warped && !onEnd.bounced &&
+        !clear.warped && !clear.bounced && !clear.stayedAbove && alone.stayedAbove && alone.bounced;
+      return {
+        pass: ok,
+        detail: "onto the back: bounced=" + onBack.bounced + " warped=" + onBack.warped + "; onto a rounded end's front: warped=" + onEnd.warped +
+          " bounced=" + onEnd.bounced + "; clear of the end: warped=" + clear.warped + " bounced=" + clear.bounced + " fell past=" + !clear.stayedAbove +
+          "; lone port hole: bounced=" + alone.bounced,
+      };
+    }
+  );
+
+  addTest(
+    "A wider exit port hole spreads the crossing point by the length ratio, and leaves the speed alone",
+    "20px off center into a 200px port hole comes out 40px off center of a 400px one, on the far side of its center (the turn is rigid); the overshoot past the line and the velocity are carried over unscaled",
+    function () {
+      var scene = portholeScene([PhysicsEngine.createCircle(420, 200, 10, false)], { length: 400 });
+      var plain = plainScene([PhysicsEngine.createCircle(420, 200, 10, false)]);
+      var ball = scene.bodies[2], after = null, fall = null;
+      for (var i = 0; i < 90 && !after; i++) {
+        PhysicsEngine.step(scene, DT);
+        PhysicsEngine.step(plain, DT);
+        if (ball.y > 600) { after = { x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy }; fall = plain.bodies[0]; }
+      }
+      if (!after) return { pass: false, detail: "the ball never came out" };
+      var ok = Math.abs(after.x - 440) < 1e-9 && Math.abs(after.y - (fall.y + 300)) < 1e-9 && Math.abs(after.vx) < 1e-9 && Math.abs(after.vy - fall.vy) < 1e-9;
+      return {
+        pass: ok,
+        detail: "out at (" + after.x.toFixed(3) + ", " + after.y.toFixed(3) + ") at vy=" + after.vy.toFixed(3) + ": want x=440, y=" + (fall.y + 300).toFixed(3) +
+          " (the plain fall's overshoot) and vy=" + fall.vy.toFixed(3),
+      };
+    }
+  );
+
+  addTest(
+    "A chain tied to the background bounces off the front; a free chain goes through whole, led by its first body",
+    "a port hole takes a body only when nothing holds it to the background: a world hinge or spring anywhere in its chain, or an anchored member, keeps it out. A free chain follows its leader, the lowest member that is no hinge child, and is carried as one piece; a trailing member reaching the front on its own bounces like anything else",
+    function () {
+      // A ball sprung to a point above it, dropped onto the front: tethered, so the front is a wall.
+      var tied = portholeScene([PhysicsEngine.createCircle(400, 300, 10, false)]);
+      tied.springs.push({ bodyA: null, bodyB: 2, localAnchorA: { x: 400, y: 100 }, localAnchorB: { x: 0, y: 0 }, stiffness: 5000, restLength: 300 });
+      var tiedLowest = -Infinity;
+      for (var i = 0; i < 120; i++) { PhysicsEngine.step(tied, DT); tiedLowest = Math.max(tiedLowest, tied.bodies[2].y); }
+      // Two balls joined by a spring, the leader (the lower index) below: it crosses and takes the other along.
+      function pair() { return [PhysicsEngine.createCircle(400, 300, 10, false), PhysicsEngine.createCircle(400, 200, 10, false)]; }
+      var spring = { bodyA: 0, bodyB: 1, localAnchorA: { x: 0, y: 0 }, localAnchorB: { x: 0, y: 0 }, stiffness: 5000, restLength: 100 };
+      var free = portholeScene(pair()), plain = plainScene(pair());
+      free.springs.push({ bodyA: 2, bodyB: 3, localAnchorA: { x: 0, y: 0 }, localAnchorB: { x: 0, y: 0 }, stiffness: 5000, restLength: 100 });
+      plain.springs.push(spring);
+      var carried = null;
+      for (var j = 0; j < 120 && !carried; j++) {
+        PhysicsEngine.step(free, DT);
+        PhysicsEngine.step(plain, DT);
+        if (free.bodies[2].y > 600) {
+          carried = 0;
+          [2, 3].forEach(function (b) {
+            var got = free.bodies[b], want = plain.bodies[b - 2];
+            carried = Math.max(carried, Math.abs(got.x - want.x), Math.abs(got.y - (want.y + 300)), Math.abs(got.vx - want.vx), Math.abs(got.vy - want.vy));
+          });
+        }
+      }
+      // The same pair the other way up: the trailing member meets the front first and bounces.
+      var trailing = portholeScene([PhysicsEngine.createCircle(400, 200, 10, false), PhysicsEngine.createCircle(400, 300, 10, false)]);
+      trailing.springs.push({ bodyA: 2, bodyB: 3, localAnchorA: { x: 0, y: 0 }, localAnchorB: { x: 0, y: 0 }, stiffness: 5000, restLength: 100 });
+      var trailingLowest = -Infinity;
+      for (var k = 0; k < 36; k++) { PhysicsEngine.step(trailing, DT); trailingLowest = Math.max(trailingLowest, trailing.bodies[3].y); }
+      var ok = tiedLowest < 400 && carried !== null && carried < 1e-6 && trailingLowest < 400;
+      return {
+        pass: ok,
+        detail: "tethered ball's lowest y=" + tiedLowest.toFixed(1) + " (want above 400); free pair carried together: " +
+          (carried === null ? "never came out" : "worst difference from the shifted plain pair " + carried.toExponential(2)) +
+          "; trailing member's lowest y=" + trailingLowest.toFixed(1) + " (want above 400)",
+      };
+    }
+  );
+
+  addTest(
+    "JS engine and GPU compiler agree on a port hole pass, in float32 and double-float",
+    "the front test, the crossing test and the exit mapping are written three times (physics-engine.js, and the float32 and multi-float spellings in generateStepOnceGLSL): a turn through a right-facing exit exercises every term of the mapping, and a float32 stage left in the df chain shows up as an error ~1000x larger",
+    function () {
+      function scene() {
+        var s = portholeScene([PhysicsEngine.createCircle(420, 200, 10, false)], { x: 800, y: 300, angle: Math.PI / 2 });
+        s.xInput = null; s.yInput = null; s.output = { body: 2, property: "y" };
+        return s;
+      }
+      var STEPS = 70;
+      var js = PhysicsEngine.cloneScene(scene());
+      js.bodies.forEach(PhysicsEngine.computeMass);
+      var traj = PhysicsGPU.runSceneOnGPU(scene(), STEPS);
+      var worst = 0;
+      for (var i = 0; i < STEPS; i++) {
+        PhysicsEngine.step(js, DT);
+        for (var b = 0; b < js.bodies.length; b++) worst = Math.max(worst, dist(js.bodies[b].x, js.bodies[b].y, traj[i][b].x, traj[i][b].y));
+      }
+      var ref = cpuStateAt(scene(), 0, 0, STEPS, 2);
+      var dfErr = gridResidualAtPoint(scene(), STEPS, 0, 0, "df", 2, ref).err;
+      var f32Err = gridResidualAtPoint(scene(), STEPS, 0, 0, "f32", 2, ref).err;
+      var cameOut = js.bodies[2].x > 800;
+      return {
+        pass: cameOut && worst < 0.01 && dfErr < 1e-6 && dfErr * 20 < f32Err,
+        detail: "ball out of the right-facing port hole=" + cameOut + "; float32 trajectory within " + worst.toFixed(5) + "px of JS over " + STEPS +
+          " steps; the grid shader's end state: df off by " + dfErr.toExponential(2) + "px, float32 by " + f32Err.toExponential(2) + "px",
+      };
+    }
+  );
+
+  addTest(
+    "JS engine and GPU compiler agree on a port hole pass under Mutual Gravity, with a sprung pair",
+    "the exit-side re-integration tells a chain's own forces (turned with it) from the outside pull (taken at each side of the warp, from every body outside the chain): the shader builds that pull from its own Mutual Gravity terms, so a sprung pair drawn into an anchored port hole has to come out where the JS engine puts it, in float32 and double-float",
+    function () {
+      function scene() {
+        var s = portholeScene([PhysicsEngine.createCircle(420, 230, 10, false), PhysicsEngine.createCircle(420, 150, 10, false)], { x: 800, y: 300, angle: Math.PI / 2 });
+        s.mutualGravity = true;
+        s.springs.push({ bodyA: 2, bodyB: 3, localAnchorA: { x: 0, y: 0 }, localAnchorB: { x: 0, y: 0 }, stiffness: 5000, restLength: 80 });
+        s.xInput = null; s.yInput = null; s.output = { body: 2, property: "y" };
+        return s;
+      }
+      var STEPS = 50;
+      var js = PhysicsEngine.cloneScene(scene());
+      js.bodies.forEach(PhysicsEngine.computeMass);
+      var traj = PhysicsGPU.runSceneOnGPU(scene(), STEPS);
+      var worst = 0, outAt = -1;
+      for (var i = 0; i < STEPS; i++) {
+        PhysicsEngine.step(js, DT);
+        if (outAt < 0 && js.bodies[2].x > 800) outAt = i;
+        for (var b = 2; b < 4; b++) worst = Math.max(worst, dist(js.bodies[b].x, js.bodies[b].y, traj[i][b].x, traj[i][b].y));
+      }
+      var ref = cpuStateAt(scene(), 0, 0, STEPS, 2);
+      var dfErr = gridResidualAtPoint(scene(), STEPS, 0, 0, "df", 2, ref).err;
+      return {
+        pass: outAt >= 0 && worst < 0.02 && dfErr < 1e-6,
+        detail: "leader out of the exit at step " + outAt + "; float32 trajectory within " + worst.toFixed(5) + "px of JS over " + STEPS +
+          " steps; the grid shader's end state in df off by " + dfErr.toExponential(2) + "px",
+      };
+    }
+  );
+
+  addTest(
+    "The fractal grid's per-pixel codegen carries a free hinged chain through a port hole as one piece",
+    "the grid builds each pixel's scene symbolically (generateGridInitialStateGLSL) and steps it with the shared loop, with the chain's transport emitted per member: a hinged pair of lines, the parent leading and the child trailing above it, has to be carried through the turned exit as one piece and match the JS engine for that pixel. Compared through the steps around the pass: a trailing member lands behind the exit and meets its back, and the hinge solver's reply to that is not what this test is about",
+    function () {
+      var STEPS = 80, WORLD_X = 9, AFTER = 8;
+      var scene = portholeScene([
+        PhysicsEngine.createLine(400, 200, 60, 0, false),
+        PhysicsEngine.createLine(400, 140, 60, 0, false),
+      ], { x: 800, y: 300, angle: Math.PI / 2 });
+      // The parent's pin sits 60px above its center, on the child's center: the child trails the fall.
+      scene.hinges.push({ bodyA: 2, bodyB: 3, localAnchorA: { x: 0, y: -60 }, localAnchorB: { x: 0, y: 0 } });
+      scene.xInput = { body: 2, property: "x" }; scene.yInput = null; scene.output = { body: 2, property: "y" };
+      var compiled = PhysicsGridCodegen.compileHoverTrajectoryGLSL(scene, WORLD_X, 0, STEPS, "f32");
+      var traj = PhysicsGPU.runCompiledTrajectoryOnGPU(compiled, STEPS);
+      var js = PhysicsGridCodegen.computeOffsetSceneNumeric(scene, WORLD_X, 0);
+      var worst = 0, outAt = -1, parentAt = null, childAt = null, angleTurn = null;
+      for (var i = 0; i < STEPS && (outAt < 0 || i <= outAt + AFTER); i++) {
+        PhysicsEngine.step(js, PhysicsGPU.FIXED_DT);
+        for (var b = 2; b < 4; b++) worst = Math.max(worst, dist(js.bodies[b].x, js.bodies[b].y, traj[i][b].x, traj[i][b].y));
+        if (outAt < 0 && js.bodies[2].x > 800) {
+          outAt = i;
+          parentAt = { x: js.bodies[2].x, y: js.bodies[2].y };
+          childAt = { x: js.bodies[3].x, y: js.bodies[3].y };
+          angleTurn = js.bodies[3].angle;
+        }
+      }
+      // The child was 60px above the parent; the turn through the right-facing exit (by its angle less the
+      // entry's, plus pi: 3pi/2 here) puts it 60px behind, at the parent's height.
+      var carried = childAt !== null && Math.abs(childAt.x - (parentAt.x - 60)) < 1e-6 && Math.abs(childAt.y - parentAt.y) < 1e-6;
+      return {
+        pass: outAt >= 0 && carried && worst < 0.05 && Math.abs(angleTurn - 3 * Math.PI / 2) < 1e-6,
+        detail: "parent out of the exit at step " + outAt + ", child carried along=" + carried + " (parent at " +
+          (parentAt ? parentAt.x.toFixed(2) + ", " + parentAt.y.toFixed(2) : "n/a") + ", child at " +
+          (childAt ? childAt.x.toFixed(2) + ", " + childAt.y.toFixed(2) : "n/a") + "), both turned by " + (angleTurn === null ? "n/a" : angleTurn.toFixed(4)) +
+          " (want 3pi/2); worst JS/GPU disagreement " + worst.toFixed(5) + "px through " + AFTER + " steps past the pass, at worldX=" + WORLD_X,
+      };
+    }
+  );
+
+  addTest(
+    "A port hole pass is not an edge: Sticky Edges play on through it, and still stop at a real edge later",
+    "reported from the map: a replay froze at the pass. The sticky stop, in the grid shader and in findWrapStopStep alike, took any jump of over half the frame in one step for an edge wrap, and a port hole moves a body that far. Both now read the step's own wrap flags (PhysicsEngine.step's wrapFlags, the shader's g_wrapDx/Dy, carried in the trajectory's sentinel column), so a pass is a pass and the run goes on until the ball really leaves the frame",
+    function () {
+      // The reported scene: the pass jumps 554px across an 1104px frame; the ball then drifts off the left edge.
+      var scene = {
+        mutualGravity: false, edgeMode: "sticky", frameWidth: 1104, frameHeight: 862,
+        bodies: [
+          PhysicsEngine.createCircle(279.19, 240.21, 30, false),
+          PhysicsEngine.createPorthole(429.38, 644.51, 262.1112, 0.2538, "orange", true),
+          PhysicsEngine.createPorthole(808.16, 562.04, 79.2456, 5.3053, "green", true),
+        ],
+        hinges: [], springs: [], xInput: null, yInput: null, output: { body: 0, property: "y" },
+      };
+      var STEPS = 200;
+      var initial = scene.bodies.map(function (b) { return { x: b.x, y: b.y, angle: b.angle }; });
+      var watched = PhysicsHingeGeometry.wrapWatchedBodyIndices(scene);
+      // The first big jump the step did not flag as a wrap is the pass; the first flagged step is the real exit.
+      function passStep(rows) {
+        for (var i = 1; i < rows.length; i++) {
+          var a = rows[i][0], b = rows[i - 1][0], jump = dist(a.x, a.y, b.x, b.y);
+          if (!a.wrapX && !a.wrapY && jump > 100) return { step: i + 1, jump: jump };
+        }
+        return null;
+      }
+      function exitStep(rows) {
+        for (var i = 0; i < rows.length; i++) if (rows[i][0].wrapX || rows[i][0].wrapY) return i + 1;
+        return -1;
+      }
+      var js = PhysicsEngine.runTrajectory(scene, STEPS, DT), gpu = PhysicsGPU.runSceneOnGPU(scene, STEPS);
+      var jsStop = PhysicsHingeGeometry.findWrapStopStep(js, watched, 0, scene.frameWidth, scene.frameHeight, initial, DT);
+      var gpuStop = PhysicsHingeGeometry.findWrapStopStep(gpu, watched, 0, scene.frameWidth, scene.frameHeight, initial, DT);
+      var jsPass = passStep(js), gpuPass = passStep(gpu), leftAt = exitStep(js), gpuLeftAt = exitStep(gpu);
+      var ok = jsPass && gpuPass && jsPass.step === gpuPass.step && jsPass.jump > scene.frameWidth / 2 && leftAt > jsPass.step + 20 && gpuLeftAt === leftAt &&
+        jsStop && gpuStop && jsStop.step === leftAt - 1 && gpuStop.step === jsStop.step;
+      return {
+        pass: ok,
+        detail: "pass at step " + (jsPass ? jsPass.step + ", a " + jsPass.jump.toFixed(0) + "px jump" : "none") + " (GPU " + (gpuPass ? gpuPass.step : "none") +
+          "), unflagged; the ball leaves the frame at step " + leftAt + " (GPU " + gpuLeftAt + "), and the stop lands at " + (jsStop ? jsStop.step : "none") +
+          " (GPU " + (gpuStop ? gpuStop.step : "none") + ")",
+      };
+    }
+  );
+
+  addTest(
+    "A shared link carries both port holes with their colors, and refuses a second of either",
+    "share-url.js: a port hole's shape code is its color (po, pg), so the editor can tell which one is missing; two of a color would leave the pair undefined",
+    function () {
+      var scene = portholeScene([PhysicsEngine.createCircle(420, 200, 10, false)]);
+      scene.xInput = null; scene.yInput = null; scene.output = null;
+      var back = ShareUrl.decode("#" + ShareUrl.encode({ page: "bldr", scene: scene })).scene;
+      var ports = back.bodies.filter(function (b) { return b.type === "porthole"; });
+      var colors = ports.map(function (b) { return b.color; }).join(",");
+      var sameShape = ports.every(function (b) { return b.length === 200 && b.isAnchored; });
+      var refused = null;
+      try { ShareUrl.decode("#bldr/body:po:0:0:0:200!;po:0:300:3.1416:200!,frmw:900,frmh:600"); } catch (err) { refused = err.message; }
+      return {
+        pass: colors === "orange,green" && sameShape && /second/.test(refused || ""),
+        detail: "port holes came back as " + colors + " with their length and anchoring=" + sameShape + "; two orange ones: " + (refused ? "refused (" + refused + ")" : "ACCEPTED"),
       };
     }
   );
@@ -3728,7 +4093,7 @@
       PhysicsGridCodegen.generatePlaybackStateOutputsGLSL(layersPerGroup).join("\n"), "",
       PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(scene)), "",
       PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision,
-        scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene)), "",
+        scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), initial.springs), "",
       "void main() {",
       // A different start per texel, so state crossing between texels shows up too.
       "  " + B.scalar + " worldX = " + B.fromFloat("(gl_FragCoord.x - 0.5) * 7.0") + ";",
@@ -3740,7 +4105,7 @@
       indent(PhysicsGridCodegen.generatePlaybackStateLoadGLSL(vars, "u_state", "ivec2(gl_FragCoord.xy)")),
       "  }",
       "  for (int i = 0; i < u_steps; i++) { stepOnce(" +
-        PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, precision) + "); }",
+        PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, precision, initial.springs) + "); }",
       indent(PhysicsGridCodegen.generatePlaybackStateStoreGLSL(vars, "u_group", layersPerGroup)),
       "}",
     ].join("\n");
@@ -3868,6 +4233,16 @@
   );
 
   addTest(
+    "Grid playback: a port hole scene's state round trip is exact",
+    "a pass through a port hole rewrites positions, angles and velocities from the step's own start positions: none of it needs carrying between draws, and a saved-and-reloaded run must land on the same bits",
+    function () {
+      var scene = portholeScene([PhysicsEngine.createCircle(420, 200, 10, false)], { x: 800, y: 300, angle: Math.PI / 2 });
+      scene.xInput = { body: 2, property: "x" }; scene.yInput = null; scene.output = { body: 2, property: "y" };
+      return comparePlaybackLegs(scene, "f32", 90, [20, 30, 40], 8);
+    }
+  );
+
+  addTest(
     "Grid playback: mutual gravity's state round trip is exact",
     "Mutual Gravity's pull is recomputed from the positions every step: stateless by design, so nothing beyond the six accumulators should need carrying",
     function () {
@@ -3903,7 +4278,7 @@
     });
   }
 
-    // One of everything a scene can hold: both shapes, anchors, velocities, both hinge kinds,
+    // One of everything a scene can hold: every shape, anchors, velocities, both hinge kinds,
     // both spring kinds, a pair Output, and every setting off its default.
   function everythingScene() {
     return {
@@ -3913,6 +4288,8 @@
         { type: "line", x: -334, y: -173.5, angle: -0.7679, isAnchored: true, length: 479, vx: 0, vy: 0, w: 0 },
         { type: "line", x: 0, y: 0, angle: 3.1416, isAnchored: false, length: 95.5, vx: 12.5, vy: 0, w: 0 },
         { type: "circle", x: 410.0625, y: 288.125, angle: 0, isAnchored: false, radius: 18.5, vx: 0, vy: 44, w: -0.12 },
+        { type: "porthole", color: "orange", x: 120, y: -40, angle: 0, isAnchored: true, length: 220, vx: 0, vy: 0, w: 0 },
+        { type: "porthole", color: "green", x: -300, y: 180, angle: 2.2, isAnchored: false, length: 160, vx: 0, vy: 0, w: 0.2 },
       ],
       hinges: [
         { bodyA: null, bodyB: 0, localAnchorA: { x: -188, y: 51.5 }, localAnchorB: { x: -70, y: 1 } },
