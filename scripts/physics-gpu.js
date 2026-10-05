@@ -1333,6 +1333,25 @@
         [0, 1].forEach(function (k) {
           var pi = portals[k], qi = portals[1 - k], t = "_" + oi + "_" + pi;
           var tP = phT(pi, true), tQ = phT(qi, true), members = passGroup[oi].members;
+          // A moving port hole's velocity at a member's spot: velocity and spin are kept relative to it.
+          var pMoves = !consts[pi].isAnchored, qMoves = !consts[qi].isAnchored;
+          function phVelocityAt(idx, pos) {
+            return df
+              ? "dfVelocityAt(" + B(idx) + ", dv2Sub(" + pos + ", dv2(" + B(idx) + ".x, " + B(idx) + ".y)))"
+              : "velocityAt(" + B(idx) + ", " + pos + " - vec2(" + B(idx) + ".x, " + B(idx) + ".y))";
+          }
+          function phRel(v) { return pMoves ? (df ? "dv2Sub(" + v + ", phFin)" : v + " - phFin") : v; }
+          function phOut(v) { return qMoves ? (df ? "dv2Add(" + v + ", phFout)" : "(" + v + " + phFout)") : v; }
+          function phSpinLine(m) {
+            if (!pMoves && !qMoves) return null;
+            var w = B(m) + ".w";
+            if (df) {
+              var turn = pMoves && qMoves ? "dfSub(" + B(qi) + ".w, " + B(pi) + ".w)" : (qMoves ? B(qi) + ".w" : B(pi) + ".w");
+              return "      " + w + " = " + (qMoves ? "dfAdd(" : "dfSub(") + w + ", " + turn + ");";
+            }
+            if (pMoves && qMoves) return "      " + w + " += " + B(qi) + ".w - " + B(pi) + ".w;";
+            return "      " + w + (qMoves ? " += " + B(qi) : " -= " + B(pi)) + ".w;";
+          }
           lines.push("  " + (k === 0 ? "if" : "else if") + " (phCross" + t + ") {");
           if (df) {
             lines.push("    DVec2 phCrossPt = dv2Sub(dv2(" + B(qi) + ".x, " + B(qi) + ".y), dv2Scale(" + tQ + ", dfMul(phSx" + t + ", dfDiv(BODY" + qi + "_HALF, BODY" + pi + "_HALF))));");
@@ -1368,23 +1387,27 @@
               outsidePullLines("phExtIn", m, members, "phS" + m).forEach(function (l) { lines.push(l); });
               outsidePullLines("phExtOut", m, members, "phExitStar").forEach(function (l) { lines.push(l); });
             }
+            if (pMoves) lines.push("      " + E.vecType + " phFin = " + phVelocityAt(pi, "phStar") + ";");
+            if (qMoves) lines.push("      " + E.vecType + " phFout = " + phVelocityAt(qi, "phExitStar") + ";");
             if (df) {
               lines.push("      DVec2 phAOut = dv2Add(" + phRot("dv2Sub(phA, phExtIn)") + ", phExtOut);");
               lines.push("      DVec2 phVPre = " + advance(m, "u" + m, "phTs") + ";");
-              lines.push("      DVec2 phDv = dv2Sub(" + E.advanceVelocity + "(" + phRot("phVPre") + ", phTau, phAOut), " + phRot(advance(m, "phVPre", "phTau")) + ");");
+              lines.push("      DVec2 phDv = dv2Sub(" + E.advanceVelocity + "(" + phOut(phRot(phRel("phVPre"))) + ", phTau, phAOut), " + phOut(phRot(phRel(advance(m, "phVPre", "phTau")))) + ");");
               lines.push("      DVec2 phR = " + phRot("dv2Sub(phHere, phLead)") + ";");
               lines.push("      " + B(m) + ".x = dfAdd(dfAdd(phExit.x, phR.x), dfMul(phDv.x, phTau)); " + B(m) + ".y = dfAdd(dfAdd(phExit.y, phR.y), dfMul(phDv.y, phTau));");
               lines.push("      " + B(m) + ".angle = dfAdd(" + B(m) + ".angle, phPhi);");
-              lines.push("      DVec2 phV = dv2Add(" + phRot("dv2(" + B(m) + ".vx, " + B(m) + ".vy)") + ", phDv); " + B(m) + ".vx = phV.x; " + B(m) + ".vy = phV.y;");
+              lines.push("      DVec2 phV = dv2Add(" + phOut(phRot(phRel("dv2(" + B(m) + ".vx, " + B(m) + ".vy)"))) + ", phDv); " + B(m) + ".vx = phV.x; " + B(m) + ".vy = phV.y;");
             } else {
               lines.push("      vec2 phAOut = " + phRot("phA - phExtIn") + " + phExtOut;");
               lines.push("      vec2 phVPre = " + advance(m, "u" + m, "phTs") + ";");
-              lines.push("      vec2 phDv = " + E.advanceVelocity + "(" + phRot("phVPre") + ", phTau, phAOut) - " + phRot(advance(m, "phVPre", "phTau")) + ";");
+              lines.push("      vec2 phDv = " + E.advanceVelocity + "(" + phOut(phRot(phRel("phVPre"))) + ", phTau, phAOut) - " + phOut(phRot(phRel(advance(m, "phVPre", "phTau")))) + ";");
               lines.push("      vec2 phR = " + phRot("phHere - phLead") + ";");
               lines.push("      " + B(m) + ".x = phExit.x + phR.x + phDv.x * phTau; " + B(m) + ".y = phExit.y + phR.y + phDv.y * phTau;");
               lines.push("      " + B(m) + ".angle += phPhi;");
-              lines.push("      vec2 phV = " + phRot("vec2(" + B(m) + ".vx, " + B(m) + ".vy)") + " + phDv; " + B(m) + ".vx = phV.x; " + B(m) + ".vy = phV.y;");
+              lines.push("      vec2 phV = " + phOut(phRot(phRel("vec2(" + B(m) + ".vx, " + B(m) + ".vy)"))) + " + phDv; " + B(m) + ".vx = phV.x; " + B(m) + ".vy = phV.y;");
             }
+            var spinLine = phSpinLine(m);
+            if (spinLine) lines.push(spinLine);
             lines.push("    }");
           });
           lines.push("  }");

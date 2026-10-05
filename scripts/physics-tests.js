@@ -3074,6 +3074,111 @@
     }
   );
 
+  // A port hole turning in place: hinged to the background at its center, set spinning.
+  function spinPorthole(scene, index, angle, w) {
+    var p = scene.bodies[index];
+    p.isAnchored = false; p.angle = angle; p.w = w;
+    scene.hinges.push({ bodyA: null, bodyB: index, localAnchorA: { x: p.x, y: p.y }, localAnchorB: { x: 0, y: 0 } });
+    scene.bodies.forEach(PhysicsEngine.computeMass);
+    return scene;
+  }
+
+  addTest(
+    "A moving exit port hole hands over its own motion: what leaves it carries the spot's velocity, and its spin",
+    "velocity and spin are kept relative to the port holes, so a spinning exit (hinged at its center, turning at 3 rad/s) adds the velocity of the spot the ball leaves from, w x r, to what a still exit standing at the same angle gives, and hands the ball its spin. A still pair adds nothing, so every earlier scene is untouched",
+    function () {
+      var OMEGA = 3, STEPS = 60;
+      function scene(angle, spinning) {
+        var s = portholeScene([PhysicsEngine.createCircle(420, 200, 10, false)], { x: 800, y: 300, angle: angle });
+        if (spinning) spinPorthole(s, 1, angle, OMEGA);
+        s.bodies.forEach(PhysicsEngine.computeMass);
+        return s;
+      }
+      var spin = scene(Math.PI / 2, true), Q = spin.bodies[1], passAt = -1;
+      for (var i = 0; i < STEPS && passAt < 0; i++) { PhysicsEngine.step(spin, DT); if (spin.bodies[2].x > 600) passAt = i + 1; }
+      if (passAt < 0) return { pass: false, detail: "the ball never came out of the spinning exit" };
+      var ball = spin.bodies[2];
+      // The ball fell 20px right of the orange's center, so it left the green 20px from its center: w x r there.
+      var tx = Math.cos(Q.angle), ty = Math.sin(Q.angle), rx = -20 * tx, ry = -20 * ty;
+      var spotVx = Q.vx - Q.w * ry, spotVy = Q.vy + Q.w * rx;
+      // The still twin: the green anchored where the spinner stood at the end of that step.
+      var still = scene(Q.angle, false);
+      for (var j = 0; j < passAt; j++) PhysicsEngine.step(still, DT);
+      var twin = still.bodies[2];
+      var dvx = ball.vx - twin.vx, dvy = ball.vy - twin.vy;
+      var velocityOk = Math.abs(dvx - spotVx) < 0.02 && Math.abs(dvy - spotVy) < 0.02;
+      var placeOk = dist(ball.x, ball.y, twin.x, twin.y) < 1e-3;
+      var spinOk = Math.abs(ball.w - Q.w) < 1e-9 && twin.w === 0;
+      return {
+        pass: Q.w > 2 && velocityOk && placeOk && spinOk,
+        detail: "pass at step " + passAt + " with the exit turning at " + Q.w.toFixed(3) + " rad/s; the ball left " + Math.hypot(spotVx, spotVy).toFixed(2) +
+          "px/s faster than from the still twin, (" + dvx.toFixed(3) + ", " + dvy.toFixed(3) + ") against the spot's (" + spotVx.toFixed(3) + ", " + spotVy.toFixed(3) +
+          "), from the same place to " + dist(ball.x, ball.y, twin.x, twin.y).toExponential(1) + "px, spinning at " + ball.w.toFixed(3) + " (twin " + twin.w + ")",
+      };
+    }
+  );
+
+  addTest(
+    "A port hole that sweeps over a resting ball throws it out of the other at the sweep's speed, spinning the other way",
+    "the entry side of the same rule: what comes out is the ball's velocity relative to the spot that crossed it. Reported from a map with a swinging port hole: a ball it swept up came out of the still one at its own near-zero speed, pointing back into the face it had just left, and the pair traded it back and forth for twenty steps",
+    function () {
+      var OMEGA = 3, STEPS = 30;
+      var s = spinPorthole(portholeScene([PhysicsEngine.createCircle(480, 400, 10, false)]), 0, 0.9 * Math.PI, OMEGA);
+      var ball = s.bodies[2], green = s.bodies[1], passAt = -1, outward = 0, awayAfter = true, lastF = 0;
+      for (var i = 0; i < STEPS; i++) {
+        var bx = ball.x, by = ball.y;
+        PhysicsEngine.step(s, DT);
+        var f = (ball.y - green.y) * -Math.cos(green.angle) + (ball.x - green.x) * Math.sin(green.angle);
+        if (passAt < 0 && dist(bx, by, ball.x, ball.y) > 100) { passAt = i + 1; outward = ball.vy; lastF = f; }
+        else if (passAt > 0 && i + 1 <= passAt + 5) { if (f <= lastF) awayAfter = false; lastF = f; }
+      }
+      // The face swept down through the ball at 3 rad/s x ~80px while the ball fell at ~80px/s: ~160px/s between them.
+      return {
+        pass: passAt > 0 && outward > 100 && awayAfter && Math.abs(ball.w + OMEGA) < 0.01,
+        detail: "swept up at step " + passAt + ", out of the still exit at " + outward.toFixed(1) + "px/s (want over 100; its own fall was ~80), moving away from it through the next 5 steps=" +
+          awayAfter + ", spinning at " + ball.w.toFixed(3) + " (want " + (-OMEGA) + ")",
+      };
+    }
+  );
+
+  addTest(
+    "JS engine and GPU compiler agree on a pass through a moving port hole, in float32 and double-float",
+    "the port holes' own velocity at the crossing spots, and the spin handed over, are written three times as well: a spinning entry and a spinning exit, each hinged at its center, exercise the subtraction and the addition in both shader spellings",
+    function () {
+      var OMEGA = 3;
+      function exitSpins() {
+        var s = spinPorthole(portholeScene([PhysicsEngine.createCircle(420, 200, 10, false)], { x: 800, y: 300, angle: Math.PI / 2 }), 1, Math.PI / 2, OMEGA);
+        s.xInput = null; s.yInput = null; s.output = { body: 2, property: "y" };
+        return s;
+      }
+      function entrySpins() {
+        var s = spinPorthole(portholeScene([PhysicsEngine.createCircle(480, 400, 10, false)]), 0, 0.9 * Math.PI, OMEGA);
+        s.xInput = null; s.yInput = null; s.output = { body: 2, property: "y" };
+        return s;
+      }
+      function check(make, steps) {
+        var js = PhysicsEngine.cloneScene(make());
+        js.bodies.forEach(PhysicsEngine.computeMass);
+        var traj = PhysicsGPU.runSceneOnGPU(make(), steps);
+        var worst = 0, passAt = -1;
+        for (var i = 0; i < steps; i++) {
+          var bx = js.bodies[2].x, by = js.bodies[2].y;
+          PhysicsEngine.step(js, DT);
+          if (passAt < 0 && dist(bx, by, js.bodies[2].x, js.bodies[2].y) > 100) passAt = i + 1;
+          for (var b = 0; b < js.bodies.length; b++) worst = Math.max(worst, dist(js.bodies[b].x, js.bodies[b].y, traj[i][b].x, traj[i][b].y));
+        }
+        var ref = cpuStateAt(make(), 0, 0, steps, 2);
+        return { passAt: passAt, worst: worst, dfErr: gridResidualAtPoint(make(), steps, 0, 0, "df", 2, ref).err };
+      }
+      var out = check(exitSpins, 55), into = check(entrySpins, 30);
+      return {
+        pass: out.passAt > 0 && into.passAt > 0 && out.worst < 0.05 && into.worst < 0.05 && out.dfErr < 1e-5 && into.dfErr < 1e-5,
+        detail: "spinning exit: pass at step " + out.passAt + ", float32 within " + out.worst.toFixed(5) + "px of JS over 55 steps, df end state off by " + out.dfErr.toExponential(2) +
+          "px; spinning entry: pass at step " + into.passAt + ", float32 within " + into.worst.toFixed(5) + "px over 30 steps, df off by " + into.dfErr.toExponential(2) + "px",
+      };
+    }
+  );
+
   addTest(
     "The fractal grid's per-pixel codegen carries a free hinged chain through a port hole as one piece",
     "the grid builds each pixel's scene symbolically (generateGridInitialStateGLSL) and steps it with the shared loop, with the chain's transport emitted per member: a hinged pair of lines, the parent leading and the child trailing above it, has to be carried through the turned exit as one piece and match the JS engine for that pixel. Compared through the steps around the pass: a trailing member lands behind the exit and meets its back, and the hinge solver's reply to that is not what this test is about",

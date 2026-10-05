@@ -885,6 +885,12 @@
   // turn with the port holes, so the exit continues the entry. The share of the step past the crossing
   // is then re-integrated on the exit side (outside forces from there, the chain's own turned with it),
   // or the exit's gravity would start up to a step late, by an amount that saws with the start.
+  // A port hole's velocity at a point, from its own motion about its end-of-step center.
+  function portholeVelocityAt(P, x, y) {
+    if (P.isAnchored) return { x: 0, y: 0 };
+    return { x: P.vx - P.w * (y - P.y), y: P.vy + P.w * (x - P.x) };
+  }
+
   function applyPortholeTransports(scene, portals, groupOf, startPose, u, acc, dt, maxSpeed) {
     var bodies = scene.bodies;
     for (var i = 0; i < bodies.length; i++) {
@@ -909,6 +915,7 @@
         // The turn taking P's inward normal onto Q's outward one, from the two tangents.
         var cs = -(aq.tx * a1.tx + aq.ty * a1.ty), sn = -(a1.tx * aq.ty - a1.ty * aq.tx);
         var phi = Q.angle - P.angle + Math.PI;
+        var spinP = P.isAnchored ? 0 : P.w, spinQ = Q.isAnchored ? 0 : Q.w;
         var tStar = lambda * dt, tau = dt - tStar;
         var leadX = O.x, leadY = O.y;
         var leadStarX = startO.x + (O.x - startO.x) * lambda, leadStarY = startO.y + (O.y - startO.y) * lambda;
@@ -924,16 +931,21 @@
           var outX = inX * cs - inY * sn + extOut.x, outY = inX * sn + inY * cs + extOut.y;
           // Two legs split at the crossing, turned there or not: their difference is what the step's
           // whole-step velocity, and the travel it drove, got wrong.
+          // Velocity and spin are kept relative to the port holes' own motion at the member's spot.
+          var fin = portholeVelocityAt(P, starX, starY), fout = portholeVelocityAt(Q, exitStarX, exitStarY);
           var pre = advanceVelocity(u[m].x, u[m].y, tStar, a.x, a.y, maxSpeed);
-          var turned = advanceVelocity(pre.x * cs - pre.y * sn, pre.x * sn + pre.y * cs, tau, outX, outY, maxSpeed);
+          var preX = pre.x - fin.x, preY = pre.y - fin.y;
+          var turned = advanceVelocity(preX * cs - preY * sn + fout.x, preX * sn + preY * cs + fout.y, tau, outX, outY, maxSpeed);
           var straight = advanceVelocity(pre.x, pre.y, tau, a.x, a.y, maxSpeed);
-          var dvx = turned.x - (straight.x * cs - straight.y * sn), dvy = turned.y - (straight.x * sn + straight.y * cs);
-          var ox = b.x - leadX, oy = b.y - leadY, vx = b.vx, vy = b.vy;
+          var strX = straight.x - fin.x, strY = straight.y - fin.y;
+          var dvx = turned.x - (strX * cs - strY * sn + fout.x), dvy = turned.y - (strX * sn + strY * cs + fout.y);
+          var ox = b.x - leadX, oy = b.y - leadY, vx = b.vx - fin.x, vy = b.vy - fin.y;
           b.x = exitX + ox * cs - oy * sn + dvx * tau;
           b.y = exitY + ox * sn + oy * cs + dvy * tau;
           b.angle += phi;
-          b.vx = vx * cs - vy * sn + dvx;
-          b.vy = vx * sn + vy * cs + dvy;
+          b.vx = vx * cs - vy * sn + fout.x + dvx;
+          b.vy = vx * sn + vy * cs + fout.y + dvy;
+          b.w += spinQ - spinP;
         });
         break;
       }
