@@ -222,6 +222,8 @@
       ctx.strokeStyle = "rgba(255,255,255,0.35)";
       ctx.lineWidth = 1.5;
       ctx.stroke();
+    } else if (body.type === "porthole") {
+      drawPorthole(ctx, body.x, body.y, body.angle, body.length, body.color, { selected: selected, anchored: body.isAnchored });
     } else {
       var endpoints = PhysicsEngine.getLineEndpoints(body);
       ctx.lineCap = "round";
@@ -236,33 +238,112 @@
       ctx.lineWidth = PhysicsEngine.LINE_THICKNESS;
       ctx.strokeStyle = body.isAnchored ? "#5a6178" : "#3a63d1";
       ctx.stroke();
-      if (body.type === "porthole") drawPortholeBand(body.x, body.y, body.angle, body.length, body.color);
     }
     ctx.restore();
   }
 
-  // The front half of the capsule in the port hole's color, round ends included: the line split along
-  // its center line. What enters this half leaves the other port hole.
+  // A port hole, the look Evan picked from rendered options: a 5px rim in its color around a black
+  // center, the center bulging 2px past the rim over the middle of the front, the side that takes
+  // bodies in. The rim is an ellipse stroked along its own inset path; PhysicsEngine.portholeOval is
+  // the two-arc fit of this outline that the physics bounces off. Local coordinates: x along the
+  // port hole, y toward its back.
   var PORTHOLE_PAINT = { orange: "#ff8a1f", green: "#36d399" };
-  function drawPortholeBand(x, y, angle, length, color) {
-    var a = PhysicsEngine.portholeAxes(angle);
-    var reach = length / 2 + PhysicsEngine.LINE_THICKNESS;
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(x - a.tx * reach, y - a.ty * reach);
-    ctx.lineTo(x + a.tx * reach, y + a.ty * reach);
-    ctx.lineTo(x + (a.tx + a.nx) * reach, y + (a.ty + a.ny) * reach);
-    ctx.lineTo(x + (a.nx - a.tx) * reach, y + (a.ny - a.ty) * reach);
-    ctx.closePath();
-    ctx.clip();
-    ctx.beginPath();
-    ctx.moveTo(x - a.tx * length / 2, y - a.ty * length / 2);
-    ctx.lineTo(x + a.tx * length / 2, y + a.ty * length / 2);
-    ctx.lineCap = "round";
-    ctx.lineWidth = PhysicsEngine.LINE_THICKNESS;
-    ctx.strokeStyle = PORTHOLE_PAINT[color] || PORTHOLE_PAINT.orange;
-    ctx.stroke();
-    ctx.restore();
+  var PORTHOLE_RIM = 5;
+  var PORTHOLE_BULGE = 2;
+  var PORTHOLE_BULGE_SPAN = 0.9;
+  // Light out of the front. The oval is a circle seen off axis, and the streaks stand on its rim at
+  // equal steps of angle around that circle, so in this view they bunch toward the ends; the ones on
+  // the far side rise across the black and out over the front. Each reaches a random 60-100% of
+  // HEIGHT past the front edge, from a fixed sequence so nothing flickers. The middle ones stand
+  // square to the port hole; toward the ends they fan outward, FAN_MAX degrees * (x/a)^FAN.
+  var PORTHOLE_STREAK_HEIGHT = 25;
+  var PORTHOLE_STREAK_SPACING = 44; // circumference per streak
+  var PORTHOLE_STREAK_FAN = 2;
+  var PORTHOLE_STREAK_FAN_MAX = 45;
+  function portholeStreaks(o) {
+    var rx = o.a - PORTHOLE_RIM / 2, ry = o.b - PORTHOLE_RIM / 2;
+    var count = Math.max(4, Math.round(2 * Math.PI * o.a / PORTHOLE_STREAK_SPACING));
+    var seed = 20261009, list = [];
+    function next() { seed = (seed * 48271) % 2147483647; return seed / 2147483647; }
+    for (var i = 0; i < count; i++) {
+      // A third of a step off, so no two streaks share an x.
+      var th = 2 * Math.PI * (i + 1 / 3) / count;
+      var x = rx * Math.cos(th), y = ry * Math.sin(th), u = x / o.a;
+      var tilt = PORTHOLE_STREAK_FAN_MAX * Math.PI / 180 * Math.pow(Math.abs(u), PORTHOLE_STREAK_FAN) * (u < 0 ? -1 : 1);
+      var front = -o.b * Math.sqrt(Math.max(0, 1 - u * u));
+      var h = (y - front) / Math.cos(tilt) + PORTHOLE_STREAK_HEIGHT * (0.6 + 0.4 * next());
+      list.push({ x: x, y: y, h: h, w: 0.8 + 0.9 * next(), k: 0.6 + 0.4 * next(), tilt: tilt });
+    }
+    return list;
+  }
+  // A color with an alpha: hex, rgb() and hsl() forms; anything else is used as it is.
+  function withAlpha(color, alpha) {
+    var m = /^#([0-9a-f]{6})$/i.exec(color);
+    if (m) return "rgba(" + parseInt(m[1].slice(0, 2), 16) + "," + parseInt(m[1].slice(2, 4), 16) + "," + parseInt(m[1].slice(4, 6), 16) + "," + alpha + ")";
+    m = /^(rgb|hsl)\((.*)\)$/i.exec(color);
+    if (m) return m[1] + "a(" + m[2] + "," + alpha + ")";
+    return color;
+  }
+  function lighten(color, amount) {
+    var m = /^#([0-9a-f]{6})$/i.exec(color);
+    if (!m) return color;
+    function ch(i) { var v = parseInt(m[1].slice(i, i + 2), 16); return Math.round(v + (255 - v) * amount); }
+    return "rgb(" + ch(0) + "," + ch(2) + "," + ch(4) + ")";
+  }
+  function drawPortholeStreaks(c, streaks, paint, light) {
+    c.lineCap = "round";
+    for (var i = 0; i < streaks.length; i++) {
+      var s = streaks[i];
+      var ex = s.x + Math.sin(s.tilt) * s.h, ey = s.y - Math.cos(s.tilt) * s.h;
+      var g = c.createLinearGradient(s.x, s.y, ex, ey);
+      g.addColorStop(0, withAlpha(light, 0.95 * s.k));
+      g.addColorStop(0.35, withAlpha(paint, 0.7 * s.k));
+      g.addColorStop(1, withAlpha(paint, 0));
+      c.strokeStyle = g;
+      c.beginPath(); c.moveTo(s.x, s.y); c.lineTo(ex, ey);
+      c.lineWidth = s.w * 3; c.globalAlpha = 0.3; c.stroke();
+      c.lineWidth = s.w; c.globalAlpha = 1; c.stroke();
+    }
+  }
+  function portholeRimPath(c, o) {
+    c.beginPath();
+    c.ellipse(0, 0, o.a - PORTHOLE_RIM / 2, o.b - PORTHOLE_RIM / 2, 0, 0, Math.PI * 2);
+    c.closePath();
+  }
+  // opts: selected, anchored, paint (a color override), underlay {width, color} (a ring outside the outline).
+  // Layered as a circle on the floor seen from its near side, the bulge on the far rim: the streaks
+  // born on the bulge's half go under the bulge, the ones born on the near half over everything.
+  function drawPorthole(c, x, y, angle, length, color, opts) {
+    opts = opts || {};
+    var o = PhysicsEngine.portholeOval(length);
+    var paint = opts.paint || PORTHOLE_PAINT[color] || PORTHOLE_PAINT.orange;
+    var light = lighten(paint, 0.45), streaks = portholeStreaks(o);
+    var far = streaks.filter(function (s) { return s.y <= 0; }), near = streaks.filter(function (s) { return s.y > 0; });
+    c.save();
+    c.translate(x, y);
+    c.rotate(angle);
+    portholeRimPath(c, o);
+    if (opts.underlay) {
+      c.lineWidth = PORTHOLE_RIM + opts.underlay.width; c.strokeStyle = opts.underlay.color; c.stroke();
+    }
+    if (opts.selected) {
+      c.lineWidth = PORTHOLE_RIM + 6; c.strokeStyle = "#ffcf4d"; c.stroke();
+    } else if (opts.anchored) {
+      c.lineWidth = PORTHOLE_RIM + 3; c.strokeStyle = "#7a8199"; c.stroke();
+    }
+    c.lineWidth = PORTHOLE_RIM; c.strokeStyle = paint; c.stroke();
+    c.fillStyle = "#000"; c.fill();
+    drawPortholeStreaks(c, far, paint, light);
+    c.save();
+    c.beginPath();
+    c.rect(-o.a - 10, -o.b - PORTHOLE_BULGE - 10, 2 * o.a + 20, o.b + PORTHOLE_BULGE + 10);
+    c.clip();
+    c.beginPath();
+    c.ellipse(0, 0, o.a * PORTHOLE_BULGE_SPAN, o.b + PORTHOLE_BULGE, 0, 0, Math.PI * 2);
+    c.fillStyle = "#000"; c.fill();
+    c.restore();
+    drawPortholeStreaks(c, near, paint, light);
+    c.restore();
   }
 
   // Shared by preview and placement. A drag under CLICK_DRAG_THRESHOLD places the default size.
@@ -3175,18 +3256,8 @@
         ctx = previous;
       }
     },
-    // A port hole's band into someone else's canvas (the map's replay draws the line itself).
-    drawPortholeBand: function (targetCtx, x, y, angle, length, color) {
-      var previous = ctx;
-      ctx = targetCtx;
-      try {
-        ctx.save();
-        drawPortholeBand(x, y, angle, length, color);
-        ctx.restore();
-      } finally {
-        ctx = previous;
-      }
-    },
+    // A port hole into someone else's canvas (the map's replay).
+    drawPorthole: drawPorthole,
     // One spring into someone else's canvas, drawn as the editor draws it; `color` is optional (an inspected point's hue).
     drawSpringBetween: function (targetCtx, a, b, stiffness, restLength, color) {
       var previous = ctx;

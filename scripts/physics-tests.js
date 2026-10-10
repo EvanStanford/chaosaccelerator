@@ -2912,8 +2912,8 @@
   );
 
   addTest(
-    "The whole front face lets a ball through, round ends included; the back and a lone port hole are a line",
-    "the colored half is the front of the capsule, nothing less: a ball meeting the front of a rounded end goes through like one meeting the middle, a ball that clears the end entirely touches nothing, a ball onto the back bounces, and so does one onto the only port hole in the scene",
+    "The whole front face lets a ball through, the thin ends included; the back and a lone port hole bounce",
+    "the front half of the oval, nothing less: a ball meeting the front near a tip goes through like one meeting the middle, a ball that clears the tip entirely touches nothing, a ball onto the back bounces, and so does one onto the only port hole in the scene",
     function () {
       function drop(scene, ballIndex) {
         var lowest = -Infinity, bounced = false, warped = false, prevVy = 0, prevY = scene.bodies[ballIndex].y;
@@ -2930,7 +2930,7 @@
       var back = portholeScene([PhysicsEngine.createCircle(400, 200, 10, false)]);
       back.bodies[0].angle = Math.PI; // faces down: the ball from above meets its back
       var onBack = drop(back, 2);
-      // 112px off center: past the 100px half-length and the 10px cap, but the ball's own 10px reaches the cap's front.
+      // 112px off center: past the 110px tip, but the ball's own 10px reaches the tip's front.
       var onEnd = drop(portholeScene([PhysicsEngine.createCircle(512, 200, 10, false)]), 2);
       // 125px: past all of that, touching nothing.
       var clear = drop(portholeScene([PhysicsEngine.createCircle(525, 200, 10, false)]), 2);
@@ -2944,6 +2944,71 @@
         detail: "onto the back: bounced=" + onBack.bounced + " warped=" + onBack.warped + "; onto a rounded end's front: warped=" + onEnd.warped +
           " bounced=" + onEnd.bounced + "; clear of the end: warped=" + clear.warped + " bounced=" + clear.bounced + " fell past=" + !clear.stayedAbove +
           "; lone port hole: bounced=" + alone.bounced,
+      };
+    }
+  );
+
+  addTest(
+    "A port hole's outline is its oval: a ball or a line meets the drawn shape, not a capsule",
+    "the outline is two big arcs and two tip circles of half the thickness (PhysicsEngine.portholeOval), within a pixel of the approved ellipse: over the thin part near an end a ball touches nothing where a capsule would have held it, a ball onto the arc gets the arc's normal, a ball at a tip the tip's, a line across the back rests on the arc, a sweep lands on the arc at the crossing instant, and a moving port hole sees the same contact in its own frame",
+    function () {
+      function ph(angle, anchored) { var p = PhysicsEngine.createPorthole(400, 400, 200, angle, "orange", anchored === undefined ? true : anchored); PhysicsEngine.computeMass(p); return p; }
+      function ball(x, y, r, vx, vy) { var b = PhysicsEngine.createCircle(x, y, r, false); b.vx = vx || 0; b.vy = vy || 0; PhysicsEngine.computeMass(b); return b; }
+      function line(x, y, len, angle) { var l = PhysicsEngine.createLine(x, y, len, angle, false); PhysicsEngine.computeMass(l); return l; }
+      function near(a, b, tol) { return Math.abs(a - b) <= tol; }
+      var o = PhysicsEngine.portholeOval(200);
+      var backAt95 = -o.cy + Math.sqrt(o.R * o.R - 95 * 95);
+      var clear = PhysicsEngine.collidePair(ph(0), ball(495, 414, 5), DT);
+      var onArc = PhysicsEngine.collidePair(ph(0), ball(495, 409, 5), DT);
+      var onTip = PhysicsEngine.collidePair(ph(0), ball(513, 400, 5), DT);
+      var swept = PhysicsEngine.collidePair(ph(0), ball(400, 460, 10, 0, -3000), DT);
+      var lineOff = PhysicsEngine.collidePair(ph(0), line(400, 425, 100, 0), DT);
+      var lineOn = PhysicsEngine.collidePair(ph(0), line(400, 418, 100, 0), DT);
+      var moving = ph(0, false); moving.vx = 500;
+      var inFrame = PhysicsEngine.collidePair(moving, ball(400, 419, 10, 500, 0), DT);
+      var arcLen = Math.sqrt(95 * 95 + (9 + o.cy) * (9 + o.cy));
+      var arcOk = !!onArc && near(onArc[0].normal.x, 95 / arcLen, 1e-9) && near(onArc[0].normal.y, (9 + o.cy) / arcLen, 1e-9) && near(onArc[0].penetration, o.R + 5 - arcLen, 1e-9);
+      var tipOk = !!onTip && near(onTip[0].normal.x, 1, 1e-9) && near(onTip[0].normal.y, 0, 1e-9) && near(onTip[0].penetration, 2, 1e-9);
+      var sweptOk = !!swept && near(swept[0].tHit, 40 / 3000, 1e-9) && near(swept[0].normal.y, 1, 1e-9) && near(swept[0].point.y, 410, 1e-9);
+      var lineOk = !lineOff && !!lineOn && near(lineOn[0].normal.y, 1, 1e-9) && near(lineOn[0].penetration, 2, 1e-9) && near(lineOn[0].point.y, 409, 1e-9);
+      var frameOk = !!inFrame && near(inFrame[0].normal.y, 1, 1e-9) && near(inFrame[0].penetration, 1, 1e-9) && near(inFrame[0].point.x, 400, 1e-9);
+      var ok = backAt95 > 4 && backAt95 < 7 && !clear && arcOk && tipOk && sweptOk && lineOk && frameOk;
+      return {
+        pass: ok,
+        detail: "back arc 95px along sits " + backAt95.toFixed(2) + "px behind the center line; ball over the thin end: " + (clear ? "HELD" : "free") +
+          "; onto the arc: " + arcOk + "; at the tip: " + tipOk + "; swept: " + sweptOk + "; line across the back: " + lineOk + "; moving port hole: " + frameOk,
+      };
+    }
+  );
+
+  addTest(
+    "JS engine and GPU compiler agree on a bounce off a port hole's back, in float32 and double-float",
+    "the oval is written three times (physics-engine.js, and the float32 and multi-float spellings): a ball onto the back arc near an end, where the oval sits 5px lower than a capsule would, and a line dropped across the other port hole's back exercise the swept circle test and the segment test in each",
+    function () {
+      function scene() {
+        var s = portholeScene([PhysicsEngine.createCircle(485, 300, 10, false), PhysicsEngine.createLine(430, 640, 80, 0, false)]);
+        s.bodies[0].angle = Math.PI; // faces down: the ball from above meets its back
+        s.xInput = null; s.yInput = null; s.output = { body: 2, property: "y" };
+        return s;
+      }
+      var STEPS = 70;
+      var js = PhysicsEngine.cloneScene(scene());
+      js.bodies.forEach(PhysicsEngine.computeMass);
+      var traj = PhysicsGPU.runSceneOnGPU(scene(), STEPS);
+      var worst = 0, bounced = false, prevVy = 0;
+      for (var i = 0; i < STEPS; i++) {
+        PhysicsEngine.step(js, DT);
+        if (prevVy > 50 && js.bodies[2].vy < 0) bounced = true;
+        prevVy = js.bodies[2].vy;
+        for (var b = 0; b < js.bodies.length; b++) worst = Math.max(worst, dist(js.bodies[b].x, js.bodies[b].y, traj[i][b].x, traj[i][b].y));
+      }
+      var ref = cpuStateAt(scene(), 0, 0, STEPS, 2);
+      var dfErr = gridResidualAtPoint(scene(), STEPS, 0, 0, "df", 2, ref).err;
+      var f32Err = gridResidualAtPoint(scene(), STEPS, 0, 0, "f32", 2, ref).err;
+      return {
+        pass: bounced && worst < 0.01 && dfErr < 1e-6 && dfErr * 20 < f32Err,
+        detail: "ball bounced off the back=" + bounced + "; float32 trajectory within " + worst.toFixed(5) + "px of JS over " + STEPS +
+          " steps; the grid shader's end state: df off by " + dfErr.toExponential(2) + "px, float32 by " + f32Err.toExponential(2) + "px",
       };
     }
   );

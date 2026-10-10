@@ -4937,6 +4937,8 @@
         hoverCtx.strokeStyle = outline;
         hoverCtx.lineWidth = HOLLOW_OUTLINE_WIDTH;
         hoverCtx.stroke();
+      } else if (spec.type === "porthole") {
+        drawHoverPorthole(spec, row, colorOverride);
       } else {
         var ox = Math.cos(row.angle) * row.half, oy = Math.sin(row.angle) * row.half;
         strokeHollow(function () {
@@ -4944,7 +4946,6 @@
           hoverCtx.moveTo(row.x - ox, row.y - oy);
           hoverCtx.lineTo(row.x + ox, row.y + oy);
         }, outline);
-        if (spec.type === "porthole") PhysicsUI.drawPortholeBand(hoverCtx, row.x, row.y, row.angle, row.half * 2, spec.color);
       }
       return;
     }
@@ -4956,6 +4957,8 @@
       hoverCtx.arc(row.x, row.y, Math.max(row.half, MIN_DISPLAY_RADIUS), 0, Math.PI * 2);
       hoverCtx.fill();
       hoverCtx.stroke();
+    } else if (spec.type === "porthole") {
+      drawHoverPorthole(spec, row, colorOverride);
     } else {
       var hx = Math.cos(row.angle) * row.half;
       var hy = Math.sin(row.angle) * row.half;
@@ -4982,8 +4985,16 @@
         hoverCtx.lineTo(row.x + hx, row.y + hy);
         hoverCtx.stroke();
       }
-      if (spec.type === "porthole") PhysicsUI.drawPortholeBand(hoverCtx, row.x, row.y, row.angle, row.half * 2, spec.color);
     }
+  }
+
+  // A port hole's oval, under the same dark ring every outline gets over the picture.
+  function drawHoverPorthole(spec, row, colorOverride) {
+    PhysicsUI.drawPorthole(hoverCtx, row.x, row.y, row.angle, row.half * 2, spec.color, {
+      anchored: spec.isAnchored,
+      paint: colorOverride ? colorOverride.fill : undefined,
+      underlay: { width: 2 * HOLLOW_UNDERLAY_EXTRA, color: HOLLOW_UNDERLAY },
+    });
   }
 
   // `rows` is indexed by body. An anchor scales with a size-linked body: the row's half over the authored one.

@@ -11,9 +11,9 @@
   // Collision/click thickness of a line: not physical, so not in mass or inertia.
   var LINE_THICKNESS = 20;
 
-  // ---- Port holes: a pair of lines whose fronts are joined. The front half of the capsule lets a
-  // chain leader through, and it leaves the other port hole with its velocity and offset carried over
-  // into that port hole's frame. The back half, and a lone port hole, are a line.
+  // ---- Port holes: a pair of lines whose fronts are joined. The front half of the oval lets a chain
+  // leader through, and it leaves the other port hole with its velocity and offset carried over into
+  // that port hole's frame. The back half, and a lone port hole, bounce.
   var PORTHOLE_COLORS = ["orange", "green"];
 
   // Tangent along the line; the front normal points up the screen at angle 0.
@@ -428,7 +428,8 @@
     return ddx * ddx + ddy * ddy <= r * r;
   }
 
-  // ---- Collision detection. Normals point A -> B (first argument to second); lines are capsules. ----
+  // ---- Collision detection. Normals point A -> B (first argument to second); lines are capsules,
+  // a port hole is its oval (portholeOval). ----
 
   // Sweep primitives: earliest t in [0,dt] at which a moving point reaches distance R, or -1.
 
@@ -623,22 +624,131 @@
     }];
   }
 
-  // A and B are PROBE bodies (velocity advanced by this step's gravity: see step()); tHit in [0, dt].
-  function collidePair(A, B, dt) {
-    var cs, aRound = A.type === "circle", bRound = B.type === "circle";
-    if (aRound && bRound) cs = collideCircleCircle(A, B, dt);
-    else if (!aRound && bRound) cs = collideLineCircle(A, B, dt);
-    else if (aRound && !bRound) {
-      // Called as (line=B, circle=A): flip the normal and swap rA/rB back to this A/B order.
-      cs = collideLineCircle(B, A, dt);
-      if (cs) for (var i = 0; i < cs.length; i++) {
-        cs[i].normal.x *= -1; cs[i].normal.y *= -1;
-        var tmp = cs[i].rA; cs[i].rA = cs[i].rB; cs[i].rB = tmp;
+  // ---- Port hole outline: two big arcs and two tip circles, tangent where they meet. a is a tip's
+  // reach (half-length + half-thickness), b the half-thickness; the arcs' radius R follows.
+  var PORTHOLE_TIP_RADIUS = 5;
+  function portholeOval(length) {
+    var b = LINE_THICKNESS / 2, r = PORTHOLE_TIP_RADIUS, a = length / 2 + b;
+    var R = ((a - r) * (a - r) + b * b - r * r) / (2 * (b - r));
+    return { a: a, b: b, r: r, R: R, cy: R - b, ax: a - r };
+  }
+
+  // Feature circles: 0 the back arc, 1 the front arc, 2 the left tip, 3 the right tip.
+  function portholeFeatureCircle(o, kind) {
+    if (kind === 0) return { kind: 0, cx: 0, cy: -o.cy, radius: o.R };
+    if (kind === 1) return { kind: 1, cx: 0, cy: o.cy, radius: o.R };
+    if (kind === 2) return { kind: 2, cx: -o.ax, cy: 0, radius: o.r };
+    return { kind: 3, cx: o.ax, cy: 0, radius: o.r };
+  }
+
+  // The feature owning a local point (x along the port hole, y toward its back): a tip past the
+  // junction rays, else the arc on the point's side. d is the signed distance to the outline.
+  function portholeFeature(o, px, py) {
+    var f;
+    if (Math.abs(px) * o.cy > o.ax * (Math.abs(py) + o.cy)) f = portholeFeatureCircle(o, px < 0 ? 2 : 3);
+    else f = portholeFeatureCircle(o, py < 0 ? 1 : 0);
+    var dx = px - f.cx, dy = py - f.cy;
+    f.dist = Math.sqrt(dx * dx + dy * dy);
+    f.d = f.dist - f.radius;
+    return f;
+  }
+
+  // The port hole's frame: x along it, y toward its back.
+  function portholeFrame(ph) {
+    var cs = Math.cos(ph.angle), sn = Math.sin(ph.angle);
+    return {
+      toLocal: function (wx, wy) { return { x: wx * cs + wy * sn, y: wy * cs - wx * sn }; },
+      toWorld: function (lx, ly) { return { x: lx * cs - ly * sn, y: lx * sn + ly * cs }; },
+    };
+  }
+
+  // Port hole = A (its oval, carried along at its velocity), circle = B. Swept in the port hole's
+  // frame: the earliest sweep onto a feature circle whose hit point that feature owns.
+  function collidePortholeCircle(ph, circle, dt) {
+    var o = portholeOval(ph.length), fr = portholeFrame(ph);
+    var p0 = fr.toLocal(circle.x - ph.x, circle.y - ph.y);
+    var v = fr.toLocal(circle.vx - ph.vx, circle.vy - ph.vy);
+    var tHit = 0;
+    if (portholeFeature(o, p0.x, p0.y).d >= circle.radius) {
+      var best = -1;
+      for (var kind = 0; kind < 4; kind++) {
+        var fc = portholeFeatureCircle(o, kind);
+        var t = sweepPointSphere(p0.x, p0.y, v.x, v.y, fc.cx, fc.cy, fc.radius + circle.radius, dt);
+        if (t < 0 || (best >= 0 && t >= best)) continue;
+        if (portholeFeature(o, p0.x + v.x * t, p0.y + v.y * t).kind === kind) best = t;
       }
-    } else {
-      cs = collideLineLine(A, B);
+      if (best < 0) return null;
+      tHit = best;
+    }
+    var px = p0.x + v.x * tHit, py = p0.y + v.y * tHit;
+    var f = portholeFeature(o, px, py);
+    var nx = f.dist > 1e-9 ? (px - f.cx) / f.dist : 0, ny = f.dist > 1e-9 ? (py - f.cy) / f.dist : 1;
+    var n = fr.toWorld(nx, ny), s = fr.toWorld(f.cx + nx * f.radius, f.cy + ny * f.radius);
+    return [{
+      normal: { x: n.x, y: n.y },
+      point: { x: ph.x + s.x + ph.vx * tHit, y: ph.y + s.y + ph.vy * tHit },
+      rA: { x: s.x, y: s.y },
+      rB: { x: -n.x * circle.radius, y: -n.y * circle.radius },
+      penetration: Math.max(f.radius + circle.radius - f.dist, 0),
+      tHit: tHit,
+    }];
+  }
+
+  // Port hole = A (its oval), line = B (its capsule). The segment's nearest point to the oval is an
+  // endpoint or the foot of a feature circle's center, when that feature owns the foot. One contact.
+  function collidePortholeLine(ph, line) {
+    var o = portholeOval(ph.length), fr = portholeFrame(ph);
+    var ends = getLineEndpoints(line);
+    var e0 = fr.toLocal(ends[0].x - ph.x, ends[0].y - ph.y), e1 = fr.toLocal(ends[1].x - ph.x, ends[1].y - ph.y);
+    var bestQ = null, bestF = null;
+    function consider(q, f) { if (!bestF || f.d < bestF.d) { bestQ = q; bestF = f; } }
+    consider(e0, portholeFeature(o, e0.x, e0.y));
+    consider(e1, portholeFeature(o, e1.x, e1.y));
+    for (var kind = 0; kind < 4; kind++) {
+      var fc = portholeFeatureCircle(o, kind);
+      var q = closestPointOnSegment(e0, e1, { x: fc.cx, y: fc.cy });
+      var f = portholeFeature(o, q.x, q.y);
+      if (f.kind === kind) consider(q, f);
+    }
+    var half = LINE_THICKNESS / 2;
+    if (bestF.d >= half) return null;
+    var nx = bestF.dist > 1e-9 ? (bestQ.x - bestF.cx) / bestF.dist : 0, ny = bestF.dist > 1e-9 ? (bestQ.y - bestF.cy) / bestF.dist : 1;
+    // Midway between the two surfaces, as collideLineLine puts it.
+    var m = fr.toWorld((bestF.cx + nx * bestF.radius + bestQ.x - nx * half) / 2, (bestF.cy + ny * bestF.radius + bestQ.y - ny * half) / 2);
+    var n = fr.toWorld(nx, ny);
+    var px = ph.x + m.x, py = ph.y + m.y;
+    return [{
+      normal: { x: n.x, y: n.y },
+      point: { x: px, y: py },
+      rA: { x: m.x, y: m.y },
+      rB: { x: px - line.x, y: py - line.y },
+      penetration: half - bestF.d,
+      tHit: 0,
+    }];
+  }
+
+  // Computed as (B, A): flip the normal and swap rA/rB back to the caller's order.
+  function flipContacts(cs) {
+    if (cs) for (var i = 0; i < cs.length; i++) {
+      cs[i].normal.x *= -1; cs[i].normal.y *= -1;
+      var tmp = cs[i].rA; cs[i].rA = cs[i].rB; cs[i].rB = tmp;
     }
     return cs;
+  }
+
+  // A and B are PROBE bodies (velocity advanced by this step's gravity: see step()); tHit in [0, dt].
+  // A port hole meets a circle or a line as its oval; two port holes meet as capsules.
+  function collidePair(A, B, dt) {
+    var aRound = A.type === "circle", bRound = B.type === "circle";
+    var aPort = A.type === "porthole", bPort = B.type === "porthole";
+    if (aRound && bRound) return collideCircleCircle(A, B, dt);
+    if (aPort && bRound) return collidePortholeCircle(A, B, dt);
+    if (bPort && aRound) return flipContacts(collidePortholeCircle(B, A, dt));
+    if (!aRound && bRound) return collideLineCircle(A, B, dt);
+    if (aRound) return flipContacts(collideLineCircle(B, A, dt));
+    if (aPort && !bPort) return collidePortholeLine(A, B);
+    if (bPort && !aPort) return flipContacts(collidePortholeLine(B, A));
+    return collideLineLine(A, B);
   }
 
   // ---- Impulse solver ----
@@ -1319,6 +1429,10 @@
     createLine: createLine,
     createPorthole: createPorthole,
     PORTHOLE_COLORS: PORTHOLE_COLORS,
+    PORTHOLE_TIP_RADIUS: PORTHOLE_TIP_RADIUS,
+    portholeOval: portholeOval,
+    portholeFeature: portholeFeature,
+    collidePair: collidePair,
     portholeAxes: portholeAxes,
     portholeGroups: portholeGroups,
     portholePair: portholePair,
