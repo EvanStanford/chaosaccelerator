@@ -1575,8 +1575,7 @@
   function gridResidualAtPoint(scene, steps, worldX, worldY, precision, bodyIndex, ref) {
     var B = PhysicsGridCodegen.backendFor(precision);
     var initial = PhysicsGridCodegen.generateGridInitialStateGLSL(scene, precision);
-    var frame = scene.frameWidth && scene.frameHeight
-      ? { width: scene.frameWidth, height: scene.frameHeight } : undefined;
+    var frame = PhysicsEngine.wrapsAtEdges(scene) ? { width: scene.frameWidth, height: scene.frameHeight } : undefined;
     var dv = precision === "df" ? "dbody" : "body";
     function residual(axis, value) {
       var v = dv + bodyIndex + "." + axis;
@@ -3085,7 +3084,7 @@
 
   addTest(
     "A moving exit port hole hands over its own motion: what leaves it carries the spot's velocity, and its spin",
-    "velocity and spin are kept relative to the port holes, so a spinning exit (hinged at its center, turning at 3 rad/s) adds the velocity of the spot the ball leaves from, w x r, to what a still exit standing at the same angle gives, and hands the ball its spin. A still pair adds nothing, so every earlier scene is untouched",
+    "velocity and spin are kept relative to the port holes as they stood at the crossing instant, so a spinning exit (hinged at its center, turning at 3 rad/s) adds the velocity of the spot the ball leaves from, w x r, to what a still exit standing at that instant's angle gives, moves the landing by that velocity over the rest of the step, and hands the ball its spin. A still pair adds nothing, so every earlier scene is untouched",
     function () {
       var OMEGA = 3, STEPS = 60;
       function scene(angle, spinning) {
@@ -3094,26 +3093,36 @@
         s.bodies.forEach(PhysicsEngine.computeMass);
         return s;
       }
-      var spin = scene(Math.PI / 2, true), Q = spin.bodies[1], passAt = -1;
-      for (var i = 0; i < STEPS && passAt < 0; i++) { PhysicsEngine.step(spin, DT); if (spin.bodies[2].x > 600) passAt = i + 1; }
+      var spin = scene(Math.PI / 2, true), Q = spin.bodies[1], passAt = -1, before = null;
+      for (var i = 0; i < STEPS && passAt < 0; i++) {
+        before = { y: spin.bodies[2].y, angle: Q.angle, vx: Q.vx, vy: Q.vy, w: Q.w };
+        PhysicsEngine.step(spin, DT);
+        if (spin.bodies[2].x > 600) passAt = i + 1;
+      }
       if (passAt < 0) return { pass: false, detail: "the ball never came out of the spinning exit" };
       var ball = spin.bodies[2];
+      // The crossing fraction, from the ball's plain fall over that step: the pass only changed where it landed.
+      var fall = plainScene([PhysicsEngine.createCircle(420, 200, 10, false)]);
+      fall.bodies.forEach(PhysicsEngine.computeMass);
+      for (var j = 0; j < passAt; j++) PhysicsEngine.step(fall, DT);
+      var f0 = 400 - before.y, f1 = 400 - fall.bodies[0].y, lambda = f0 / (f0 - f1), tau = (1 - lambda) * DT;
+      var angleAt = before.angle + (Q.angle - before.angle) * lambda, wAt = before.w + (Q.w - before.w) * lambda;
       // The ball fell 20px right of the orange's center, so it left the green 20px from its center: w x r there.
-      var tx = Math.cos(Q.angle), ty = Math.sin(Q.angle), rx = -20 * tx, ry = -20 * ty;
-      var spotVx = Q.vx - Q.w * ry, spotVy = Q.vy + Q.w * rx;
-      // The still twin: the green anchored where the spinner stood at the end of that step.
-      var still = scene(Q.angle, false);
-      for (var j = 0; j < passAt; j++) PhysicsEngine.step(still, DT);
+      var rx = -20 * Math.cos(angleAt), ry = -20 * Math.sin(angleAt);
+      var spotVx = before.vx + (Q.vx - before.vx) * lambda - wAt * ry, spotVy = before.vy + (Q.vy - before.vy) * lambda + wAt * rx;
+      // The still twin: the green anchored where the spinner stood at the crossing instant.
+      var still = scene(angleAt, false);
+      for (var k = 0; k < passAt; k++) PhysicsEngine.step(still, DT);
       var twin = still.bodies[2];
       var dvx = ball.vx - twin.vx, dvy = ball.vy - twin.vy;
       var velocityOk = Math.abs(dvx - spotVx) < 0.02 && Math.abs(dvy - spotVy) < 0.02;
-      var placeOk = dist(ball.x, ball.y, twin.x, twin.y) < 1e-3;
-      var spinOk = Math.abs(ball.w - Q.w) < 1e-9 && twin.w === 0;
+      var placeErr = dist(ball.x, ball.y, twin.x + spotVx * tau, twin.y + spotVy * tau), placeOk = placeErr < 1e-3;
+      var spinOk = Math.abs(ball.w - wAt) < 1e-9 && twin.w === 0;
       return {
-        pass: Q.w > 2 && velocityOk && placeOk && spinOk,
-        detail: "pass at step " + passAt + " with the exit turning at " + Q.w.toFixed(3) + " rad/s; the ball left " + Math.hypot(spotVx, spotVy).toFixed(2) +
+        pass: wAt > 2 && lambda > 0 && lambda < 1 && velocityOk && placeOk && spinOk,
+        detail: "pass at step " + passAt + ", " + (lambda * 100).toFixed(1) + "% into it, the exit turning at " + wAt.toFixed(3) + " rad/s; the ball left " + Math.hypot(spotVx, spotVy).toFixed(2) +
           "px/s faster than from the still twin, (" + dvx.toFixed(3) + ", " + dvy.toFixed(3) + ") against the spot's (" + spotVx.toFixed(3) + ", " + spotVy.toFixed(3) +
-          "), from the same place to " + dist(ball.x, ball.y, twin.x, twin.y).toExponential(1) + "px, spinning at " + ball.w.toFixed(3) + " (twin " + twin.w + ")",
+          "), landing that much further on over the rest of the step to " + placeErr.toExponential(1) + "px, spinning at " + ball.w.toFixed(3) + " (twin " + twin.w + ")",
       };
     }
   );
@@ -3175,6 +3184,69 @@
         pass: out.passAt > 0 && into.passAt > 0 && out.worst < 0.05 && into.worst < 0.05 && out.dfErr < 1e-5 && into.dfErr < 1e-5,
         detail: "spinning exit: pass at step " + out.passAt + ", float32 within " + out.worst.toFixed(5) + "px of JS over 55 steps, df end state off by " + out.dfErr.toExponential(2) +
           "px; spinning entry: pass at step " + into.passAt + ", float32 within " + into.worst.toFixed(5) + "px over 30 steps, df off by " + into.dfErr.toExponential(2) + "px",
+      };
+    }
+  );
+
+  // Reported from the map: two free port holes sprung together, spinning and accelerating, and a fast ball.
+  function sprungPortholeScene(mutualGravity) {
+    var authored = ShareUrl.decode("#map/body:ci:-188.9961:222.414:0:30;po:-292.1328:-62.0696:-.028:131.4327;pg:187.1642:309.2142:-.0684:133.4833,sprg:1:2:66.2561:-.4076:-64.1772:.052:5300:140,xinp:0.vx,yinp:0.vy,outp:0.y,edge:infi,mgrv:t,coll:f,step:50,frmw:1003,frmh:1092").scene;
+    var scene = PhysicsCoords.toEngineJSON(authored, authored);
+    scene.bodies.forEach(PhysicsEngine.computeMass);
+    scene.mutualGravity = mutualGravity;
+    return scene;
+  }
+
+  addTest(
+    "A pass through a moving port hole is continuous where the crossing moves from one step to the next",
+    "reported from the map as a sawtooth 50px tall after 50 steps: the hand-over took the port holes' velocity, spin and turn from the end of the step, while they spin at 6 rad/s and gain 20px/s a step from their spring, so the handed-over velocity was off by the time left after the crossing, resetting at each step. Both port holes are now taken as they stood at the crossing instant and what passes flies from its exit spot for the rest of the step. Bisected to the boundary where the pass moves a step, the two sides must agree to rounding with the spring alone. Under Mutual Gravity the ball's own pull on the port holes is still taken from where it started the step, which leaves a small mismatch",
+    function () {
+      var STEPS = 50, A = [1382.46685, 534.076349], B = [2055.203987, 528.069767];
+      function sides(scene) {
+        function run(t) {
+          var s = PhysicsGridCodegen.computeOffsetSceneNumeric(scene, A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t), ball = s.bodies[0], passStep = -1;
+          for (var i = 0; i < STEPS; i++) {
+            var px = ball.x, py = ball.y;
+            PhysicsEngine.step(s, DT);
+            if (passStep < 0 && dist(px, py, ball.x, ball.y) > 150) passStep = i + 1;
+          }
+          return { x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy, passStep: passStep };
+        }
+        var lo = 0, hi = 0.2, loStep = run(lo).passStep, hiStep = run(hi).passStep;
+        if (loStep < 0 || hiStep < 0 || loStep === hiStep) return null;
+        for (var it = 0; it < 60; it++) { var mid = (lo + hi) / 2; if (run(mid).passStep === loStep) lo = mid; else hi = mid; }
+        var a = run(lo), b = run(hi);
+        return { steps: loStep + "->" + hiStep, dp: dist(a.x, a.y, b.x, b.y), dv: Math.hypot(b.vx - a.vx, b.vy - a.vy) };
+      }
+      var spring = sides(sprungPortholeScene(false)), mutual = sides(sprungPortholeScene(true));
+      function show(r) { return r ? "pass " + r.steps + ": the sides differ by " + r.dp.toExponential(2) + "px and " + r.dv.toExponential(2) + "px/s" : "no boundary found"; }
+      return {
+        pass: !!spring && !!mutual && spring.dp < 1e-6 && spring.dv < 1e-6 && mutual.dp < 1.5,
+        detail: "spring alone, " + show(spring) + " (want rounding; was 29px); under Mutual Gravity, " + show(mutual) + " (want under 1.5px; was 47px)",
+      };
+    }
+  );
+
+  addTest(
+    "JS engine and GPU compiler agree on a pass between two moving port holes, in float32 and double-float",
+    "the crossing-instant state of both port holes (pose, velocity and spin interpolated through the step, the turn between them, the exit spot) and the flight from that spot are in both shader spellings as well: the reported sprung pair under Mutual Gravity, collisions off, followed through the pass at one map point",
+    function () {
+      var STEPS = 25, WX = 1700, WY = 530;
+      var scene = sprungPortholeScene(true);
+      var js = PhysicsGridCodegen.computeOffsetSceneNumeric(scene, WX, WY);
+      var traj = PhysicsGPU.runCompiledTrajectoryOnGPU(PhysicsGridCodegen.compileHoverTrajectoryGLSL(scene, WX, WY, STEPS, "f32"), STEPS);
+      var worst = 0, passAt = -1;
+      for (var i = 0; i < STEPS; i++) {
+        var px = js.bodies[0].x, py = js.bodies[0].y;
+        PhysicsEngine.step(js, DT);
+        if (passAt < 0 && dist(px, py, js.bodies[0].x, js.bodies[0].y) > 150) passAt = i + 1;
+        for (var b = 0; b < 3; b++) worst = Math.max(worst, dist(js.bodies[b].x, js.bodies[b].y, traj[i][b].x, traj[i][b].y));
+      }
+      var ref = cpuStateAt(scene, WX, WY, STEPS, 0);
+      var dfErr = gridResidualAtPoint(scene, STEPS, WX, WY, "df", 0, ref).err;
+      return {
+        pass: passAt > 0 && worst < 0.05 && dfErr < 1e-5,
+        detail: "pass at step " + passAt + "; float32 within " + worst.toFixed(5) + "px of JS over " + STEPS + " steps, the df end state off by " + dfErr.toExponential(2) + "px",
       };
     }
   );

@@ -885,10 +885,18 @@
   // turn with the port holes, so the exit continues the entry. The share of the step past the crossing
   // is then re-integrated on the exit side (outside forces from there, the chain's own turned with it),
   // or the exit's gravity would start up to a step late, by an amount that saws with the start.
-  // A port hole's velocity at a point, from its own motion about its end-of-step center.
-  function portholeVelocityAt(P, x, y) {
-    if (P.isAnchored) return { x: 0, y: 0 };
-    return { x: P.vx - P.w * (y - P.y), y: P.vy + P.w * (x - P.x) };
+  // A port hole as it stood part-way through the step: pose, velocity and spin interpolated
+  // between the step's start and end. An anchored one does not move.
+  function portholeStateAt(P, start, u, lambda) {
+    if (P.isAnchored) return { x: P.x, y: P.y, angle: P.angle, vx: 0, vy: 0, w: 0 };
+    return {
+      x: start.x + (P.x - start.x) * lambda, y: start.y + (P.y - start.y) * lambda, angle: start.angle + (P.angle - start.angle) * lambda,
+      vx: u.x + (P.vx - u.x) * lambda, vy: u.y + (P.vy - u.y) * lambda, w: start.w + (P.w - start.w) * lambda,
+    };
+  }
+  // Its velocity at a point, from its own motion about its center.
+  function frameVelocityAt(S, x, y) {
+    return { x: S.vx - S.w * (y - S.y), y: S.vy + S.w * (x - S.x) };
   }
 
   function applyPortholeTransports(scene, portals, groupOf, startPose, u, acc, dt, maxSpeed) {
@@ -908,16 +916,14 @@
         var sCross = s0 + (s1 - s0) * lambda;
         // Anywhere the body could have touched the front: the capsule's reach plus the body's own.
         if (Math.abs(sCross) > P.length / 2 + LINE_THICKNESS / 2 + halfExtent(O)) continue;
-        var aq = portholeAxes(Q.angle);
-        // The crossing point on the exit side, and the end-of-step position past it.
-        var crossX = Q.x - sCross * Q.length / P.length * aq.tx, crossY = Q.y - sCross * Q.length / P.length * aq.ty;
-        var exitX = crossX - (s1 - sCross) * aq.tx - f1 * aq.nx, exitY = crossY - (s1 - sCross) * aq.ty - f1 * aq.ny;
-        // The turn taking P's inward normal onto Q's outward one, from the two tangents.
-        var cs = -(aq.tx * a1.tx + aq.ty * a1.ty), sn = -(a1.tx * aq.ty - a1.ty * aq.tx);
-        var phi = Q.angle - P.angle + Math.PI;
-        var spinP = P.isAnchored ? 0 : P.w, spinQ = Q.isAnchored ? 0 : Q.w;
         var tStar = lambda * dt, tau = dt - tStar;
-        var leadX = O.x, leadY = O.y;
+        // Both port holes as they stood at the crossing instant.
+        var Ps = portholeStateAt(P, startP, u[portals[k]], lambda), Qs = portholeStateAt(Q, startPose[portals[1 - k]], u[portals[1 - k]], lambda);
+        var ap = portholeAxes(Ps.angle), aq = portholeAxes(Qs.angle);
+        // The crossing point on the exit side, and the turn taking P's inward normal onto Q's outward one.
+        var crossX = Qs.x - sCross * Q.length / P.length * aq.tx, crossY = Qs.y - sCross * Q.length / P.length * aq.ty;
+        var cs = -(aq.tx * ap.tx + aq.ty * ap.ty), sn = -(ap.tx * aq.ty - ap.ty * aq.tx);
+        var phi = Qs.angle - Ps.angle + Math.PI;
         var leadStarX = startO.x + (O.x - startO.x) * lambda, leadStarY = startO.y + (O.y - startO.y) * lambda;
         g.members.forEach(function (m) {
           var b = bodies[m], s = startPose[m], a = acc[m];
@@ -929,23 +935,25 @@
           var extOut = outsideAcceleration(scene, m, g.members, exitStarX, exitStarY, startPose);
           var inX = a.x - extIn.x, inY = a.y - extIn.y;
           var outX = inX * cs - inY * sn + extOut.x, outY = inX * sn + inY * cs + extOut.y;
-          // Two legs split at the crossing, turned there or not: their difference is what the step's
-          // whole-step velocity, and the travel it drove, got wrong.
           // Velocity and spin are kept relative to the port holes' own motion at the member's spot.
-          var fin = portholeVelocityAt(P, starX, starY), fout = portholeVelocityAt(Q, exitStarX, exitStarY);
+          var fin = frameVelocityAt(Ps, starX, starY), fout = frameVelocityAt(Qs, exitStarX, exitStarY);
+          // Two legs split at the crossing, turned there or not: their difference is what the step's
+          // whole-step velocity got wrong.
           var pre = advanceVelocity(u[m].x, u[m].y, tStar, a.x, a.y, maxSpeed);
           var preX = pre.x - fin.x, preY = pre.y - fin.y;
           var turned = advanceVelocity(preX * cs - preY * sn + fout.x, preX * sn + preY * cs + fout.y, tau, outX, outY, maxSpeed);
           var straight = advanceVelocity(pre.x, pre.y, tau, a.x, a.y, maxSpeed);
           var strX = straight.x - fin.x, strY = straight.y - fin.y;
           var dvx = turned.x - (strX * cs - strY * sn + fout.x), dvy = turned.y - (strX * sn + strY * cs + fout.y);
-          var ox = b.x - leadX, oy = b.y - leadY, vx = b.vx - fin.x, vy = b.vy - fin.y;
-          b.x = exitX + ox * cs - oy * sn + dvx * tau;
-          b.y = exitY + ox * sn + oy * cs + dvy * tau;
-          b.angle += phi;
+          var ox = b.x - leadStarX, oy = b.y - leadStarY, vx = b.vx - fin.x, vy = b.vy - fin.y;
           b.vx = vx * cs - vy * sn + fout.x + dvx;
           b.vy = vx * sn + vy * cs + fout.y + dvy;
-          b.w += spinQ - spinP;
+          // The step's travel past the crossing, solver shoves included, carried into the exit's frame.
+          b.x = crossX + ox * cs - oy * sn + (fout.x - (fin.x * cs - fin.y * sn) + dvx) * tau;
+          b.y = crossY + ox * sn + oy * cs + (fout.y - (fin.x * sn + fin.y * cs) + dvy) * tau;
+          var spin = Qs.w - Ps.w;
+          b.w += spin;
+          b.angle += phi + spin * tau;
         });
         break;
       }
@@ -983,7 +991,7 @@
     // through the other at the end of the step; its contacts on that front are dropped.
     var portals = portholePair(bodies);
     var passGroup = portals ? portholeGroups(scene) : null;
-    var startPose = portals ? bodies.map(function (b) { return { x: b.x, y: b.y, angle: b.angle }; }) : null;
+    var startPose = portals ? bodies.map(function (b) { return { x: b.x, y: b.y, angle: b.angle, w: b.w }; }) : null;
     function onPortholeFront(c) {
       var pi = bodies[c.a].type === "porthole" ? c.a : (bodies[c.b].type === "porthole" ? c.b : -1);
       if (pi === -1) return false;
