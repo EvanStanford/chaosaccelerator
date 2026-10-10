@@ -30,22 +30,27 @@
   }
   function onVolumeChange(cb) { volumeListeners.push(cb); }
 
-  function ensureContext() {
-    if (ctx) return ctx;
-    var Ctor = global.AudioContext || global.webkitAudioContext;
-    if (!Ctor) return null; // no Web Audio support: sounds just silently don't play
-    ctx = new Ctor();
-    masterGain = ctx.createGain();
-    applyGain();
-    // A limiter: a big Inspect (Grid) can stack over a hundred voices, which would clip without it.
-    var compressor = ctx.createDynamicsCompressor();
+  // A gain into `destination` through a limiter: a big Inspect (Grid) can stack over a hundred voices, which would clip without it.
+  function limitedOutput(c, destination) {
+    var gain = c.createGain();
+    var compressor = c.createDynamicsCompressor();
     compressor.threshold.value = -24;
     compressor.knee.value = 12;
     compressor.ratio.value = 12;
     compressor.attack.value = 0.003;
     compressor.release.value = 0.15;
-    masterGain.connect(compressor);
-    compressor.connect(ctx.destination);
+    gain.connect(compressor);
+    compressor.connect(destination);
+    return gain;
+  }
+
+  function ensureContext() {
+    if (ctx) return ctx;
+    var Ctor = global.AudioContext || global.webkitAudioContext;
+    if (!Ctor) return null; // no Web Audio support: sounds just silently don't play
+    ctx = new Ctor();
+    masterGain = limitedOutput(ctx, ctx.destination);
+    applyGain();
     return ctx;
   }
 
@@ -100,19 +105,19 @@
     g.gain.exponentialRampToValueAtTime(0.001, now + attack + decay);
     return g;
   }
-  function tone(c, now, type, freq, attack, decay, peak, via) {
+  function tone(c, now, type, freq, attack, decay, peak, via, out) {
     var osc = c.createOscillator();
     osc.type = type;
     osc.frequency.setValueAtTime(freq, now);
     var g = envGain(c, now, attack, decay, peak);
     if (via) { osc.connect(via); via.connect(g); } else osc.connect(g);
-    g.connect(masterGain);
+    g.connect(out);
     osc.start(now);
     osc.stop(now + attack + decay + 0.02);
   }
   var noiseBuffer = null;
-  function noise(c, now, attack, decay, peak, lowpassHz) {
-    if (!noiseBuffer) {
+  function noise(c, now, attack, decay, peak, lowpassHz, out) {
+    if (!noiseBuffer || noiseBuffer.sampleRate !== c.sampleRate) {
       noiseBuffer = c.createBuffer(1, c.sampleRate, c.sampleRate);
       var d = noiseBuffer.getChannelData(0);
       for (var i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
@@ -123,7 +128,7 @@
     f.type = "lowpass";
     f.frequency.value = lowpassHz;
     var g = envGain(c, now, attack, decay, peak);
-    src.connect(f); f.connect(g); g.connect(masterGain);
+    src.connect(f); f.connect(g); g.connect(out);
     src.start(now);
     src.stop(now + attack + decay + 0.02);
   }
@@ -133,30 +138,42 @@
   }
 
   // Clave: a short bright sine at 2.5x the note, plus an even briefer 6x ping for the click.
-  function playBounce(freq) {
-    var c = startVoice();
-    if (!c) return;
-    var now = c.currentTime;
-    tone(c, now, "sine", freq * 2.5, 0.0005, 0.16, 0.45);
-    tone(c, now, "sine", freq * 6, 0.0005, 0.03, 0.12);
+  function bounceVoice(c, now, freq, out) {
+    tone(c, now, "sine", freq * 2.5, 0.0005, 0.16, 0.45, null, out);
+    tone(c, now, "sine", freq * 6, 0.0005, 0.03, 0.12, null, out);
   }
-
   // Palm-muted string: sawtooth through a 900 Hz lowpass over a few ms of noise for the pick.
-  function playEdge(freq) {
-    var c = startVoice();
-    if (!c) return;
-    var now = c.currentTime;
+  function edgeVoice(c, now, freq, out) {
     var lp = c.createBiquadFilter();
     lp.type = "lowpass";
     lp.frequency.value = 900;
-    tone(c, now, "sawtooth", freq, 0.002, 0.18, 0.5, lp);
-    noise(c, now, 0.001, 0.008, 0.2, 4000);
+    tone(c, now, "sawtooth", freq, 0.002, 0.18, 0.5, lp, out);
+    noise(c, now, 0.001, 0.008, 0.2, 4000, out);
+  }
+  function playBounce(freq) {
+    var c = startVoice();
+    if (c) bounceVoice(c, c.currentTime, freq, masterGain);
+  }
+  function playEdge(freq) {
+    var c = startVoice();
+    if (c) edgeVoice(c, c.currentTime, freq, masterGain);
+  }
+
+  // The same voices in another context (a movie's), at full volume through a limiter of their own.
+  function track(c, destination) {
+    var out = limitedOutput(c, destination);
+    out.gain.value = MASTER_GAIN_CEILING;
+    return {
+      bounce: function (freq, when) { bounceVoice(c, when, freq, out); },
+      edge: function (freq, when) { edgeVoice(c, when, freq, out); },
+    };
   }
 
   global.PhysicsSound = {
     chordFrequencies: chordFrequencies,
     playBounce: playBounce,
     playEdge: playEdge,
+    track: track,
     setVolume: setVolume,
     getVolume: getVolume,
     isMuted: isMuted,

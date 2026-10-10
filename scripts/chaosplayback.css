@@ -155,9 +155,31 @@ button.bar-link:disabled {
   margin: 0 0 12px 0;
 }
 
-#render-status {
+#render-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin: 0 0 8px 0;
+}
+#render-status {
+  margin: 0;
   font-weight: 600;
+}
+/* Turning while an Inspect movie films, which needs no progress bar. */
+#render-spinner {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: render-spin 0.8s linear infinite;
+}
+#render-spinner[hidden] {
+  display: none;
+}
+@keyframes render-spin {
+  to { transform: rotate(360deg); }
 }
 #render-detail {
   margin: 8px 0 0 0;
@@ -248,6 +270,9 @@ button.bar-link:disabled {
 .transport-button.wide {
   width: 48px;
   font-size: 12px;
+}
+.transport-button[hidden] {
+  display: none;
 }
 .transport-button:hover:not(:disabled) {
   background: var(--bg-input);

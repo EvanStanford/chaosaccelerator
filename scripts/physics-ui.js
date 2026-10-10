@@ -185,11 +185,11 @@
 
   // Ruled from the origin (frame center: see physics-coords.js), not the corner;
   // every line the same weight on purpose.
-  var GRID_STEP = 50;
+  var GRID_STEP = 50, GRID_COLOR = "rgba(255,255,255,0.05)";
   function drawGrid(w, h) {
     var originX = w / 2, originY = h / 2;
     ctx.lineWidth = 1;
-    ctx.strokeStyle = "rgba(255,255,255,0.05)";
+    ctx.strokeStyle = GRID_COLOR;
     ctx.beginPath();
     for (var x = originX % GRID_STEP; x < w; x += GRID_STEP) {
       ctx.moveTo(Math.round(x) + 0.5, 0); ctx.lineTo(Math.round(x) + 0.5, h);
@@ -3152,6 +3152,20 @@
   // transition.js draws the editor's BODIES, tiled, into its own canvas: none of the editing chrome.
   // drawBody() draws into this module's `ctx`, so the context is swapped rather than the drawing duplicated.
   global.PhysicsUI = {
+    // The editor's grid into someone else's canvas, ruled across [x0, x1] x [y0, y1] of a frame this big.
+    drawGridOver: function (targetCtx, frameWidth, frameHeight, x0, y0, x1, y1) {
+      var originX = frameWidth / 2, originY = frameHeight / 2;
+      targetCtx.lineWidth = 1;
+      targetCtx.strokeStyle = GRID_COLOR;
+      targetCtx.beginPath();
+      for (var x = originX + Math.ceil((x0 - originX) / GRID_STEP) * GRID_STEP; x <= x1; x += GRID_STEP) {
+        targetCtx.moveTo(x, y0); targetCtx.lineTo(x, y1);
+      }
+      for (var y = originY + Math.ceil((y0 - originY) / GRID_STEP) * GRID_STEP; y <= y1; y += GRID_STEP) {
+        targetCtx.moveTo(x0, y); targetCtx.lineTo(x1, y);
+      }
+      targetCtx.stroke();
+    },
     drawSceneBodies: function (targetCtx, bodies) {
       var previous = ctx;
       ctx = targetCtx;

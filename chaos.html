@@ -8,17 +8,17 @@
 <meta name="theme-color" content="#14161c">
 <title>Chaos Accelerator</title>
 <!-- Both views share this document so transition.js can show them at once. -->
-<link rel="stylesheet" href="scripts/physics.css?v=m88">
-<link rel="stylesheet" href="scripts/fractal-grid.css?v=m88">
-<link rel="stylesheet" href="scripts/app-shell.css?v=m88">
-<link rel="stylesheet" href="scripts/fractal-stats.css?v=m88">
-<link rel="stylesheet" href="scripts/responsive-layout.css?v=m88">
+<link rel="stylesheet" href="scripts/physics.css?v=m92">
+<link rel="stylesheet" href="scripts/fractal-grid.css?v=m92">
+<link rel="stylesheet" href="scripts/app-shell.css?v=m92">
+<link rel="stylesheet" href="scripts/fractal-stats.css?v=m92">
+<link rel="stylesheet" href="scripts/responsive-layout.css?v=m92">
 <!-- mobile.css after the app sheets: it must win their cascade without !important. -->
-<link rel="stylesheet" href="scripts/mobile.css?v=m88">
-<link rel="stylesheet" href="scripts/eighties-app.css?v=m88">
-<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m88" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="scripts/mobile.css?v=m92">
+<link rel="stylesheet" href="scripts/eighties-app.css?v=m92">
+<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m92" as="font" type="font/woff2" crossorigin>
 <!-- In <head> on purpose: both views measure their canvas area as they start. -->
-<script src="scripts/layout-mode.js?v=m88"></script>
+<script src="scripts/layout-mode.js?v=m92"></script>
 <!-- A #map/ link should open on the map: hide the editor (still laid out) until transition.js picks the view. -->
 <script>
   if (/^#map\//.test(location.hash)) document.documentElement.classList.add("opening-map");
@@ -612,6 +612,7 @@
                   </label>
                   <p class="readout" id="movie-summary"></p>
                   <button id="movie-done" type="button" disabled>Done</button>
+                  <button id="movie-inspect" type="button" class="secondary" disabled title="A high quality movie of what the Inspect tab plays for its locked points, at the size above cut to the scene's shape.">... or movie of the Inspect tab</button>
                 </div>
               </div>
             </section>
@@ -739,23 +740,23 @@
 
 </div>
 
-<script src="scripts/app-message.js?v=m88"></script>
-<script src="scripts/physics-engine.js?v=m88"></script>
-<script src="scripts/physics-coords.js?v=m88"></script>
-<script src="scripts/share-url.js?v=m88"></script>
-<script src="scripts/movie-path.js?v=m88"></script>
-<script src="scripts/movie-store.js?v=m88"></script>
-<script src="scripts/physics-sound.js?v=m88"></script>
-<script src="scripts/physics-hinge-geometry.js?v=m88"></script>
-<script src="scripts/physics-df.js?v=m88"></script>
-<script src="scripts/physics-gpu.js?v=m88"></script>
-<script src="scripts/physics-gpu-df.js?v=m88"></script>
-<script src="scripts/physics-grid-codegen.js?v=m88"></script>
-<script src="scripts/physics-ui.js?v=m88"></script>
-<script src="scripts/fractal-stats.js?v=m88"></script>
-<script src="scripts/fractal-stats-panel.js?v=m88"></script>
-<script src="scripts/fractal-grid.js?v=m88"></script>
-<script src="scripts/transition.js?v=m88"></script>
+<script src="scripts/app-message.js?v=m92"></script>
+<script src="scripts/physics-engine.js?v=m92"></script>
+<script src="scripts/physics-coords.js?v=m92"></script>
+<script src="scripts/share-url.js?v=m92"></script>
+<script src="scripts/movie-path.js?v=m92"></script>
+<script src="scripts/movie-store.js?v=m92"></script>
+<script src="scripts/physics-sound.js?v=m92"></script>
+<script src="scripts/physics-hinge-geometry.js?v=m92"></script>
+<script src="scripts/physics-df.js?v=m92"></script>
+<script src="scripts/physics-gpu.js?v=m92"></script>
+<script src="scripts/physics-gpu-df.js?v=m92"></script>
+<script src="scripts/physics-grid-codegen.js?v=m92"></script>
+<script src="scripts/physics-ui.js?v=m92"></script>
+<script src="scripts/fractal-stats.js?v=m92"></script>
+<script src="scripts/fractal-stats-panel.js?v=m92"></script>
+<script src="scripts/fractal-grid.js?v=m92"></script>
+<script src="scripts/transition.js?v=m92"></script>
 <script>
   // ---- The '80s switch: the same saved setting as the other pages (eighties-theme.js) ----
   (function () {

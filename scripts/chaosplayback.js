@@ -16,6 +16,7 @@
   function $(id) { return document.getElementById(id); }
   var stage = $("stage"), engine = $("engine"), screen = $("screen");
   var renderPanel = $("render-panel"), renderStatus = $("render-status"), renderBar = $("render-bar"), renderDetail = $("render-detail");
+  var renderSpinner = $("render-spinner");
   var progressEl = renderPanel.querySelector(".progress");
   var messageBox = $("player-message"), messageText = $("player-message-text");
   var btnPlayPause = $("play-pause"), scrubber = $("scrubber"), timeReadout = $("time-readout");
@@ -40,19 +41,29 @@
     fail("This link's scene couldn't be read: " + err.message);
     return;
   }
-  if (!link || link.page !== ShareUrl.PAGE_MOVIE || !link.scene || !link.view.movie.keyframes.length) {
+  if (!link || link.page !== ShareUrl.PAGE_MOVIE || !link.scene) {
     fail("There's no movie in this address. Movies are made on the map, in the Movie card.");
     return;
   }
   var movie = link.view.movie;
   var movieSize = movie.size, antialias = movie.antialias;
+  // A movie of the map's Inspect tab plays its locked points once instead of flying through keyframes.
+  var ofInspect = movie.subject === "inspect";
+  if (ofInspect ? !link.view.inspect.length : !movie.keyframes.length) {
+    fail(ofInspect ? "This link has no locked Inspect points to film." : "There's no movie in this address. Movies are made on the map, in the Movie card.");
+    return;
+  }
 
-  // The way back, keyframes included, so the Movie card comes up holding this movie.
-  var first = movie.keyframes[0];
+  // The way back, keyframes and Inspect points included, so the map comes up as it was left.
+  var backView = ofInspect ? link.view : movie.keyframes[0];
   $("back-to-map").href = "chaos.html#" + ShareUrl.encode({
     page: ShareUrl.PAGE_MAP,
     scene: link.scene,
-    view: { center: first.center, zoom: first.zoom, display: link.view.display, lowSaturation: link.view.lowSaturation, precision: link.view.precision, movie: movie },
+    view: {
+      center: backView.center, zoom: backView.zoom, display: link.view.display, lowSaturation: link.view.lowSaturation, precision: link.view.precision,
+      speed: link.view.speed, volume: link.view.volume, inspect: link.view.inspect,
+      movie: { keyframes: movie.keyframes, size: movie.size, antialias: movie.antialias, loop: movie.loop },
+    },
   });
   // A different movie pasted over the address: start over.
   window.addEventListener("hashchange", function () { location.reload(); });
@@ -212,7 +223,7 @@
       blobs = all;
       closeJob();
       // The renderer stays for the Inspect overlay; a last still 16 px across lets its canvas go.
-      engineGrid.renderStill({ center: frames[0].center, scale: frames[0].scale, step: 0, antialias: false, width: 16, height: 16 }, function () {});
+      if (!ofInspect) engineGrid.renderStill({ center: frames[0].center, scale: frames[0].scale, step: 0, antialias: false, width: 16, height: 16 }, function () {});
       if (videoFile || videoProblem) return beginPlayback();
       // Resumed with nothing left to render: the file's size from a saved frame.
       createImageBitmap(blobs[0]).then(function (bitmap) {
@@ -305,6 +316,7 @@
 
   function beginRender(grid) {
     engineGrid = grid;
+    if (ofInspect) return beginInspectRender(grid);
     var defaultScale = grid.defaultScale();
     log10DefaultScale = Math.log10(defaultScale);
     var lastStep = link.scene.simulationSteps;
@@ -427,10 +439,113 @@
       }
       beginRender(grid);
     });
-    engine.src = "chaos.html#" + ShareUrl.encode({
-      page: ShareUrl.PAGE_MAP,
-      scene: link.scene,
-      view: { display: link.view.display, lowSaturation: link.view.lowSaturation, precision: link.view.precision },
+    // Silent: the engine's own Inspect tab would play the points' bounces.
+    var view = { display: link.view.display, lowSaturation: link.view.lowSaturation, volume: 0 };
+    if (!ofInspect) {
+      view.precision = link.view.precision;
+      engine.src = "chaos.html#" + ShareUrl.encode({ page: ShareUrl.PAGE_MAP, scene: link.scene, view: view });
+      return;
+    }
+    // Without the map's own copy, the engine rebuilds the points from the link, so it needs them and their view.
+    loadInspectSnapshot().then(function () {
+      if (!inspectSnapshot) {
+        view.precision = link.view.precision;
+        view.center = link.view.center;
+        view.zoom = link.view.zoom;
+        view.speed = link.view.speed;
+        view.inspect = link.view.inspect;
+      }
+      engine.src = "chaos.html#" + ShareUrl.encode({ page: ShareUrl.PAGE_MAP, scene: link.scene, view: view });
+    });
+  }
+
+  // ---- A movie of the Inspect tab ---- the map's saved trajectories if they are this link's, else the points rebuilt
+  // from the link (FractalGrid.inspectTab); played once at the tab's speed, then held on the last frame as the tab does.
+  var inspectSnapshot = null;
+  function loadInspectSnapshot() {
+    return MovieStore.loadInspect().then(function (saved) {
+      if (saved && withoutLook(ShareUrl.cleanFragment(saved.link)) === withoutLook(address)) inspectSnapshot = saved;
+    }).catch(function () {});
+  }
+
+  // The look (background, filled bodies) is chosen here, so a snapshot is this link's whatever its look. A new
+  // look goes in the address, and the page films again (hashchange reloads it).
+  var backgroundField = $("background-field"), backgroundChoice = $("background-choice");
+  var bodiesField = $("bodies-field"), bodiesChoice = $("bodies-choice");
+  function withoutLook(fragment) { return fragment.replace(/,(bkgd|fill):[a-z]+/g, ""); }
+  backgroundChoice.value = movie.background;
+  bodiesChoice.value = movie.filled ? "filled" : "outlined";
+  function changeLook() {
+    var fragment = withoutLook(address);
+    if (backgroundChoice.value !== "plain") fragment += ",bkgd:" + backgroundChoice.value;
+    if (bodiesChoice.value === "filled") fragment += ",fill:t";
+    location.hash = fragment;
+  }
+  backgroundChoice.addEventListener("change", changeLook);
+  bodiesChoice.addEventListener("change", changeLook);
+
+  function beginInspectRender(grid) {
+    renderStatus.textContent = "Filming the Inspect tab\u2026";
+    renderSpinner.hidden = false;
+    progressEl.hidden = renderDetail.hidden = renderActions.hidden = true;
+    var tab = grid.inspectTab(inspectSnapshot, { background: movie.background, filled: movie.filled });
+    if (!tab) {
+      // Still rebuilding the link's points.
+      requestAnimationFrame(function () { beginInspectRender(grid); });
+      return;
+    }
+    if (!tab.points) {
+      fail("None of this link's Inspect points could be simulated.");
+      return;
+    }
+    filmVoices = tab.voices;
+    // The chosen size, cut to the scene's shape.
+    var w = movieSize.width, h = movieSize.height;
+    if (w / h > tab.aspect) w = h * tab.aspect;
+    else h = w / tab.aspect;
+    copy.width = frameWidth = Math.max(16, 4 * Math.floor(w / 4));
+    copy.height = frameHeight = Math.max(16, 2 * Math.floor(h / 2));
+    var count = Math.ceil((tab.steps - 1) * FPS / tab.stepsPerSecond) + 1 + Math.round(tab.endHoldSeconds * FPS);
+    frames = [];
+    for (var i = 0; i < count; i++) frames.push({ step: Math.min(tab.steps - 1, Math.floor(i * tab.stepsPerSecond / FPS)) });
+    blobPromises = new Array(frames.length);
+    movieFacts.textContent = frames.length.toLocaleString() + " frames  \u00b7  " + (frames.length / FPS).toFixed(1) + " s";
+    renderStartedAt = performance.now();
+    openVideo(frameWidth, frameHeight, true).then(function () { filmInspectFrame(tab, 0); });
+  }
+
+  // The Inspect tab's sounds for the move from frame `from` to frame `to`, into `track` at `when`: a voice bounces
+  // or stops at an edge once for the steps in between, as the tab sounds them.
+  var filmVoices = [];
+  function soundInspectStep(track, from, to, when) {
+    var a = frames[from].step, b = frames[to].step;
+    if (b <= a) return;
+    filmVoices.forEach(function (voice) {
+      if (voice.bounces.some(function (e) { return e > a && e <= b; })) track.bounce(voice.freq, when);
+      if (voice.edgeStep !== null && voice.edgeStep > a && voice.edgeStep <= b) track.edge(voice.freq, when);
+    });
+  }
+
+  // A few JPEGs in flight at most, and a pause for the page every few frames.
+  function filmInspectFrame(tab, i) {
+    if (i >= frames.length) {
+      finishRender();
+      return;
+    }
+    Promise.resolve(i >= 4 ? blobPromises[i - 4] : null).then(function () {
+      if (i > 0 && frames[i].step === frames[i - 1].step) {
+        blobPromises[i] = blobPromises[i - 1];
+      } else {
+        tab.draw(copyCtx, copy.width, copy.height, frames[i].step);
+        stampWatermark();
+        blobPromises[i] = new Promise(function (resolve) { copy.toBlob(resolve, "image/jpeg", JPEG_QUALITY); });
+      }
+      encodeFrame(i);
+      renderedCount = i + 1;
+      whenEncoderReady(function () {
+        if ((i + 1) % 8) filmInspectFrame(tab, i + 1);
+        else setTimeout(filmInspectFrame, 0, tab, i + 1);
+      });
     });
   }
 
@@ -586,7 +701,7 @@
 
   // Off until asked, and the AudioContext made only in the click: a page can't start sound on its own.
   var btnSound = $("sound");
-  var soundOn = false, audioCtx = null, liveTone = null;
+  var soundOn = false, audioCtx = null, liveTone = null, liveVoices = null;
   function updateSound() {
     if (liveTone) liveTone.setLevel(soundOn && playing ? 1 : 0);
   }
@@ -594,7 +709,9 @@
     soundOn = next;
     if (soundOn && !audioCtx && typeof AudioContext === "function") {
       audioCtx = new AudioContext();
-      liveTone = new ShepardTone(audioCtx, audioCtx.destination);
+      // An Inspect movie sounds its points' bounces and edge stops; a keyframe movie, the zoom's tone.
+      if (ofInspect) liveVoices = PhysicsSound.track(audioCtx, audioCtx.destination);
+      else liveTone = new ShepardTone(audioCtx, audioCtx.destination);
     }
     if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
     btnSound.setAttribute("aria-pressed", soundOn ? "true" : "false");
@@ -672,6 +789,7 @@
     keepAhead();
     var index = indexAt(position), bitmap = decoded[index];
     if (index !== shownIndex && bitmap && bitmap !== true) {
+      if (liveVoices && soundOn && playing && shownIndex >= 0 && index > shownIndex) soundInspectStep(liveVoices, shownIndex, index, audioCtx.currentTime);
       show(bitmap, index);
       shownIndex = index;
     }
@@ -715,13 +833,15 @@
     window.addEventListener("keydown", function (event) {
       if (event.target === scrubber) return; // it has arrow keys of its own
       if (event.key === " ") { event.preventDefault(); btnPlayPause.click(); }
-      else if (event.key === "m") btnSound.click();
+      else if (event.key === "m" && !btnSound.hidden) btnSound.click();
       else if (event.key === "ArrowRight") { setPlaying(false); seek(Math.floor(position) + 1); }
       else if (event.key === "ArrowLeft") { setPlaying(false); seek(Math.floor(position) - 1); }
       else if (event.key === "Home") seek(0);
     });
 
-    inspectField.hidden = false;
+    // The Inspect point belongs to keyframe movies, the look to Inspect ones.
+    inspectField.hidden = ofInspect;
+    backgroundField.hidden = bodiesField.hidden = !ofInspect;
     btnDownload.hidden = false;
     if (videoProblem) {
       btnDownload.textContent = videoProblem;
@@ -921,20 +1041,70 @@
     }).catch(dropVideo);
   }
 
-  // The tone the player plays, rendered ahead and encoded; null where this browser can't.
+  // Samples the encoder holds its output back by (AAC primes 2112), found by encoding a click and decoding it.
+  function encoderDelay(config) {
+    var click = new Float32Array(SOUND_RATE), at = SOUND_RATE / 2;
+    for (var i = 0; i < 48; i++) click[at + i] = 0.8 * (1 - i / 48);
+    var chunks = [], meta = null, decoded = [];
+    var encoder = new AudioEncoder({
+      output: function (chunk, m) {
+        if (!meta && m && m.decoderConfig) meta = m;
+        chunks.push(chunk);
+      },
+      error: function () {},
+    });
+    encoder.configure(config);
+    var data = new AudioData({ format: "f32-planar", sampleRate: SOUND_RATE, numberOfChannels: 1, numberOfFrames: click.length, timestamp: 0, data: click });
+    encoder.encode(data);
+    data.close();
+    return encoder.flush().then(function () {
+      encoder.close();
+      var decoder = new AudioDecoder({
+        output: function (part) {
+          var samples = new Float32Array(part.numberOfFrames);
+          part.copyTo(samples, { planeIndex: 0 });
+          decoded.push(samples);
+          part.close();
+        },
+        error: function () {},
+      });
+      decoder.configure(meta.decoderConfig);
+      chunks.forEach(function (chunk) { decoder.decode(chunk); });
+      return decoder.flush().then(function () {
+        decoder.close();
+        for (var b = 0, n = 0; b < decoded.length; b++) {
+          for (var j = 0; j < decoded[b].length; j++, n++) if (Math.abs(decoded[b][j]) > 0.4) return Math.max(0, n - at);
+        }
+        return 0;
+      });
+    }).catch(function () { return 0; });
+  }
+
+  // The movie's sound, rendered ahead and encoded early by the encoder's delay so it lands on the picture; null where
+  // this browser can't.
   function soundTrack() {
     if (typeof AudioEncoder !== "function" || typeof OfflineAudioContext !== "function") return Promise.resolve(null);
     var tries = [["aac", "mp4a.40.2"], ["opus", "opus"]].map(function (c) {
       return { mux: c[0], config: { codec: c[1], sampleRate: SOUND_RATE, numberOfChannels: 1, bitrate: 128000 } };
     });
-    return firstSupported(AudioEncoder, tries).then(function (pick) {
+    var pick = null, delay = 0;
+    return firstSupported(AudioEncoder, tries).then(function (found) {
+      pick = found;
+      return pick ? encoderDelay(pick.config) : 0;
+    }).then(function (found) {
       if (!pick) return null;
+      delay = found;
       var seconds = frames.length / FPS;
-      var offline = new OfflineAudioContext(1, Math.ceil(seconds * SOUND_RATE), SOUND_RATE);
-      var tone = new ShepardTone(offline, offline.destination);
-      tone.setLevel(1, 0);
-      for (var i = 0; i < frames.length; i++) tone.setPitch(pitchOf(i), i / FPS);
-      tone.setLevel(0, Math.max(0, seconds - 4 * TONE_FADE_S)); // silent by the end
+      var offline = new OfflineAudioContext(1, Math.ceil(seconds * SOUND_RATE) + delay, SOUND_RATE);
+      if (ofInspect) {
+        var voices = PhysicsSound.track(offline, offline.destination);
+        for (var f = 1; f < frames.length; f++) soundInspectStep(voices, f - 1, f, f / FPS);
+      } else {
+        var tone = new ShepardTone(offline, offline.destination);
+        tone.setLevel(1, 0);
+        for (var i = 0; i < frames.length; i++) tone.setPitch(pitchOf(i), i / FPS);
+        tone.setLevel(0, Math.max(0, seconds - 4 * TONE_FADE_S)); // silent by the end
+      }
       return offline.startRendering().then(function (buffer) {
         var chunks = [], meta = null;
         var encoder = new AudioEncoder({
@@ -945,7 +1115,7 @@
           error: function () {}, // flush() rejects with it
         });
         encoder.configure(pick.config);
-        var samples = buffer.getChannelData(0);
+        var samples = buffer.getChannelData(0).subarray(delay);
         for (var at = 0; at < samples.length; at += SOUND_RATE) {
           var part = samples.subarray(at, at + SOUND_RATE);
           var data = new AudioData({ format: "f32-planar", sampleRate: SOUND_RATE, numberOfChannels: 1,

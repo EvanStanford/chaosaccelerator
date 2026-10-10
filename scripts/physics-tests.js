@@ -4674,7 +4674,7 @@
 
   addTest(
     "A movie's link carries its keyframes, each with the digits its own zoom can use",
-    "share-url.js's kfrm/size/aa/loop - the player renders from its address alone, so the keyframes are the movie, and how the map is drawn (display mode, Low Saturation) rides along with them. A keyframe's center is written to the precision of THAT keyframe's zoom, which is what keeps a movie that dives to 1e8x from costing thirty digits on its wide shots; and a movie link has no view of its own, so none of the map's view fields belong in it",
+    "share-url.js's kfrm/size/aa/loop - the player renders from its address alone, so the keyframes are the movie, and how the map is drawn (display mode, Low Saturation) rides along with them. A keyframe's center is written to the precision of THAT keyframe's zoom, which is what keeps a movie that dives to 1e8x from costing thirty digits on its wide shots; a keyframe movie's link has no view of its own, so none of the map's view fields belong in it, while a movie of the Inspect tab (subj:insp) carries the view and points it films, and its look",
     function () {
       var deep = PhysicsDF.twoSum64(213.41826094537, 3.1e-15);
       var movie = { size: { width: 1080, height: 1920 }, antialias: false, loop: false, keyframes: [
@@ -4697,13 +4697,25 @@
       var mapKeeps = ShareUrl.decode(ShareUrl.encode({ page: "map", scene: scene, view: mapView })).view.movie.keyframes.length === 2;
       mapView.movie = { keyframes: [], size: { width: 640, height: 360 }, antialias: false, loop: false };
       var silent = !/kfrm|size|aa:|loop/.test(ShareUrl.encode({ page: "map", scene: scene, view: mapView }));
+      // A movie of the Inspect tab: the view, its points, the size and the look; and a map with points keeps the size.
+      var inspectView = { center: { x: 1.5, xLo: 0, y: -2, yLo: 0 }, scale: 100, zoom: 3, speed: 2, volume: 0.5, inspect: [{ type: "point", a: [0.0115, -0.0075] }],
+        movie: { keyframes: [], size: { width: 1000, height: 1000 }, antialias: true, loop: true, subject: "inspect", background: "grid", filled: true } };
+      var inspectBack = ShareUrl.decode(ShareUrl.encode({ page: "movi", scene: scene, view: inspectView })).view;
+      var inspectOk = inspectBack.movie.subject === "inspect" && inspectBack.movie.background === "grid" && inspectBack.movie.filled === true &&
+        inspectBack.movie.size.width === 1000 && inspectBack.inspect.length === 1 && inspectBack.speed === 2 && inspectBack.volume === 0.5 && inspectBack.zoom === 3;
+      inspectView.movie.subject = undefined;
+      var mapWithPoints = ShareUrl.encode({ page: "map", scene: scene, view: inspectView });
+      var mapLookOk = /size:1000x1000/.test(mapWithPoints) && !/subj|bkgd|fill/.test(mapWithPoints);
       var defaults = ShareUrl.decode("#map/body:ci:0:0:0:30").view.movie;
+      var oddLook = ShareUrl.decode("#movi/body:ci:0:0:0:30,subj:zzz,bkgd:zzz").view.movie;
       var badSize = ShareUrl.decode("#map/body:ci:0:0:0:30,size:20000x10").view.movie.size;
       return {
-        pass: keyframesOk && settingsOk && noViewFields && mapKeeps && silent && defaults.size.width === 1280 && defaults.size.height === 720 &&
-          defaults.antialias === true && defaults.loop === true && defaults.keyframes.length === 0 && badSize.width === 1280 && badSize.height === 720,
+        pass: keyframesOk && settingsOk && noViewFields && mapKeeps && silent && inspectOk && mapLookOk && defaults.size.width === 1280 && defaults.size.height === 720 &&
+          defaults.antialias === true && defaults.loop === true && defaults.keyframes.length === 0 && badSize.width === 1280 && badSize.height === 720 &&
+          defaults.subject === "map" && defaults.background === "plain" && defaults.filled === false && oddLook.subject === "map" && oddLook.background === "plain",
         detail: "keyframes " + (keyframesOk ? "exact" : "DIFFER: " + JSON.stringify(k)) + "; settings and scene=" + settingsOk +
           "; no map-view fields in a movie link=" + noViewFields + "; a map link keeps them=" + mapKeeps + " and is silent without any=" + silent +
+          "; an Inspect movie round-trips=" + inspectOk + "; a map with points keeps the size and no look=" + mapLookOk +
           "; " + fragment.slice(fragment.indexOf("kfrm")),
       };
     }

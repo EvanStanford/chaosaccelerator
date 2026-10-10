@@ -307,7 +307,9 @@
 
   // ---- The map's view ---- what FractalGrid.shareState() hands over and applyShareView()
   // takes back: { center: {x, xLo, y, yLo}, scale, zoom, display, lowSaturation, precision, speed,
-  // volume, inspect: [{type, a, b, count|size, twoPart}], movie: {keyframes, size: {width, height}, antialias, loop} }.
+  // volume, inspect: [{type, a, b, count|size, twoPart}], movie: {keyframes, size: {width, height}, antialias, loop, subject, background, filled} }.
+  // A movie's subject is "map" (its keyframes) or "inspect" (the Inspect tab's points, played once, on a
+  // "plain", "grid" or "black" background, bodies it outlines drawn solid if filled).
   // Inspect points are (u, v) in VIEW HEIGHTS FROM THE CENTER, not world coordinates.
 
   function uvNum(v) {
@@ -397,13 +399,18 @@
     if (view.volume !== undefined && num(view.volume) !== "1") fields.push("snd:" + num(view.volume));
     if (view.inspect && view.inspect.length) fields.push("insp:" + view.inspect.map(encodeInspect).join(";"));
     var movie = view.movie;
-    if (movie && movie.keyframes && movie.keyframes.length) {
-      fields.push("kfrm:" + movie.keyframes.map(encodeKeyframe).join(";"));
+    var hasKeyframes = movie && movie.keyframes && movie.keyframes.length, ofInspect = movie && movie.subject === "inspect";
+    if (hasKeyframes) fields.push("kfrm:" + movie.keyframes.map(encodeKeyframe).join(";"));
+    // Also with Inspect points: a movie of the Inspect tab is made at this size.
+    if (movie && (hasKeyframes || ofInspect || (view.inspect && view.inspect.length))) {
       var size = movie.size || DEFAULT_MOVIE_SIZE;
       if (size.width !== DEFAULT_MOVIE_SIZE.width || size.height !== DEFAULT_MOVIE_SIZE.height) fields.push("size:" + size.width + "x" + size.height);
       if (movie.antialias === false) fields.push("aa:f");
       if (movie.loop === false) fields.push("loop:f");
     }
+    if (ofInspect) fields.push("subj:insp");
+    if (ofInspect && movie.background && movie.background !== "plain") fields.push("bkgd:" + movie.background);
+    if (ofInspect && movie.filled) fields.push("fill:t");
     return fields;
   }
 
@@ -428,6 +435,9 @@
         size: attempt("size", parseMovieSize, { width: DEFAULT_MOVIE_SIZE.width, height: DEFAULT_MOVIE_SIZE.height }),
         antialias: attempt("aa", function (t) { return parseBool(t, "aa"); }, true),
         loop: attempt("loop", function (t) { return parseBool(t, "loop"); }, true),
+        subject: attempt("subj", function (t) { return t === "insp" ? "inspect" : "map"; }, "map"),
+        background: attempt("bkgd", function (t) { return t === "grid" || t === "black" ? t : "plain"; }, "plain"),
+        filled: attempt("fill", function (t) { return parseBool(t, "fill"); }, false),
       },
     };
   }

@@ -261,6 +261,7 @@
   var btnInspectLine = document.getElementById("btn-inspect-line");
   var btnInspectGrid = document.getElementById("btn-inspect-grid");
   var btnInspectClearAll = document.getElementById("btn-inspect-clear-all");
+  var btnMovieInspect = document.getElementById("movie-inspect");
   var btnSuperlativeLargest = document.getElementById("btn-superlative-largest");
   var btnSuperlativeSmallest = document.getElementById("btn-superlative-smallest");
   var btnSuperlativeEdge = document.getElementById("btn-superlative-edge");
@@ -2710,8 +2711,15 @@
     btnInspectLine.disabled = full;
     btnInspectGrid.disabled = full;
     btnInspectClearAll.hidden = inspectedGroups.length === 0;
+    updateMovieInspectButton();
     restartCurrentPreview();
   }
+  // Not while a link's points are still being rebuilt: the movie would miss the rest.
+  function updateMovieInspectButton() {
+    btnMovieInspect.disabled = inspectedGroups.length === 0 || !!pendingInspect;
+  }
+  // Back from the player can bring this page back as it was left, button disabled.
+  global.addEventListener("pageshow", updateMovieInspectButton);
 
   // runHoverAt's GPU replay + wrap-stop work, run once and cached. Null on failure; the caller decides the batch.
   function computeTrajectoryEntry(worldPoint) {
@@ -4662,14 +4670,7 @@
 
   // Auto-advance ceiling: the latest final frame on screen. Recomputed per call, since inspected points change under a running session.
   function playbackClockCeiling() {
-    var ceiling = activeReplay ? activeReplay.effectiveMaxStep : 0;
-    for (var g = 0; g < inspectedGroups.length; g++) {
-      var points = inspectedGroups[g].points;
-      for (var i = 0; i < points.length; i++) {
-        ceiling = Math.max(ceiling, points[i].effectiveMaxStep);
-      }
-    }
-    return Math.max(1, ceiling);
+    return Math.max(activeReplay ? activeReplay.effectiveMaxStep : 1, lockedClockCeiling(inspectedGroups));
   }
 
   // A JS copy of colorMap's hue (hueRangeMaxValue: 360 for a wrapping Output, 300 for a capped one).
@@ -4891,7 +4892,9 @@
     heads.forEach(function (slot) { tracked[slot] = true; });
     return tracked;
   }
-  function isHollow(tracked, i) { return !!tracked && !tracked[i]; }
+  // A movie of the Inspect tab can draw every body solid (inspectTab).
+  var fillOutlinedBodies = false;
+  function isHollow(tracked, i) { return !fillOutlinedBodies && !!tracked && !tracked[i]; }
 
   var HOLLOW_OUTLINE_WIDTH = 2.5;
   // A wider dark ring under every outline: a lone light ring vanishes where the background hue matches.
@@ -7767,6 +7770,37 @@
     if (global.AppShell && global.AppShell.syncAddress) global.AppShell.syncAddress();
     global.location.href = link;
   });
+  // A movie of the Inspect tab's locked points. The link describes them; the trajectories on screen go along
+  // in MovieStore for the player to film.
+  btnMovieInspect.addEventListener("click", function () {
+    if (!inspectedGroups.length) return;
+    var shared = global.FractalGrid.shareState(), sharedView = shared.view;
+    var fragment = ShareUrl.encode({
+      page: ShareUrl.PAGE_MOVIE,
+      scene: PhysicsCoords.toAuthoredJSON(shared.scene),
+      view: {
+        center: sharedView.center, zoom: sharedView.zoom, display: sharedView.display, lowSaturation: sharedView.lowSaturation,
+        precision: sharedView.precision, speed: sharedView.speed, volume: sharedView.volume, inspect: sharedView.inspect,
+        movie: { keyframes: sharedView.movie.keyframes, size: movie.size, antialias: movie.antialias, loop: movie.loop, subject: "inspect" },
+      },
+    });
+    if (global.AppShell && global.AppShell.syncAddress) global.AppShell.syncAddress();
+    var gone = false;
+    function go() {
+      if (gone) return;
+      gone = true;
+      global.location.href = "chaosplayback.html#" + fragment;
+    }
+    btnMovieInspect.disabled = true;
+    setTimeout(go, 10000);
+    var saving;
+    try {
+      saving = global.MovieStore.saveInspect(inspectTabSnapshot(fragment));
+    } catch (err) {
+      saving = Promise.resolve(); // the player rebuilds the points from the link instead
+    }
+    saving.then(go, go);
+  });
   updateMovieUI();
 
   // ---- One finished picture, on request ----
@@ -7807,6 +7841,121 @@
     return { name: precision, slowdown: PRECISION_SLOWDOWN[precision] || 1 };
   };
 
+  // The Inspect tab's sounds, voice by voice in its order: each point's pitch, the steps it bounces on, and the
+  // step it stops at an edge on, if it does.
+  function inspectVoices(groups) {
+    var entries = [];
+    groups.forEach(function (group) { entries = entries.concat(group.points); });
+    var freqs = PhysicsSound.chordFrequencies(entries.length);
+    return entries.map(function (entry, i) {
+      var last = entry.effectiveMaxStep - 1;
+      return { freq: freqs[i], bounces: (entry.bounceEvents || []).filter(function (e) { return e <= last; }), edgeStep: entry.wrapOverride ? last : null };
+    });
+  }
+
+  // The latest final frame among locked points: how long the Inspect tab plays them.
+  function lockedClockCeiling(groups) {
+    var ceiling = 1;
+    groups.forEach(function (group) {
+      group.points.forEach(function (entry) { ceiling = Math.max(ceiling, entry.effectiveMaxStep); });
+    });
+    return ceiling;
+  }
+
+  // What the Inspect tab is playing, for a movie of it (FractalGrid.inspectTab on the player's page). Positions are float32.
+  function inspectTabSnapshot(link) {
+    return {
+      link: link,
+      steps: lockedClockCeiling(inspectedGroups),
+      stepsPerSecond: hoverStepsPerSecond(),
+      groups: inspectedGroups.map(function (group) {
+        return {
+          type: group.type,
+          segments: group.segments || null,
+          outputBodyIndex: group.outputBodyIndex === undefined ? null : group.outputBodyIndex,
+          points: group.points.map(function (entry) {
+            var rows = entry.trajectory, bodies = rows.length ? rows[0].length : 0;
+            var packed = new Float32Array(rows.length * bodies * 4), k = 0;
+            rows.forEach(function (row) {
+              for (var i = 0; i < bodies; i++) {
+                packed[k++] = row[i].x; packed[k++] = row[i].y; packed[k++] = row[i].angle; packed[k++] = row[i].half;
+              }
+            });
+            return { color: entry.color, effectiveMaxStep: entry.effectiveMaxStep, wrapOverride: entry.wrapOverride, bounceEvents: entry.bounceEvents || [], bodies: bodies, trajectory: packed };
+          }),
+        };
+      }),
+    };
+  }
+  function unpackInspectGroups(groups) {
+    return groups.map(function (group) {
+      return {
+        type: group.type,
+        segments: group.segments,
+        outputBodyIndex: group.outputBodyIndex,
+        points: group.points.map(function (point) {
+          var rows = [], data = point.trajectory;
+          for (var k = 0; k < data.length;) {
+            var row = [];
+            for (var i = 0; i < point.bodies; i++, k += 4) row.push({ x: data[k], y: data[k + 1], angle: data[k + 2], half: data[k + 3] });
+            rows.push(row);
+          }
+          return { color: point.color, effectiveMaxStep: point.effectiveMaxStep, wrapOverride: point.wrapOverride, bounceEvents: point.bounceEvents, trajectory: rows };
+        }),
+      };
+    });
+  }
+
+  // The Inspect tab's locked points for a movie: a snapshot's, or this page's own once a link's are rebuilt (null
+  // until then). draw() paints step `step` as the preview does, scaled up from its size, lines and all. look:
+  // { background: "plain" (the preview's), "grid" (the editor's over that) or "black", filled: outlined bodies solid }.
+  global.FractalGrid.inspectTab = function (snapshot, look) {
+    if (!snapshot && pendingInspect) return null;
+    var groups = snapshot ? unpackInspectGroups(snapshot.groups) : inspectedGroups;
+    var background = look && look.background, filled = !!(look && look.filled);
+    var fill = background === "black" ? "#000" : global.getComputedStyle(hoverCanvas.parentNode).backgroundColor;
+    return {
+      points: groups.reduce(function (n, group) { return n + group.points.length; }, 0),
+      aspect: scene.frameWidth && scene.frameHeight ? scene.frameWidth / scene.frameHeight : hoverCanvas.width / hoverCanvas.height,
+      steps: snapshot ? snapshot.steps : lockedClockCeiling(groups),
+      stepsPerSecond: snapshot ? snapshot.stepsPerSecond : hoverStepsPerSecond(),
+      // The pause on the last frame before the tab loops.
+      endHoldSeconds: REPLAY_LOOP_DELAY_MS / 1000,
+      voices: inspectVoices(groups),
+      draw: function (ctx, width, height, step) {
+        var k = width / hoverCanvas.width;
+        var savedCtx = hoverCtx, savedFit = hoverFit, savedGroups = inspectedGroups, savedFilled = fillOutlinedBodies;
+        hoverCtx = ctx;
+        hoverFit = fitScene(width / k, height / k);
+        inspectedGroups = groups;
+        fillOutlinedBodies = filled;
+        try {
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.clearRect(0, 0, width, height);
+          ctx.setTransform(k * hoverFit.scale, 0, 0, k * hoverFit.scale, k * hoverFit.offsetX, k * hoverFit.offsetY);
+          drawFrameBoundary();
+          drawInspectedAtStep(step);
+          // The backdrop goes under the drawing, so what a hollow body cuts out of it shows the backdrop.
+          ctx.globalCompositeOperation = "destination-over";
+          if (background === "grid") {
+            var x0 = -hoverFit.offsetX / hoverFit.scale, y0 = -hoverFit.offsetY / hoverFit.scale;
+            PhysicsUI.drawGridOver(ctx, scene.frameWidth, scene.frameHeight, x0, y0, x0 + width / k / hoverFit.scale, y0 + height / k / hoverFit.scale);
+          }
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.fillStyle = fill;
+          ctx.fillRect(0, 0, width, height);
+        } finally {
+          ctx.globalCompositeOperation = "source-over";
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          hoverCtx = savedCtx;
+          hoverFit = savedFit;
+          inspectedGroups = savedGroups;
+          fillOutlinedBodies = savedFilled;
+        }
+      },
+    };
+  };
+
   // The Inspect replay of `world` (double-double) at `precision`, for the movie player's overlay, or null if the
   // scene has no bodies. draw() paints Map Evolution frame `frame` into the player's canvas as the preview would.
   global.FractalGrid.inspection = function (world, precision) {
@@ -7826,12 +7975,17 @@
         hoverFit = fitScene(width, height);
         try {
           ctx.setTransform(1, 0, 0, 1, 0, 0);
-          ctx.fillStyle = replayBackground(replay, shown);
-          ctx.fillRect(0, 0, width, height);
+          ctx.clearRect(0, 0, width, height);
           ctx.setTransform(hoverFit.scale, 0, 0, hoverFit.scale, hoverFit.offsetX, hoverFit.offsetY);
           drawFrameBoundary();
           drawReplayFrame(replay, shown);
+          // Under the drawing, as inspectTab's.
+          ctx.globalCompositeOperation = "destination-over";
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.fillStyle = replayBackground(replay, shown);
+          ctx.fillRect(0, 0, width, height);
         } finally {
+          ctx.globalCompositeOperation = "source-over";
           hoverCtx = savedCtx;
           hoverFit = savedFit;
         }
@@ -7866,6 +8020,8 @@
     if (next.type === "point") lockPointAt(next.a);
     else if (next.type === "line") lockLineOfPoints(next.a, next.b, next.count);
     else lockGridOfPoints(next.a, next.b, next.size, next.twoPart);
+    // A last group that failed to lock leaves the button as it was.
+    if (!pendingInspect) updateMovieInspectButton();
   }
 
   // The scene as run here (its own Simulation Duration) and the view; inspection points as view-heights from the centre, pending included.
