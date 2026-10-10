@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#1b1e27">
 <title>Physics Fractal: Movie</title>
-<link rel="stylesheet" href="scripts/chaosplayback.css?v=m92">
+<link rel="stylesheet" href="scripts/chaosplayback.css?v=m93">
 </head>
 <body>
 
@@ -40,6 +40,14 @@
     <select id="bodies-choice">
       <option value="outlined" selected>Outlined</option>
       <option value="filled">Filled</option>
+    </select>
+  </label>
+  <label id="pace-field" class="bar-select" hidden title="Slow motion: more frames, with the bodies placed between simulation steps. Changing it films the movie again.">
+    <span>Render at</span>
+    <select id="pace-choice">
+      <option value="1" selected>1x</option>
+      <option value="0.5">0.5x</option>
+      <option value="0.25">0.25x</option>
     </select>
   </label>
   <button id="download" class="bar-link" type="button" hidden title="Save the movie as an MP4 video, with the sound if it is on.">Download</button>
@@ -93,11 +101,11 @@
   </button>
 </footer>
 
-<script src="scripts/share-url.js?v=m92"></script>
-<script src="scripts/movie-path.js?v=m92"></script>
-<script src="scripts/movie-store.js?v=m92"></script>
-<script src="scripts/mp4-muxer.js?v=m92"></script>
-<script src="scripts/physics-sound.js?v=m92"></script>
-<script src="scripts/chaosplayback.js?v=m92"></script>
+<script src="scripts/share-url.js?v=m93"></script>
+<script src="scripts/movie-path.js?v=m93"></script>
+<script src="scripts/movie-store.js?v=m93"></script>
+<script src="scripts/mp4-muxer.js?v=m93"></script>
+<script src="scripts/physics-sound.js?v=m93"></script>
+<script src="scripts/chaosplayback.js?v=m93"></script>
 </body>
 </html>

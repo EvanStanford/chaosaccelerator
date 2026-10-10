@@ -307,9 +307,9 @@
 
   // ---- The map's view ---- what FractalGrid.shareState() hands over and applyShareView()
   // takes back: { center: {x, xLo, y, yLo}, scale, zoom, display, lowSaturation, precision, speed,
-  // volume, inspect: [{type, a, b, count|size, twoPart}], movie: {keyframes, size: {width, height}, antialias, loop, subject, background, filled} }.
+  // volume, inspect: [{type, a, b, count|size, twoPart}], movie: {keyframes, size: {width, height}, antialias, loop, subject, background, filled, pace} }.
   // A movie's subject is "map" (its keyframes) or "inspect" (the Inspect tab's points, played once, on a
-  // "plain", "grid" or "black" background, bodies it outlines drawn solid if filled).
+  // "plain", "grid" or "black" background, bodies it outlines drawn solid if filled, slowed to a pace of 0.5 or 0.25).
   // Inspect points are (u, v) in VIEW HEIGHTS FROM THE CENTER, not world coordinates.
 
   function uvNum(v) {
@@ -411,6 +411,7 @@
     if (ofInspect) fields.push("subj:insp");
     if (ofInspect && movie.background && movie.background !== "plain") fields.push("bkgd:" + movie.background);
     if (ofInspect && movie.filled) fields.push("fill:t");
+    if (ofInspect && movie.pace && movie.pace !== 1) fields.push("pace:" + num(movie.pace));
     return fields;
   }
 
@@ -438,6 +439,7 @@
         subject: attempt("subj", function (t) { return t === "insp" ? "inspect" : "map"; }, "map"),
         background: attempt("bkgd", function (t) { return t === "grid" || t === "black" ? t : "plain"; }, "plain"),
         filled: attempt("fill", function (t) { return parseBool(t, "fill"); }, false),
+        pace: attempt("pace", function (t) { var v = parseNum(t, "pace"); return v === 0.5 || v === 0.25 ? v : 1; }, 1),
       },
     };
   }

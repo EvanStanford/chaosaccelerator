@@ -468,21 +468,25 @@
     }).catch(function () {});
   }
 
-  // The look (background, filled bodies) is chosen here, so a snapshot is this link's whatever its look. A new
-  // look goes in the address, and the page films again (hashchange reloads it).
+  // The look (background, filled bodies, pace) is chosen here, so a snapshot is this link's whatever its look. A
+  // new look goes in the address, and the page films again (hashchange reloads it).
   var backgroundField = $("background-field"), backgroundChoice = $("background-choice");
   var bodiesField = $("bodies-field"), bodiesChoice = $("bodies-choice");
-  function withoutLook(fragment) { return fragment.replace(/,(bkgd|fill):[a-z]+/g, ""); }
+  var paceField = $("pace-field"), paceChoice = $("pace-choice");
+  function withoutLook(fragment) { return fragment.replace(/,(bkgd|fill|pace):[a-z0-9.]+/g, ""); }
   backgroundChoice.value = movie.background;
   bodiesChoice.value = movie.filled ? "filled" : "outlined";
+  paceChoice.value = String(movie.pace);
   function changeLook() {
     var fragment = withoutLook(address);
     if (backgroundChoice.value !== "plain") fragment += ",bkgd:" + backgroundChoice.value;
     if (bodiesChoice.value === "filled") fragment += ",fill:t";
+    if (paceChoice.value !== "1") fragment += ",pace:" + paceChoice.value.replace(/^0/, "");
     location.hash = fragment;
   }
   backgroundChoice.addEventListener("change", changeLook);
   bodiesChoice.addEventListener("change", changeLook);
+  paceChoice.addEventListener("change", changeLook);
 
   function beginInspectRender(grid) {
     renderStatus.textContent = "Filming the Inspect tab\u2026";
@@ -505,9 +509,15 @@
     else h = w / tab.aspect;
     copy.width = frameWidth = Math.max(16, 4 * Math.floor(w / 4));
     copy.height = frameHeight = Math.max(16, 2 * Math.floor(h / 2));
-    var count = Math.ceil((tab.steps - 1) * FPS / tab.stepsPerSecond) + 1 + Math.round(tab.endHoldSeconds * FPS);
+    // Slowed, frames fall between simulation steps and the app places the bodies in between; at full pace each
+    // frame is a step the simulation reached, as the tab shows it.
+    var rate = tab.stepsPerSecond * movie.pace;
+    var count = Math.ceil((tab.steps - 1) * FPS / rate) + 1 + Math.round(tab.endHoldSeconds * FPS);
     frames = [];
-    for (var i = 0; i < count; i++) frames.push({ step: Math.min(tab.steps - 1, Math.floor(i * tab.stepsPerSecond / FPS)) });
+    for (var i = 0; i < count; i++) {
+      var step = i * rate / FPS;
+      frames.push({ step: Math.min(tab.steps - 1, movie.pace < 1 ? step : Math.floor(step)) });
+    }
     blobPromises = new Array(frames.length);
     movieFacts.textContent = frames.length.toLocaleString() + " frames  \u00b7  " + (frames.length / FPS).toFixed(1) + " s";
     renderStartedAt = performance.now();
@@ -841,7 +851,7 @@
 
     // The Inspect point belongs to keyframe movies, the look to Inspect ones.
     inspectField.hidden = ofInspect;
-    backgroundField.hidden = bodiesField.hidden = !ofInspect;
+    backgroundField.hidden = bodiesField.hidden = paceField.hidden = !ofInspect;
     btnDownload.hidden = false;
     if (videoProblem) {
       btnDownload.textContent = videoProblem;

@@ -4699,20 +4699,20 @@
       var silent = !/kfrm|size|aa:|loop/.test(ShareUrl.encode({ page: "map", scene: scene, view: mapView }));
       // A movie of the Inspect tab: the view, its points, the size and the look; and a map with points keeps the size.
       var inspectView = { center: { x: 1.5, xLo: 0, y: -2, yLo: 0 }, scale: 100, zoom: 3, speed: 2, volume: 0.5, inspect: [{ type: "point", a: [0.0115, -0.0075] }],
-        movie: { keyframes: [], size: { width: 1000, height: 1000 }, antialias: true, loop: true, subject: "inspect", background: "grid", filled: true } };
+        movie: { keyframes: [], size: { width: 1000, height: 1000 }, antialias: true, loop: true, subject: "inspect", background: "grid", filled: true, pace: 0.25 } };
       var inspectBack = ShareUrl.decode(ShareUrl.encode({ page: "movi", scene: scene, view: inspectView })).view;
-      var inspectOk = inspectBack.movie.subject === "inspect" && inspectBack.movie.background === "grid" && inspectBack.movie.filled === true &&
+      var inspectOk = inspectBack.movie.subject === "inspect" && inspectBack.movie.background === "grid" && inspectBack.movie.filled === true && inspectBack.movie.pace === 0.25 &&
         inspectBack.movie.size.width === 1000 && inspectBack.inspect.length === 1 && inspectBack.speed === 2 && inspectBack.volume === 0.5 && inspectBack.zoom === 3;
       inspectView.movie.subject = undefined;
       var mapWithPoints = ShareUrl.encode({ page: "map", scene: scene, view: inspectView });
-      var mapLookOk = /size:1000x1000/.test(mapWithPoints) && !/subj|bkgd|fill/.test(mapWithPoints);
+      var mapLookOk = /size:1000x1000/.test(mapWithPoints) && !/subj|bkgd|fill|pace/.test(mapWithPoints);
       var defaults = ShareUrl.decode("#map/body:ci:0:0:0:30").view.movie;
       var oddLook = ShareUrl.decode("#movi/body:ci:0:0:0:30,subj:zzz,bkgd:zzz").view.movie;
       var badSize = ShareUrl.decode("#map/body:ci:0:0:0:30,size:20000x10").view.movie.size;
       return {
         pass: keyframesOk && settingsOk && noViewFields && mapKeeps && silent && inspectOk && mapLookOk && defaults.size.width === 1280 && defaults.size.height === 720 &&
           defaults.antialias === true && defaults.loop === true && defaults.keyframes.length === 0 && badSize.width === 1280 && badSize.height === 720 &&
-          defaults.subject === "map" && defaults.background === "plain" && defaults.filled === false && oddLook.subject === "map" && oddLook.background === "plain",
+          defaults.subject === "map" && defaults.background === "plain" && defaults.filled === false && defaults.pace === 1 && oddLook.subject === "map" && oddLook.background === "plain",
         detail: "keyframes " + (keyframesOk ? "exact" : "DIFFER: " + JSON.stringify(k)) + "; settings and scene=" + settingsOk +
           "; no map-view fields in a movie link=" + noViewFields + "; a map link keeps them=" + mapKeeps + " and is silent without any=" + silent +
           "; an Inspect movie round-trips=" + inspectOk + "; a map with points keeps the size and no look=" + mapLookOk +

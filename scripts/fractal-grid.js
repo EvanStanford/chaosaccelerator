@@ -5005,23 +5005,46 @@
     });
   }
 
-  // Every inspected point's bodies at `step` (each capped to its own effectiveMaxStep), in its own color.
+  // An entry's bodies at `step`, capped to its effectiveMaxStep, where Sticky Edges' stop shows. A slowed movie of
+  // the Inspect tab asks for steps in between: each body then on a straight line from one step to the next (to the
+  // stop on the last), and null for one that jumps there, through a port hole or round a wrapped edge.
+  function inspectedRowAt(entry, step) {
+    var rows = entry.trajectory, last = entry.effectiveMaxStep - 1, stop = entry.wrapOverride;
+    var s = Math.min(step, last), s0 = Math.floor(s), t = s - s0;
+    if (s >= last) {
+      if (!stop) return rows[last];
+      return rows[last].map(function (at, i) { return stop.bodyIndex === i ? { x: stop.x, y: stop.y, angle: stop.angle, half: at.half } : at; });
+    }
+    if (t === 0) return rows[s0];
+    return rows[s0].map(function (a, i) {
+      var toStop = stop && stop.bodyIndex === i && s0 + 1 === last;
+      if (!toStop && jumpsAfter(rows, s0, i)) return null;
+      var b = toStop ? stop : rows[s0 + 1][i];
+      var turn = b.angle - a.angle;
+      turn -= 2 * Math.PI * Math.round(turn / (2 * Math.PI));
+      return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, angle: a.angle + turn * t, half: a.half + (rows[s0 + 1][i].half - a.half) * t };
+    });
+  }
+  // Body i moved far more from step s to s + 1 than in the steps either side of it.
+  function jumpsAfter(rows, s, i) {
+    function moved(k) {
+      if (k < 0 || k + 1 >= rows.length) return 0;
+      return Math.hypot(rows[k + 1][i].x - rows[k][i].x, rows[k + 1][i].y - rows[k][i].y);
+    }
+    return moved(s) > 4 + 3 * Math.max(moved(s - 1), moved(s + 1));
+  }
+
+  // Every inspected point's bodies at `step` (inspectedRowAt), in its own color.
   // "grid" groups draw no bodies; their mesh is the separate pass below so it sits on top of every group.
   var INSPECT_GRID_MESH_LINE_WIDTH = 2.5;
   function drawInspectedAtStep(step) {
     inspectedGroups.forEach(function (group) {
       if (group.type === "grid") return;
       group.points.forEach(function (entry) {
-        var s = Math.min(step, entry.effectiveMaxStep - 1);
-        var isFinalFrame = s >= entry.effectiveMaxStep - 1;
-        var row = entry.trajectory[s];
-        var color = entry.color;
-        var shown = [], tracked = trackedBodySlots();
-        for (var i = 0; i < row.length; i++) {
-          shown[i] = (isFinalFrame && entry.wrapOverride && entry.wrapOverride.bodyIndex === i)
-            ? { x: entry.wrapOverride.x, y: entry.wrapOverride.y, angle: entry.wrapOverride.angle, half: row[i].half }
-            : row[i];
-          drawHoverBody(scene.bodies[i], shown[i], color, isHollow(tracked, i));
+        var shown = inspectedRowAt(entry, step);
+        var color = entry.color, tracked = trackedBodySlots();
+        for (var i = 0; i < shown.length; i++) {
+          if (shown[i]) drawHoverBody(scene.bodies[i], shown[i], color, isHollow(tracked, i));
         }
         drawHoverSprings(shown, color);
         drawOffscreenMappingArrows(shown, color);
@@ -5033,18 +5056,13 @@
     inspectedGroups.forEach(function (group) {
       if (group.type !== "grid" || group.outputBodyIndex === null) return;
       var positions = group.points.map(function (entry) {
-        var s = Math.min(step, entry.effectiveMaxStep - 1);
-        var isFinalFrame = s >= entry.effectiveMaxStep - 1;
-        var row = entry.trajectory[s];
-        var outputRow = (isFinalFrame && entry.wrapOverride && entry.wrapOverride.bodyIndex === group.outputBodyIndex)
-          ? { x: entry.wrapOverride.x, y: entry.wrapOverride.y }
-          : row[group.outputBodyIndex];
-        return { x: outputRow.x, y: outputRow.y };
+        return inspectedRowAt(entry, step)[group.outputBodyIndex];
       });
       hoverCtx.lineCap = "round";
       hoverCtx.lineWidth = INSPECT_GRID_MESH_LINE_WIDTH / hoverFit.scale;
       group.segments.forEach(function (pair) {
         var a = positions[pair[0]], b = positions[pair[1]];
+        if (!a || !b) return;
         var gradient = hoverCtx.createLinearGradient(a.x, a.y, b.x, b.y);
         gradient.addColorStop(0, group.points[pair[0]].color.fill);
         gradient.addColorStop(1, group.points[pair[1]].color.fill);
