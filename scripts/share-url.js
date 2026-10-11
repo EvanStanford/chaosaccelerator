@@ -312,6 +312,7 @@
   // volume, inspect: [{type, a, b, count|size, twoPart}], movie: {keyframes, size: {width, height}, antialias, loop, subject, background, filled, pace} }.
   // A movie's subject is "map" (its keyframes) or "inspect" (the Inspect tab's points, played once, on a
   // "plain", "grid" or "black" background, bodies it outlines drawn solid if filled, slowed to a pace of 0.5 or 0.25).
+  // A keyframe is {center, zoom, step, seconds, friction}; seconds and friction (a fraction 0 to 0.99) are null when unset.
   // Inspect points are (u, v) in VIEW HEIGHTS FROM THE CENTER, not world coordinates.
 
   function uvNum(v) {
@@ -353,26 +354,31 @@
     return zoom;
   }
 
-  // "x:y:zoom:frame", plus seconds when the move was given a length. Each center gets the digits ITS OWN zoom needs.
+  // "x:y:zoom:frame[:seconds][:friction]", an empty seconds slot when only friction is set.
+  // Each center gets the digits its own zoom needs.
   function encodeKeyframe(k) {
     var decimals = decimalsFor(k);
     var parts = [
       formatDD(k.center.x, k.center.xLo, decimals), formatDD(k.center.y, k.center.yLo, decimals),
       zoomNum(k.zoom), Math.round(k.step),
+      Number(k.seconds) > 0 ? num(Math.round(k.seconds * 10) / 10) : "",
+      k.friction === null || k.friction === undefined ? "" : sceneNum(k.friction),
     ];
-    if (Number(k.seconds) > 0) parts.push(num(Math.round(k.seconds * 10) / 10));
+    while (parts.length > 4 && parts[parts.length - 1] === "") parts.pop();
     return parts.join(":");
   }
   function decodeKeyframe(text) {
     var parts = text.split(":"), what = "kfrm";
-    if (parts.length < 4 || parts.length > 5) throw new Error("kfrm has a keyframe that is not x, y, zoom and frame");
+    if (parts.length < 4 || parts.length > 6) throw new Error("kfrm has a keyframe that is not x, y, zoom and frame");
     var cx = parseDD(parts[0], what), cy = parseDD(parts[1], what);
-    var seconds = parts.length > 4 ? parseNum(parts[4], what) : null;
+    var seconds = parts.length > 4 && parts[4] !== "" ? parseNum(parts[4], what) : null;
+    var friction = parts.length > 5 ? Math.min(0.99, Math.max(0, parseNum(parts[5], "kfrm's friction"))) : null;
     return {
       center: { x: cx[0], xLo: cx[1], y: cy[0], yLo: cy[1] },
       zoom: parseZoom(parts[2], what),
       step: parseIndex(parts[3], "kfrm's frame"),
       seconds: seconds > 0 ? seconds : null,
+      friction: friction,
     };
   }
 

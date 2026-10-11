@@ -63,11 +63,19 @@
     }
     return [PhysicsDF.rationalWords(q * D - p * P, q * D, words), PhysicsDF.rationalWords(P, D, words)];
   }
-  function frictionDecls(friction) {
+  function frictionDecls(friction, uniform) {
+    if (uniform) return ["uniform MF DF_FRICTION;", "uniform MF DF_FRICTION_STEP_DECAY;", "uniform MF DF_FRICTION_STEP_PHI;"].join("\n");
     var factors = stepFactors(friction, PhysicsDF.currentWords());
     return ["const MF DF_FRICTION = " + d(friction) + ";",
       "const MF DF_FRICTION_STEP_DECAY = " + PhysicsDF.literal(factors[0]) + ";",
       "const MF DF_FRICTION_STEP_PHI = " + PhysicsDF.literal(factors[1]) + ";"].join("\n");
+  }
+  // Word lists for frictionDecls(_, true) at a rate; rate 0 skips stepFactors, whose phi is 0/0 there.
+  function frictionUniformValues(rate, words) {
+    var one = [1];
+    while (one.length < words) one.push(0);
+    var f = rate > 0 ? stepFactors(rate, words) : [one, one.slice()];
+    return { DF_FRICTION: PhysicsDF.splitWords(rate, 0, words), DF_FRICTION_STEP_DECAY: f[0], DF_FRICTION_STEP_PHI: f[1] };
   }
   function advanceVelocityGLSL(friction) {
     var floor = global.PhysicsEngine.FRICTION_FLOOR;
@@ -780,6 +788,7 @@
     get GLSL_LIBRARY() { return buildLibrary(0); },
     libraryGLSL: buildLibrary,
     frictionDecls: frictionDecls,
+    frictionUniformValues: frictionUniformValues,
     OPTIONS: OPTIONS,
   };
 })(typeof window !== "undefined" ? window : globalThis);

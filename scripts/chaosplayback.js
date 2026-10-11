@@ -53,6 +53,10 @@
     fail(ofInspect ? "This link has no locked Inspect points to film." : "There's no movie in this address. Movies are made on the map, in the Movie card.");
     return;
   }
+  // Each keyframe's friction as a fraction; a keyframe without one has the scene's.
+  var keyFrictions = movie.keyframes.map(function (k) { return k.friction == null ? link.scene.friction : k.friction; });
+  var frictionVaries = !ofInspect && keyFrictions.some(function (f) { return f !== keyFrictions[0]; });
+  var sharedFriction = !ofInspect && !frictionVaries && movie.keyframes.some(function (k) { return k.friction != null; }) ? keyFrictions[0] : null;
 
   // The way back, keyframes and Inspect points included, so the map comes up as it was left.
   var backView = ofInspect ? link.view : movie.keyframes[0];
@@ -99,7 +103,7 @@
 
   // ---- 2. Rendering ----
 
-  var frames = [];        // [{ center, scale, step }]: see MoviePath.frames
+  var frames = [];        // [{ center, scale, step[, friction] }]: see MoviePath.frames
   var blobPromises = [];  // one per frame; the same promise twice where two frames are the same picture
   var blobs = [];         // what they resolve to
   var frameWidth = 0, frameHeight = 0;
@@ -209,7 +213,8 @@
   }
 
   function frameKey(f) {
-    return [f.center.x, f.center.xLo, f.center.y, f.center.yLo, f.scale, f.step].join(" ");
+    var key = [f.center.x, f.center.xLo, f.center.y, f.center.yLo, f.scale, f.step].join(" ");
+    return f.friction === undefined ? key : key + " " + f.friction;
   }
 
   function finishRender() {
@@ -279,7 +284,7 @@
     }
     frameStartedAt = performance.now();
     var spec = frames[i];
-    grid.renderStill({ center: spec.center, scale: spec.scale, step: spec.step, antialias: antialias,
+    grid.renderStill({ center: spec.center, scale: spec.scale, step: spec.step, friction: spec.friction, antialias: antialias,
       width: movieSize.width, height: movieSize.height }, function (canvas) {
       // Called from inside the renderer's own frame: anything thrown here would end its render loop.
       if (endedEarly) return; // this frame was given up on
@@ -317,12 +322,14 @@
   function beginRender(grid) {
     engineGrid = grid;
     if (ofInspect) return beginInspectRender(grid);
+    // Recompiles the engine's programs once, with friction read per frame.
+    if (frictionVaries) grid.useFrictionUniform();
     var defaultScale = grid.defaultScale();
     log10DefaultScale = Math.log10(defaultScale);
     var lastStep = link.scene.simulationSteps;
     frames = MoviePath.frames(movie.keyframes.map(function (k) {
-      return { center: k.center, scale: defaultScale / k.zoom, step: Math.min(k.step, lastStep), seconds: k.seconds };
-    }), movie.loop);
+      return { center: k.center, scale: defaultScale / k.zoom, step: Math.min(k.step, lastStep), seconds: k.seconds, friction: k.friction };
+    }), movie.loop, link.scene.friction);
     frameCosts = frames.map(function (f, i) {
       if (i > 0 && frameKey(f) === frameKey(frames[i - 1])) return null;
       var precision = grid.stillPrecision({ center: f.center, scale: f.scale, width: movieSize.width, height: movieSize.height });
@@ -443,7 +450,14 @@
     var view = { display: link.view.display, lowSaturation: link.view.lowSaturation, volume: 0 };
     if (!ofInspect) {
       view.precision = link.view.precision;
-      engine.src = "chaos.html#" + ShareUrl.encode({ page: ShareUrl.PAGE_MAP, scene: link.scene, view: view });
+      // One friction for every frame: the engine compiles it as a constant, and the Inspect point runs at it.
+      var engineScene = link.scene;
+      if (sharedFriction !== null) {
+        engineScene = {};
+        for (var key in link.scene) engineScene[key] = link.scene[key];
+        engineScene.friction = sharedFriction;
+      }
+      engine.src = "chaos.html#" + ShareUrl.encode({ page: ShareUrl.PAGE_MAP, scene: engineScene, view: view });
       return;
     }
     // Without the map's own copy, the engine rebuilds the points from the link, so it needs them and their view.
@@ -849,8 +863,8 @@
       else if (event.key === "Home") seek(0);
     });
 
-    // The Inspect point belongs to keyframe movies, the look to Inspect ones.
-    inspectField.hidden = ofInspect;
+    // The Inspect point belongs to keyframe movies, the look to Inspect ones. A changing friction has no one run to show.
+    inspectField.hidden = ofInspect || frictionVaries;
     backgroundField.hidden = bodiesField.hidden = paceField.hidden = !ofInspect;
     btnDownload.hidden = false;
     if (videoProblem) {
@@ -1141,6 +1155,68 @@
     });
   }
 
+  // ---- The link in the file ----
+  // An iTunes-style comment in the MP4 (moov/udta/meta/ilst), the tag Windows shows as Comments and tag-aware players read.
+  var SITE = "https://chaosaccelerator.com/";
+  function movieComment() {
+    return "Created with chaosaccelerator.com. Simulation being rendered: " + SITE + "chaosplayback.html#" + address;
+  }
+
+  // Overwrites bytes at `position` in a file kept as a list of parts.
+  function writeParts(parts, position, data) {
+    var start = 0;
+    parts.forEach(function (part) {
+      var from = Math.max(position, start), to = Math.min(position + data.byteLength, start + part.byteLength);
+      if (from < to) part.set(data.subarray(from - position, to - position), from - start);
+      start += part.byteLength;
+    });
+  }
+  function readParts(parts, position, count) {
+    var out = new Uint8Array(count), start = 0;
+    parts.forEach(function (part) {
+      var from = Math.max(position, start), to = Math.min(position + count, start + part.byteLength);
+      if (from < to) out.set(part.subarray(from - start, to - start), from - position);
+      start += part.byteLength;
+    });
+    return out;
+  }
+  function u32(bytes, at) { return ((bytes[at] << 24) >>> 0) + (bytes[at + 1] << 16) + (bytes[at + 2] << 8) + bytes[at + 3]; }
+  function be32(value) { return new Uint8Array([value >>> 24 & 255, value >>> 16 & 255, value >>> 8 & 255, value & 255]); }
+  function fourcc(text) { return new Uint8Array([text.charCodeAt(0), text.charCodeAt(1), text.charCodeAt(2), text.charCodeAt(3)]); }
+  // type: 4 bytes; pieces: byte arrays, concatenated after the size and type.
+  function mp4Box(type, pieces) {
+    var length = 8;
+    pieces.forEach(function (piece) { length += piece.length; });
+    var out = new Uint8Array(length), at = 8;
+    out.set(be32(length), 0);
+    out.set(type, 4);
+    pieces.forEach(function (piece) { out.set(piece, at); at += piece.length; });
+    return out;
+  }
+  function commentBox(text) {
+    var zero4 = new Uint8Array(4), utf8 = new TextEncoder().encode(text);
+    var hdlr = mp4Box(fourcc("hdlr"), [zero4, zero4, fourcc("mdir"), fourcc("appl"), new Uint8Array(9)]);
+    var data = mp4Box(fourcc("data"), [be32(1), zero4, utf8]);
+    var ilst = mp4Box(fourcc("ilst"), [mp4Box(new Uint8Array([0xa9, 0x63, 0x6d, 0x74]), [data])]);
+    return mp4Box(fourcc("udta"), [mp4Box(fourcc("meta"), [zero4, hdlr, ilst])]);
+  }
+  // The muxer writes moov last, so the comment is appended and moov's size raised. Left alone if the layout differs.
+  function tagMovie(parts, size, text) {
+    var at = 0, moovAt = -1, moovSize = 0;
+    while (at + 8 <= size) {
+      var head = readParts(parts, at, 16), boxSize = u32(head, 0), type = String.fromCharCode(head[4], head[5], head[6], head[7]);
+      if (boxSize === 1) boxSize = u32(head, 8) * 4294967296 + u32(head, 12);
+      else if (boxSize === 0) boxSize = size - at;
+      if (boxSize < 8) return parts;
+      if (type === "moov") { moovAt = at; moovSize = boxSize; }
+      at += boxSize;
+    }
+    if (moovAt < 0 || moovAt + moovSize !== size || u32(readParts(parts, moovAt, 4), 0) !== moovSize) return parts;
+    var udta = commentBox(text);
+    writeParts(parts, moovAt, be32(moovSize + udta.length));
+    return parts.concat([udta]);
+  }
+
   function downloadMovie() {
     if (btnDownload.disabled) return;
     var withSound = soundOn, withOverlay = !!inspection && inspectCorner.value !== "off";
@@ -1161,12 +1237,7 @@
             size += data.byteLength;
             return;
           }
-          var start = 0;
-          parts.forEach(function (part) {
-            var from = Math.max(position, start), to = Math.min(position + data.byteLength, start + part.byteLength);
-            if (from < to) part.set(data.subarray(from - position, to - position), from - start);
-            start += part.byteLength;
-          });
+          writeParts(parts, position, data);
         },
       });
       var muxer = new Mp4Muxer.Muxer({
@@ -1188,6 +1259,7 @@
         }
       }
       muxer.finalize();
+      parts = tagMovie(parts, size, movieComment());
       var save = document.createElement("a");
       save.href = URL.createObjectURL(new Blob(parts, { type: "video/mp4" }));
       save.download = "chaosaccelerator-movie.mp4";

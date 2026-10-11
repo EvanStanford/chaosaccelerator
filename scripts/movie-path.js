@@ -1,8 +1,8 @@
 // CPAL-1.0 License. See chaosaccelerator.com/license.html
 
 // A movie's camera: keyframes in, one view per frame out. Pure arithmetic, no DOM or GL.
-// A keyframe is { center: {x, xLo, y, yLo}, scale, step, seconds }: a map view, its simulation
-// frame, and how long the move ARRIVING at it takes (null: autoSeconds).
+// A keyframe is { center: {x, xLo, y, yLo}, scale, step, seconds, friction }: a map view, its simulation
+// frame, how long the move arriving at it takes (null: autoSeconds), and its friction (null: the scene's).
 (function (global) {
   "use strict";
 
@@ -13,8 +13,13 @@
   var STEPS_PER_SECOND = 120;
   var MIN_SECONDS = 1;
   var MAX_SECONDS = 60;
+  var FRICTION_MAX = 0.99; // PhysicsEngine.FRICTION_MAX, which the player page does not load
 
   function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
+
+  function frictionAt(key, sceneFriction) {
+    return clamp(key.friction == null ? sceneFriction || 0 : key.friction, 0, FRICTION_MAX);
+  }
 
   function twoSum(a, b) {
     var s = a + b, bb = s - a;
@@ -65,13 +70,18 @@
   // van Wijk & Nuij's measure, so panning and zooming compare.
   function wijkDot(a, b) { return RHO * RHO * (a[0] * b[0] + a[1] * b[1]) + a[2] * b[2] / (RHO * RHO); }
 
-  // The mean of the moves arriving and leaving, axis by axis, steps included; zero on an axis where they
-  // disagree in sign (the camera turns round there, so it rests), at a movie's ends, and beside a hold.
+  // At most MAX_END_SPEED times the slower side, so neither move overshoots its keyframes.
+  function meetRate(rin, rout) {
+    return rin * rout > 0 ? Math.sign(rin) * Math.min(Math.abs(rin + rout) / 2, MAX_END_SPEED * Math.min(Math.abs(rin), Math.abs(rout))) : 0;
+  }
+
+  // The mean of the moves arriving and leaving, axis by axis, steps and friction included; zero on an axis where
+  // they disagree in sign (the camera turns round there, so it rests), at a movie's ends, and beside a hold.
   function keyframeVelocities(list, keyframes, loop) {
     return keyframes.map(function (key, i) {
       var arriving = i > 0 ? list[i - 1] : (loop && list.length ? list[list.length - 1] : null);
       var leaving = i < list.length ? list[i] : null;
-      var out = { view: [0, 0, 0], steps: 0 };
+      var out = { view: [0, 0, 0], steps: 0, friction: 0 };
       if (!arriving || !leaving) return out;
       if (arriving.route.length > 0 && leaving.route.length > 0) {
         out.view = [0, 1, 2].map(function (c) {
@@ -79,9 +89,8 @@
           return a * b < 0 ? 0 : (a + b) / 2;
         });
       }
-      // Steps: at most MAX_END_SPEED times the slower side, so neither move overshoots its keyframes.
-      var rin = arriving.stepRate, rout = leaving.stepRate;
-      if (rin * rout > 0) out.steps = Math.sign(rin) * Math.min(Math.abs(rin + rout) / 2, MAX_END_SPEED * Math.min(Math.abs(rin), Math.abs(rout)));
+      out.steps = meetRate(arriving.stepRate, leaving.stepRate);
+      out.friction = meetRate(arriving.frictionChange, leaving.frictionChange);
       return out;
     });
   }
@@ -217,20 +226,24 @@
   }
 
   // Every frame: each move contributes its start up to, not including, its end; a non-looping movie then gets its last keyframe.
-  function frames(keyframes, loop) {
-    var out = [], smooth = [], keyed = [];
+  // Frames carry friction only when some keyframe sets one.
+  function frames(keyframes, loop, sceneFriction) {
+    var out = [], smooth = [], keyed = [], friction = [];
+    var withFriction = keyframes.some(function (key) { return key.friction != null; });
     var list = moves(keyframes, loop);
     list.forEach(function (move) {
       move.route = path(move.from, move.to);
       move.start = endVelocity(move.route, true);
       move.end = endVelocity(move.route, false);
       move.stepRate = (move.to.step - move.from.step) / move.seconds;
+      move.frictionChange = (frictionAt(move.to, sceneFriction) - frictionAt(move.from, sceneFriction)) / move.seconds;
     });
     var velocities = keyframeVelocities(list, keyframes, loop);
     list.forEach(function (move, j) {
       var v0 = velocities[j], v1 = velocities[(j + 1) % keyframes.length];
       var a = splitVelocity(v0.view, move.start, move.seconds), b = splitVelocity(v1.view, move.end, move.seconds);
       var count = Math.max(1, Math.round(move.seconds * FPS));
+      var f0 = frictionAt(move.from, sceneFriction), f1 = frictionAt(move.to, sceneFriction);
       keyed[out.length] = Math.round(move.from.step);
       for (var k = 0; k < count; k++) {
         var t = k / count, s0 = startSlope(t), s1 = endSlope(t);
@@ -242,6 +255,7 @@
         });
         // Steps on a quintic of their own, leaving and arriving at their keyframes' step velocities.
         smooth.push(move.from.step + (move.to.step - move.from.step) * smootherstep(t) + move.seconds * (s0 * v0.steps + s1 * v1.steps));
+        friction.push(clamp(f0 + (f1 - f0) * smootherstep(t) + move.seconds * (s0 * v0.friction + s1 * v1.friction), 0, FRICTION_MAX));
       }
     });
     if (keyframes.length && !(loop && keyframes.length > 1)) {
@@ -249,16 +263,21 @@
       keyed[out.length] = Math.round(last.step);
       out.push({ center: { x: last.center.x, xLo: last.center.xLo || 0, y: last.center.y, yLo: last.center.yLo || 0 }, scale: last.scale });
       smooth.push(last.step);
+      friction.push(frictionAt(last, sceneFriction));
     }
     if (!out.length) return out;
     var steps = keyframes.map(function (key) { return Math.round(key.step); });
     var whole = wholeSteps(smooth, keyed, Math.min.apply(null, steps), Math.max.apply(null, steps));
-    out.forEach(function (frame, k) { frame.step = whole[k]; });
+    out.forEach(function (frame, k) {
+      frame.step = whole[k];
+      if (withFriction) frame.friction = friction[k];
+    });
     return out;
   }
 
   global.MoviePath = {
     FPS: FPS,
+    FRICTION_MAX: FRICTION_MAX,
     ease: ease,
     path: path,
     autoSeconds: autoSeconds,

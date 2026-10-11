@@ -594,26 +594,42 @@
   ].join("\n");
 
   // Per-scene constants the library reads (PhysicsEngine.speedCapFor, frictionRate); must precede it.
-  function sceneDecls(precision, maxSpeed, friction) {
+  function sceneDecls(precision, maxSpeed, friction, frictionUniform) {
     var cap = maxSpeed === undefined ? global.PhysicsEngine.MAX_SPEED : maxSpeed;
     var lines = ["const float MAX_SPEED = " + fnum(cap) + ";"];
-    if (friction > 0) lines.push("const float FRICTION = " + fnum(friction) + ";");
+    if (friction > 0) lines.push(frictionUniform ? "uniform float FRICTION;" : "const float FRICTION = " + fnum(friction) + ";");
     if (global.PhysicsDF.isExtended(precision)) {
       lines.push("const MF DF_MAX_SPEED = " + global.PhysicsDF.num(cap) + ";");
-      if (friction > 0) lines.push(global.PhysicsGPUDF.frictionDecls(friction));
+      if (friction > 0) lines.push(global.PhysicsGPUDF.frictionDecls(friction, frictionUniform));
     }
     return lines.join("\n") + "\n";
   }
 
+  // The rate at PhysicsEngine.FRICTION_MAX. Uniform mode builds for it so the df phi series covers every value.
+  var MAX_FRICTION_RATE = -Math.log(1 - global.PhysicsEngine.FRICTION_MAX);
+
   // The full preamble a shader needs before generated code, in the right order.
   // Whole libraries: pruneUnusedGLSL drops what the finished program never names.
-  function libraryGLSL(precision, maxSpeed, friction) {
-    if (!global.PhysicsDF.isExtended(precision)) return sceneDecls(precision, maxSpeed, friction) + glslLibrary(friction);
+  // frictionUniform declares the friction names as uniforms (values from frictionUniforms).
+  function libraryGLSL(precision, maxSpeed, friction, frictionUniform) {
+    if (frictionUniform) friction = MAX_FRICTION_RATE;
+    if (!global.PhysicsDF.isExtended(precision)) return sceneDecls(precision, maxSpeed, friction, frictionUniform) + glslLibrary(friction);
     // Everything multi-float from here on is at this precision (PhysicsDF.usePrecision).
     global.PhysicsDF.usePrecision(precision);
     // Order matters: df arithmetic, then the f32 library (a df grid still reads its DT), then df physics.
     return [global.PhysicsDF.UNIFORM_DECL, "", global.PhysicsDF.GLSL_LIBRARY, "",
-      sceneDecls(precision, maxSpeed, friction), glslLibrary(friction), "", global.PhysicsGPUDF.libraryGLSL(friction)].join("\n");
+      sceneDecls(precision, maxSpeed, friction, frictionUniform), glslLibrary(friction), "", global.PhysicsGPUDF.libraryGLSL(friction)].join("\n");
+  }
+
+  // { name: [floats] } for libraryGLSL's uniform mode at a friction fraction.
+  function frictionUniforms(precision, friction) {
+    var rate = global.PhysicsEngine.frictionRate({ friction: friction });
+    var out = { FRICTION: [rate] };
+    if (global.PhysicsDF.isExtended(precision)) {
+      var vals = global.PhysicsGPUDF.frictionUniformValues(rate, global.PhysicsDF.wordsFor(precision));
+      for (var name in vals) out[name] = vals[name];
+    }
+    return out;
   }
 
   // ---- Scene -> GLSL codegen ----
@@ -1785,7 +1801,8 @@
   }
 
   // precision is a parameter (not always "f32") so the test suite can compile both ways.
-  function compileSceneToTrajectoryGLSL(scene, maxSteps, precision) {
+  function compileSceneToTrajectoryGLSL(scene, maxSteps, precision, opts) {
+    var frictionUniform = !!(opts && opts.frictionUniform);
     var df = global.PhysicsDF.isExtended(precision);
     if (df) global.PhysicsDF.usePrecision(precision);
     var dfnum = df ? global.PhysicsDF.num : null;
@@ -1816,7 +1833,7 @@
     lines.push("precision highp float;");
     lines.push(generateTrajectoryHeaderGLSL(chunk));
     lines.push("");
-    lines.push(libraryGLSL(precision, global.PhysicsEngine.speedCapFor(scene), global.PhysicsEngine.frictionRate(scene)));
+    lines.push(libraryGLSL(precision, global.PhysicsEngine.speedCapFor(scene), global.PhysicsEngine.frictionRate(scene), frictionUniform));
     lines.push("");
     // Nothing here depends on maxSteps, so different run lengths reuse the program.
     var springs = springLinksFor(scene, df ? dfnum : fnum);
@@ -1825,7 +1842,9 @@
     var locals = generateBodyLocalsGLSL(consts, precision) + "\n" + generateHingeAnchorLocalsGLSL(hingeAnchors, precision);
     lines.push(generateTrajectoryMainGLSL(n, locals, hingeAnchors, precision, chunk, springs));
 
-    return { fragmentSource: pruneUnusedGLSL(lines.join("\n")), numBodies: n, precision: df ? precision : "f32", chunk: chunk };
+    var compiled = { fragmentSource: pruneUnusedGLSL(lines.join("\n")), numBodies: n, precision: df ? precision : "f32", chunk: chunk };
+    if (frictionUniform) compiled.uniforms = frictionUniforms(precision, global.PhysicsEngine.frictionOf(scene));
+    return compiled;
   }
 
   // ---- Carrying a pixel's simulation across draws (grid playback) ----
@@ -2283,6 +2302,7 @@
     // Exposed so the per-pixel fractal grid reuses the same physics and step logic.
     GLSL_LIBRARY: GLSL_LIBRARY,
     libraryGLSL: libraryGLSL,
+    frictionUniforms: frictionUniforms,
     VERTEX_SOURCE: VERTEX_SOURCE,
     fnum: fnum,
     bodyConst: bodyConst,

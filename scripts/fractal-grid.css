@@ -548,6 +548,21 @@ input[type="range"] {
   touch-action: none;
 }
 
+/* The center of the frame while the Movie card is open: a light line with a dark halo reads on any color. */
+#movie-center-lines {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+#movie-center-lines span {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55);
+}
+#movie-center-lines span:first-child { left: 0; right: 0; top: 50%; height: 1px; transform: translateY(-50%); }
+#movie-center-lines span:last-child { top: 0; bottom: 0; left: 50%; width: 1px; transform: translateX(-50%); }
+
 /* One per Inspect point, on the grid itself (a grid entry draws its mesh in #inspect-preview instead). */
 /* --marker-color and left/top (CSS px in #grid-canvas-area's box) are set from JS; clickable to remove the point. */
 .inspect-marker {

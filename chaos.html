@@ -8,17 +8,17 @@
 <meta name="theme-color" content="#14161c">
 <title>Chaos Accelerator</title>
 <!-- Both views share this document so transition.js can show them at once. -->
-<link rel="stylesheet" href="scripts/physics.css?v=m96">
-<link rel="stylesheet" href="scripts/fractal-grid.css?v=m96">
-<link rel="stylesheet" href="scripts/app-shell.css?v=m96">
-<link rel="stylesheet" href="scripts/fractal-stats.css?v=m96">
-<link rel="stylesheet" href="scripts/responsive-layout.css?v=m96">
+<link rel="stylesheet" href="scripts/physics.css?v=m97">
+<link rel="stylesheet" href="scripts/fractal-grid.css?v=m97">
+<link rel="stylesheet" href="scripts/app-shell.css?v=m97">
+<link rel="stylesheet" href="scripts/fractal-stats.css?v=m97">
+<link rel="stylesheet" href="scripts/responsive-layout.css?v=m97">
 <!-- mobile.css after the app sheets: it must win their cascade without !important. -->
-<link rel="stylesheet" href="scripts/mobile.css?v=m96">
-<link rel="stylesheet" href="scripts/eighties-app.css?v=m96">
-<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m96" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="scripts/mobile.css?v=m97">
+<link rel="stylesheet" href="scripts/eighties-app.css?v=m97">
+<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m97" as="font" type="font/woff2" crossorigin>
 <!-- In <head> on purpose: both views measure their canvas area as they start. -->
-<script src="scripts/layout-mode.js?v=m96"></script>
+<script src="scripts/layout-mode.js?v=m97"></script>
 <!-- A #map/ link should open on the map: hide the editor (still laid out) until transition.js picks the view. -->
 <script>
   if (/^#map\//.test(location.hash)) document.documentElement.classList.add("opening-map");
@@ -374,6 +374,8 @@
           <canvas id="grid-canvas"></canvas>
           <!-- Never [hidden]: besides the drag previews it hosts every completed grid's mesh lines. -->
           <svg id="inspect-preview"></svg>
+          <!-- The center of the frame while the Movie card is open (a Settings toggle). -->
+          <div id="movie-center-lines" aria-hidden="true" hidden><span></span><span></span></div>
           <!-- Never [hidden] (see showInspectToast): rests at opacity:0, toggled by .visible alone. -->
           <div id="inspect-toast" class="inspect-toast"></div>
           <div id="grid-toast" class="app-toast" role="alert"></div>
@@ -414,6 +416,20 @@
                     <span>Inspection Grid Two Part Line</span>
                     <span class="toggle-switch">
                       <input type="checkbox" id="inspect-grid-two-part-checkbox" checked>
+                      <span class="toggle-slider"></span>
+                    </span>
+                  </label>
+                  <label class="toggle-field" id="movie-friction-field" title="Adds a friction field to every Movie keyframe. The movie eases friction from one keyframe to the next, as it does the camera.">
+                    <span>Allow friction % to change in movies</span>
+                    <span class="toggle-switch">
+                      <input type="checkbox" id="movie-friction-checkbox">
+                      <span class="toggle-slider"></span>
+                    </span>
+                  </label>
+                  <label class="toggle-field" id="movie-center-lines-field" title="While the Movie card is open, a horizontal and a vertical line cross at the center of the frame, to help center a view before adding a keyframe.">
+                    <span>Center lines while the Movie card is open</span>
+                    <span class="toggle-switch">
+                      <input type="checkbox" id="movie-center-lines-checkbox">
                       <span class="toggle-slider"></span>
                     </span>
                   </label>
@@ -744,23 +760,23 @@
 
 </div>
 
-<script src="scripts/app-message.js?v=m96"></script>
-<script src="scripts/physics-engine.js?v=m96"></script>
-<script src="scripts/physics-coords.js?v=m96"></script>
-<script src="scripts/share-url.js?v=m96"></script>
-<script src="scripts/movie-path.js?v=m96"></script>
-<script src="scripts/movie-store.js?v=m96"></script>
-<script src="scripts/physics-sound.js?v=m96"></script>
-<script src="scripts/physics-hinge-geometry.js?v=m96"></script>
-<script src="scripts/physics-df.js?v=m96"></script>
-<script src="scripts/physics-gpu.js?v=m96"></script>
-<script src="scripts/physics-gpu-df.js?v=m96"></script>
-<script src="scripts/physics-grid-codegen.js?v=m96"></script>
-<script src="scripts/physics-ui.js?v=m96"></script>
-<script src="scripts/fractal-stats.js?v=m96"></script>
-<script src="scripts/fractal-stats-panel.js?v=m96"></script>
-<script src="scripts/fractal-grid.js?v=m96"></script>
-<script src="scripts/transition.js?v=m96"></script>
+<script src="scripts/app-message.js?v=m97"></script>
+<script src="scripts/physics-engine.js?v=m97"></script>
+<script src="scripts/physics-coords.js?v=m97"></script>
+<script src="scripts/share-url.js?v=m97"></script>
+<script src="scripts/movie-path.js?v=m97"></script>
+<script src="scripts/movie-store.js?v=m97"></script>
+<script src="scripts/physics-sound.js?v=m97"></script>
+<script src="scripts/physics-hinge-geometry.js?v=m97"></script>
+<script src="scripts/physics-df.js?v=m97"></script>
+<script src="scripts/physics-gpu.js?v=m97"></script>
+<script src="scripts/physics-gpu-df.js?v=m97"></script>
+<script src="scripts/physics-grid-codegen.js?v=m97"></script>
+<script src="scripts/physics-ui.js?v=m97"></script>
+<script src="scripts/fractal-stats.js?v=m97"></script>
+<script src="scripts/fractal-stats-panel.js?v=m97"></script>
+<script src="scripts/fractal-grid.js?v=m97"></script>
+<script src="scripts/transition.js?v=m97"></script>
 <script>
   // ---- The '80s switch: the same saved setting as the other pages (eighties-theme.js) ----
   (function () {

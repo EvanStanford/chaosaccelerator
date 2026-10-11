@@ -3538,6 +3538,79 @@
   );
 
   addTest(
+    "A movie's friction uniform runs the same physics as the friction constant, in float32 and double-float",
+    "a movie whose keyframes differ in friction compiles it as uniforms (libraryGLSL's frictionUniform, the multi-float series sized for the largest rate) so one program serves every frame. Fed a scene's friction it must step like the constant it replaces: bit for bit on whole steps in double-float, where both read the same whole-step factors, to the last bit through a bounce's split legs, and at 0 like the text with no friction in it; a compile that doesn't ask keeps the constants",
+    function () {
+      var N = 90;
+      function contactFree(f) {
+        var s = plainScene([PhysicsEngine.createCircle(300, 200, 20, false), PhysicsEngine.createCircle(900, 200, 20, false)]);
+        s.friction = f; s.collisionsEnabled = false; s.bodies[0].vx = 40; s.bodies[1].vx = -40;
+        s.xInput = null; s.yInput = null; s.output = { body: 0, property: "y" };
+        return s;
+      }
+      function bounce(f) {
+        var s = plainScene([PhysicsEngine.createLine(400, 600, 700, 0.15, true), PhysicsEngine.createCircle(380, 300, 20, false)]);
+        s.friction = f; s.xInput = null; s.yInput = null; s.output = { body: 1, property: "y" };
+        return s;
+      }
+      function compile(build, f, p, uniform) {
+        return uniform ? PhysicsGPU.compileSceneToTrajectoryGLSL(build(f), N, p, { frictionUniform: true }) : PhysicsGPU.compileSceneToTrajectoryGLSL(build(f), N, p);
+      }
+      // The trajectory reads back in float32, so a last-bit change in df can show as one float32 step.
+      function f32Step(v) { return Math.pow(2, Math.floor(Math.log2(Math.max(Math.abs(v), 1e-30))) - 23); }
+      function compare(a, b) {
+        var out = { worst: 0, steps: 0, same: true, finite: true };
+        for (var i = 0; i < N; i++) {
+          for (var j = 0; j < a[i].length; j++) {
+            ["x", "y", "angle"].forEach(function (c) {
+              var u = a[i][j][c], v = b[i][j][c];
+              if (!isFinite(u) || !isFinite(v)) out.finite = false;
+              if (u !== v) out.same = false;
+              out.worst = Math.max(out.worst, Math.abs(u - v));
+              out.steps = Math.max(out.steps, Math.abs(u - v) / f32Step(u));
+            });
+          }
+        }
+        return out;
+      }
+      function close(r, extended) { return r.finite && (extended ? r.worst < 1e-6 || r.steps <= 1 : r.worst < 1e-3); }
+      function gap(r) { return r.same ? "bitwise" : "off by " + r.worst.toExponential(2) + "px"; }
+      var precisions = ["f32", "df"].concat(PhysicsDF.isSupported("tf") ? ["tf"] : []);
+      var kinds = [{ name: "contact-free", build: contactFree, f: 0.5 }, { name: "bounce", build: bounce, f: 0.3 }];
+      var ok = true, notes = [];
+      try {
+        precisions.forEach(function (p) {
+          var extended = p !== "f32", parts = [];
+          kinds.forEach(function (kind) {
+            var constant = compile(kind.build, kind.f, p, false), uniform = compile(kind.build, kind.f, p, true);
+            var src = constant.fragmentSource, usrc = uniform.fragmentSource;
+            var keepsConstants = (extended ? /const MF DF_FRICTION = /.test(src) : src.indexOf("const float FRICTION") !== -1) &&
+              !/uniform (float FRICTION|MF DF_FRICTION)/.test(src) && !("uniforms" in constant) &&
+              PhysicsGPU.compileSceneToTrajectoryGLSL(kind.build(kind.f), N, p, { frictionUniform: false }).fragmentSource === src;
+            var oneProgram = usrc.indexOf(extended ? "uniform MF DF_FRICTION;" : "uniform float FRICTION;") !== -1 && !/const (float FRICTION|MF DF_FRICTION)/.test(usrc) &&
+              [0, 0.3, 0.5].every(function (f) { return compile(kind.build, f, p, true).fragmentSource === usrc; }) &&
+              canonicalJSON(uniform.uniforms) === canonicalJSON(PhysicsGPU.frictionUniforms(p, kind.f));
+            var withConstant = PhysicsGPU.runCompiledTrajectoryOnGPU(constant, N), withUniform = PhysicsGPU.runCompiledTrajectoryOnGPU(uniform, N);
+            uniform.uniforms = PhysicsGPU.frictionUniforms(p, 0);
+            var uniformAtZero = PhysicsGPU.runCompiledTrajectoryOnGPU(uniform, N), constantAtZero = PhysicsGPU.runSceneOnGPU(kind.build(0), N, p);
+            var same = compare(withConstant, withUniform), zero = compare(constantAtZero, uniformAtZero), took = compare(withUniform, uniformAtZero).worst > 1;
+            var match = kind.name === "contact-free" && extended ? same.same && same.finite : close(same, extended);
+            var turned = kind.name !== "bounce";
+            for (var i = 1; i < N && !turned; i++) if (withConstant[i][1].y < withConstant[i - 1][1].y) turned = true;
+            if (!(keepsConstants && oneProgram && match && close(zero, extended) && took && turned)) ok = false;
+            parts.push(kind.name + " " + gap(same) + ", at 0 " + gap(zero) + (took ? "" : ", no effect from the uniform") + (turned ? "" : ", never bounced") +
+              (keepsConstants ? "" : ", the default compile lost its constants") + (oneProgram ? "" : ", the uniform text varies with friction or its uniforms are wrong"));
+          });
+          notes.push(p + ": " + parts.join("; "));
+        });
+      } finally {
+        PhysicsDF.usePrecision("df");
+      }
+      return { pass: ok, detail: notes.join(" | ") + " (uniform against constant over " + N + " steps, every body's x, y and angle)" };
+    }
+  );
+
+  addTest(
     "The fractal grid's per-pixel codegen carries a free hinged chain through a port hole as one piece",
     "the grid builds each pixel's scene symbolically (generateGridInitialStateGLSL) and steps it with the shared loop, with the chain's transport emitted per member: a hinged pair of lines, the parent leading and the child trailing above it, has to be carried through the turned exit as one piece and match the JS engine for that pixel. Compared through the steps around the pass: a trailing member lands behind the exit and meets its back, and the hinge solver's reply to that is not what this test is about",
     function () {
@@ -4916,8 +4989,10 @@
 
   // ---- Movies (movie-path.js, and their fields in share-url.js) ----
 
-  function movieKeyframe(x, y, scale, step, seconds) {
-    return { center: { x: x, xLo: 0, y: y, yLo: 0 }, scale: scale, step: step || 0, seconds: seconds === undefined ? null : seconds };
+  function movieKeyframe(x, y, scale, step, seconds, friction) {
+    var key = { center: { x: x, xLo: 0, y: y, yLo: 0 }, scale: scale, step: step || 0, seconds: seconds === undefined ? null : seconds };
+    if (friction !== undefined) key.friction = friction;
+    return key;
   }
   function viewDistance(p, q) {
     return Math.hypot((p.x - q.x) + (p.xLo - q.xLo), (p.y - q.y) + (p.yLo - q.yLo));
@@ -5153,6 +5228,95 @@
       return {
         pass: bad.length === 0,
         detail: cases.map(function (c) { return c[0] + ": keyframes met=" + c[1].exact + ", " + c[1].runs + " runs, " + c[1].stutters + " stutters"; }).join("; "),
+      };
+    }
+  );
+
+  addTest(
+    "A movie's friction eases from keyframe to keyframe, lands on each one, and holds where they agree",
+    "movie-path.js's frames() - with the Settings toggle on, each keyframe has a friction and the player renders each frame at the one frames() gives it. It eases on the same quintic as the simulation frames, with the same keyframe rate (the mean of arriving and leaving, zero where they turn round), clamped to 0..0.99; a keyframe without one takes the scene's, and a movie where none has one gets frames with no friction at all, so it renders as it did",
+    function () {
+      function frictions(keys, loop, sceneFriction) { return MoviePath.frames(keys, loop, sceneFriction).map(function (f) { return f.friction; }); }
+      function key(x, seconds, friction) { return movieKeyframe(x, 0, 100, 0, seconds, friction); }
+      var rise = frictions([key(0, null, 0.1), key(50, 2, 0.6)], false), mid = rise[Math.floor(rise.length / 2)];
+      var rises = rise[0] === 0.1 && rise[rise.length - 1] === 0.6 && mid > 0.1 && mid < 0.6 &&
+        rise.every(function (f, i) { return i === 0 || f >= rise[i - 1]; });
+      var loopKeys = [movieKeyframe(0, 0, 100, 0, 1, 0.2), movieKeyframe(60, 0, 100, 0, 1.5, 0.5), movieKeyframe(60, 40, 100, 0, 2, 0.05)];
+      var looped = frictions(loopKeys, true), at = 0, lands = looped[0] === 0.2;
+      MoviePath.moves(loopKeys, true).forEach(function (move, j) {
+        at += Math.round(move.seconds * MoviePath.FPS);
+        if (looped[at % looped.length] !== loopKeys[(j + 1) % loopKeys.length].friction) lands = false;
+      });
+      var inRange = looped.every(function (f) { return f >= 0 && f <= MoviePath.FRICTION_MAX; });
+      // The rate either side of the middle keyframe, in friction per second.
+      function slopes(keys) {
+        var f = frictions(keys, false), i = Math.round(MoviePath.moves(keys, false)[0].seconds * MoviePath.FPS);
+        return { before: (f[i] - f[i - 1]) * MoviePath.FPS, after: (f[i + 1] - f[i]) * MoviePath.FPS };
+      }
+      var through = slopes([key(0, null, 0), key(50, 2, 0.4), key(100, 2, 0.8)]), turn = slopes([key(0, null, 0), key(50, 2, 0.8), key(100, 2, 0.4)]);
+      var sails = through.before > 0.1 && Math.abs(through.after - through.before) < 0.01;
+      var rests = Math.abs(turn.before) < 0.01 && Math.abs(turn.after) < 0.01;
+      var agree = [key(0, null, 0.25), key(50, 2, 0.25)];
+      var holds = frictions(agree, false).concat(frictions(agree, true)).every(function (f) { return f === 0.25; });
+      var plainKeys = [movieKeyframe(0, 0, 1000, 0), movieKeyframe(100, 50, 100, 500, 2), movieKeyframe(100, 50, 100, 200, 1)];
+      var nullKeys = plainKeys.map(function (k) { return movieKeyframe(k.center.x, k.center.y, k.scale, k.step, k.seconds, null); });
+      var bare = [true, false].every(function (loop) {
+        var plain = MoviePath.frames(plainKeys, loop), nulls = MoviePath.frames(nullKeys, loop, 0.3);
+        return JSON.stringify(nulls) === JSON.stringify(plain) && plain.concat(nulls).every(function (f) { return !("friction" in f); });
+      });
+      var mix = frictions([key(0, null, null), key(50, 2, 0.4)], false, 0.1);
+      var mixOk = mix[0] === 0.1 && mix[mix.length - 1] === 0.4;
+      var wild = frictions([key(0, null, 1.5), key(50, 2, -0.2)], false);
+      var clamps = MoviePath.FRICTION_MAX === PhysicsEngine.FRICTION_MAX && wild[0] === MoviePath.FRICTION_MAX && wild[wild.length - 1] === 0 &&
+        wild.every(function (f) { return f >= 0 && f <= MoviePath.FRICTION_MAX; });
+      return {
+        pass: rises && lands && inRange && sails && rests && holds && bare && mixOk && clamps,
+        detail: "0.1 to 0.6: " + rise[0] + " to " + rise[rise.length - 1] + ", " + mid.toFixed(4) + " halfway, never falling=" + rises +
+          "; looped 0.2, 0.5, 0.05 lands on each=" + lands + " and stays in 0..0.99=" + inRange + "; 0, 0.4, 0.8 passes the middle at " +
+          through.before.toFixed(4) + " then " + through.after.toFixed(4) + "/s; 0, 0.8, 0.4 at " + turn.before.toFixed(4) + " then " + turn.after.toFixed(4) +
+          "/s; equal keyframes hold=" + holds + "; no friction set gives the same frames with no friction key=" + bare + "; unset takes the scene's=" + mixOk + "; 1.5 and -0.2 clamp=" + clamps,
+      };
+    }
+  );
+
+  addTest(
+    "A movie keyframe's friction rides in its link, and links from before it still read",
+    "share-url.js's kfrm - a keyframe's friction is a sixth part, written only when set and after an empty seconds slot when only it is set, so a movie that never touched friction keeps the link it had and links from before read with no friction. A friction that can't be read drops the keyframe list like any other bad entry, and one over 99% reads as 99%",
+    function () {
+      var scene = everythingScene(), spec = [[null, 0.3], [4.26, 0.995], [2, null], [null, null], [3, 0]];
+      // which: "set" takes spec's friction, "null" sets null on every keyframe, "none" leaves the field out.
+      function keys(which) {
+        return spec.map(function (s, i) {
+          var k = { center: { x: i * 10.5, xLo: 0, y: -i * 3.25, yLo: 0 }, zoom: Math.pow(10, i), step: 1000 - 100 * i, seconds: s[0] };
+          if (which !== "none") k.friction = which === "set" ? s[1] : null;
+          return k;
+        });
+      }
+      function link(keyframes) {
+        return ShareUrl.encode({ page: "movi", scene: scene, view: { display: "standard", movie: { size: { width: 1280, height: 720 }, antialias: true, loop: true, keyframes: keyframes } } });
+      }
+      function kfrmOf(fragment) { return ShareUrl.readFields(fragment.slice(fragment.indexOf("/") + 1)).kfrm; }
+      var fragment = link(keys("set")), back = ShareUrl.decode(fragment), k = back.view.movie.keyframes;
+      var frictionsOk = JSON.stringify(k.map(function (x) { return x.friction; })) === JSON.stringify([0.3, 0.99, null, null, 0]);
+      var secondsOk = JSON.stringify(k.map(function (x) { return x.seconds; })) === JSON.stringify([null, 4.3, 2, null, 3]);
+      // The link keeps the .995 it was given; read back it is 0.99, and that is what a re-encode writes.
+      var again = ShareUrl.encode(back);
+      var stable = fragment.indexOf(":4.3:.995") !== -1 && again === fragment.replace(":4.3:.995", ":4.3:.99") && ShareUrl.encode(ShareUrl.decode(again)) === again;
+      var entries = kfrmOf(fragment).split(";"), counts = entries.map(function (e) { return e.split(":").length; });
+      var countsOk = counts.join(",") === "6,6,5,4,6" && /::\.3$/.test(entries[0]);
+      var pristine = link(keys("none")), nulls = link(keys("null"));
+      var pristineOk = nulls === pristine && kfrmOf(pristine).split(";").every(function (e) { var n = e.split(":").length; return n === 4 || n === 5; });
+      var legacy = ShareUrl.decode("#movi/body:ci:0:0:0:30,kfrm:0:0:1:1000;-14.318359:57.44:3.2:500:4").view.movie.keyframes;
+      var legacyOk = legacy.length === 2 && legacy[0].friction === null && legacy[1].friction === null && legacy[0].seconds === null && legacy[1].seconds === 4;
+      var dropped = ["0:0:1:1000:2:.2:9", "0:0:1:1000:0:lots"].every(function (bad) {
+        var view = ShareUrl.decode("#movi/body:ci:0:0:0:30,disp:lapl,kfrm:0:0:1:1000;" + bad + ",size:1000x1000").view;
+        return view.movie.keyframes.length === 0 && view.display === "laplacian" && view.movie.size.width === 1000;
+      });
+      return {
+        pass: frictionsOk && secondsOk && stable && countsOk && pristineOk && legacyOk && dropped,
+        detail: "frictions " + JSON.stringify(k.map(function (x) { return x.friction; })) + ", seconds " + JSON.stringify(k.map(function (x) { return x.seconds; })) +
+          "; re-encodes to itself once clamped=" + stable + "; parts " + counts.join(",") + "=" + countsOk + "; no friction set writes the old link=" + pristineOk +
+          "; an old link reads with none=" + legacyOk + "; 7 parts or an unreadable friction drop the list and keep the rest=" + dropped + "; kfrm:" + kfrmOf(fragment),
       };
     }
   );

@@ -20,6 +20,7 @@
     shareState: function () { return null; },
     applyShareView: function () {},
     renderStill: function () {},
+    useFrictionUniform: function () {},
     // Replaced by boot(); kept as no-ops if boot stops early, so the way back to the builder still works.
     defaultScale: function () { return 1; },
     setScale: function () {},
@@ -696,6 +697,9 @@
 
   var raw = bootScene ? JSON.stringify(bootScene) : null;
   var scene = null;
+  // Friction as GLSL uniforms (useFrictionUniform); stillFriction is a still's fraction, null for the scene's.
+  var frictionUniform = false;
+  var stillFriction = null;
   if (raw) {
     try {
       scene = JSON.parse(raw);
@@ -1039,7 +1043,7 @@
       "uniform int u_displayMode;",
       "out vec4 fragColor;",
       "",
-      PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(sceneToCompile), PhysicsEngine.frictionRate(sceneToCompile)),
+      PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(sceneToCompile), PhysicsEngine.frictionRate(sceneToCompile), frictionUniform),
       "",
     ]);
 
@@ -1300,7 +1304,7 @@
       stateWorldCoordLines: stateWorldCoordLines,
       colorLibraryLines: colorLibraryLines,
       deltaTLines: deltaTLines,
-      libraryLines: [PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(sceneToCompile), PhysicsEngine.frictionRate(sceneToCompile))],
+      libraryLines: [PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(sceneToCompile), PhysicsEngine.frictionRate(sceneToCompile), frictionUniform)],
       constantLines: [
         isRunTally ? "" : "const float OUTPUT_RANGE_MAX = " + PhysicsGPU.fnum(rangeMax) + ";",
         goalLines.join("\n"),
@@ -1480,7 +1484,16 @@
       displayMode: gl.getUniformLocation(prog, "u_displayMode"),
       sampleField: gl.getUniformLocation(prog, "u_sampleField"),
     };
+    frictionLocations(prog, pass.uniforms);
     pass.status = "ready";
+  }
+
+  // Null unless the program was compiled with frictionUniform.
+  function frictionLocations(prog, uniforms) {
+    uniforms.friction = gl.getUniformLocation(prog, "FRICTION");
+    uniforms.dfFriction = gl.getUniformLocation(prog, "DF_FRICTION");
+    uniforms.dfDecay = gl.getUniformLocation(prog, "DF_FRICTION_STEP_DECAY");
+    uniforms.dfPhi = gl.getUniformLocation(prog, "DF_FRICTION_STEP_PHI");
   }
 
   function pumpPass(pass, wait) {
@@ -1600,6 +1613,28 @@
     gl.uniform2f(u.centerLo, words[0][1], words[1][1]);
     gl.uniform2f(u.centerLo2, words[0][2], words[1][2]);
     gl.uniform2f(u.centerLo3, words[0][3], words[1][3]);
+  }
+
+  function drawnFriction() {
+    return stillFriction === null ? PhysicsEngine.frictionOf(scene) : stillFriction;
+  }
+  // One entry per precision: tf and qf words come from BigInt math.
+  var frictionUniformCache = {};
+  function setFrictionUniforms(u, precision) {
+    if (!frictionUniform) return;
+    var fraction = drawnFriction();
+    var cached = frictionUniformCache[precision];
+    if (!cached || cached.fraction !== fraction) {
+      cached = frictionUniformCache[precision] = { fraction: fraction, vals: PhysicsGPU.frictionUniforms(precision, fraction) };
+    }
+    var vals = cached.vals;
+    if (u.friction) gl.uniform1f(u.friction, vals.FRICTION[0]);
+    var words = PhysicsDF.wordsFor(precision);
+    if (words < 2) return;
+    var upload = "uniform" + words + "fv";
+    if (u.dfFriction) gl[upload](u.dfFriction, vals.DF_FRICTION);
+    if (u.dfDecay) gl[upload](u.dfDecay, vals.DF_FRICTION_STEP_DECAY);
+    if (u.dfPhi) gl[upload](u.dfPhi, vals.DF_FRICTION_STEP_PHI);
   }
 
   // ---- Measuring the field: the standard program, in sample mode ----
@@ -2018,6 +2053,7 @@
     gl.uniform1f(sampler.uniforms.gridStride, 1);
     gl.uniform2f(sampler.uniforms.gridOrigin, 0, rowStart);
     setCenterUniforms(sampler.uniforms);
+    setFrictionUniforms(sampler.uniforms, sampler.precision);
     gl.uniform1f(sampler.uniforms.scale, view.scale);
     // rawBounces: the bounce divisor is measured over the whole duration so colors hold while the timeline plays.
     gl.uniform1i(sampler.uniforms.maxSteps, rawBounces ? simulationSteps : renderedSteps());
@@ -2291,7 +2327,8 @@
     values: new Float32Array(BOUNCE_MAX_SAMPLE_SIZE * BOUNCE_MAX_SAMPLE_SIZE * 4) };
 
   function bounceMaxViewKey() {
-    return [viewCenterKey(), view.scale, canvas.width, canvas.height, simulationSteps, effectivePrecision()].join(" ");
+    return [viewCenterKey(), view.scale, canvas.width, canvas.height, simulationSteps, effectivePrecision()].join(" ") +
+      (frictionUniform ? " " + drawnFriction() : "");
   }
 
   function requestBounceMax() {
@@ -2360,6 +2397,7 @@
     gl.uniform1f(pass.uniforms.gridStride, stride);
     gl.uniform2f(pass.uniforms.gridOrigin, originX, originY);
     setCenterUniforms(pass.uniforms);
+    setFrictionUniforms(pass.uniforms, pass.precision);
     gl.uniform1f(pass.uniforms.scale, view.scale);
     gl.uniform1i(pass.uniforms.colorZoom, colorZoomEnabled ? 1 : 0);
     gl.uniform1i(pass.uniforms.lowSaturation, lowSaturationEnabled ? 1 : 0);
@@ -3482,7 +3520,8 @@
 
   function reuseLookKey() {
     return [sceneGeneration, renderedSteps(), simulationSteps, displayMode ? displayMode.id : 0,
-      colorZoomEnabled ? 1 : 0, lowSaturationEnabled ? 1 : 0, bounceMaxValue, canvas.width, canvas.height].join(" ");
+      colorZoomEnabled ? 1 : 0, lowSaturationEnabled ? 1 : 0, bounceMaxValue, canvas.width, canvas.height].join(" ") +
+      (frictionUniform ? " " + drawnFriction() : "");
   }
 
   function reuseDropSource() {
@@ -6384,6 +6423,7 @@
     var prog = build.program;
     var uniforms = {};
     uniformNames.forEach(function (name) { uniforms[name] = gl.getUniformLocation(prog, "u_" + name); });
+    frictionLocations(prog, uniforms);
     return { program: prog, posLoc: gl.getAttribLocation(prog, "a_position"), uniforms: uniforms };
   }
 
@@ -6395,6 +6435,7 @@
     var layers = PhysicsGridCodegen.playbackStateLayerCount(vars);
     return {
       status: "building",
+      precision: precision,
       programs: null,
       layers: layers,
       groups: Math.ceil(layers / MAX_STATE_ATTACHMENTS),
@@ -6421,6 +6462,7 @@
     }
     if (a === "ready" && b === "ready") {
       entry.programs = {
+        precision: entry.precision,
         layers: entry.layers,
         groups: entry.groups,
         step: finishedPlaybackProgram(entry.stepBuild, PLAYBACK_STEP_UNIFORMS),
@@ -6626,6 +6668,7 @@
     gl.uniform1f(u.gridStride, spec.stride);
     gl.uniform2f(u.gridOrigin, spec.originX, spec.originY);
     setCenterUniforms(u);
+    setFrictionUniforms(u, job.programs.precision);
     gl.uniform1f(u.scale, view.scale);
     gl.uniform1i(u.init, job.started ? 0 : 1);
     gl.uniform1i(u.baseStep, job.done);
@@ -6993,6 +7036,7 @@
     gl.uniform1f(u.gridStride, res.stride);
     gl.uniform2f(u.gridOrigin, 0, 0);
     setCenterUniforms(u);
+    setFrictionUniforms(u, res.programs.precision);
     gl.uniform1f(u.scale, view.scale);
     gl.uniform1i(u.init, pass.init ? 1 : 0);
     gl.uniform1i(u.baseStep, pass.from);
@@ -7514,16 +7558,40 @@
     scheduleDockLayout(false);
   };
 
+  // For a movie whose frames differ in friction: recompiles with friction as a uniform, for the rest of the page's life.
+  global.FractalGrid.useFrictionUniform = function () {
+    if (frictionUniform) return;
+    frictionUniform = true;
+    reuse.image = null;
+    reuseDropSource();
+    releaseAllPlayback();
+    discardAllPasses();
+    releaseAllSliceStates();
+    bounceMaxProbe.measuredKey = null;
+    bounceMaxProbe.key = null;
+    sceneGeneration += 1;
+    markDirty();
+  };
+
   // ---- Movies ----
   //
   // A movie is a list of KEYFRAMES (view + Map Evolution frame) a camera travels
   // between (movie-path.js). Done hands the list, in a link, to chaosplayback.html,
   // which loads this app in a frame and asks for one picture after another via renderStill.
 
-  // keyframes: movie-path.js's shape, [{ center, scale, step, seconds }], seconds null until typed. size: in pixels.
+  // keyframes: movie-path.js's shape, [{ center, scale, step, seconds, friction }], seconds null until typed. size: in pixels.
   var movie = { keyframes: [], size: { width: 1280, height: 720 }, antialias: true, loop: true };
 
-  var movieMenu = makeMenu("menu-movie", "grid-btn-movie", "movie", function (open) { if (open) checkPausedRender(); });
+  var movieCenterLines = document.getElementById("movie-center-lines");
+  var movieCenterLinesCheckbox = document.getElementById("movie-center-lines-checkbox");
+  var movieMenu = makeMenu("menu-movie", "grid-btn-movie", "movie", function (open) {
+    if (open) checkPausedRender();
+    updateMovieCenterLines();
+  });
+  function updateMovieCenterLines() {
+    movieCenterLines.hidden = !(movieCenterLinesCheckbox.checked && movieMenu.isOpen());
+  }
+  movieCenterLinesCheckbox.addEventListener("change", updateMovieCenterLines);
   var challengesMenu = makeMenu("menu-challenges", "grid-btn-challenges", "movie");
   var movieHint = document.getElementById("movie-hint");
   var btnMovieAddKeyframe = document.getElementById("movie-add-keyframe");
@@ -7532,15 +7600,18 @@
   var movieHeightInput = document.getElementById("movie-height");
   var movieAntialiasCheckbox = document.getElementById("movie-antialias-checkbox");
   var movieLoopCheckbox = document.getElementById("movie-loop-checkbox");
+  var movieFrictionCheckbox = document.getElementById("movie-friction-checkbox");
+  var movieFrictionEnabled = movieFrictionCheckbox.checked;
   var movieSummary = document.getElementById("movie-summary");
   var btnMovieDone = document.getElementById("movie-done");
 
-  function currentKeyframe(seconds) {
+  function currentKeyframe(seconds, friction) {
     return {
       center: { x: view.center.x, xLo: view.center.xLo, y: view.center.y, yLo: view.center.yLo },
       scale: view.scale,
       step: timeline.step,
       seconds: seconds === undefined ? null : seconds,
+      friction: friction === undefined ? PhysicsEngine.frictionOf(scene) : friction,
     };
   }
 
@@ -7574,6 +7645,8 @@
     var zoom = Number(s);
     return zoom > 0 && isFinite(zoom) ? zoom : null;
   }
+
+  function frictionPercent(f) { return Math.round(f * 10000) / 100; }
 
   // One number in a keyframe's row. `field`: show() text at rest, edit() text to type over
   // (default show()), parse(text) -> value or undefined, step(dir) one arrow away, apply(value) commits.
@@ -7688,13 +7761,28 @@
           apply: function (seconds) { k.seconds = seconds === null ? null : clamp(Math.round(seconds * 10) / 10, 0.1, 60); },
         }));
       }
+      if (movieFrictionEnabled) {
+        what.appendChild(movieField("friction", "Friction at keyframe " + (i + 1), {
+          title: "Friction at this keyframe, in percent of speed lost per second, 0 to 99. The movie eases it from one keyframe to the next along with the camera.",
+          stepHint: "a percent",
+          show: function () { return frictionPercent(k.friction) + "%"; },
+          edit: function () { return String(frictionPercent(k.friction)); },
+          parse: function (text) {
+            var s = String(text).replace(/[\s%]/g, "");
+            var v = Number(s);
+            return s !== "" && isFinite(v) ? v : undefined;
+          },
+          step: function (dir) { return frictionPercent(k.friction) + dir; },
+          apply: function (pct) { k.friction = PhysicsEngine.frictionOf({ friction: Math.round(pct * 100) / 10000 }); },
+        }));
+      }
       row.appendChild(what);
 
       var actions = document.createElement("div");
       actions.className = "movie-keyframe-actions";
       actions.appendChild(movieButton("⌖", "Go to this keyframe", function () { goToKeyframe(k); }));
       actions.appendChild(movieButton("⟳", "Replace with the current view and frame", function () {
-        movie.keyframes[i] = currentKeyframe(k.seconds);
+        movie.keyframes[i] = currentKeyframe(k.seconds, k.friction);
         updateMovieUI();
       }));
       var earlier = movieButton("▲", "Move earlier", function () {
@@ -7786,6 +7874,10 @@
     movie.loop = movieLoopCheckbox.checked;
     updateMovieUI();
   });
+  movieFrictionCheckbox.addEventListener("change", function () {
+    movieFrictionEnabled = movieFrictionCheckbox.checked;
+    updateMovieUI();
+  });
   btnMovieDone.addEventListener("click", function () {
     if (movie.keyframes.length < 2) return;
     var shared = global.FractalGrid.shareState();
@@ -7846,8 +7938,11 @@
     stillJob = null;
     job.onDone(canvas);
   }
-  // spec: { center: { x, xLo, y, yLo }, scale, step, antialias, width, height }; no width and height: the window's size.
+  // spec: { center: { x, xLo, y, yLo }, scale, step, antialias, width, height, friction }; no width and height: the window's size.
+  // friction: a fraction; absent draws at the scene's.
   global.FractalGrid.renderStill = function (spec, onDone) {
+    stillFriction = spec.friction == null ? null : PhysicsEngine.frictionOf({ friction: spec.friction });
+    if (stillFriction !== null && !frictionUniform && stillFriction !== PhysicsEngine.frictionOf(scene)) global.FractalGrid.useFrictionUniform();
     stillJob = { antialias: spec.antialias !== false, onDone: onDone };
     stillSize = spec.width > 0 && spec.height > 0 ? { width: spec.width, height: spec.height } : null;
     resizeCanvas();
@@ -8078,7 +8173,9 @@
         inspect: inspect,
         movie: {
           keyframes: movie.keyframes.map(function (k) {
-            return { center: k.center, scale: k.scale, zoom: DEFAULT_SCALE / k.scale, step: k.step, seconds: k.seconds };
+            // null leaves the scene's friction: a hidden field never changes a render.
+            var friction = movieFrictionEnabled && k.friction !== PhysicsEngine.frictionOf(scene) ? k.friction : null;
+            return { center: k.center, scale: k.scale, zoom: DEFAULT_SCALE / k.scale, step: k.step, seconds: k.seconds, friction: friction };
           }),
           size: movie.size,
           antialias: movie.antialias,
@@ -8129,8 +8226,14 @@
         scale: clamp(DEFAULT_SCALE / k.zoom, MIN_SCALE, MAX_SCALE),
         step: clamp(k.step, 0, simulationSteps),
         seconds: k.seconds,
+        friction: k.friction == null ? PhysicsEngine.frictionOf(scene) : PhysicsEngine.frictionOf({ friction: k.friction }),
       };
     });
+    // A link with friction in it shows the fields, so Back from the player never hides them.
+    if (shared.movie.keyframes.some(function (k) { return k.friction != null; })) {
+      movieFrictionCheckbox.checked = true;
+      movieFrictionEnabled = true;
+    }
     movie.size = shared.movie.size;
     movie.antialias = shared.movie.antialias;
     movie.loop = shared.movie.loop;
