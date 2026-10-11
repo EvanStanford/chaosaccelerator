@@ -391,7 +391,7 @@
     var chunk = PhysicsGPU.trajectoryChunkInfo(initial.n, initial.consts, initial.hingeAnchors, precision);
     lines.push(PhysicsGPU.generateTrajectoryHeaderGLSL(chunk));
     lines.push("");
-    lines.push(PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(scene)));
+    lines.push(PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(scene), PhysicsEngine.frictionRate(scene)));
     lines.push("");
     lines.push(PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), initial.springs));
     lines.push("");

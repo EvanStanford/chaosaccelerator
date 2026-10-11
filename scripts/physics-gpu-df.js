@@ -22,7 +22,108 @@
   // nudgeTrig off makes this bit-identical to a straight port (physics-tests.js uses that).
   var OPTIONS = { nudgeTrig: true };
 
-  function buildLibrary() {
+  function factorial(n) { var r = 1; for (var i = 2; i <= n; i++) r *= i; return r; }
+  function big(n) { return BigInt(n); }
+  function bigFactorial(n) { var r = big(1); for (var i = 2; i <= n; i++) r *= big(i); return r; }
+
+  // ---- Friction (PhysicsEngine.advanceVelocity): a leg of length dt scales v by e^-x and weights the
+  // acceleration by dt * phi(x), x = DF_FRICTION * dt, phi = (1 - e^-x)/x. phi is a series sized to the
+  // word count; both factors are precomputed for the whole-step leg, which is nearly all of them.
+
+  // 1/(n+1)! coefficients until the first dropped term is below the last word at x = friction * DT.
+  function phiLiterals(friction, words) {
+    var x = friction * FIXED_DT, bound = Math.pow(2, -(24 * words + 8)), lits = [];
+    for (var n = 0; n < 40; n++) {
+      lits.push(words > 2 ? PhysicsDF.literal(PhysicsDF.rationalWords(big(n % 2 ? -1 : 1), bigFactorial(n + 1), words)) : d((n % 2 ? -1 : 1) / factorial(n + 1)));
+      if (Math.pow(x, n + 1) / factorial(n + 2) < bound) break;
+    }
+    return lits;
+  }
+  // A positive float64 as an exact fraction p / q (q a power of two).
+  function exactFraction(v) {
+    var view = new DataView(new ArrayBuffer(8));
+    view.setFloat64(0, v);
+    var hi = view.getUint32(0), lo = view.getUint32(4), exp = (hi >>> 20) & 0x7ff;
+    var mant = (big(hi & 0xfffff) << big(32)) | big(lo);
+    if (exp === 0) return { p: mant, q: big(1) << big(1074) };
+    var shift = exp - 1075;
+    mant = mant | (big(1) << big(52));
+    return shift >= 0 ? { p: mant << big(shift), q: big(1) } : { p: mant, q: big(1) << big(-shift) };
+  }
+  // [decay, phi] for the whole step, x = friction / 60, as word lists: an exact rational series past two words.
+  function stepFactors(friction, words) {
+    var x = friction * FIXED_DT;
+    if (words <= 2) return [PhysicsDF.split(Math.exp(-x)), PhysicsDF.split(-Math.expm1(-x) / x)];
+    // phi = sum (-x)^n/(n+1)! over N terms, x = p/q: numerator P over D = q^(N-1) N!.
+    var f = exactFraction(friction), p = f.p, q = f.q * big(60), N = 30, D = (q ** big(N - 1)) * bigFactorial(N), P = big(0), pn = big(1);
+    for (var n = 0; n < N; n++) {
+      var term = pn * (q ** big(N - 1 - n)) * (bigFactorial(N) / bigFactorial(n + 1));
+      P += n % 2 ? -term : term;
+      pn *= p;
+    }
+    return [PhysicsDF.rationalWords(q * D - p * P, q * D, words), PhysicsDF.rationalWords(P, D, words)];
+  }
+  function frictionDecls(friction) {
+    var factors = stepFactors(friction, PhysicsDF.currentWords());
+    return ["const MF DF_FRICTION = " + d(friction) + ";",
+      "const MF DF_FRICTION_STEP_DECAY = " + PhysicsDF.literal(factors[0]) + ";",
+      "const MF DF_FRICTION_STEP_PHI = " + PhysicsDF.literal(factors[1]) + ";"].join("\n");
+  }
+  function advanceVelocityGLSL(friction) {
+    var floor = global.PhysicsEngine.FRICTION_FLOOR;
+    var lines = [
+    "DVec2 dfDragAndCap(DVec2 v, MF dt) {",
+    floor ? "  v = dv2Scale(v, dfSub(DF_ONE, dfMul(" + d(floor) + ", dt)));" : "",
+    "  MF sq = dv2LengthSq(v);",
+    "  if (dfGreater(sq, dfSqr(DF_MAX_SPEED))) v = dv2Scale(v, dfDiv(DF_MAX_SPEED, dfSqrt(sq)));",
+    "  return v;",
+    "}"];
+    if (friction > 0) {
+      var lits = phiLiterals(friction, PhysicsDF.currentWords());
+      lines.push("MF dfFrictionPhi(MF x) {", "  MF p = " + lits[lits.length - 1] + ";");
+      for (var i = lits.length - 2; i >= 0; i--) lines.push("  p = dfAdd(dfMul(p, x), " + lits[i] + ");");
+      lines.push("  return p;", "}",
+      // A zero leg (tRest with no contact) and the whole step are most calls; both skip the series bit-identically.
+      "void dfFrictionLeg(MF dt, out MF decay, out MF phi) {",
+      "  if (dfIsZero(dt)) { decay = DF_ONE; phi = DF_ONE; return; }",
+      "  if (all(equal(dt, DF_DT))) { decay = DF_FRICTION_STEP_DECAY; phi = DF_FRICTION_STEP_PHI; return; }",
+      "  MF x = dfMul(DF_FRICTION, dt);",
+      "  phi = dfFrictionPhi(x);",
+      "  decay = dfSub(DF_ONE, dfMul(x, phi));",
+      "}",
+      // accel is the body's whole acceleration: a spring sum, or under Mutual Gravity the df force sum.
+      "DVec2 dfAdvanceVelocity(DVec2 v, MF dt, DVec2 accel) {",
+      "  MF decay, phi;",
+      "  dfFrictionLeg(dt, decay, phi);",
+      "  MF s = dfMul(dt, phi);",
+      "  v.x = dfAdd(dfMul(v.x, decay), dfMul(accel.x, s));",
+      "  v.y = dfAdd(dfMul(v.y, decay), dfMul(accel.y, s));",
+      "  return dfDragAndCap(v, dt);",
+      "}",
+      // Plain gravity: its x component is zero, and a df multiply-add of zero is real work.
+      "DVec2 dfAdvanceVelocityGravity(DVec2 v, MF dt) {",
+      "  MF decay, phi;",
+      "  dfFrictionLeg(dt, decay, phi);",
+      "  v.x = dfMul(v.x, decay);",
+      "  v.y = dfAdd(dfMul(v.y, decay), dfMul(DF_GRAVITY, dfMul(dt, phi)));",
+      "  return dfDragAndCap(v, dt);",
+      "}");
+    } else {
+      lines.push(
+      "DVec2 dfAdvanceVelocity(DVec2 v, MF dt, DVec2 accel) {",
+      "  v.x = dfAdd(v.x, dfMul(accel.x, dt));",
+      "  v.y = dfAdd(v.y, dfMul(accel.y, dt));",
+      "  return dfDragAndCap(v, dt);",
+      "}",
+      "DVec2 dfAdvanceVelocityGravity(DVec2 v, MF dt) {",
+      "  v.y = dfAdd(v.y, dfMul(DF_GRAVITY, dt));",
+      "  return dfDragAndCap(v, dt);",
+      "}");
+    }
+    return lines.filter(Boolean).join("\n");
+  }
+
+  function buildLibrary(friction) {
     return [
     "// ---- Multi-float physics: a port of GLSL_LIBRARY in physics-gpu.js ----",
     "",
@@ -177,26 +278,7 @@
     "  return t;",
     "}",
     "",
-    "DVec2 dfDragAndCap(DVec2 v, MF dt) {",
-    // PhysicsEngine.AIR_DRAG (experimental): no line at all when it is 0.
-    (global.PhysicsEngine.AIR_DRAG ? "  v = dv2Scale(v, dfSub(DF_ONE, dfMul(" + d(global.PhysicsEngine.AIR_DRAG) + ", dt)));" : ""),
-    "  MF sq = dv2LengthSq(v);",
-    "  if (dfGreater(sq, dfSqr(DF_MAX_SPEED))) v = dv2Scale(v, dfDiv(DF_MAX_SPEED, dfSqrt(sq)));",
-    "  return v;",
-    "}",
-    // accel is the body's whole acceleration: a spring sum, or under Mutual
-    // Gravity the df force sum the generated step builds.
-    "DVec2 dfAdvanceVelocity(DVec2 v, MF dt, DVec2 accel) {",
-    "  v.x = dfAdd(v.x, dfMul(accel.x, dt));",
-    "  v.y = dfAdd(v.y, dfMul(accel.y, dt));",
-    "  return dfDragAndCap(v, dt);",
-    "}",
-    // Plain gravity: its x component is zero, and a df multiply-add of zero is
-    // real work behind the dfv() veil.
-    "DVec2 dfAdvanceVelocityGravity(DVec2 v, MF dt) {",
-    "  v.y = dfAdd(v.y, dfMul(DF_GRAVITY, dt));",
-    "  return dfDragAndCap(v, dt);",
-    "}",
+    advanceVelocityGLSL(friction),
     "",
     "DContact dfCollideCircleCircle(DBody a, MF ra, DBody b, MF rb) {",
     "  DVec2 dvec = dv2(dfSub(b.x, a.x), dfSub(b.y, a.y));",
@@ -695,7 +777,9 @@
 
   global.PhysicsGPUDF = {
     // A getter: OPTIONS is read on every build.
-    get GLSL_LIBRARY() { return buildLibrary(); },
+    get GLSL_LIBRARY() { return buildLibrary(0); },
+    libraryGLSL: buildLibrary,
+    frictionDecls: frictionDecls,
     OPTIONS: OPTIONS,
   };
 })(typeof window !== "undefined" ? window : globalThis);

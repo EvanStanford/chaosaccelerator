@@ -28,8 +28,8 @@
     return dist(wa.x, wa.y, wb.x, wb.y);
   }
 
-  function runJS(scene, steps) {
-    for (var i = 0; i < steps; i++) PhysicsEngine.step(scene, DT);
+  function runJS(scene, steps, opts) {
+    for (var i = 0; i < steps; i++) PhysicsEngine.step(scene, DT, opts);
     return scene;
   }
 
@@ -446,7 +446,7 @@
       "precision highp float;",
       "out vec4 fragColor;",
       "",
-      PhysicsGPU.libraryGLSL("f32", PhysicsEngine.speedCapFor(scene)),
+      PhysicsGPU.libraryGLSL("f32", PhysicsEngine.speedCapFor(scene), PhysicsEngine.frictionRate(scene)),
       "",
       "void main() {",
       "  float worldX = " + PhysicsGPU.fnum(worldX) + ";",
@@ -507,7 +507,7 @@
     }
     var fs = [
       "#version 300 es", "precision highp float;", "out vec4 fragColor;", "",
-      PhysicsGPU.libraryGLSL("f32", PhysicsEngine.speedCapFor(scene)), "",
+      PhysicsGPU.libraryGLSL("f32", PhysicsEngine.speedCapFor(scene), PhysicsEngine.frictionRate(scene)), "",
       stepOnceSrc, "",
       "void main() {",
       "  float worldX = " + PhysicsGPU.fnum(worldX) + ";",
@@ -1085,7 +1085,7 @@
         var fullW = PhysicsGPU.fnum(frame.width), fullH = PhysicsGPU.fnum(frame.height);
         var fs = [
           "#version 300 es", "precision highp float;", "out vec4 fragColor;", "",
-          PhysicsGPU.libraryGLSL("f32", PhysicsEngine.speedCapFor(scene)), "",
+          PhysicsGPU.libraryGLSL("f32", PhysicsEngine.speedCapFor(scene), PhysicsEngine.frictionRate(scene)), "",
           PhysicsGPU.generateStepOnceGLSL(1, consts, [], [], frame), "",
           "void main() {",
           "  Body body0 = Body(" + PhysicsGPU.fnum(consts[0].x + worldX) + ", " + PhysicsGPU.fnum(consts[0].y + worldY) + ", " + PhysicsGPU.fnum(consts[0].angle) + ", 0.0, 0.0, 0.0);",
@@ -1576,17 +1576,17 @@
     var B = PhysicsGridCodegen.backendFor(precision);
     var initial = PhysicsGridCodegen.generateGridInitialStateGLSL(scene, precision);
     var frame = PhysicsEngine.wrapsAtEdges(scene) ? { width: scene.frameWidth, height: scene.frameHeight } : undefined;
-    var dv = precision === "df" ? "dbody" : "body";
+    var dv = PhysicsDF.isExtended(precision) ? "dbody" : "body";
     function residual(axis, value) {
       var v = dv + bodyIndex + "." + axis;
-      return precision === "df"
+      return PhysicsDF.isExtended(precision)
         ? "dfToFloat(dfSub(" + v + ", " + PhysicsDF.num(value) + "))"
         : "(" + v + " - " + PhysicsGPU.fnum(Math.fround(value)) + ")";
     }
     var src = [
       "#version 300 es", "precision highp float;", "out vec4 fragColor;", "",
       // Speed cap and gravity mode are per-scene; forward them.
-      PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(scene)), "",
+      PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(scene), PhysicsEngine.frictionRate(scene)), "",
       "const " + B.scalar + " worldX = " + B.lit(worldX) + ";",
       "const " + B.scalar + " worldY = " + B.lit(worldY) + ";", "",
       PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), initial.springs), "",
@@ -1615,7 +1615,7 @@
     }
     var src = [
       "#version 300 es", "precision highp float;", "out vec4 fragColor;", "",
-      PhysicsGPU.libraryGLSL("df", PhysicsEngine.speedCapFor(scene)), "",
+      PhysicsGPU.libraryGLSL("df", PhysicsEngine.speedCapFor(scene), PhysicsEngine.frictionRate(scene)), "",
       PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, "df", scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), initial.springs), "",
       "void main() {",
       // k*dx may be float32; the ADD onto x0 is what needs df, as in the grid shader.
@@ -1924,7 +1924,7 @@
     var nudgeLines = nudges.map(function (dx, k) { return "  if (k == " + (k + 1) + ") nudge = " + PhysicsGPU.fnum(dx) + ";"; });
     var src = [
       "#version 300 es", "precision highp float;", "out vec4 fragColor;", "",
-      PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(scene)), "",
+      PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(scene), PhysicsEngine.frictionRate(scene)), "",
       PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), initial.springs), "",
       "void main() {",
       "  int texel = int(gl_FragCoord.x); int k = texel % " + count + "; bool wantY = texel >= " + count + ";",
@@ -2265,8 +2265,9 @@
       };
       var STEPS = 10;
       for (var i = 0; i < STEPS; i++) PhysicsEngine.step(scene, DT);
-      // Free fall from rest: v = g*t exactly, with no sideways component.
-      var wantVy = PhysicsEngine.GRAVITY * DT * STEPS;
+      // Free fall from rest under the floor drag every scene has, with no sideways component.
+      var wantVy = 0;
+      for (var k = 0; k < STEPS; k++) wantVy = (wantVy + PhysicsEngine.GRAVITY * DT) * (1 - PhysicsEngine.FRICTION_FLOOR * DT);
       return {
         pass: Math.abs(scene.bodies[0].vy - wantVy) < 1e-9 && scene.bodies[0].vx === 0 && scene.bodies[0].x === 400,
         detail: "after " + STEPS + " steps: vy=" + scene.bodies[0].vy.toFixed(6) + " (want " + wantVy.toFixed(6) +
@@ -2309,7 +2310,7 @@
 
   addTest(
     "Mutual Gravity: a collision conserves momentum",
-    "between two free bodies the pull is equal and opposite and so is the contact impulse, so a bounce under Mutual Gravity must leave the pair's total momentum where it was, and must actually be a bounce, not the perfectly inelastic weld this engine used to apply",
+    "between two free bodies the pull is equal and opposite and so is the contact impulse, so a bounce under Mutual Gravity must leave the pair's total momentum where it was, and must actually be a bounce, not the perfectly inelastic weld this engine used to apply, minus the floor drag's share",
     function () {
       // Small fast body into a big stationary one, frame off so nothing wraps.
       var scene = {
@@ -2330,9 +2331,12 @@
         else if (touched && relSpeedAfter === 0) relSpeedAfter = Math.hypot(b.vx - a.vx, b.vy - a.vy);
       }
       var pAfter = a.mass * a.vx + b.mass * b.vx;
+      // The floor drag scales both velocities alike each step: the pair's momentum shrinks by that factor and nothing
+      // else, bar the contact step's split legs, whose two factors differ from one by floor^2 tHit tRest (under 2e-9).
+      var pWant = pBefore * Math.pow(1 - PhysicsEngine.FRICTION_FLOOR * DT, 60);
       return {
-        pass: touched && Math.abs(pAfter - pBefore) / Math.abs(pBefore) < 1e-9 && relSpeedAfter > 100,
-        detail: "momentum " + pBefore.toExponential(6) + " -> " + pAfter.toExponential(6) +
+        pass: touched && Math.abs(pAfter - pWant) / Math.abs(pBefore) < 1e-8 && relSpeedAfter > 100,
+        detail: "momentum " + pBefore.toExponential(6) + " -> " + pAfter.toExponential(6) + " (want " + pWant.toExponential(6) + " after the floor drag)" +
           "; relative speed once they parted=" + relSpeedAfter.toFixed(1) + "px/s (a weld would leave 0)",
       };
     }
@@ -2408,7 +2412,7 @@
 
   addTest(
     "Mutual Gravity: an orbit clear of the surface is a closed Kepler ellipse",
-    "reported as an orbit coming out 'a very different shape' from what Kepler predicts. Widening MUTUAL_GRAVITY_SOFTENING for the bounce had put a flattened, non-inverse-square region around every body, and an orbit dipping into one precesses instead of closing: 177 degrees per lap on the reported scene. This pins the property that matters: an orbit that stays clear of the bodies themselves must close, lap after lap, at the distance Kepler says",
+    "reported as an orbit coming out 'a very different shape' from what Kepler predicts. Widening MUTUAL_GRAVITY_SOFTENING for the bounce had put a flattened, non-inverse-square region around every body, and an orbit dipping into one precesses instead of closing: 177 degrees per lap on the reported scene. This pins the property that matters: an orbit that stays clear of the bodies themselves must close, lap after lap, at the distance Kepler says. Run without the floor drag, which would shrink the orbit",
     function () {
       // 500px out at 300px/s tangential: a wide ellipse clear of both surfaces.
       var scene = {
@@ -2433,7 +2437,7 @@
       // both, a rosette walks the direction round.
       var peris = [], prevR = null, prevPrev = null;
       for (var i = 0; i < 25 * 60; i++) {
-        PhysicsEngine.step(scene, DT);
+        PhysicsEngine.step(scene, DT, { frictionFloor: 0 });
         var dx = scene.bodies[0].x - scene.bodies[1].x, dy = scene.bodies[0].y - scene.bodies[1].y;
         var r = Math.hypot(dx, dy);
         if (prevPrev !== null && prevR < prevPrev && prevR <= r) {
@@ -2843,65 +2847,74 @@
 
   addTest(
     "A port hole turns what passes it: in straight down, out straight right, the offset and overshoot kept in the exit's frame",
-    "the velocity is re-expressed relative to the exit port hole, so a ball falling into an up-facing one leaves a right-facing one moving right at the speed it had when it crossed. The crossing point maps along the exit's line (20px right of center in becomes 20px toward its start end, the turn being rigid), the overshoot past the center line comes out in front of it, and the share of the step spent past the crossing gets its gravity on the exit side: that share of a step's fall, straight down again, plus the travel it drove",
+    "the velocity is re-expressed relative to the exit port hole, so a ball falling into an up-facing one leaves a right-facing one moving right at the speed it had when it crossed. The crossing point maps along the exit's line (20px right of center in becomes 20px toward its start end, the turn being rigid), the overshoot past the center line comes out in front of it, and the share of the step spent past the crossing gets its gravity on the exit side: that share of a step's fall, straight down again, plus the travel it drove. With friction on, that share is the exit leg's own decayed gain, worked out apart from the entry leg's",
     function () {
-      var scene = portholeScene([PhysicsEngine.createCircle(420, 200, 10, false)], { x: 800, y: 300, angle: Math.PI / 2 });
-      var plain = plainScene([PhysicsEngine.createCircle(420, 200, 10, false)]);
-      var ball = scene.bodies[2], after = null, fall = null, before = null;
-      for (var i = 0; i < 90 && !after; i++) {
-        before = ball.y;
-        PhysicsEngine.step(scene, DT);
-        PhysicsEngine.step(plain, DT);
-        if (ball.x > 600) { after = { x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy }; fall = plain.bodies[0]; }
+      function at(friction) {
+        var scene = portholeScene([PhysicsEngine.createCircle(420, 200, 10, false)], { x: 800, y: 300, angle: Math.PI / 2 });
+        var plain = plainScene([PhysicsEngine.createCircle(420, 200, 10, false)]);
+        scene.friction = friction; plain.friction = friction;
+        var ball = scene.bodies[2], after = null, fall = null, before = null;
+        for (var i = 0; i < 90 && !after; i++) {
+          before = ball.y;
+          PhysicsEngine.step(scene, DT);
+          PhysicsEngine.step(plain, DT);
+          if (ball.x > 600) { after = { x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy }; fall = plain.bodies[0]; }
+        }
+        if (!after) return { pass: false, detail: "the ball never came out of the right-facing port hole" };
+        // The plain fall is the entry-side step: the crossing instant, the overshoot past the line, and the end velocity.
+        var tau = DT * (1 - (400 - before) / (fall.y - before)), over = fall.y - 400, k = PhysicsEngine.frictionRate(scene);
+        // The exit leg's own gain, decayed over its own share of the step, then the floor drag's factor.
+        var share = PhysicsEngine.GRAVITY * tau * (k > 0 ? -Math.expm1(-k * tau) / (k * tau) : 1) * (1 - PhysicsEngine.FRICTION_FLOOR * tau);
+        var want = { x: 800 + over - share * tau, y: 280 + share * tau, vx: fall.vy - share, vy: share };
+        var err = Math.max(Math.abs(after.x - want.x), Math.abs(after.y - want.y), Math.abs(after.vx - want.vx), Math.abs(after.vy - want.vy));
+        return {
+          pass: err < 1e-9 && tau > 0 && tau < DT,
+          detail: "friction " + friction + ": out at (" + after.x.toFixed(4) + ", " + after.y.toFixed(4) + ") moving (" + after.vx.toFixed(4) + ", " + after.vy.toFixed(4) +
+            "); from the plain fall's step, " + (tau * 1000).toFixed(2) + "ms of it past the crossing: want (" + want.x.toFixed(4) + ", " + want.y.toFixed(4) +
+            ") moving (" + want.vx.toFixed(4) + ", " + want.vy.toFixed(4) + "), worst difference " + err.toExponential(2),
+        };
       }
-      if (!after) return { pass: false, detail: "the ball never came out of the right-facing port hole" };
-      // The plain fall is the entry-side step: the crossing instant, the overshoot past the line, and the end velocity.
-      var tau = DT * (1 - (400 - before) / (fall.y - before)), over = fall.y - 400;
-      var share = (1 - PhysicsEngine.AIR_DRAG * tau) * PhysicsEngine.GRAVITY * tau;
-      var want = { x: 800 + over - share * tau, y: 280 + share * tau, vx: fall.vy - share, vy: share };
-      var err = Math.max(Math.abs(after.x - want.x), Math.abs(after.y - want.y), Math.abs(after.vx - want.vx), Math.abs(after.vy - want.vy));
-      return {
-        pass: err < 1e-9 && tau > 0 && tau < DT,
-        detail: "out at (" + after.x.toFixed(4) + ", " + after.y.toFixed(4) + ") moving (" + after.vx.toFixed(4) + ", " + after.vy.toFixed(4) +
-          "); from the plain fall's step, " + (tau * 1000).toFixed(2) + "ms of it past the crossing: want (" + want.x.toFixed(4) + ", " + want.y.toFixed(4) +
-          ") moving (" + want.vx.toFixed(4) + ", " + want.vy.toFixed(4) + "), worst difference " + err.toExponential(2),
-      };
+      var none = at(0), some = at(0.3);
+      return { pass: none.pass && some.pass, detail: none.detail + "; " + some.detail };
     }
   );
+
+  // Bisects the start height of the ball at bodies[2] to the boundary where its crossing moves a step, and
+  // compares the two sides after N steps.
+  function portholeTooth(name, build, N) {
+    function run(startY) {
+      var scene = build(startY), ball = scene.bodies[2], out = -1;
+      for (var i = 0; i < N; i++) {
+        PhysicsEngine.step(scene, DT);
+        if (out < 0 && ball.x > 800) out = i;
+      }
+      return { out: out, x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy };
+    }
+    // Lower start (larger y) crosses earlier; find a start height either side of which the crossing step differs.
+    var lo = 150, hi = 260, outLo = run(lo).out, outHi = run(hi).out;
+    if (outLo < 0 || outHi < 0 || outLo === outHi) return { name: name, detail: "no tooth between the two starts (steps " + outLo + " and " + outHi + ")", pass: false };
+    for (var k = 0; k < 50; k++) {
+      var mid = (lo + hi) / 2;
+      if (run(mid).out === outLo) lo = mid; else hi = mid;
+    }
+    var a = run(lo - 1e-7), b = run(hi + 1e-7);
+    var dp = Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)), dv = Math.max(Math.abs(a.vx - b.vx), Math.abs(a.vy - b.vy));
+    return { name: name, pass: a.out !== b.out && dp < 1e-4 && dv < 1e-3, detail: name + ": tooth between steps " + a.out + " and " + b.out + " at y=" + lo.toFixed(6) + ", the two sides differ by " + dp.toExponential(2) + "px and " + dv.toExponential(2) + "px/s" };
+  }
 
   addTest(
     "A port hole pass is continuous where the crossing moves from one step to the next",
     "reported from the map as a sawtooth: the crossing step's travel was integrated whole on the entry side and then turned, so the exit side's gravity began at the next step boundary, up to a step late by an amount that grew as the start moved and reset when the crossing jumped a step. Each scene bisects the start height to the exact tooth, then compares the two sides of it after the same number of steps: under gravity, under Mutual Gravity (the outside pull taken from each side of the warp), and for a sprung pair (its own force turned with it)",
     function () {
-      function family(name, build, N) {
-        function run(startY) {
-          var scene = build(startY), ball = scene.bodies[2], out = -1;
-          for (var i = 0; i < N; i++) {
-            PhysicsEngine.step(scene, DT);
-            if (out < 0 && ball.x > 800) out = i;
-          }
-          return { out: out, x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy };
-        }
-        // Lower start (larger y) crosses earlier; find a start height either side of which the crossing step differs.
-        var lo = 150, hi = 260, outLo = run(lo).out, outHi = run(hi).out;
-        if (outLo < 0 || outHi < 0 || outLo === outHi) return { name: name, detail: "no tooth between the two starts (steps " + outLo + " and " + outHi + ")", pass: false };
-        for (var k = 0; k < 50; k++) {
-          var mid = (lo + hi) / 2;
-          if (run(mid).out === outLo) lo = mid; else hi = mid;
-        }
-        var a = run(lo - 1e-7), b = run(hi + 1e-7);
-        var dp = Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)), dv = Math.max(Math.abs(a.vx - b.vx), Math.abs(a.vy - b.vy));
-        return { name: name, pass: a.out !== b.out && dp < 1e-4 && dv < 1e-3, detail: name + ": tooth between steps " + a.out + " and " + b.out + " at y=" + lo.toFixed(6) + ", the two sides differ by " + dp.toExponential(2) + "px and " + dv.toExponential(2) + "px/s" };
-      }
       var exit = { x: 800, y: 300, angle: Math.PI / 2 };
       var results = [
-        family("gravity", function (y) { return portholeScene([PhysicsEngine.createCircle(420, y, 10, false)], exit); }, 60),
-        family("mutual gravity", function (y) {
+        portholeTooth("gravity", function (y) { return portholeScene([PhysicsEngine.createCircle(420, y, 10, false)], exit); }, 60),
+        portholeTooth("mutual gravity", function (y) {
           var s = portholeScene([PhysicsEngine.createCircle(420, y, 10, false)], exit);
           s.mutualGravity = true;
           return s;
         }, 60),
-        family("sprung pair", function (y) {
+        portholeTooth("sprung pair", function (y) {
           var s = portholeScene([PhysicsEngine.createCircle(420, y, 10, false), PhysicsEngine.createCircle(420, y - 90, 10, false)], exit);
           s.springs.push({ bodyA: 2, bodyB: 3, localAnchorA: { x: 0, y: 0 }, localAnchorB: { x: 0, y: 0 }, stiffness: 5000, restLength: 90 });
           return s;
@@ -3262,28 +3275,30 @@
     return scene;
   }
 
+  // Bisects along a map segment to the boundary where the pass moves a step, and compares the two sides.
+  function movingPortholeSides(scene) {
+    var STEPS = 50, A = [1382.46685, 534.076349], B = [2055.203987, 528.069767];
+    function run(t) {
+      var s = PhysicsGridCodegen.computeOffsetSceneNumeric(scene, A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t), ball = s.bodies[0], passStep = -1;
+      for (var i = 0; i < STEPS; i++) {
+        var px = ball.x, py = ball.y;
+        PhysicsEngine.step(s, DT);
+        if (passStep < 0 && dist(px, py, ball.x, ball.y) > 150) passStep = i + 1;
+      }
+      return { x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy, passStep: passStep };
+    }
+    var lo = 0, hi = 0.2, loStep = run(lo).passStep, hiStep = run(hi).passStep;
+    if (loStep < 0 || hiStep < 0 || loStep === hiStep) return null;
+    for (var it = 0; it < 60; it++) { var mid = (lo + hi) / 2; if (run(mid).passStep === loStep) lo = mid; else hi = mid; }
+    var a = run(lo), b = run(hi);
+    return { steps: loStep + "->" + hiStep, dp: dist(a.x, a.y, b.x, b.y), dv: Math.hypot(b.vx - a.vx, b.vy - a.vy) };
+  }
+
   addTest(
     "A pass through a moving port hole is continuous where the crossing moves from one step to the next",
     "reported from the map as a sawtooth 50px tall after 50 steps: the hand-over took the port holes' velocity, spin and turn from the end of the step, while they spin at 6 rad/s and gain 20px/s a step from their spring, so the handed-over velocity was off by the time left after the crossing, resetting at each step. Both port holes are now taken as they stood at the crossing instant and what passes flies from its exit spot for the rest of the step. Bisected to the boundary where the pass moves a step, the two sides must agree to rounding with the spring alone. Under Mutual Gravity the ball's own pull on the port holes is still taken from where it started the step, which leaves a small mismatch",
     function () {
-      var STEPS = 50, A = [1382.46685, 534.076349], B = [2055.203987, 528.069767];
-      function sides(scene) {
-        function run(t) {
-          var s = PhysicsGridCodegen.computeOffsetSceneNumeric(scene, A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t), ball = s.bodies[0], passStep = -1;
-          for (var i = 0; i < STEPS; i++) {
-            var px = ball.x, py = ball.y;
-            PhysicsEngine.step(s, DT);
-            if (passStep < 0 && dist(px, py, ball.x, ball.y) > 150) passStep = i + 1;
-          }
-          return { x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy, passStep: passStep };
-        }
-        var lo = 0, hi = 0.2, loStep = run(lo).passStep, hiStep = run(hi).passStep;
-        if (loStep < 0 || hiStep < 0 || loStep === hiStep) return null;
-        for (var it = 0; it < 60; it++) { var mid = (lo + hi) / 2; if (run(mid).passStep === loStep) lo = mid; else hi = mid; }
-        var a = run(lo), b = run(hi);
-        return { steps: loStep + "->" + hiStep, dp: dist(a.x, a.y, b.x, b.y), dv: Math.hypot(b.vx - a.vx, b.vy - a.vy) };
-      }
-      var spring = sides(sprungPortholeScene(false)), mutual = sides(sprungPortholeScene(true));
+      var spring = movingPortholeSides(sprungPortholeScene(false)), mutual = movingPortholeSides(sprungPortholeScene(true));
       function show(r) { return r ? "pass " + r.steps + ": the sides differ by " + r.dp.toExponential(2) + "px and " + r.dv.toExponential(2) + "px/s" : "no boundary found"; }
       return {
         pass: !!spring && !!mutual && spring.dp < 1e-6 && spring.dv < 1e-6 && mutual.dp < 1.5,
@@ -3312,6 +3327,212 @@
       return {
         pass: passAt > 0 && worst < 0.05 && dfErr < 1e-5,
         detail: "pass at step " + passAt + "; float32 within " + worst.toFixed(5) + "px of JS over " + STEPS + " steps, the df end state off by " + dfErr.toExponential(2) + "px",
+      };
+    }
+  );
+
+  // ---- Friction: a share of speed lost per second, continuous through every leg of a step ----
+
+  addTest(
+    "Friction takes the slider's share of speed each second, settles toward a terminal speed under gravity, and at 0 is the engine with no field at all",
+    "scene.friction is the share of speed lost per second on top of the floor drag: a body coasting at 1000px/s for 60 steps at 50% keeps 500px/s less the floor's share, to rounding, its fall approaches a terminal speed by the same exponential, and 0 steps bit for bit like a scene with no friction key through a bounce and a port hole pass. The engine clamps the field and reads garbage as 0",
+    function () {
+      var f = 0.5, k = -Math.log(1 - f), E = Math.exp(-k * DT), phi = -Math.expm1(-k * DT) / (k * DT), floor = 1 - PhysicsEngine.FRICTION_FLOOR * DT;
+      var coast = plainScene([PhysicsEngine.createCircle(100, 100, 10, false)]);
+      coast.friction = f; coast.bodies[0].vx = 1000;
+      for (var i = 0; i < 60; i++) PhysicsEngine.step(coast, DT);
+      // The slider's leg, then the floor's factor, each step: 500 before the floor's own share.
+      var wantVx = 1000, wantVy = 0;
+      for (var n = 0; n < 60; n++) { wantVx = wantVx * E * floor; wantVy = (wantVy * E + PhysicsEngine.GRAVITY * DT * phi) * floor; }
+      function build(withKey) {
+        var s = portholeScene([PhysicsEngine.createCircle(420, 200, 10, false), PhysicsEngine.createCircle(300, 100, 12, false), PhysicsEngine.createLine(300, 500, 300, 0.1, true)], { x: 800, y: 300, angle: Math.PI / 2 });
+        if (withKey) s.friction = 0;
+        return s;
+      }
+      var a = build(true), b = build(false), same = true, passed = false;
+      for (var j = 0; j < 300; j++) {
+        PhysicsEngine.step(a, DT); PhysicsEngine.step(b, DT);
+        if (a.bodies[2].x > 800) passed = true;
+        for (var q = 0; q < a.bodies.length; q++) {
+          if (a.bodies[q].x !== b.bodies[q].x || a.bodies[q].y !== b.bodies[q].y || a.bodies[q].vx !== b.bodies[q].vx || a.bodies[q].vy !== b.bodies[q].vy || a.bodies[q].w !== b.bodies[q].w) same = false;
+        }
+      }
+      var clamped = PhysicsEngine.frictionOf({ friction: 5 }) === PhysicsEngine.FRICTION_MAX && PhysicsEngine.frictionOf({ friction: -1 }) === 0 &&
+        PhysicsEngine.frictionOf({ friction: "x" }) === 0 && PhysicsEngine.frictionOf({}) === 0 && PhysicsEngine.frictionRate({}) === 0;
+      return {
+        pass: Math.abs(coast.bodies[0].vx - wantVx) < 1e-9 && Math.abs(coast.bodies[0].vy - wantVy) < 1e-9 && same && passed && clamped,
+        detail: "after 1s at 50%: vx=" + coast.bodies[0].vx.toFixed(9) + " (want " + wantVx.toFixed(9) + ", 500 before the floor's share), vy=" + coast.bodies[0].vy.toFixed(6) + " (want " + wantVy.toFixed(6) +
+          "); friction 0 against no key over 300 steps with a bounce and a pass (passed=" + passed + "): identical=" + same + "; clamps and garbage=" + clamped,
+      };
+    }
+  );
+
+  addTest(
+    "A friction leg composes: a step split anywhere gives the whole step, and a zero-length leg is the identity",
+    "the leg is the exact solution of dv/dt = a - k v, so the two legs either side of a contact, or the entry and exit legs of a port hole pass, add up to one leg below the speed cap; the floor drag's factor of (1 - k dt) per leg misses by k t1 t2 (a + k v), tiny at 0.005/s, and the slider's friction must add nothing to that. tRest is 0 for every untouched body every step, so dt = 0 must hand the velocity back untouched, not NaN",
+    function () {
+      var seed = 7, worst = 0, identity = true, floorOk = true, fl = PhysicsEngine.FRICTION_FLOOR;
+      function rnd() { seed = (seed * 48271) % 2147483647; return seed / 2147483647; }
+      function adv(x, y, dt, ax, ay, k, floor) { return PhysicsEngine.advanceVelocity(x, y, dt, ax, ay, 1e9, k, floor); }
+      for (var i = 0; i < 2000; i++) {
+        var vx = (rnd() - 0.5) * 3000, vy = (rnd() - 0.5) * 3000, ax = (rnd() - 0.5) * 20000, ay = (rnd() - 0.5) * 20000, k = rnd() * 4.7, t1 = rnd() * DT;
+        var one = adv(vx, vy, DT, ax, ay, k, 0), mid = adv(vx, vy, t1, ax, ay, k, 0), two = adv(mid.x, mid.y, DT - t1, ax, ay, k, 0);
+        worst = Math.max(worst, Math.hypot(two.x - one.x, two.y - one.y) / Math.max(1, Math.hypot(one.x, one.y)));
+        var same = adv(vx, vy, 0, ax, ay, k, fl);
+        if (same.x !== vx || same.y !== vy) identity = false;
+        // With the floor, what is left is the old factor's own residual, floor * t1 * t2 * (a + floor * v), and no more.
+        var oneF = adv(vx, vy, DT, ax, ay, k, fl), midF = adv(vx, vy, t1, ax, ay, k, fl), twoF = adv(midF.x, midF.y, DT - t1, ax, ay, k, fl);
+        var bound = 2 * fl * t1 * (DT - t1) * (Math.hypot(ax, ay) + fl * Math.hypot(vx, vy) + 1) + 1e-9;
+        if (Math.hypot(twoF.x - oneF.x, twoF.y - oneF.y) > bound) floorOk = false;
+      }
+      return { pass: worst < 1e-12 && identity && floorOk, detail: "2000 random splits without the floor: worst relative difference " + worst.toExponential(2) + "; dt = 0 returns the input bit for bit=" + identity + "; with the floor the gap stays within the old factor's own residual=" + floorOk };
+    }
+  );
+
+  addTest(
+    "Friction reaches every shader build and every copy of a scene, and at 0 leaves the shader text without it",
+    "the rate is threaded by hand into each libraryGLSL call (the builder's Play trajectory, the map's grid preamble, the hover and Inspect trajectory); a missed one compiles and runs frictionless, so Play, the map and Inspect would quietly disagree. cloneScene, the share link and the authored JSON must keep the field as well, since the bounce tally and the sounds step a clone",
+    function () {
+      var scene = portholeScene([PhysicsEngine.createCircle(420, 200, 10, false)], { x: 800, y: 300, angle: Math.PI / 2 });
+      scene.xInput = { body: 2, property: "x" }; scene.yInput = { body: 2, property: "y" }; scene.output = { body: 2, property: "y" };
+      var bare = PhysicsEngine.cloneScene(scene);
+      delete bare.friction;
+      scene.friction = 0.25;
+      var k = PhysicsEngine.frictionRate(scene);
+      function has(src) { return src.indexOf("const float FRICTION = " + PhysicsGPU.fnum(k) + ";") !== -1; }
+      var traj32 = PhysicsGPU.compileSceneToTrajectoryGLSL(scene, 10, "f32").fragmentSource, trajDf = PhysicsGPU.compileSceneToTrajectoryGLSL(scene, 10, "df").fragmentSource;
+      var hover32 = PhysicsGridCodegen.compileHoverTrajectoryGLSL(scene, 0, 0, 10, "f32").fragmentSource, hoverDf = PhysicsGridCodegen.compileHoverTrajectoryGLSL(scene, 0, 0, 10, "df").fragmentSource;
+      var grid = PhysicsGPU.libraryGLSL("df", PhysicsEngine.speedCapFor(scene), PhysicsEngine.frictionRate(scene));
+      function hasDf(src) { return /const MF DF_FRICTION = /.test(src) && /DF_FRICTION_STEP_DECAY/.test(src) && /dfFrictionPhi/.test(src); }
+      var reach = has(traj32) && hasDf(trajDf) && has(hover32) && hasDf(hoverDf) && has(grid) && hasDf(grid);
+      // The whole-step factors at three and four words come from an exact rational series: their words must sum to exp(-x).
+      var x = k * DT, words = ["tf", "qf"].every(function (p) {
+        if (!PhysicsDF.isSupported(p)) return true;
+        PhysicsDF.usePrecision(p);
+        var decls = PhysicsGPUDF.frictionDecls(k), sum = {};
+        decls.split("\n").forEach(function (l) { var m = /DF_FRICTION_STEP_(\w+) = vec\d\(([^)]*)\)/.exec(l); if (m) sum[m[1]] = m[2].split(",").map(Number).reduce(function (a, b) { return a + b; }, 0); });
+        return Math.abs(sum.DECAY - Math.exp(-x)) < 5e-16 && Math.abs(sum.PHI + Math.expm1(-x) / x) < 5e-16;
+      });
+      PhysicsDF.usePrecision("df");
+      var zero32 = PhysicsGPU.compileSceneToTrajectoryGLSL(bare, 10, "f32").fragmentSource, zeroDf = PhysicsGPU.compileSceneToTrajectoryGLSL(bare, 10, "df").fragmentSource;
+      bare.friction = 0;
+      var clean = !/FRICTION|frictionPhi/.test(zero32) && !/FRICTION|dfFriction/.test(zeroDf) &&
+        PhysicsGPU.compileSceneToTrajectoryGLSL(bare, 10, "f32").fragmentSource === zero32 && PhysicsGPU.compileSceneToTrajectoryGLSL(bare, 10, "df").fragmentSource === zeroDf;
+      var clone = PhysicsEngine.cloneScene(scene).friction === 0.25 && PhysicsGridCodegen.computeOffsetSceneNumeric(scene, 0, 0).friction === 0.25;
+      var link = ShareUrl.encodeScene(scene).join(","), back = ShareUrl.decode("#map/" + link).scene;
+      var linkOk = /(^|,)fric:\.25(,|$)/.test(link) && back.friction === 0.25 &&
+        ShareUrl.decode("#map/" + ShareUrl.encodeScene(bare).join(",")).scene.friction === 0 && ShareUrl.encodeScene(bare).join(",").indexOf("fric") === -1;
+      var refused = false;
+      try { ShareUrl.decode("#map/" + link.replace("fric:.25", "fric:lots")); } catch (e) { refused = true; }
+      return {
+        pass: reach && words && clean && clone && linkOk && refused,
+        detail: "FRICTION in the Play, hover and grid preambles, f32 and df=" + reach + "; tf and qf whole-step factors sum to exp(-x)=" + words + "; friction 0 and no key compile to the same text with no friction in it=" + clean +
+          "; cloneScene and the offset scene keep it=" + clone + "; the link carries fric: and omits it at 0=" + linkOk + "; a non-number is refused=" + refused,
+      };
+    }
+  );
+
+  addTest(
+    "JS engine and GPU compiler agree with friction on: a bounce, and a pass between two moving port holes, in float32 and double-float",
+    "the leg is spelled three times (physics-engine.js, and the float32 and multi-float advanceVelocity): a ball bouncing on a tilted line exercises the split legs, and the reported sprung pair the entry and exit legs of a transport whose velocity map is affine; the multi-float series and its precomputed whole-step factors must land where Math.expm1 puts the JS engine",
+    function () {
+      function bounce() {
+        var s = plainScene([PhysicsEngine.createLine(400, 600, 700, 0.15, true), PhysicsEngine.createCircle(380, 300, 20, false)]);
+        s.friction = 0.3; s.xInput = null; s.yInput = null; s.output = { body: 1, property: "y" };
+        return s;
+      }
+      var STEPS = 90, js = PhysicsEngine.cloneScene(bounce());
+      js.bodies.forEach(PhysicsEngine.computeMass);
+      var traj = PhysicsGPU.runSceneOnGPU(bounce(), STEPS), worst = 0, bounced = false;
+      for (var i = 0; i < STEPS; i++) {
+        var vyBefore = js.bodies[1].vy;
+        PhysicsEngine.step(js, DT);
+        if (vyBefore > 0 && js.bodies[1].vy < 0) bounced = true;
+        worst = Math.max(worst, dist(js.bodies[1].x, js.bodies[1].y, traj[i][1].x, traj[i][1].y));
+      }
+      var dfErr = gridResidualAtPoint(bounce(), STEPS, 0, 0, "df", 1, cpuStateAt(bounce(), 0, 0, STEPS, 1)).err;
+      var scene = sprungPortholeScene(false);
+      scene.friction = 0.3;
+      var S2 = 25, WX = 1700, WY = 530, js2 = PhysicsGridCodegen.computeOffsetSceneNumeric(scene, WX, WY);
+      var traj2 = PhysicsGPU.runCompiledTrajectoryOnGPU(PhysicsGridCodegen.compileHoverTrajectoryGLSL(scene, WX, WY, S2, "f32"), S2), worst2 = 0, passAt = -1;
+      for (var j = 0; j < S2; j++) {
+        var px = js2.bodies[0].x, py = js2.bodies[0].y;
+        PhysicsEngine.step(js2, DT);
+        if (passAt < 0 && dist(px, py, js2.bodies[0].x, js2.bodies[0].y) > 150) passAt = j + 1;
+        for (var b = 0; b < 3; b++) worst2 = Math.max(worst2, dist(js2.bodies[b].x, js2.bodies[b].y, traj2[j][b].x, traj2[j][b].y));
+      }
+      var dfErr2 = gridResidualAtPoint(scene, S2, WX, WY, "df", 0, cpuStateAt(scene, WX, WY, S2, 0)).err;
+      return {
+        pass: bounced && worst < 0.01 && dfErr < 1e-6 && passAt > 0 && worst2 < 0.05 && dfErr2 < 1e-5,
+        detail: "bounce (happened=" + bounced + "): float32 within " + worst.toFixed(5) + "px of JS over " + STEPS + " steps, the df end state off by " + dfErr.toExponential(2) +
+          "px; moving port holes: pass at step " + passAt + ", float32 within " + worst2.toFixed(5) + "px over " + S2 + " steps, df off by " + dfErr2.toExponential(2) + "px",
+      };
+    }
+  );
+
+  addTest(
+    "In double-float, friction costs a paired body nothing a free one does not see: the whole-step and zero-length legs skip the series bit for bit",
+    "dfFrictionLeg hands the whole-step leg a precomputed pair and a zero leg the identity, so a body in a collision pair that never touches (vPre at the whole step, vPost at none of it) lands on the same bits as the same scene with collisions off, where only vFull runs. Two circles far apart, friction 0.5, 60 steps, compared bitwise in df and to a few ulps in float32",
+    function () {
+      function scene(collisions) {
+        var s = plainScene([PhysicsEngine.createCircle(300, 200, 20, false), PhysicsEngine.createCircle(900, 200, 20, false)]);
+        s.friction = 0.5; s.collisionsEnabled = collisions; s.bodies[0].vx = 40; s.bodies[1].vx = -40;
+        s.xInput = null; s.yInput = null; s.output = { body: 0, property: "y" };
+        return s;
+      }
+      var STEPS = 60, dfOn = PhysicsGPU.runSceneOnGPU(scene(true), STEPS, "df"), dfOff = PhysicsGPU.runSceneOnGPU(scene(false), STEPS, "df");
+      var f32On = PhysicsGPU.runSceneOnGPU(scene(true), STEPS, "f32"), f32Off = PhysicsGPU.runSceneOnGPU(scene(false), STEPS, "f32");
+      var dfSame = true, f32Worst = 0, moved = false;
+      for (var i = 0; i < STEPS; i++) {
+        for (var b = 0; b < 2; b++) {
+          if (dfOn[i][b].x !== dfOff[i][b].x || dfOn[i][b].y !== dfOff[i][b].y) dfSame = false;
+          f32Worst = Math.max(f32Worst, Math.abs(f32On[i][b].x - f32Off[i][b].x), Math.abs(f32On[i][b].y - f32Off[i][b].y));
+        }
+        if (dfOn[i][0].y > 300) moved = true;
+      }
+      // Three words: the whole-step factors come from the exact rational series, and the longer series runs on the GPU.
+      // The trajectory reads back in float32, so the JS comparison goes through the grid shader's own residual.
+      var tfSame = true, tfErr = 0, tfNote = "tf not supported here";
+      if (PhysicsDF.isSupported("tf")) {
+        var tfOn = PhysicsGPU.runSceneOnGPU(scene(true), STEPS, "tf"), tfOff = PhysicsGPU.runSceneOnGPU(scene(false), STEPS, "tf");
+        for (var j = 0; j < STEPS; j++) {
+          for (var c = 0; c < 2; c++) if (tfOn[j][c].x !== tfOff[j][c].x || tfOn[j][c].y !== tfOff[j][c].y) tfSame = false;
+        }
+        tfErr = gridResidualAtPoint(scene(true), STEPS, 0, 0, "tf", 0, cpuStateAt(scene(true), 0, 0, STEPS, 0)).err;
+        tfNote = "tf identical on and off=" + tfSame + ", the grid shader's end state off by " + tfErr.toExponential(2) + "px from JS";
+      }
+      return {
+        pass: moved && dfSame && f32Worst < 1e-3 && tfSame && tfErr < 1e-9,
+        detail: "df trajectories with collisions on and off identical over " + STEPS + " steps=" + dfSame + "; float32 differ by at most " + f32Worst.toExponential(2) + "px; " + tfNote + "; the balls fell=" + moved,
+      };
+    }
+  );
+
+  addTest(
+    "With friction on, a port hole pass is still continuous where the crossing moves from one step to the next",
+    "the speed lost is worked out for the share of the step before the crossing and the share after, each on its own side's velocity, the way gravity already is; bisected to the boundary under gravity, under Mutual Gravity, for a sprung pair and through the reported moving pair, the two sides agree as closely as they do without friction",
+    function () {
+      var F = 0.3, exit = { x: 800, y: 300, angle: Math.PI / 2 };
+      function withFriction(s) { s.friction = F; return s; }
+      var results = [
+        portholeTooth("gravity", function (y) { return withFriction(portholeScene([PhysicsEngine.createCircle(420, y, 10, false)], exit)); }, 70),
+        portholeTooth("mutual gravity", function (y) {
+          var s = withFriction(portholeScene([PhysicsEngine.createCircle(420, y, 10, false)], exit));
+          s.mutualGravity = true;
+          return s;
+        }, 70),
+        portholeTooth("sprung pair", function (y) {
+          var s = withFriction(portholeScene([PhysicsEngine.createCircle(420, y, 10, false), PhysicsEngine.createCircle(420, y - 90, 10, false)], exit));
+          s.springs.push({ bodyA: 2, bodyB: 3, localAnchorA: { x: 0, y: 0 }, localAnchorB: { x: 0, y: 0 }, stiffness: 5000, restLength: 90 });
+          return s;
+        }, 70),
+      ];
+      var moving = movingPortholeSides(withFriction(sprungPortholeScene(false)));
+      var movingOk = !!moving && moving.dp < 1e-6 && moving.dv < 1e-6;
+      return {
+        pass: results.every(function (r) { return r.pass; }) && movingOk,
+        detail: results.map(function (r) { return r.detail; }).join("; ") + "; moving sprung pair " +
+          (moving ? "pass " + moving.steps + ": the sides differ by " + moving.dp.toExponential(2) + "px and " + moving.dv.toExponential(2) + "px/s" : "no boundary found"),
       };
     }
   );
@@ -4333,7 +4554,7 @@
       "uniform highp sampler2DArray u_state;",
       "uniform bool u_init;", "uniform int u_steps;", "uniform int u_group;",
       PhysicsGridCodegen.generatePlaybackStateOutputsGLSL(layersPerGroup).join("\n"), "",
-      PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(scene)), "",
+      PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(scene), PhysicsEngine.frictionRate(scene)), "",
       PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision,
         scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), initial.springs), "",
       "void main() {",
@@ -4543,7 +4764,7 @@
       ],
       xInput: { body: 0, property: "vx" }, yInput: { body: 3, property: "radius" },
       output: { body: 0, bodyB: 3, property: "distance" },
-      frameWidth: 1192, frameHeight: 809, edgeMode: "infinite",
+      frameWidth: 1192, frameHeight: 809, edgeMode: "infinite", friction: 0.1235,
     };
   }
 
@@ -4573,14 +4794,14 @@
     "share-url.js's wire defaults: a field at its default is left out of a link, so what 'left out' means is fixed by every link already shared. decode() fills each one in explicitly so that nothing downstream can substitute a newer default of its own",
     function () {
       var decoded = ShareUrl.decode("#bldr/body:ci:0:0:0:30,frmw:900,frmh:600").scene;
-      var want = { mutualGravity: false, collisionsEnabled: true, simulationSteps: 1000, edgeMode: "sticky" };
+      var want = { mutualGravity: false, collisionsEnabled: true, simulationSteps: 1000, edgeMode: "sticky", friction: 0 };
       var wrong = Object.keys(want).filter(function (k) { return decoded[k] !== want[k]; });
       var body = decoded.bodies[0];
       var restOk = body.vx === 0 && body.vy === 0 && body.w === 0 && body.isAnchored === false &&
         decoded.hinges.length === 0 && decoded.springs.length === 0 && decoded.xInput === null && decoded.yInput === null && decoded.output === null;
       return {
         pass: wrong.length === 0 && restOk,
-        detail: wrong.length ? "wrong defaults for: " + wrong.join(", ") : "all four settings, the three velocities, anchoring and the mappings come back explicit",
+        detail: wrong.length ? "wrong defaults for: " + wrong.join(", ") : "all five settings, the three velocities, anchoring and the mappings come back explicit",
       };
     }
   );
@@ -4966,13 +5187,13 @@
 
   addTest(
     "A spring conserves energy, and its torque is the torque of its force",
-    "springs are the engine's only source of angular acceleration: a force and a torque that disagreed (a sign, a lever arm taken from the wrong end) would not crash anything - it would quietly pump energy in, and only an energy audit says so. Semi-implicit Euler makes the total wobble by an amount proportional to the step, so the wobble has to SHRINK with the step; an inconsistent force leaves a drift that does not",
+    "springs are the engine's only source of angular acceleration: a force and a torque that disagreed (a sign, a lever arm taken from the wrong end) would not crash anything - it would quietly pump energy in, and only an energy audit says so. Semi-implicit Euler makes the total wobble by an amount proportional to the step, so the wobble has to SHRINK with the step; an inconsistent force leaves a drift that does not. Run without the floor drag, which would hide it",
     function () {
       function wobble(sub) {
         var dt = DT / sub, scene = buildSpringChain();
         var e0 = springSceneEnergy(scene, dt), scale = PhysicsEngine.springPotentialEnergy(scene, dt) + 1e7, worst = 0;
         for (var i = 0; i < 1500 * sub; i++) {
-          PhysicsEngine.step(scene, dt);
+          PhysicsEngine.step(scene, dt, { frictionFloor: 0 });
           worst = Math.max(worst, Math.abs(springSceneEnergy(scene, dt) - e0) / scale);
         }
         return { worst: worst, spun: Math.abs(scene.bodies[1].w) > 0 };
@@ -4987,7 +5208,7 @@
 
   addTest(
     "A two-body spring pushes both ends equally: momentum and angular momentum hold",
-    "the force on end B must be exactly the opposite of the force on end A, lever arms included, or a pair of bodies joined by a spring drifts off (or spins up) by itself. Run under Mutual Gravity, whose pull between two free bodies is equal and opposite too: under ordinary gravity the pair free-falls into the speed cap, which rescales the whole velocity vector and so does not conserve anything",
+    "the force on end B must be exactly the opposite of the force on end A, lever arms included, or a pair of bodies joined by a spring drifts off (or spins up) by itself. Run under Mutual Gravity, whose pull between two free bodies is equal and opposite too: under ordinary gravity the pair free-falls into the speed cap, which rescales the whole velocity vector and so does not conserve anything. Run without the floor drag, which would hide it",
     function () {
       var scene = buildSpringChain();
       scene.springs = [scene.springs[1]]; // just the body-to-body one: nothing acts from outside
@@ -5002,7 +5223,7 @@
       }
       var before = momenta(scene), scale = 0;
       scene.bodies.forEach(function (q) { scale += q.mass * Math.hypot(q.vx, q.vy); });
-      runJS(scene, 1500);
+      runJS(scene, 1500, { frictionFloor: 0 });
       var after = momenta(scene);
       var dp = Math.hypot(after.px - before.px, after.py - before.py) / scale;
       var dL = Math.abs(after.L - before.L) / Math.abs(before.L);
@@ -5145,7 +5366,7 @@
 
   addTest(
     "The spring's smooth core is the same law, with the same energy, in JS and on the GPU",
-    "the core is a second branch of the spring law, written three times (springForceFactor, and the float32 and multi-float spellings in generateStepOnceGLSL) plus once more as its own integral in springPotentialEnergy. A pass through zero length exercises every one: if the GLSL branch disagreed the trajectories would part on the first pass, and if the potential were not the force's integral the energy audit would show a step at the core's rim",
+    "the core is a second branch of the spring law, written three times (springForceFactor, and the float32 and multi-float spellings in generateStepOnceGLSL) plus once more as its own integral in springPotentialEnergy. A pass through zero length exercises every one: if the GLSL branch disagreed the trajectories would part on the first pass, and if the potential were not the force's integral the energy audit would show a step at the core's rim. That audit runs without the floor drag, which would hide it",
     function () {
       var js = PhysicsEngine.runTrajectory(buildPassThroughScene(0), 120, DT);
       var f32 = worstTrajectoryGap(js, PhysicsGPU.runSceneOnGPU(buildPassThroughScene(0), 60), 60, 2);
@@ -5157,7 +5378,7 @@
           springs: [{ bodyA: null, bodyB: 0, localAnchorA: { x: 200, y: 300 }, localAnchorB: { x: 0, y: 0 }, stiffness: 110000, restLength: 406 }] };
         function energy() { return PhysicsEngine.springPotentialEnergy(scene, dt) + 0.5 * ball.mass * (ball.vx * ball.vx + ball.vy * ball.vy); }
         var e0 = energy(), lo = e0, hi = e0, farSide = false;
-        for (var i = 0; i < 240 * sub; i++) { PhysicsEngine.step(scene, dt); var e = energy(); lo = Math.min(lo, e); hi = Math.max(hi, e); if (ball.x < 200 - 406 * PhysicsEngine.SPRING_CORE) farSide = true; }
+        for (var i = 0; i < 240 * sub; i++) { PhysicsEngine.step(scene, dt, { frictionFloor: 0 }); var e = energy(); lo = Math.min(lo, e); hi = Math.max(hi, e); if (ball.x < 200 - 406 * PhysicsEngine.SPRING_CORE) farSide = true; }
         return { range: (hi - lo) / e0, farSide: farSide };
       }
       var coarse = wobble(1), fine = wobble(16);

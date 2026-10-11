@@ -1039,7 +1039,7 @@
       "uniform int u_displayMode;",
       "out vec4 fragColor;",
       "",
-      PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(sceneToCompile)),
+      PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(sceneToCompile), PhysicsEngine.frictionRate(sceneToCompile)),
       "",
     ]);
 
@@ -1300,7 +1300,7 @@
       stateWorldCoordLines: stateWorldCoordLines,
       colorLibraryLines: colorLibraryLines,
       deltaTLines: deltaTLines,
-      libraryLines: [PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(sceneToCompile))],
+      libraryLines: [PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(sceneToCompile), PhysicsEngine.frictionRate(sceneToCompile))],
       constantLines: [
         isRunTally ? "" : "const float OUTPUT_RANGE_MAX = " + PhysicsGPU.fnum(rangeMax) + ";",
         goalLines.join("\n"),

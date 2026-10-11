@@ -31,7 +31,7 @@
   function speedCapFor(scene) {
     return scene.mutualGravity ? MUTUAL_GRAVITY_MAX_SPEED : MAX_SPEED;
   }
-  // Downward pull when Mutual Gravity is off. Fixed; no friction, perfectly elastic.
+  // Downward pull when Mutual Gravity is off. Fixed; contacts are perfectly elastic.
   var GRAVITY = 800;
   // Below this closing speed restitution is 0, so a resting body settles instead of jittering.
   var RESTITUTION_THRESHOLD = 30;
@@ -63,14 +63,32 @@
     return t * t * (3 - 2 * t);
   }
 
-  // advanceVelocity must be the identity at dt=0 (step() calls it per leg). Air drag (EXPERIMENTAL,
-  // 0 turns it off exactly): a = -AIR_DRAG*v, linear only, as a factor (1 - AIR_DRAG*dt) before the cap.
-  var AIR_DRAG = 0.005;
-
-  function advanceVelocity(vx, vy, dt, ax, ay, maxSpeed) {
-    vx += ax * dt;
-    vy += ay * dt;
-    var drag = 1 - AIR_DRAG * dt;
+  // Friction: scene.friction is the share of speed lost per second on top of the floor (0 = the floor, the
+  // default). As a rate k = -ln(1 - f), a leg of length dt is the closed-form solution of dv/dt = a - k v, so
+  // legs compose (below the speed cap) and dt=0 is the identity: v' = v e^-x + a dt phi(x), x = k dt,
+  // phi = (1 - e^-x)/x. The floor is the light drag every scene has always had, kept as the factor
+  // (1 - FRICTION_FLOOR*dt) after the leg so an older scene runs bit for bit as before. Spin is left alone.
+  var FRICTION_FLOOR = 0.005;
+  var FRICTION_MAX = 0.99;
+  function frictionOf(scene) {
+    var f = Number(scene.friction);
+    return f > 0 ? Math.min(FRICTION_MAX, f) : 0;
+  }
+  function frictionRate(scene) {
+    var f = frictionOf(scene);
+    return f > 0 ? -Math.log(1 - f) : 0;
+  }
+  // Must agree with the GLSL copies in physics-gpu.js and physics-gpu-df.js.
+  function advanceVelocity(vx, vy, dt, ax, ay, maxSpeed, friction, floor) {
+    if (friction > 0) {
+      var x = friction * dt, phi = x > 0 ? -Math.expm1(-x) / x : 1, decay = 1 - x * phi;
+      vx = vx * decay + ax * dt * phi;
+      vy = vy * decay + ay * dt * phi;
+    } else {
+      vx += ax * dt;
+      vy += ay * dt;
+    }
+    var drag = 1 - floor * dt;
     vx *= drag; vy *= drag;
     var speedSq = vx * vx + vy * vy;
     if (speedSq > maxSpeed * maxSpeed) {
@@ -1009,7 +1027,7 @@
     return { x: S.vx - S.w * (y - S.y), y: S.vy + S.w * (x - S.x) };
   }
 
-  function applyPortholeTransports(scene, portals, groupOf, startPose, u, acc, dt, maxSpeed) {
+  function applyPortholeTransports(scene, portals, groupOf, startPose, u, acc, dt, maxSpeed, friction, floor) {
     var bodies = scene.bodies;
     for (var i = 0; i < bodies.length; i++) {
       var g = groupOf[i];
@@ -1049,10 +1067,10 @@
           var fin = frameVelocityAt(Ps, starX, starY), fout = frameVelocityAt(Qs, exitStarX, exitStarY);
           // Two legs split at the crossing, turned there or not: their difference is what the step's
           // whole-step velocity got wrong.
-          var pre = advanceVelocity(u[m].x, u[m].y, tStar, a.x, a.y, maxSpeed);
+          var pre = advanceVelocity(u[m].x, u[m].y, tStar, a.x, a.y, maxSpeed, friction, floor);
           var preX = pre.x - fin.x, preY = pre.y - fin.y;
-          var turned = advanceVelocity(preX * cs - preY * sn + fout.x, preX * sn + preY * cs + fout.y, tau, outX, outY, maxSpeed);
-          var straight = advanceVelocity(pre.x, pre.y, tau, a.x, a.y, maxSpeed);
+          var turned = advanceVelocity(preX * cs - preY * sn + fout.x, preX * sn + preY * cs + fout.y, tau, outX, outY, maxSpeed, friction, floor);
+          var straight = advanceVelocity(pre.x, pre.y, tau, a.x, a.y, maxSpeed, friction, floor);
           var strX = straight.x - fin.x, strY = straight.y - fin.y;
           var dvx = turned.x - (strX * cs - strY * sn + fout.x), dvy = turned.y - (strX * sn + strY * cs + fout.y);
           var ox = b.x - leadStarX, oy = b.y - leadStarY, vx = b.vx - fin.x, vy = b.vy - fin.y;
@@ -1077,8 +1095,10 @@
     var bodies = scene.bodies;
     var i, j;
 
-    // Fixed for the whole step; both legs and the detection sweep must agree on it.
-    var maxSpeed = speedCapFor(scene);
+    // Fixed for the whole step; both legs and the detection sweep must agree on them. opts.frictionFloor
+    // lets a caller run without the floor (conservation checks); the shaders always have it.
+    var maxSpeed = speedCapFor(scene), friction = frictionRate(scene);
+    var floor = opts.frictionFloor === undefined ? FRICTION_FLOOR : opts.frictionFloor;
     var acc = computeAccelerations(scene);
     // Springs add angular acceleration (alpha) and the swing tally; all zeros without springs.
     var alpha = new Array(bodies.length).fill(0), swing = new Array(bodies.length).fill(0);
@@ -1089,7 +1109,7 @@
     for (i = 0; i < bodies.length; i++) {
       if (bodies[i].isAnchored) continue;
       u[i] = { x: bodies[i].vx, y: bodies[i].vy };
-      vFull[i] = advanceVelocity(u[i].x, u[i].y, dt, acc[i].x, acc[i].y, maxSpeed);
+      vFull[i] = advanceVelocity(u[i].x, u[i].y, dt, acc[i].x, acc[i].y, maxSpeed, friction, floor);
     }
 
     var probes = new Array(bodies.length);
@@ -1163,7 +1183,7 @@
       // Angular twin: turn at the whole step's spin, keep only the torque acted by tHit.
       b1.angle += springSpin(b1.w, alpha[i], swing[i], dt) * th;
       b1.w = springSpin(b1.w, alpha[i], swing[i], th);
-      var vPre = advanceVelocity(u[i].x, u[i].y, th, acc[i].x, acc[i].y, maxSpeed);
+      var vPre = advanceVelocity(u[i].x, u[i].y, th, acc[i].x, acc[i].y, maxSpeed, friction, floor);
       b1.vx = vPre.x; b1.vy = vPre.y;
     }
 
@@ -1180,7 +1200,7 @@
       var b2 = bodies[i];
       if (b2.isAnchored) continue;
       var tRest = dt - bodyTHit[i];
-      var vPost = advanceVelocity(b2.vx, b2.vy, tRest, acc[i].x, acc[i].y, maxSpeed);
+      var vPost = advanceVelocity(b2.vx, b2.vy, tRest, acc[i].x, acc[i].y, maxSpeed, friction, floor);
       b2.vx = vPost.x; b2.vy = vPost.y;
       b2.w = springSpin(b2.w, alpha[i], swing[i], tRest);
       b2.x += vPost.x * tRest; b2.y += vPost.y * tRest; b2.angle += b2.w * tRest;
@@ -1193,7 +1213,7 @@
       }
     }
 
-    if (portals) applyPortholeTransports(scene, portals, passGroup, startPose, u, acc, dt, maxSpeed);
+    if (portals) applyPortholeTransports(scene, portals, passGroup, startPose, u, acc, dt, maxSpeed, friction, floor);
 
     // Edge wrapping, last (matches the GLSL). Only roots decide; world-hinged by PIN; sprung by group.
     if (wrapsAtEdges(scene)) {
@@ -1265,6 +1285,7 @@
       mutualGravity: !!scene.mutualGravity,
       collisionsEnabled: collisionsEnabled(scene),
       edgeMode: edgeModeOf(scene),
+      friction: frictionOf(scene),
       simulationSteps: scene.simulationSteps,
       bodies: scene.bodies.map(function (b) {
         var copy = {};
@@ -1416,7 +1437,11 @@
     LINE_LINEAR_DENSITY: LINE_LINEAR_DENSITY,
     // Exported so physics-gpu.js's GLSL bakes the same numbers.
     GRAVITY: GRAVITY,
-    AIR_DRAG: AIR_DRAG,
+    FRICTION_FLOOR: FRICTION_FLOOR,
+    FRICTION_MAX: FRICTION_MAX,
+    frictionOf: frictionOf,
+    frictionRate: frictionRate,
+    advanceVelocity: advanceVelocity,
     ANCHORED_GRAVITY_DENSITY: ANCHORED_GRAVITY_DENSITY,
     MUTUAL_GRAVITY_CONSTANT: MUTUAL_GRAVITY_CONSTANT,
     gravitationalMass: gravitationalMass,

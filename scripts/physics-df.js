@@ -834,6 +834,7 @@
     isExtended: isExtended,
     isSupported: isSupported,
     usePrecision: usePrecision,
+    currentWords: function () { return currentWords; },
     PRECISIONS: ORDER,
     UNIFORM_DECL: UNIFORM_DECL,
     // Rebuilt at usePrecision()'s current precision; a measurement page can pin

@@ -27,7 +27,32 @@
 
   // ---- The reusable GLSL physics library: a direct port of physics-engine.js ----
 
-  var GLSL_LIBRARY = [
+  function factorial(n) { var r = 1; for (var i = 2; i <= n; i++) r *= i; return r; }
+  // phi(x) = (1 - e^-x)/x, six terms: x = FRICTION * dt stays under 0.08, so the rest is below float32.
+  function frictionPhiGLSL() {
+    var expr = fnum(-1 / factorial(6));
+    for (var n = 4; n >= 0; n--) expr = fnum((n % 2 ? -1 : 1) / factorial(n + 1)) + " + x * (" + expr + ")";
+    return "float frictionPhi(float x) {\n  return " + expr + ";\n}";
+  }
+  // PhysicsEngine.advanceVelocity; accel is the body's whole acceleration (per-body under Mutual Gravity).
+  // With friction the leg is the exact solution of dv/dt = a - FRICTION v; at 0 the text has no friction in
+  // it beyond the floor's line, which every scene has always had.
+  function advanceVelocityGLSL(friction) {
+    var floor = global.PhysicsEngine.FRICTION_FLOOR;
+    return [
+      friction > 0 ? frictionPhiGLSL() : "",
+      "vec2 advanceVelocity(vec2 v, float dt, vec2 accel) {",
+      friction > 0 ? "  float x = FRICTION * dt, phi = frictionPhi(x);\n  v = v * (1.0 - x * phi) + accel * (dt * phi);" : "  v += accel * dt;",
+      floor ? "  v *= 1.0 - " + fnum(floor) + " * dt;" : "",
+      "  float sq = dot(v, v);",
+      "  if (sq > MAX_SPEED * MAX_SPEED) v *= MAX_SPEED / sqrt(sq);",
+      "  return v;",
+      "}",
+    ].filter(Boolean).join("\n");
+  }
+
+  function glslLibrary(friction) {
+    return [
     "struct Body { float x, y, angle, vx, vy, w; };",
     "struct Contact { bool hit; vec2 normal; vec2 point; vec2 rA; vec2 rB; float penetration; float tHit; };",
     "struct ContactPair { Contact c0; Contact c1; };",
@@ -140,19 +165,8 @@
     "  return t;",
     "}",
     "",
-    "// Gravity + speed clamp over an arbitrary sub-step, not just the fixed",
-    "// step DT - stepOnce() calls this once per leg of a CCD-split step (see",
-    "// its own comment), so it has to be continuous in dt itself: dt=0.0 must",
-    "// reduce to a clamp of an already-clamped vector, i.e. the identity.",
-    // accel is the body's whole acceleration (per-body under Mutual Gravity).
-    "vec2 advanceVelocity(vec2 v, float dt, vec2 accel) {",
-    "  v += accel * dt;",
-    // PhysicsEngine.AIR_DRAG (experimental): no line at all when it is 0.
-    (global.PhysicsEngine.AIR_DRAG ? "  v *= 1.0 - " + fnum(global.PhysicsEngine.AIR_DRAG) + " * dt;" : ""),
-    "  float sq = dot(v, v);",
-    "  if (sq > MAX_SPEED * MAX_SPEED) v *= MAX_SPEED / sqrt(sq);",
-    "  return v;",
-    "}",
+    "// One leg of a step: gravity, friction and the speed clamp, continuous in dt (dt=0 is the identity).",
+    advanceVelocityGLSL(friction),
     "",
     "Contact collideCircleCircle(Body a, float ra, Body b, float rb) {",
     "  vec2 d = vec2(b.x - a.x, b.y - a.y);",
@@ -567,7 +581,9 @@
     "  bodyB.y += impulse.y * invMassB;",
     "  bodyB.angle += invInertiaB * (rB.x * impulse.y - rB.y * impulse.x);",
     "}",
-  ].join("\n");
+    ].join("\n");
+  }
+  var GLSL_LIBRARY = glslLibrary(0);
 
   // The df port of GLSL_LIBRARY lives in physics-gpu-df.js and carries the whole step.
 
@@ -577,23 +593,27 @@
     "void main() { gl_Position = vec4(a_position, 0.0, 1.0); }",
   ].join("\n");
 
-  // Per-scene cap (PhysicsEngine.speedCapFor); must precede the library, which references it.
-  function speedCapDecls(precision, maxSpeed) {
+  // Per-scene constants the library reads (PhysicsEngine.speedCapFor, frictionRate); must precede it.
+  function sceneDecls(precision, maxSpeed, friction) {
     var cap = maxSpeed === undefined ? global.PhysicsEngine.MAX_SPEED : maxSpeed;
     var lines = ["const float MAX_SPEED = " + fnum(cap) + ";"];
-    if (global.PhysicsDF.isExtended(precision)) lines.push("const MF DF_MAX_SPEED = " + global.PhysicsDF.num(cap) + ";");
+    if (friction > 0) lines.push("const float FRICTION = " + fnum(friction) + ";");
+    if (global.PhysicsDF.isExtended(precision)) {
+      lines.push("const MF DF_MAX_SPEED = " + global.PhysicsDF.num(cap) + ";");
+      if (friction > 0) lines.push(global.PhysicsGPUDF.frictionDecls(friction));
+    }
     return lines.join("\n") + "\n";
   }
 
   // The full preamble a shader needs before generated code, in the right order.
   // Whole libraries: pruneUnusedGLSL drops what the finished program never names.
-  function libraryGLSL(precision, maxSpeed) {
-    if (!global.PhysicsDF.isExtended(precision)) return speedCapDecls(precision, maxSpeed) + GLSL_LIBRARY;
+  function libraryGLSL(precision, maxSpeed, friction) {
+    if (!global.PhysicsDF.isExtended(precision)) return sceneDecls(precision, maxSpeed, friction) + glslLibrary(friction);
     // Everything multi-float from here on is at this precision (PhysicsDF.usePrecision).
     global.PhysicsDF.usePrecision(precision);
     // Order matters: df arithmetic, then the f32 library (a df grid still reads its DT), then df physics.
     return [global.PhysicsDF.UNIFORM_DECL, "", global.PhysicsDF.GLSL_LIBRARY, "",
-      speedCapDecls(precision, maxSpeed), GLSL_LIBRARY, "", global.PhysicsGPUDF.GLSL_LIBRARY].join("\n");
+      sceneDecls(precision, maxSpeed, friction), glslLibrary(friction), "", global.PhysicsGPUDF.libraryGLSL(friction)].join("\n");
   }
 
   // ---- Scene -> GLSL codegen ----
@@ -1796,7 +1816,7 @@
     lines.push("precision highp float;");
     lines.push(generateTrajectoryHeaderGLSL(chunk));
     lines.push("");
-    lines.push(libraryGLSL(precision, global.PhysicsEngine.speedCapFor(scene)));
+    lines.push(libraryGLSL(precision, global.PhysicsEngine.speedCapFor(scene), global.PhysicsEngine.frictionRate(scene)));
     lines.push("");
     // Nothing here depends on maxSteps, so different run lengths reuse the program.
     var springs = springLinksFor(scene, df ? dfnum : fnum);

@@ -267,6 +267,7 @@
     if (scene.edgeMode && scene.edgeMode !== DEFAULT_EDGE) fields.push("edge:" + EDGE_CODES[scene.edgeMode]);
     if (scene.mutualGravity) fields.push("mgrv:t");
     if (scene.collisionsEnabled === false) fields.push("coll:f");
+    if (scene.friction > 0) fields.push("fric:" + sceneNum(scene.friction));
     if (scene.simulationSteps && scene.simulationSteps !== DEFAULT_STEPS) fields.push("step:" + scene.simulationSteps);
     fields.push("frmw:" + sceneNum(scene.frameWidth));
     fields.push("frmh:" + sceneNum(scene.frameHeight));
@@ -292,6 +293,7 @@
     return {
       mutualGravity: fields.mgrv === undefined ? false : parseBool(fields.mgrv, "mgrv"),
       collisionsEnabled: fields.coll === undefined ? true : parseBool(fields.coll, "coll"),
+      friction: fields.fric === undefined ? 0 : parseNum(fields.fric, "fric"),
       simulationSteps: fields.step === undefined ? DEFAULT_STEPS : parseNum(fields.step, "step"),
       bodies: bodies,
       hinges: splitList(fields.hnge || "").map(decodeHinge),

@@ -51,6 +51,8 @@
   var collisionsCheckbox = document.getElementById("collisions-checkbox");
   var simulationStepsSlider = document.getElementById("simulation-steps-slider");
   var simulationStepsReadout = document.getElementById("simulation-steps-readout");
+  var frictionSlider = document.getElementById("friction-slider");
+  var frictionReadout = document.getElementById("friction-readout");
   var btnExportScene = document.getElementById("btn-export-scene");
   var btnImportScene = document.getElementById("btn-import-scene");
   var modalBackdrop = document.getElementById("modal-backdrop");
@@ -140,6 +142,8 @@
     frameHeight: 0,
     // Stop-at-edge vs wrap: serialized with the scene, since it changes how Output reads.
     edgeMode: PhysicsEngine.DEFAULT_EDGE_MODE,
+    // Share of speed lost per second (PhysicsEngine.frictionOf clamps it); the slider holds it in percent.
+    friction: 0,
   };
   var initialScene = null;
   var selectedIndex = -1;
@@ -1966,6 +1970,41 @@
     applyEdgeMode(edgeModeSelect.value);
   });
 
+  // ---- Friction ----
+  // The slider is quadratic (notch n is (n/100)^2, so 10 reads 1% and 50 reads 25%) with the top notch
+  // at the engine's limit; the typed box holds an exact percent to a hundredth. Both show the scene value.
+  function frictionPercent(f) {
+    return Math.round(f * 10000) / 100;
+  }
+  function frictionNotch(f) {
+    if (f >= PhysicsEngine.FRICTION_MAX) return 100;
+    return Math.min(100, Math.max(0, Math.round(100 * Math.sqrt(f))));
+  }
+  function frictionFromNotch(n) {
+    return Math.min(PhysicsEngine.FRICTION_MAX, Math.round(n * n) / 10000);
+  }
+  function syncFrictionUI() {
+    var f = PhysicsEngine.frictionOf(scene), pct = frictionPercent(f);
+    if (frictionReadout.value !== String(pct)) frictionReadout.value = String(pct);
+    if (frictionFromNotch(Number(frictionSlider.value)) !== f) frictionSlider.value = String(frictionNotch(f));
+    frictionSlider.setAttribute("aria-valuetext", pct + "% per second");
+  }
+  frictionSlider.addEventListener("input", function () {
+    scene.friction = frictionFromNotch(Number(frictionSlider.value));
+    syncFrictionUI();
+    render(); // sweeps it into the autosave and the address bar
+  });
+  // Applied on commit (Enter or blur), not per keystroke; unusable input restores the current value.
+  frictionReadout.addEventListener("change", function () {
+    var typed = Number(frictionReadout.value);
+    if (frictionReadout.value !== "" && isFinite(typed)) scene.friction = PhysicsEngine.frictionOf({ friction: Math.round(typed * 100) / 10000 });
+    syncFrictionUI();
+    render();
+  });
+  frictionReadout.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") frictionReadout.blur();
+  });
+
   // ---- X / Y input mapping ----
 
   function bodyOptionLabel(body, index) {
@@ -2295,6 +2334,7 @@
       frameWidth: roundNum(scene.frameWidth),
       frameHeight: roundNum(scene.frameHeight),
       edgeMode: PhysicsEngine.edgeModeOf(scene),
+      friction: roundNum(PhysicsEngine.frictionOf(scene)),
     };
   }
 
@@ -2427,6 +2467,8 @@
       yInput: parseMapping(parsed.yInput, "yInput"),
       output: parseMapping(parsed.output, "output", OUTPUT_PROPERTIES, true),
       edgeMode: PhysicsEngine.edgeModeOf(parsed),
+      // Rounded like the export and the link, so a hand-edited value runs the same after a reload.
+      friction: roundNum(PhysicsEngine.frictionOf(parsed)),
       mutualGravity: parsed.mutualGravity === true,
       collisionsEnabled: PhysicsEngine.collisionsEnabled(parsed),
       // Kept exact (see clampSimulationSteps); the slider rests on the nearest hundred.
@@ -2442,11 +2484,13 @@
     scene.yInput = data.yInput;
     scene.output = data.output;
     scene.edgeMode = data.edgeMode;
+    scene.friction = PhysicsEngine.frictionOf(data);
     scene.mutualGravity = !!data.mutualGravity;
     scene.collisionsEnabled = data.collisionsEnabled !== false;
     scene.simulationSteps = data.simulationSteps;
 
     edgeModeSelect.value = scene.edgeMode;
+    syncFrictionUI();
     mutualGravityCheckbox.checked = scene.mutualGravity;
     collisionsCheckbox.checked = scene.collisionsEnabled;
     simulationStepsSlider.value = String(simulationStepsNotch(scene.simulationSteps));
@@ -2619,7 +2663,7 @@
     btnExportScene, btnImportScene,
     btnSampleDoublePendulum, btnSamplePinball, btnSampleBinaryStar, btnClearAll,
     mutualGravityCheckbox, collisionsCheckbox,
-    edgeModeSelect, simulationStepsSlider, simulationStepsReadout,
+    edgeModeSelect, frictionSlider, frictionReadout, simulationStepsSlider, simulationStepsReadout,
     xInputBodySelect, yInputBodySelect, outputBodySelect,
     xInputPropertySelect, yInputPropertySelect, outputPropertySelect,
   ]);
@@ -3203,7 +3247,7 @@
     resetToInitialScene();
     applySceneData({
       bodies: [], hinges: [], springs: [], xInput: null, yInput: null, output: null,
-      edgeMode: PhysicsEngine.DEFAULT_EDGE_MODE,
+      edgeMode: PhysicsEngine.DEFAULT_EDGE_MODE, friction: 0,
       mutualGravity: false, collisionsEnabled: true, simulationSteps: DEFAULT_SIMULATION_STEPS,
     });
     seedDefaultScene();
@@ -3221,6 +3265,7 @@
   // Redundant after loadPersistedScene, but keeps a seeded scene's slider in sync without trusting the HTML default.
   simulationStepsSlider.value = String(simulationStepsNotch(scene.simulationSteps));
   updateSimulationStepsReadout(scene.simulationSteps);
+  syncFrictionUI();
   playbackProgressSlider.max = String(scene.simulationSteps);
   updatePlayPauseButtonUI();
   updateSpeedUI();
