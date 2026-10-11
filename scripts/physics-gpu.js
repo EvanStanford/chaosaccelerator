@@ -659,6 +659,11 @@
     return pairs;
   }
 
+  // Bit of pair (i, j), i < j, in a trajectory row's contact bits: (0,1), (0,2), ..., (1,2), ...
+  function pairContactBit(i, j, n) {
+    return i * n - i * (i + 1) / 2 + (j - i - 1);
+  }
+
   // ---- Springs, as the generators see them ----
   // One { aIsWorld, a, b, localA, localB, stiffness, restLength } per spring, anchors
   // already GLSL text in the pass's precision (they can be per-pixel). An anchor
@@ -767,8 +772,9 @@
   // precision: "f32" or "df"/"tf"/"qf" (see PhysicsDF). mutualGravity: n-body pull.
   // collisions: only Mutual Gravity's accel loop needs it (touching-bodies rule).
   // springs: see the Springs section above.
-  // flags { contactBody, touchBody }: g_contactN for that one body (the map's Bounce
-  // Count) and g_touchK per other body for that one (the goal order); neither by default.
+  // flags { contactBody, touchBody, pairContacts }: g_contactN for that one body (the map's Bounce
+  // Count), g_touchK per other body for that one (the goal order) and g_pairContacts, every
+  // pair's contact as a bit (the trajectory log); none by default.
   function generateStepOnceGLSL(n, consts, pairs, hingeAnchors, frame, precision, mutualGravity, collisions, springs, flags) {
     var df = global.PhysicsDF.isExtended(precision);
     if (df) global.PhysicsDF.usePrecision(precision);
@@ -846,7 +852,9 @@
     var lines = [];
     var contactBody = flags && typeof flags.contactBody === "number" ? flags.contactBody : -1;
     var touchBody = flags && typeof flags.touchBody === "number" ? flags.touchBody : -1;
+    var pairContacts = !!(flags && flags.pairContacts);
     if (contactBody >= 0) lines.push("bool g_contact" + contactBody + " = false;");
+    if (pairContacts) lines.push("float g_pairContacts = 0.0;");
     for (var td = 0; td < n; td++) if (touchBody >= 0 && td !== touchBody) lines.push("bool g_touch" + td + " = false;");
     // The step's edge wrap per body, 0.0 or a frame span: the sticky stop and the trajectory log read these.
     for (var wd = 0; wd < n; wd++) lines.push("float g_wrapDx" + wd + " = 0.0, g_wrapDy" + wd + " = 0.0;");
@@ -1287,6 +1295,14 @@
       });
       lines.push("  g_touch" + tk + " = " + (touchHits.length ? touchHits.join(" || ") : "false") + ";");
     }
+    if (pairContacts && pairs.length) {
+      var pairBits = pairs.map(function (pair) {
+        var vn = "pair_" + pair[0] + "_" + pair[1];
+        var hit = pairSlots(pair).map(function (slot) { return vn + "." + slot + ".hit"; }).join(" || ");
+        return "((" + hit + ") ? " + fnum(Math.pow(2, pairContactBit(pair[0], pair[1], n))) + " : 0.0)";
+      });
+      lines.push("  g_pairContacts = " + pairBits.join(" + ") + ";");
+    }
     lines.push("");
 
     // Per-body earliest contact tHit, default DT; folded only when a slot hit (a miss carries 0.0).
@@ -1716,7 +1732,8 @@
 
   // ---- The trajectory program: every body's state at every step ----
   // Texel (b, r) of the output is body b after r + 1 steps, and the sentinel column past the
-  // bodies carries that step's wrap bits (x at bit 2b, y at bit 2b + 1). Running every texel
+  // bodies carries that step's wrap bits (x at bit 2b, y at bit 2b + 1) and, in alpha, its
+  // contact bits (pairContactBit; the step code needs the pairContacts flag). Running every texel
   // from step 0 is quadratic, and the last row's invocation runs the whole run,
   // which the OS's GPU watchdog aborts (zeros, no error). So it runs in CHUNKS,
   // carrying state in an RGBA32F strip (playbackStateVariables layout, texel
@@ -1789,12 +1806,12 @@
       lines.push((o === 0 ? "  if" : "  else if") + " (bodyIdx == " + o + ") { outVal = vec3(" +
         readField(o, "x") + ", " + readField(o, "y") + ", " + readField(o, "angle") + "); outHalf = " + half + "; }");
     }
-    // The column past the last body is each row's sentinel, with the step's wrap bits: see the runner.
+    // The column past the last body is each row's sentinel, with the step's wrap and contact bits: see the runner.
     var wrapBits = [];
     for (var wb = 0; wb < n; wb++) {
       wrapBits.push("(g_wrapDx" + wb + " != 0.0 ? " + fnum(Math.pow(2, 2 * wb)) + " : 0.0) + (g_wrapDy" + wb + " != 0.0 ? " + fnum(Math.pow(2, 2 * wb + 1)) + " : 0.0)");
     }
-    lines.push("  if (bodyIdx == " + n + ") { outVal = vec3(gl_FragCoord.y + 0.5, TRAJECTORY_SENTINEL, " + wrapBits.join(" + ") + "); }");
+    lines.push("  if (bodyIdx == " + n + ") { outVal = vec3(gl_FragCoord.y + 0.5, TRAJECTORY_SENTINEL, " + wrapBits.join(" + ") + "); outHalf = g_pairContacts; }");
     lines.push("  pbOut0 = vec4(outVal, outHalf);");
     lines.push("}");
     return lines.join("\n");
@@ -1837,7 +1854,7 @@
     lines.push("");
     // Nothing here depends on maxSteps, so different run lengths reuse the program.
     var springs = springLinksFor(scene, df ? dfnum : fnum);
-    lines.push(generateStepOnceGLSL(n, consts, pairs, hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), springs));
+    lines.push(generateStepOnceGLSL(n, consts, pairs, hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), springs, { pairContacts: true }));
     lines.push("");
     var locals = generateBodyLocalsGLSL(consts, precision) + "\n" + generateHingeAnchorLocalsGLSL(hingeAnchors, precision);
     lines.push(generateTrajectoryMainGLSL(n, locals, hingeAnchors, precision, chunk, springs));
@@ -2265,13 +2282,21 @@
     var trajectory = new Array(maxSteps);
     for (var step = 0; step < maxSteps && !failure; step++) {
       var row = new Array(numBodies);
-      var mark = (step * logWidth + numBodies) * 4, wrapBits = pixels[mark + 2] | 0;
+      var mark = (step * logWidth + numBodies) * 4, wrapBits = pixels[mark + 2] | 0, pairBits = pixels[mark + 3] | 0;
       for (var b = 0; b < numBodies; b++) {
         var idx = (step * logWidth + b) * 4;
         row[b] = {
           x: pixels[idx], y: pixels[idx + 1], angle: pixels[idx + 2], half: pixels[idx + 3],
-          wrapX: !!(wrapBits & (1 << (2 * b))), wrapY: !!(wrapBits & (2 << (2 * b))),
+          wrapX: !!(wrapBits & (1 << (2 * b))), wrapY: !!(wrapBits & (2 << (2 * b))), contacts: 0,
         };
+      }
+      // contacts: bit j set when the body touched body j in this step.
+      for (var ci = 0; pairBits && ci < numBodies; ci++) {
+        for (var cj = ci + 1; cj < numBodies; cj++) {
+          if (!(pairBits & (1 << pairContactBit(ci, cj, numBodies)))) continue;
+          row[ci].contacts |= 1 << cj;
+          row[cj].contacts |= 1 << ci;
+        }
       }
       trajectory[step] = row;
       if (pixels[mark] !== step + 1 || pixels[mark + 1] !== TRAJECTORY_SENTINEL) failure = "step " + (step + 1) + " was never written";

@@ -2789,7 +2789,7 @@
       effectiveMaxStep: effectiveMaxStep,
       wrapOverride: wrapOverride,
       lifespanValue: isLifespan ? lifespanValue : null,
-      bounceEvents: bounceEventsAt(worldPoint, steps),
+      bounceEvents: bounceEventsAt(worldPoint, trajectory),
     };
   }
 
@@ -5434,22 +5434,11 @@
     renderPlaybackFrame();
   });
 
-  // Bounce Count per step from the JS engine on the same offset scene (a GPU trajectory logs positions
-  // only); the engines agree except on a grazing contact.
-  function bounceCountsAt(worldPoint, steps) {
+  // Bounce sound events, read off the trajectory that is drawn. Failure never costs the entry: an empty list just means no sound.
+  function bounceEventsAt(worldPoint, trajectory) {
     try {
       var offsetScene = PhysicsGridCodegen.computeOffsetSceneNumeric(scene, worldPoint.x, worldPoint.y);
-      return PhysicsEngine.runBounceCounts(offsetScene, scene.output.body, steps, PhysicsGPU.FIXED_DT);
-    } catch (err) {
-      return null; // same "a preview must never break the page" rule as showHoverInstant's own catch
-    }
-  }
-
-  // Bounce sound events, also a JS re-simulation. Failure never costs the entry: an empty list just means no sound.
-  function bounceEventsAt(worldPoint, steps) {
-    try {
-      var offsetScene = PhysicsGridCodegen.computeOffsetSceneNumeric(scene, worldPoint.x, worldPoint.y);
-      return PhysicsEngine.runBounceEvents(offsetScene, steps, PhysicsGPU.FIXED_DT);
+      return PhysicsEngine.bounceEventsFromTrajectory(offsetScene, trajectory);
     } catch (err) {
       return [];
     }
@@ -5509,9 +5498,9 @@
       effectiveMaxStep: effectiveMaxStep,
       wrapOverride: wrapOverride,
       lifespanValue: isLifespan ? lifespanValue : null,
-      bounceCounts: isBouncesOutput ? bounceCountsAt(worldPoint, steps) : null,
+      bounceCounts: isBouncesOutput ? PhysicsEngine.bounceCountsFromTrajectory(trajectory, scene.output.body) : null,
       extraWrapOverrides: extraWrapOverrides,
-      bounceEvents: bounceEventsAt(worldPoint, steps),
+      bounceEvents: bounceEventsAt(worldPoint, trajectory),
     };
   }
 

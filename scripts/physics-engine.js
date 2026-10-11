@@ -1166,7 +1166,7 @@
     // Opt-in per-body edge wrap this step: 1 along x, 2 along y (the trajectory's wrapX/wrapY).
     var wrapFlags = opts.wrapFlags;
     if (wrapFlags) for (i = 0; i < bodies.length; i++) wrapFlags[i] = 0;
-    // Opt-in raw pair list for runBounceEvents' per-pair detection. Refilled in place.
+    // Opt-in raw pair list for runTrajectory's per-pair contacts. Refilled in place.
     var contactsOut = opts.contactsOut;
     if (contactsOut) {
       contactsOut.length = 0;
@@ -1309,33 +1309,35 @@
     };
   }
 
-  // runTrajectory: rows[i] is every body's {x, y, angle, wrapX, wrapY} after i+1 steps, like
-  // PhysicsGPU.runSceneOnGPU's: the wrap flags say the body crossed that frame edge in that step.
-  // runBounceCounts: counts[i] is the body's bounces by the end of step i+1; a bounce is the
-  // false->true edge of contactFlags, not every step spent touching. Both use a private clone.
+  // runTrajectory: rows[i] is every body's {x, y, angle, wrapX, wrapY, contacts} after i+1 steps, like
+  // PhysicsGPU.runSceneOnGPU's: the wrap flags say the body crossed that frame edge in that step, and
+  // contacts has bit j set when it touched body j in that step. Uses a private clone.
   function runTrajectory(scene, steps, dt) {
     var sim = cloneScene(scene);
     // A scene straight from JSON has no invMass/invInertia; stepping without them yields NaN.
     sim.bodies.forEach(computeMass);
-    var rows = new Array(steps), flags = new Array(sim.bodies.length);
+    var rows = new Array(steps), flags = new Array(sim.bodies.length), contactsBuf = [];
     for (var i = 0; i < steps; i++) {
-      step(sim, dt, { wrapFlags: flags });
-      rows[i] = sim.bodies.map(function (body, b) {
-        return { x: body.x, y: body.y, angle: body.angle, wrapX: !!(flags[b] & 1), wrapY: !!(flags[b] & 2) };
+      step(sim, dt, { wrapFlags: flags, contactsOut: contactsBuf });
+      var row = sim.bodies.map(function (body, b) {
+        return { x: body.x, y: body.y, angle: body.angle, wrapX: !!(flags[b] & 1), wrapY: !!(flags[b] & 2), contacts: 0 };
       });
+      for (var k = 0; k < contactsBuf.length; k++) {
+        row[contactsBuf[k].a].contacts |= 1 << contactsBuf[k].b;
+        row[contactsBuf[k].b].contacts |= 1 << contactsBuf[k].a;
+      }
+      rows[i] = row;
     }
     return rows;
   }
 
-  function runBounceCounts(scene, bodyIndex, steps, dt) {
-    var sim = cloneScene(scene);
-    sim.bodies.forEach(computeMass);
-    var flags = new Array(sim.bodies.length);
-    var counts = new Array(steps);
+  // counts[i] is the body's bounces by the end of step i+1 of a run's rows (runTrajectory's or the
+  // GPU's); a bounce is the false->true edge of touching anything, not every step spent touching.
+  function bounceCountsFromTrajectory(rows, bodyIndex) {
+    var counts = new Array(rows.length);
     var count = 0, wasTouching = false;
-    for (var i = 0; i < steps; i++) {
-      step(sim, dt, { contactFlags: flags });
-      var touching = !!flags[bodyIndex];
+    for (var i = 0; i < rows.length; i++) {
+      var touching = rows[i][bodyIndex].contacts !== 0;
       if (touching && !wasTouching) count++;
       wasTouching = touching;
       counts[i] = count;
@@ -1343,15 +1345,20 @@
     return counts;
   }
 
+  function runBounceCounts(scene, bodyIndex, steps, dt) {
+    return bounceCountsFromTrajectory(runTrajectory(scene, steps, dt), bodyIndex);
+  }
+
   // Pairs overlapping geometrically (halfExtent sum), solver running or not; keys "i,j", i < j.
-  function overlappingPairs(sim) {
-    var bodies = sim.bodies, n = bodies.length, pairs = [];
+  // Shapes from scene.bodies, positions from `at` (scene.bodies or a trajectory row).
+  function overlappingPairs(scene, at) {
+    var bodies = scene.bodies, n = bodies.length, pairs = [];
     for (var i = 0; i < n; i++) {
       for (var j = i + 1; j < n; j++) {
         var a = bodies[i], b = bodies[j];
         if (a.isAnchored && b.isAnchored) continue;
-        if (hingeConnects(sim.hinges, i, j)) continue;
-        var dx = b.x - a.x, dy = b.y - a.y;
+        if (hingeConnects(scene.hinges, i, j)) continue;
+        var dx = at[j].x - at[i].x, dy = at[j].y - at[i].y;
         var contact = halfExtent(a) + halfExtent(b);
         if (dx * dx + dy * dy <= contact * contact) pairs.push(i + "," + j);
       }
@@ -1360,11 +1367,11 @@
   }
 
   // Hinged pairs of two free lines (a double pendulum); the alignment event below is theirs.
-  function hingedLinePairs(sim) {
+  function hingedLinePairs(scene) {
     var pairs = [];
-    for (var h = 0; h < sim.hinges.length; h++) {
-      var hinge = sim.hinges[h];
-      var a = sim.bodies[hinge.bodyA], b = sim.bodies[hinge.bodyB];
+    for (var h = 0; h < scene.hinges.length; h++) {
+      var hinge = scene.hinges[h];
+      var a = scene.bodies[hinge.bodyA], b = scene.bodies[hinge.bodyB];
       if (!a || !b) continue; // hinge.bodyA can be null (pinned to a world point, not a body)
       if (a.type !== "line" || b.type !== "line") continue;
       if (a.isAnchored || b.isAnchored) continue;
@@ -1374,10 +1381,10 @@
   }
 
   // `sign`: which side of ray 1 (hinge -> center A) ray 2 falls on; `dot` > 0: centers on one side.
-  // A sign flip between steps is the event.
-  function lineHingeCrossState(sim, pair) {
-    var hingePoint = getHingeWorldPoint(pair.hinge, sim.bodies);
-    var a = sim.bodies[pair.i], b = sim.bodies[pair.j];
+  // A sign flip between steps is the event. `at`: positions and angles, as in overlappingPairs.
+  function lineHingeCrossState(at, pair) {
+    var hingePoint = getHingeWorldPoint(pair.hinge, at);
+    var a = at[pair.i], b = at[pair.j];
     var v1x = a.x - hingePoint.x, v1y = a.y - hingePoint.y;
     var v2x = b.x - hingePoint.x, v2y = b.y - hingePoint.y;
     var cross = v1x * v2y - v1y * v2x;
@@ -1385,41 +1392,46 @@
     return { sign: cross > 0 ? 1 : (cross < 0 ? -1 : 0), dot: dot };
   }
 
-  // Steps at which some pair STARTS touching: the bounce sound's event source. Per-PAIR state
-  // ("a,b", a < b). Mutual Gravity usually runs with collisions off, so there overlap is geometric
-  // (overlappingPairs); otherwise the contact list. Hinged-line alignment also fires. One event a step.
-  function runBounceEvents(scene, steps, dt) {
+  function hasBounceSounds(scene) {
+    return !!scene.mutualGravity || collisionsEnabled(scene) || hingedLinePairs(scene).length > 0;
+  }
+
+  // Steps at which some pair STARTS touching: the bounce sound's event source, read off a run's rows
+  // (runTrajectory's or the GPU's) that start from `scene`. Per-PAIR state ("a,b", a < b). Mutual
+  // Gravity usually runs with collisions off, so there overlap is geometric (overlappingPairs);
+  // otherwise the rows' contacts. Hinged-line alignment also fires. One event a step.
+  function bounceEventsFromTrajectory(scene, rows) {
+    if (!hasBounceSounds(scene)) return [];
     var geometric = !!scene.mutualGravity;
-    var sim = cloneScene(scene);
-    sim.bodies.forEach(computeMass);
-    var linePairs = hingedLinePairs(sim);
-    if (!geometric && !collisionsEnabled(scene) && linePairs.length === 0) return [];
-    var contactsBuf = [];
+    var linePairs = hingedLinePairs(scene);
     var wasTouchingPairs = {};
     // Seed with pairs already overlapping, so pre-placed contact isn't a fresh bounce on step 0.
-    var initialPairs = overlappingPairs(sim);
+    var initialPairs = overlappingPairs(scene, scene.bodies);
     for (var q = 0; q < initialPairs.length; q++) wasTouchingPairs[initialPairs[q]] = true;
-    var prevCrossSign = linePairs.map(function (lp) { return lineHingeCrossState(sim, lp).sign; });
+    var prevCrossSign = linePairs.map(function (lp) { return lineHingeCrossState(scene.bodies, lp).sign; });
     var events = [];
-    for (var i = 0; i < steps; i++) {
-      step(sim, dt, { contactsOut: contactsBuf });
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
       var nowTouchingPairs = {};
       var newEvent = false;
       if (geometric) {
-        var pairs = overlappingPairs(sim);
+        var pairs = overlappingPairs(scene, row);
         for (var p = 0; p < pairs.length; p++) {
           nowTouchingPairs[pairs[p]] = true;
           if (!wasTouchingPairs[pairs[p]]) newEvent = true;
         }
       } else {
-        for (var k = 0; k < contactsBuf.length; k++) {
-          var key = contactsBuf[k].a + "," + contactsBuf[k].b;
-          nowTouchingPairs[key] = true;
-          if (!wasTouchingPairs[key]) newEvent = true;
+        for (var a = 0; a < row.length; a++) {
+          for (var b = a + 1; b < row.length; b++) {
+            if (!(row[a].contacts & (1 << b))) continue;
+            var key = a + "," + b;
+            nowTouchingPairs[key] = true;
+            if (!wasTouchingPairs[key]) newEvent = true;
+          }
         }
       }
       for (var lp2 = 0; lp2 < linePairs.length; lp2++) {
-        var state = lineHingeCrossState(sim, linePairs[lp2]);
+        var state = lineHingeCrossState(row, linePairs[lp2]);
         // dot > 0: only the same-orientation alignment; the folded-apart flip isn't the sound's.
         if (state.sign !== 0 && prevCrossSign[lp2] !== 0 && state.sign !== prevCrossSign[lp2] && state.dot > 0) {
           newEvent = true;
@@ -1430,6 +1442,10 @@
       wasTouchingPairs = nowTouchingPairs;
     }
     return events;
+  }
+
+  function runBounceEvents(scene, steps, dt) {
+    return hasBounceSounds(scene) ? bounceEventsFromTrajectory(scene, runTrajectory(scene, steps, dt)) : [];
   }
 
   global.PhysicsEngine = {
@@ -1449,6 +1465,8 @@
     computeAccelerations: computeAccelerations,
     runBounceCounts: runBounceCounts,
     runBounceEvents: runBounceEvents,
+    bounceCountsFromTrajectory: bounceCountsFromTrajectory,
+    bounceEventsFromTrajectory: bounceEventsFromTrajectory,
     runTrajectory: runTrajectory,
     createCircle: createCircle,
     createLine: createLine,

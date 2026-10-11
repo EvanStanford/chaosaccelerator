@@ -2589,6 +2589,53 @@
     }
   );
 
+  addTest(
+    "Bounce sounds and Bounce Count read off the GPU run match the JS engine's",
+    "Inspect took them from a second, float64 run: past float64's resolution (tf/qf zoom) it played the bounces over a second early",
+    function () {
+      // Collisions on: the log's contact bits. Mutual Gravity: overlap read off the logged positions.
+      function bouncing() {
+        var ball = PhysicsEngine.createCircle(380, 380, 20, false);
+        ball.vx = 70;
+        return {
+          bodies: [ball, PhysicsEngine.createLine(600, 600, 900, 0.06, true), PhysicsEngine.createLine(720, 420, 140, -0.5, false)],
+          hinges: [], frameWidth: 1200, frameHeight: 800, edgeMode: "wrap",
+        };
+      }
+      // Through the star and back; float32 and float64 drift a step apart after about 90 steps.
+      function falling() {
+        var probe = PhysicsEngine.createCircle(600, 250, 15, false);
+        return {
+          bodies: [probe, PhysicsEngine.createCircle(600, 400, 40, true)],
+          hinges: [], frameWidth: 1200, frameHeight: 800, edgeMode: "infinite", mutualGravity: true, collisionsEnabled: false,
+        };
+      }
+      var pass = true, parts = [];
+      function compare(label, start, rows) {
+        var steps = rows.length;
+        var events = PhysicsEngine.bounceEventsFromTrajectory(start, rows), jsEvents = PhysicsEngine.runBounceEvents(start, steps, DT);
+        var counts = start.bodies.map(function (_, b) { return PhysicsEngine.bounceCountsFromTrajectory(rows, b)[steps - 1]; });
+        var jsCounts = start.bodies.map(function (_, b) { return PhysicsEngine.runBounceCounts(start, b, steps, DT)[steps - 1]; });
+        var same = events.join() === jsEvents.join() && counts.join() === jsCounts.join();
+        if (!same || events.length < 5) pass = false;
+        parts.push(label + " [" + events.join(",") + "] counts " + counts.join("/") + (same ? " = JS" : " vs JS [" + jsEvents.join(",") + "] counts " + jsCounts.join("/")));
+      }
+      [["bouncing", bouncing(), 300], ["falling", falling(), 90]].forEach(function (run) {
+        ["f32", "df"].forEach(function (precision) {
+          compare(run[0] + " " + precision, run[1], PhysicsGPU.runSceneOnGPU(run[1], run[2], precision));
+        });
+      });
+      // The Inspect tab's own program, at an offset point.
+      var hover = bouncing();
+      hover.xInput = { body: 0, property: "x" };
+      hover.yInput = { body: 0, property: "y" };
+      hover.output = { body: 0, property: "y" };
+      var hoverRows = PhysicsGPU.runCompiledTrajectoryOnGPU(PhysicsGridCodegen.compileHoverTrajectoryGLSL(hover, 25, -15, 300), 300);
+      compare("Inspect point", PhysicsGridCodegen.computeOffsetSceneNumeric(hover, 25, -15), hoverRows);
+      return { pass: pass, detail: "events (steps) and final bounce counts: " + parts.join("; ") };
+    }
+  );
+
   // ---- df.8 The honest version of "does df buy resolution" ----
   addTest(
     "Where float32 renders one flat color, df still tracks the float64 engine",
@@ -5734,12 +5781,14 @@
       var leftovers = has(f32, f32Gone).concat(has(df, dfGone), has(hinged, hingedGone));
       var missing = f32Kept.filter(function (n) { return has(f32, [n]).length === 0; })
         .concat(dfKept.filter(function (n) { return has(df, [n]).length === 0; }), hingedKept.filter(function (n) { return has(hinged, [n]).length === 0; }));
-      // Contact flags: one body's, and only for a caller that asks (the map's Bounce Count).
+      // Contact flags only for a caller that asks: one body's (the map's Bounce Count), every pair's (the trajectory log).
       var consts = circles().bodies.map(PhysicsGPU.bodyConst);
       var pairs = PhysicsGPU.collisionPairs(2, consts, []);
       var silent = PhysicsGPU.generateStepOnceGLSL(2, consts, pairs, [], undefined, "f32", false, true, []);
       var flagged = PhysicsGPU.generateStepOnceGLSL(2, consts, pairs, [], undefined, "f32", false, true, [], { contactBody: 1 });
-      var flagsOk = !/g_contact/.test(silent) && /bool g_contact1/.test(flagged) && !/g_contact0/.test(flagged);
+      var logged = PhysicsGPU.generateStepOnceGLSL(2, consts, pairs, [], undefined, "f32", false, true, [], { pairContacts: true });
+      var flagsOk = !/g_contact/.test(silent) && /bool g_contact1/.test(flagged) && !/g_contact0/.test(flagged) &&
+        !/g_pairContacts/.test(silent + flagged) && /g_pairContacts = /.test(logged);
       var noLoops = !/for \(int iter/.test(free);
       var runs = [circles(), circles(false), pendulum].every(function (scene) {
         var traj = PhysicsGPU.runSceneOnGPU(scene, 5);
