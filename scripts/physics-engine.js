@@ -1090,6 +1090,12 @@
     if (output.property === "bounces" && isPairOutput(output)) {
       return "Bounce Count reads one body, but a second is set";
     }
+    if (output.property === "totalRotation" && isPairOutput(output)) {
+      return "Cumulative Rotation reads one body, but a second is set";
+    }
+    if (output.property === "warps" && isPairOutput(output)) {
+      return "Port Hole Warps reads one body, but a second is set";
+    }
     return null;
   }
 
@@ -1118,6 +1124,8 @@
       var d = shortestSeparation(scene, b.x - a.x, b.y - a.y);
       return Math.sqrt(d.x * d.x + d.y * d.y);
     }
+    // Run tallies start from nothing.
+    if (output.property === "bounces" || output.property === "warps" || output.property === "totalRotation") return 0;
     var sum = 0;
     for (var i = 0; i < indices.length; i++) sum += bodies[indices[i]][output.property];
     return sum / indices.length;
@@ -1143,7 +1151,7 @@
     return { x: S.vx - S.w * (y - S.y), y: S.vy + S.w * (x - S.x) };
   }
 
-  function applyPortholeTransports(scene, portals, groupOf, startPose, u, acc, dt, maxSpeed, friction) {
+  function applyPortholeTransports(scene, portals, groupOf, startPose, u, acc, dt, maxSpeed, friction, warpFlags) {
     var bodies = scene.bodies;
     for (var i = 0; i < bodies.length; i++) {
       var g = groupOf[i];
@@ -1198,6 +1206,7 @@
           var spin = Qs.w - Ps.w;
           b.w += spin;
           b.angle += phi + spin * tau;
+          if (warpFlags) warpFlags[m] = true;
         });
         break;
       }
@@ -1282,6 +1291,9 @@
     // Opt-in per-body edge wrap this step: 1 along x, 2 along y (the trajectory's wrapX/wrapY).
     var wrapFlags = opts.wrapFlags;
     if (wrapFlags) for (i = 0; i < bodies.length; i++) wrapFlags[i] = 0;
+    // Opt-in per-body "went through a port hole this step" (the trajectory's warped).
+    var warpFlags = opts.warpFlags;
+    if (warpFlags) for (i = 0; i < bodies.length; i++) warpFlags[i] = false;
     // Opt-in raw pair list for runTrajectory's per-pair contacts. Refilled in place.
     var contactsOut = opts.contactsOut;
     if (contactsOut) {
@@ -1335,7 +1347,7 @@
       }
     }
 
-    if (portals) applyPortholeTransports(scene, portals, passGroup, startPose, u, acc, dt, maxSpeed, friction);
+    if (portals) applyPortholeTransports(scene, portals, passGroup, startPose, u, acc, dt, maxSpeed, friction, warpFlags);
 
     // Edge wrapping, last (matches the GLSL). Only roots decide; world-hinged by PIN; sprung by group.
     if (wrapsAtEdges(scene)) {
@@ -1431,18 +1443,18 @@
     };
   }
 
-  // runTrajectory: rows[i] is every body's {x, y, angle, wrapX, wrapY, contacts} after i+1 steps, like
-  // PhysicsGPU.runSceneOnGPU's: the wrap flags say the body crossed that frame edge in that step, and
-  // contacts has bit j set when it touched body j in that step. Uses a private clone.
+  // runTrajectory: rows[i] is every body's {x, y, angle, wrapX, wrapY, warped, contacts} after i+1 steps, like
+  // PhysicsGPU.runSceneOnGPU's: the wrap flags say the body crossed that frame edge in that step, warped that
+  // it went through a port hole, and contacts has bit j set when it touched body j in that step. Uses a private clone.
   function runTrajectory(scene, steps, dt) {
     var sim = cloneScene(scene);
     // A scene straight from JSON has no invMass/invInertia; stepping without them yields NaN.
     sim.bodies.forEach(computeMass);
-    var rows = new Array(steps), flags = new Array(sim.bodies.length), contactsBuf = [];
+    var rows = new Array(steps), flags = new Array(sim.bodies.length), warps = new Array(sim.bodies.length), contactsBuf = [];
     for (var i = 0; i < steps; i++) {
-      step(sim, dt, { wrapFlags: flags, contactsOut: contactsBuf });
+      step(sim, dt, { wrapFlags: flags, warpFlags: warps, contactsOut: contactsBuf });
       var row = sim.bodies.map(function (body, b) {
-        return { x: body.x, y: body.y, angle: body.angle, wrapX: !!(flags[b] & 1), wrapY: !!(flags[b] & 2), contacts: 0 };
+        return { x: body.x, y: body.y, angle: body.angle, wrapX: !!(flags[b] & 1), wrapY: !!(flags[b] & 2), warped: warps[b], contacts: 0 };
       });
       for (var k = 0; k < contactsBuf.length; k++) {
         row[contactsBuf[k].a].contacts |= 1 << contactsBuf[k].b;
@@ -1469,6 +1481,37 @@
 
   function runBounceCounts(scene, bodyIndex, steps, dt) {
     return bounceCountsFromTrajectory(runTrajectory(scene, steps, dt), bodyIndex);
+  }
+
+  // counts[i] is how many times the body has gone through a port hole by the end of step i+1.
+  function warpCountsFromTrajectory(rows, bodyIndex) {
+    var counts = new Array(rows.length), count = 0;
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i][bodyIndex].warped) count++;
+      counts[i] = count;
+    }
+    return counts;
+  }
+
+  function wrapToPi(a) { return a - 2 * Math.PI * Math.floor(a / (2 * Math.PI) + 0.5); }
+
+  // turns[i] is the body's rotation in radians from `scene` to the end of step i+1, less each warp's own
+  // turn, which the rows give only at the step's end: the way through that leaves the smaller turn.
+  function rotationsFromTrajectory(scene, rows, bodyIndex) {
+    var portals = portholePair(scene.bodies);
+    var turns = new Array(rows.length), total = 0, prev = scene.bodies[bodyIndex].angle;
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i][bodyIndex], turn = r.angle - prev;
+      if (r.warped && portals) {
+        var p = rows[i][portals[0]].angle, q = rows[i][portals[1]].angle;
+        var a = wrapToPi(turn - (q - p + Math.PI)), b = wrapToPi(turn - (p - q + Math.PI));
+        turn = Math.abs(a) <= Math.abs(b) ? a : b;
+      }
+      total += turn;
+      prev = r.angle;
+      turns[i] = total;
+    }
+    return turns;
   }
 
   // Pairs overlapping geometrically (halfExtent sum), solver running or not; keys "i,j", i < j.
@@ -1587,6 +1630,8 @@
     runBounceCounts: runBounceCounts,
     runBounceEvents: runBounceEvents,
     bounceCountsFromTrajectory: bounceCountsFromTrajectory,
+    warpCountsFromTrajectory: warpCountsFromTrajectory,
+    rotationsFromTrajectory: rotationsFromTrajectory,
     bounceEventsFromTrajectory: bounceEventsFromTrajectory,
     runTrajectory: runTrajectory,
     createCircle: createCircle,

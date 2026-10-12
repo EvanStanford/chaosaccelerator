@@ -788,12 +788,18 @@
     var df = PhysicsDF.isExtended(precision);
     var B = PhysicsGridCodegen.backendFor(precision);
     var initial = PhysicsGridCodegen.generateGridInitialStateGLSL(sceneToCompile, precision);
-    var outProp = sceneToCompile.output.property; // "x" | "y" | "angle" | "distance" | "lifespan" | "bounces"
+    // "x" | "y" | "angle" | "distance" | "lifespan" | "bounces" | "warps" | "totalRotation"
+    var outProp = sceneToCompile.output.property;
     var isLifespan = outProp === "lifespan";
     var isDistance = outProp === "distance";
     var outputBodies = PhysicsEngine.outputBodyIndices(sceneToCompile.output);
     var isBounces = outProp === "bounces";
-    var isRunTally = isLifespan || isBounces;
+    var isWarps = outProp === "warps";
+    var isTotalRotation = outProp === "totalRotation";
+    var isCount = isBounces || isWarps;
+    var isRunTally = isLifespan || isCount;
+    // Only a scene with both port holes placed can warp.
+    var hasPortals = !!PhysicsEngine.portholePair(sceneToCompile.bodies);
     var goalOrder = challengeGoalOrder(sceneToCompile, outputBodies);
     var goalLines = goalOrder ? goalDeclarationLines(goalOrder) : [];
     var isInfinitePosition = sceneToCompile.edgeMode === "infinite" && (outProp === "x" || outProp === "y" || isDistance);
@@ -811,6 +817,10 @@
       outputLines = ["  outputValue = lifespanValue;"];
     } else if (isBounces) {
       outputLines = ["  outputValue = bounceCount;"];
+    } else if (isWarps) {
+      outputLines = ["  outputValue = warpCount;"];
+    } else if (isTotalRotation) {
+      outputLines = [emitBodyValue("outAngle", outputBodies[0], "angle"), "  outputValue = " + B.sub("outAngle", "rotationBase") + ";"];
     } else if (isDistance) {
       // Twin of shortestSeparation, at the pass's precision: derived modes difference it.
       outputLines = [
@@ -835,7 +845,8 @@
     var frame = PhysicsEngine.wrapsAtEdges(sceneToCompile)
       ? { width: sceneToCompile.frameWidth, height: sceneToCompile.frameHeight } : undefined;
     var stepOnceSource = PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, sceneToCompile.mutualGravity, PhysicsEngine.collisionsEnabled(sceneToCompile), initial.springs,
-      { contactBody: isBounces ? sceneToCompile.output.body : null, touchBody: goalOrder ? outputBodies[0] : null });
+      { contactBody: isBounces ? sceneToCompile.output.body : null, touchBody: goalOrder ? outputBodies[0] : null,
+        warpBody: (isWarps || isTotalRotation) && hasPortals ? sceneToCompile.output.body : null });
     var stepOnceCall = "stepOnce(" + PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, precision, initial.springs) + ");";
 
     // "Stop on wrap": each pixel freezes the first step ANY watched body would cross
@@ -851,6 +862,15 @@
       "    if (bounceNow && !bounceTouching) bounceCount += 1.0;",
       "    bounceTouching = bounceNow;",
     ] : [];
+    if (isWarps) {
+      bounceInitLines.push("  float warpCount = 0.0;");
+      if (hasPortals) bounceStepLines.push("    if (g_warp) warpCount += 1.0;");
+    }
+    // Rotation is the angle less its start and every warp's turn.
+    if (isTotalRotation) {
+      bounceInitLines.push("  " + B.scalar + " rotationBase = " + (df ? "dbody" : "body") + outputBodies[0] + ".angle;");
+      if (hasPortals) bounceStepLines.push("    if (g_warp) rotationBase = " + B.add("rotationBase", "g_warpTurn") + ";");
+    }
     if (goalOrder) {
       bounceInitLines.push("  float goalNext = 0.0;", "  float goalMask = 0.0;");
       bounceStepLines = bounceStepLines.concat(goalStepLines(goalOrder, outputBodies[0], initial.n));
@@ -977,6 +997,8 @@
     if (isBounces) {
       loopStateVariables.push({ name: "bounceCount", type: "float" }, { name: "bounceTouching", type: "bool" });
     }
+    if (isWarps) loopStateVariables.push({ name: "warpCount", type: "float" });
+    if (isTotalRotation) loopStateVariables.push({ name: "rotationBase", type: df ? "df" : "float" });
     if (goalOrder) loopStateVariables.push({ name: "goalNext", type: "float" }, { name: "goalMask", type: "float" });
     PhysicsGridCodegen.withWords(loopStateVariables, precision);
 
@@ -986,7 +1008,8 @@
     var OB = isRunTally ? PhysicsGridCodegen.backendFor("f32") : B;
     var outScalar = OB.scalar;
     var outZero = OB.zero;
-    var deltaDenom = isBounces ? "max(u_bounceMax, 1.0)"
+    var deltaDenom = isCount ? "max(u_bounceMax, 1.0)"
+      : isTotalRotation ? "(2.0 * u_bounceMax)"
       : isLifespan ? "float(u_durationSteps)"
         : "OUTPUT_RANGE_MAX";
     // Contours needs the gradient of t ITSELF: under the sigmoid that is deltaT
@@ -998,10 +1021,12 @@
     // ---- Raw Output value -> the t the color ramp reads ----
     var tLine =
     // mod() at the pass's precision (folding in float32 first merges neighbouring
-    // pixels); lifespan and distance clamp. Bounce Count is scaled by the busiest
-    // pixel in view and NOT clamped: readback uses u_bounceMax = 1 for the raw count.
-    isBounces
-      ? "  float t = u_bounceMax > 0.0 ? outputValue / u_bounceMax : 0.0;"
+    // pixels); lifespan and distance clamp. Counts and Cumulative Rotation are scaled by
+    // the largest value in view and NOT clamped; u_bounceMax = 0 reads back the raw value.
+    isCount
+      ? "  float t = u_bounceMax > 0.0 ? outputValue / u_bounceMax : outputValue;"
+      : isTotalRotation
+        ? "  float t = " + B.toFloat("outputValue") + ";\n  if (u_bounceMax > 0.0) t = 0.5 + 0.5 * t / u_bounceMax;"
       : isLifespan
         ? "  float t = clamp(outputValue / float(u_durationSteps), 0.0, 1.0);"
         : isInfinitePosition
@@ -1716,10 +1741,14 @@
   }
   var activePass = passes[passKey("f32", "standard")];
   gl.useProgram(activePass.program);
-  var isBouncesOutput = scene.output.property === "bounces";
+  // Counts and Cumulative Rotation are scaled by the largest value in view (bounceMaxValue).
+  var isCountOutput = isCountProperty(scene.output.property);
+  var isTotalRotationOutput = scene.output.property === "totalRotation";
   var isInfinitePositionOutput = scene.edgeMode === "infinite" &&
     (scene.output.property === "x" || scene.output.property === "y");
   var bounceMaxValue = 1;
+  function isCountProperty(prop) { return prop === "bounces" || prop === "warps"; }
+  function isViewScaledOutput() { return isCountOutput || isTotalRotationOutput; }
   function currentOutputRangeMax() { return outputRangeMax(scene, scene.output.property); }
   function computeIsCircularOutput() {
     var prop = scene.output.property;
@@ -2143,7 +2172,7 @@
   var displayMode = DISPLAY_MODES[0];
 
   // Offscreen RGBA32F target for reading raw t back; made per call, never per
-  // frame. rawBounces: sample with u_bounceMax = 1 to get the raw count.
+  // frame. rawBounces: sample with u_bounceMax = 0 to get a scaled Output's raw value.
   function createSampleTarget(w, h) {
     var texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -2191,7 +2220,7 @@
     // rawBounces: the bounce divisor is measured over the whole duration so colors hold while the timeline plays.
     gl.uniform1i(sampler.uniforms.maxSteps, rawBounces ? simulationSteps : renderedSteps());
     gl.uniform1i(sampler.uniforms.durationSteps, simulationSteps);
-    gl.uniform1f(sampler.uniforms.bounceMax, rawBounces ? 1 : bounceMaxValue);
+    gl.uniform1f(sampler.uniforms.bounceMax, rawBounces ? 0 : bounceMaxValue);
     bindQuad(sampler.posLoc);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
     gl.disable(gl.SCISSOR_TEST);
@@ -2453,7 +2482,15 @@
 
   // Bounce-count divisor: the largest count in the view, from a small offscreen float sample over the whole
   // duration. Measured once per VIEW change (beginProgressive): a mid-refinement re-measure would shift every hue.
+  // Cumulative Rotation uses the largest turn either way.
   var BOUNCE_MAX_SAMPLE_SIZE = 32;
+
+  // Never 0: an all-quiet view would divide by zero.
+  function viewMaxOf(values) {
+    var max = 0;
+    for (var i = 0; i < values.length; i += 4) max = Math.max(max, Math.abs(values[i]));
+    return Math.max(isTotalRotationOutput ? TAU / 360 : 1, max);
+  }
 
   // Asynchronous (PBO behind a fence): it runs every frame of a drag, and a readPixels stall hitched each one.
   var bounceMaxProbe = { target: null, pbo: null, sync: null, key: null, measuredKey: null,
@@ -2501,10 +2538,7 @@
     // A stale view's measurement says nothing; the move queued its own.
     if (bounceMaxProbe.key !== bounceMaxViewKey()) return;
     bounceMaxProbe.measuredKey = bounceMaxProbe.key;
-    var max = 0, values = bounceMaxProbe.values;
-    for (var i = 0; i < values.length; i += 4) max = Math.max(max, values[i]);
-    // Never 0: an all-quiet view would divide by zero.
-    max = Math.max(1, max);
+    var max = viewMaxOf(bounceMaxProbe.values);
     if (max !== bounceMaxValue) {
       bounceMaxValue = max;
       markDirty();
@@ -2515,9 +2549,7 @@
   function findBounceMax() {
     var grid = sampleValueGrid(BOUNCE_MAX_SAMPLE_SIZE, BOUNCE_MAX_SAMPLE_SIZE, true);
     if (!grid) return bounceMaxValue; // no float-texture support: keep whatever we had
-    var max = 0;
-    for (var i = 0; i < grid.values.length; i += 4) max = Math.max(max, grid.values[i]);
-    return Math.max(1, max);
+    return viewMaxOf(grid.values);
   }
 
   // Draws one sub-lattice: rendered pixel (i, j) carries full-res pixel (i*stride + originX, j*stride + originY).
@@ -3184,7 +3216,7 @@
       var initialAtPoint = PhysicsGridCodegen.computeOffsetSceneNumeric(scene, worldPoint.x, worldPoint.y);
       var watchedIndices = PhysicsHingeGeometry.wrapWatchedBodyIndices(scene);
       // Neither Scene Lifespan nor Bounce Count has an output body to reconstruct.
-      var targetBodyIndex = (isLifespan || isBouncesOutput) ? null : scene.output.body;
+      var targetBodyIndex = (isLifespan || isCountOutput) ? null : scene.output.body;
       var wrapStop = PhysicsHingeGeometry.findWrapStopStep(trajectory, watchedIndices, targetBodyIndex, scene.frameWidth, scene.frameHeight, initialAtPoint.bodies, PhysicsGPU.FIXED_DT);
       if (wrapStop !== null) {
         effectiveMaxStep = Math.max(1, Math.min(trajectory.length, wrapStop.step));
@@ -3350,6 +3382,13 @@
     } else if (prop === "bounces") {
       largestLabel = "Most Bounces";
       smallestLabel = "Least Bounces";
+    } else if (prop === "warps") {
+      largestLabel = "Most Warps";
+      smallestLabel = "Fewest Warps";
+    } else if (prop === "totalRotation") {
+      // t follows the engine's angle, which turns clockwise on screen.
+      largestLabel = "Most Clockwise";
+      smallestLabel = "Most Counterclockwise";
     } else if (prop === "distance") {
       largestLabel = "Furthest";
       smallestLabel = "Closest";
@@ -3901,7 +3940,7 @@
   // Starts a run. Even the coarsest level goes through the banded path: the left slider can be dragged to full res.
   function beginProgressive() {
     if (reuseEnabled) { reuseNoteImage(); reusePlanRun(); }
-    if (isBouncesOutput) requestBounceMax();
+    if (isViewScaledOutput()) requestBounceMax();
     progressive.stride = startStride();
     // See SLICE_FIRST_LEVEL_SAMPLES: under slicing the coarsest levels cost as much as a useful one.
     if (slicedProgramsForGrid()) {
@@ -5224,7 +5263,8 @@
   // Mirrors the shader's mod(outputValue, OUTPUT_RANGE_MAX) / OUTPUT_RANGE_MAX with the always-positive wrap.
   function outputColorT(v) {
     // Lifespan is clamped, not wrapped (its max means "ran the whole run"); Bounce Count scales by the grid's own u_bounceMax.
-    if (isBouncesOutput) return Math.min(1, Math.max(0, v / bounceMaxValue));
+    if (isCountOutput) return Math.min(1, Math.max(0, v / bounceMaxValue));
+    if (isTotalRotationOutput) return Math.min(1, Math.max(0, 0.5 + 0.5 * v / bounceMaxValue));
     var rangeMax = currentOutputRangeMax();
     if (scene.output.property === "lifespan") return Math.min(1, Math.max(0, v / rangeMax));
     // Infinite Space: an unbounded coordinate is squashed by the shader's own curve, not wrapped.
@@ -5678,7 +5718,7 @@
     } else {
       // Lifespan is unknown before the replay: show "hasn't crossed yet" until the upgrade. Bounce Count is 0 at the start.
       var v0 = scene.output.property === "lifespan" ? simulationSteps
-        : isBouncesOutput ? 0
+        : isCountOutput ? 0
         : PhysicsEngine.computeOutputValue(offsetScene, scene.output);
       hoverCanvas.style.backgroundColor = hoverOutputColor(outputColorT(v0));
     }
@@ -5711,7 +5751,7 @@
   // Lifespan is one fact about the whole run (known since findWrapStopStep): held for every frame.
   function replayBackground(replay, frame) {
     var v = replay.lifespanValue !== null ? replay.lifespanValue
-      : replay.bounceCounts ? replay.bounceCounts[Math.min(frame.step, replay.bounceCounts.length - 1)]
+      : replay.tallies ? tallyAtFrame(replay, frame)
       : hoverOutputValue(frame.row, replay.wrapOverride, frame.isFinal, replay.extraWrapOverrides);
     return frame.isFinal ? hoverOutputColorFinal(outputColorT(v)) : hoverOutputColor(outputColorT(v));
   }
@@ -5903,6 +5943,24 @@
     renderPlaybackFrame();
   });
 
+  // A run tally's per-step values, read off the trajectory that is drawn; null for the other Outputs.
+  function runTalliesAt(worldPoint, trajectory) {
+    var prop = scene.output.property, body = scene.output.body;
+    if (prop === "bounces") return PhysicsEngine.bounceCountsFromTrajectory(trajectory, body);
+    if (prop === "warps") return PhysicsEngine.warpCountsFromTrajectory(trajectory, body);
+    if (prop !== "totalRotation") return null;
+    var offsetScene = PhysicsGridCodegen.computeOffsetSceneNumeric(scene, worldPoint.x, worldPoint.y);
+    return PhysicsEngine.rotationsFromTrajectory(offsetScene, trajectory, body);
+  }
+
+  // A Sticky Edges stop moves the final frame's angle to the crossing instant, and the rotation with it.
+  function tallyAtFrame(replay, frame) {
+    var v = replay.tallies[Math.min(frame.step, replay.tallies.length - 1)];
+    var o = replay.wrapOverride;
+    if (isTotalRotationOutput && frame.isFinal && o && o.bodyIndex === scene.output.body) v += o.angle - frame.row[o.bodyIndex].angle;
+    return v;
+  }
+
   // Bounce sound events, read off the trajectory that is drawn. Failure never costs the entry: an empty list just means no sound.
   function bounceEventsAt(worldPoint, trajectory) {
     try {
@@ -5947,7 +6005,7 @@
       var initialAtPoint = PhysicsGridCodegen.computeOffsetSceneNumeric(scene, worldPoint.x, worldPoint.y);
       var watchedIndices = PhysicsHingeGeometry.wrapWatchedBodyIndices(scene);
       // Bounce Count and Lifespan aren't positions: findWrapStopStep picks the body that crossed.
-      var heads = (isLifespan || isBouncesOutput) ? [] : PhysicsEngine.outputBodyIndices(scene.output);
+      var heads = (isLifespan || isCountOutput) ? [] : PhysicsEngine.outputBodyIndices(scene.output);
       var targetBodyIndex = heads.length ? heads[0] : null;
       var wrapStop = PhysicsHingeGeometry.findWrapStopStep(trajectory, watchedIndices, targetBodyIndex, scene.frameWidth, scene.frameHeight, initialAtPoint.bodies, PhysicsGPU.FIXED_DT);
       if (wrapStop !== null) {
@@ -5967,7 +6025,7 @@
       effectiveMaxStep: effectiveMaxStep,
       wrapOverride: wrapOverride,
       lifespanValue: isLifespan ? lifespanValue : null,
-      bounceCounts: isBouncesOutput ? PhysicsEngine.bounceCountsFromTrajectory(trajectory, scene.output.body) : null,
+      tallies: runTalliesAt(worldPoint, trajectory),
       extraWrapOverrides: extraWrapOverrides,
       bounceEvents: bounceEventsAt(worldPoint, trajectory),
     };
@@ -6107,12 +6165,16 @@
     if (prop === "distance") return "Distance Apart";
     if (prop === "lifespan") return "Scene lifespan";
     if (prop === "bounces") return "Bounce Count";
+    if (prop === "warps") return "Port Hole Warps";
+    if (prop === "totalRotation") return "Cumulative Rotation";
     return prop;
   }
 
   // Output units per unit of t. Exact where t is a plain division; under Infinite Space (a sigmoid) it is the frame dimension, not a constant ratio.
   function statsValueSpan() {
-    return isBouncesOutput ? bounceMaxValue : currentOutputRangeMax();
+    if (isCountOutput) return bounceMaxValue;
+    if (isTotalRotationOutput) return 2 * bounceMaxValue;
+    return currentOutputRangeMax();
   }
 
   // Every REPORTED number is in authored coordinates (origin at frame center, +y up, +rotation CCW;
@@ -6121,14 +6183,15 @@
     var prop = scene.output.property;
     if (prop === "x") return PhysicsCoords.toAuthoredX(v, scene);
     if (prop === "y") return PhysicsCoords.toAuthoredY(v, scene);
-    if (prop === "angle") return PhysicsCoords.flipAngle(v);
+    if (prop === "angle" || prop === "totalRotation") return PhysicsCoords.flipAngle(v);
     return v;
   }
 
   // Inverse of outputColorT, branch for branch. Not monotonic for every Output: with +y up, t = 0 is the
   // TOP of the frame (largest Center Y); callers wanting an ordered pair sort themselves.
   function statsValueForT(t) {
-    if (isBouncesOutput) return authoredOutputValue(t * bounceMaxValue);
+    if (isCountOutput) return authoredOutputValue(t * bounceMaxValue);
+    if (isTotalRotationOutput) return authoredOutputValue((2 * t - 1) * bounceMaxValue);
     var rangeMax = currentOutputRangeMax();
     if (scene.output.property === "lifespan") return authoredOutputValue(t * rangeMax);
     if (isInfinitePositionOutput) {
@@ -6145,6 +6208,8 @@
     if (prop === "angle") return (v * 180 / Math.PI).toFixed(1) + "°";
     if (prop === "lifespan") return Math.round(v).toLocaleString() + " steps";
     if (prop === "bounces") return (Math.round(v * 10) / 10).toLocaleString() + " bounces";
+    if (prop === "warps") return (Math.round(v * 10) / 10).toLocaleString() + " warps";
+    if (prop === "totalRotation") return Math.round(v * 180 / Math.PI).toLocaleString() + "°";
     var a = Math.abs(v);
     if (a !== 0 && (a < 1e-3 || a >= 1e6)) return v.toExponential(2);
     return (Math.round(v * 100) / 100).toLocaleString();
@@ -6219,7 +6284,7 @@
   // The t of the Output's STARTING value as authored, for Topography's Return Line; null for a lifespan or bounce count.
   function statsReturnT() {
     var prop = scene.output.property;
-    if (prop === "lifespan" || isBouncesOutput) return null;
+    if (prop === "lifespan" || isCountOutput) return null;
     var v = PhysicsEngine.computeOutputValue(scene, scene.output);
     if (typeof v !== "number" || !isFinite(v)) return null;
     return outputColorT(v);
@@ -7381,7 +7446,7 @@
         stride: 1, originX: 0, originY: 0, resW: blockWidth, resH: blockHeight, totalSteps: total,
       });
       do { advanceSliceJob(job, perDraw); } while (job.done < total);
-      resolveSliceJob(job, target.fbo, 0, r, { sample: true, bounceMax: rawBounces ? 1 : bounceMaxValue });
+      resolveSliceJob(job, target.fbo, 0, r, { sample: true, bounceMax: rawBounces ? 0 : bounceMaxValue });
     }
   }
 
@@ -7647,7 +7712,7 @@
           : (fresh || have < timeline.step) ? timeline.step
           : Math.min(simulationSteps, have + Math.floor(timeline.carry));
         if (!fresh && want <= have) break;
-        if (fresh && isBouncesOutput) bounceMaxValue = findBounceMax();
+        if (fresh && isViewScaledOutput()) bounceMaxValue = findBounceMax();
         var affordable = Math.max(1, Math.floor((budget - spent) / (res.w * res.h * groups)));
         timeline.pass = { key: res.key, init: fresh, from: have, steps: Math.min(want - have, affordable), band: 0 };
       }
@@ -8047,7 +8112,8 @@
     releaseAllPlayback();
     timeline.step = simulationSteps;
     updateTimelineUI();
-    isBouncesOutput = scene.output.property === "bounces";
+    isCountOutput = isCountProperty(scene.output.property);
+    isTotalRotationOutput = scene.output.property === "totalRotation";
     isInfinitePositionOutput = scene.edgeMode === "infinite" &&
       (scene.output.property === "x" || scene.output.property === "y");
     // Whether Output WRAPS decides hue range, superlative neighbour distance and circular stats.

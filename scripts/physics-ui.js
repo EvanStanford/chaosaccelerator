@@ -108,12 +108,14 @@
   };
   // A port hole has a line's shape, so a line's properties.
   PROPERTIES_BY_TYPE.porthole = PROPERTIES_BY_TYPE.line;
-  // Output-only: bounces are accumulated over a run (PhysicsEngine.step's contactFlags).
+  // Output-only: bounces, rotation and warps are accumulated over a run.
   var OUTPUT_PROPERTIES = [
     { key: "x", label: "Center X" },
     { key: "y", label: "Center Y" },
     { key: "angle", label: "Rotation" },
+    { key: "totalRotation", label: "Cumulative Rotation" },
     { key: "bounces", label: "Bounce Count" },
+    { key: "warps", label: "Port Hole Warps" },
   ];
   var OUTPUT_PAIR_PROPERTIES = [
     { key: "x", label: "Average X" },
@@ -121,8 +123,17 @@
     { key: "angle", label: "Average Rotation" },
     { key: "distance", label: "Distance Apart" },
   ];
+  // Cumulative Rotation needs a body that moves; Port Hole Warps one that can go through a placed pair.
   function outputPropertiesFor(output) {
-    return PhysicsEngine.isPairOutput(output) ? OUTPUT_PAIR_PROPERTIES : OUTPUT_PROPERTIES;
+    if (PhysicsEngine.isPairOutput(output)) return OUTPUT_PAIR_PROPERTIES;
+    var body = output && scene.bodies[output.body];
+    if (!body) return OUTPUT_PROPERTIES;
+    var canWarp = !body.isAnchored && body.type !== "porthole" && !!PhysicsEngine.portholePair(scene.bodies);
+    return OUTPUT_PROPERTIES.filter(function (p) {
+      if (p.key === "totalRotation") return !body.isAnchored;
+      if (p.key === "warps") return canWarp;
+      return true;
+    });
   }
 
   var scene = {
@@ -1592,6 +1603,7 @@
         var anchoredBody = scene.bodies[selectedIndex];
         anchoredBody.isAnchored = false;
         PhysicsEngine.computeMass(anchoredBody);
+        refreshOutputPairUI();
         render();
         return;
       }
@@ -1643,6 +1655,7 @@
       if (hit2 >= 0) {
         scene.bodies[hit2].isAnchored = !scene.bodies[hit2].isAnchored;
         PhysicsEngine.computeMass(scene.bodies[hit2]);
+        refreshOutputPairUI();
         render();
       }
       setActiveTool("select");
@@ -2700,8 +2713,8 @@
   var wrapStopOverride = null;
   // Scene Lifespan's value for this run, constant across frames; simulationSteps if it never stopped early.
   var lifespanValue = DEFAULT_SIMULATION_STEPS;
-  // Bounce Count's per-step totals (JS engine; not in the GPU trajectory), or null.
-  var bounceCounts = null;
+  // A run tally's per-step values (Bounce Count from the JS engine; warps and rotation off the GPU run), or null.
+  var outputTallies = null;
   // Steps (0-indexed) at which a pair started touching: the bounce sound's triggers, whatever the Output.
   var bounceEvents = [];
 
@@ -2727,7 +2740,7 @@
   // The map's rule: a range that does not wrap (lifespan; x/y unless the edges wrap) stops at 300
   // degrees so the key's ends are two colors (fractal-grid.js: isCircularOutput, HUE_RANGE_MAX).
   function outputHueRange(prop) {
-    if (prop === "lifespan") return 300;
+    if (prop === "lifespan" || prop === "warps" || prop === "totalRotation") return 300;
     if (prop === "x" || prop === "y") return scene.edgeMode === "wrap" ? 360 : 300;
     return 360;
   }
@@ -2747,9 +2760,19 @@
     } else if (scene.output.property === "distance") {
       // Clamped, not wrapped: maximal separation is a real value.
       t = Math.min(1, Math.max(0, outputValueAtFrame(trajectory[currentStepCount - 1], scene.output) / rangeMax));
-    } else if (scene.output.property === "bounces") {
-      var maxBounces = bounceCounts ? bounceCounts[effectiveMaxSteps - 1] : 0;
-      t = maxBounces > 0 ? bounceCounts[currentStepCount - 1] / maxBounces : 0;
+    } else if (scene.output.property === "bounces" || scene.output.property === "warps") {
+      var maxCount = outputTallies ? outputTallies[effectiveMaxSteps - 1] : 0;
+      t = maxCount > 0 ? outputTallies[currentStepCount - 1] / maxCount : 0;
+    } else if (scene.output.property === "totalRotation") {
+      // Scaled by the run's largest turn either way, as the map scales by its view's.
+      var maxTurn = 0;
+      for (var k = 0; outputTallies && k < effectiveMaxSteps; k++) maxTurn = Math.max(maxTurn, Math.abs(outputTallies[k]));
+      var turn = outputTallies ? outputTallies[currentStepCount - 1] : 0;
+      // The stopped final frame's angle is wrapStopOverride's.
+      if (wrapStopOverride && currentStepCount === effectiveMaxSteps && wrapStopOverride.bodyIndex === scene.output.body) {
+        turn += wrapStopOverride.angle - trajectory[currentStepCount - 1][scene.output.body].angle;
+      }
+      t = maxTurn > 0 ? 0.5 + 0.5 * turn / maxTurn : 0.5;
     } else {
       var value = (wrapStopOverride && currentStepCount === effectiveMaxSteps)
         ? wrapStopOverride[scene.output.property]
@@ -3147,13 +3170,16 @@
     effectiveMaxSteps = scene.simulationSteps;
     wrapStopOverride = null;
     lifespanValue = scene.simulationSteps;
-    bounceCounts = scene.output && scene.output.property === "bounces"
+    var outputProp = scene.output ? scene.output.property : null;
+    outputTallies = outputProp === "bounces"
       ? PhysicsEngine.runBounceCounts(initialScene, scene.output.body, scene.simulationSteps, PhysicsGPU.FIXED_DT)
+      : outputProp === "warps" ? PhysicsEngine.warpCountsFromTrajectory(trajectory, scene.output.body)
+      : outputProp === "totalRotation" ? PhysicsEngine.rotationsFromTrajectory(initialScene, trajectory, scene.output.body)
       : null;
     bounceEvents = PhysicsEngine.runBounceEvents(initialScene, scene.simulationSteps, PhysicsGPU.FIXED_DT);
     if (scene.edgeMode === "sticky" && scene.output) {
       var watchedIndices = PhysicsHingeGeometry.wrapWatchedBodyIndices(scene);
-      var targetBodyIndex = scene.output.property === "lifespan" ? null : scene.output.body;
+      var targetBodyIndex = outputProp === "lifespan" || outputProp === "bounces" || outputProp === "warps" ? null : scene.output.body;
       var wrapStop = PhysicsHingeGeometry.findWrapStopStep(trajectory, watchedIndices, targetBodyIndex, scene.frameWidth, scene.frameHeight, initialScene.bodies, PhysicsGPU.FIXED_DT);
       if (wrapStop !== null) {
         effectiveMaxSteps = Math.max(1, wrapStop.step);

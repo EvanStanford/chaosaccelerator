@@ -770,9 +770,11 @@
   // precision: "f32" or "df"/"tf"/"qf" (see PhysicsDF). mutualGravity: n-body pull.
   // collisions: only Mutual Gravity's accel loop needs it (touching-bodies rule).
   // springs: see the Springs section above.
-  // flags { contactBody, touchBody, pairContacts }: g_contactN for that one body (the map's Bounce
-  // Count), g_touchK per other body for that one (the goal order) and g_pairContacts, every
-  // pair's contact as a bit (the trajectory log); none by default.
+  // flags { contactBody, touchBody, pairContacts, warpBody, warpBits }: g_contactN for that one body (the
+  // map's Bounce Count), g_touchK per other body for that one (the goal order), g_pairContacts, every
+  // pair's contact as a bit (the trajectory log), g_warp and g_warpTurn, whether that one body went
+  // through a port hole and the turn the crossing gave it, and g_warpBits, every body's warp as a bit
+  // (the trajectory log); none by default.
   function generateStepOnceGLSL(n, consts, pairs, hingeAnchors, frame, precision, mutualGravity, collisions, springs, flags) {
     var df = global.PhysicsDF.isExtended(precision);
     if (df) global.PhysicsDF.usePrecision(precision);
@@ -865,8 +867,12 @@
     var contactBody = flags && typeof flags.contactBody === "number" ? flags.contactBody : -1;
     var touchBody = flags && typeof flags.touchBody === "number" ? flags.touchBody : -1;
     var pairContacts = !!(flags && flags.pairContacts);
+    var warpBody = flags && typeof flags.warpBody === "number" ? flags.warpBody : -1;
+    var warpBits = !!(flags && flags.warpBits);
     if (contactBody >= 0) lines.push("bool g_contact" + contactBody + " = false;");
     if (pairContacts) lines.push("float g_pairContacts = 0.0;");
+    if (warpBody >= 0) lines.push("bool g_warp = false;", E.scalarType + " g_warpTurn;");
+    if (warpBits) lines.push("float g_warpBits = 0.0;");
     for (var td = 0; td < n; td++) if (touchBody >= 0 && td !== touchBody) lines.push("bool g_touch" + td + " = false;");
     // The step's edge wrap per body, 0.0 or a frame span: the sticky stop and the trajectory log read these.
     for (var wd = 0; wd < n; wd++) lines.push("float g_wrapDx" + wd + " = 0.0, g_wrapDy" + wd + " = 0.0;");
@@ -902,6 +908,8 @@
       lines.push("    g_dfStaticGeomReady = true;");
       lines.push("  }");
     }
+    if (warpBody >= 0) lines.push("  g_warp = false; g_warpTurn = " + E.zero + ";");
+    if (warpBits) lines.push("  g_warpBits = 0.0;");
     // df needs no stand-in world body: its hinge solvers have world-pin forms.
     if (!df && hingeAnchors.some(function (h) { return h.aIsWorld; })) {
       lines.push("  " + E.bodyType + " worldBody = " + E.bodyType + "(" +
@@ -1785,6 +1793,8 @@
             } else {
               lines.push(df ? "      " + B(m) + ".angle = dfAdd(" + B(m) + ".angle, phPhi);" : "      " + B(m) + ".angle += phPhi;");
             }
+            if (m === warpBody) lines.push("      g_warp = true; g_warpTurn = phPhi;");
+            if (warpBits) lines.push("      g_warpBits += " + fnum(Math.pow(2, m)) + ";");
             lines.push("    }");
           });
           lines.push("  }");
@@ -1896,8 +1906,9 @@
 
   // ---- The trajectory program: every body's state at every step ----
   // Texel (b, r) of the output is body b after r + 1 steps, and the sentinel column past the
-  // bodies carries that step's wrap bits (x at bit 2b, y at bit 2b + 1) and, in alpha, its
-  // contact bits (pairContactBit; the step code needs the pairContacts flag). Running every texel
+  // bodies carries that step's wrap bits (x at bit 2b, y at bit 2b + 1), warp bits (bit
+  // TRAJECTORY_WARP_SHIFT + b) and, in alpha, its contact bits (pairContactBit; the step code
+  // needs the pairContacts and warpBits flags). Running every texel
   // from step 0 is quadratic, and the last row's invocation runs the whole run,
   // which the OS's GPU watchdog aborts (zeros, no error). So it runs in CHUNKS,
   // carrying state in an RGBA32F strip (playbackStateVariables layout, texel
@@ -1914,6 +1925,8 @@
   var TRAJECTORY_TARGET_MS = 4;
   // Written beside the data by every draw so a dropped draw is noticed.
   var TRAJECTORY_SENTINEL = 8191;
+  // Past the 2 * MAX_BODIES wrap bits; all of them stay under float32's 24 exact integer bits.
+  var TRAJECTORY_WARP_SHIFT = 2 * MAX_BODIES;
 
   function trajectoryChunkInfo(n, consts, hingeAnchors, precision) {
     // Anchored bodies are not carried: every invocation re-declares them from the scene.
@@ -2001,6 +2014,7 @@
     for (var wb = 0; wb < n; wb++) {
       wrapBits.push("(g_wrapDx" + wb + " != 0.0 ? " + fnum(Math.pow(2, 2 * wb)) + " : 0.0) + (g_wrapDy" + wb + " != 0.0 ? " + fnum(Math.pow(2, 2 * wb + 1)) + " : 0.0)");
     }
+    wrapBits.push("g_warpBits * " + fnum(Math.pow(2, TRAJECTORY_WARP_SHIFT)));
     lines.push("  if (bodyIdx == " + n + ") { outVal = vec3(gl_FragCoord.y + 0.5, TRAJECTORY_SENTINEL, " + wrapBits.join(" + ") + "); outHalf = g_pairContacts; }");
     lines.push("  pbOut0 = vec4(outVal, outHalf);");
     loNames.forEach(function (name, k) { lines.push("  " + name + " = outLo" + (k + 1) + ";"); });
@@ -2045,7 +2059,7 @@
     lines.push("");
     // Nothing here depends on maxSteps, so different run lengths reuse the program.
     var springs = springLinksFor(scene, df ? dfnum : fnum);
-    lines.push(generateStepOnceGLSL(n, consts, pairs, hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), springs, { pairContacts: true }));
+    lines.push(generateStepOnceGLSL(n, consts, pairs, hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), springs, { pairContacts: true, warpBits: true }));
     lines.push("");
     var locals = generateBodyLocalsGLSL(consts, precision) + "\n" + generateHingeAnchorLocalsGLSL(hingeAnchors, precision);
     lines.push(generateTrajectoryMainGLSL(n, locals, hingeAnchors, precision, chunk, springs));
@@ -2493,7 +2507,8 @@
         var idx = (step * logWidth + b) * 4;
         row[b] = {
           x: pixels[idx], y: pixels[idx + 1], angle: pixels[idx + 2], half: pixels[idx + 3],
-          wrapX: !!(wrapBits & (1 << (2 * b))), wrapY: !!(wrapBits & (2 << (2 * b))), contacts: 0,
+          wrapX: !!(wrapBits & (1 << (2 * b))), wrapY: !!(wrapBits & (2 << (2 * b))),
+          warped: !!(wrapBits & (1 << (TRAJECTORY_WARP_SHIFT + b))), contacts: 0,
         };
         if (loPixels.length) {
           // xLo/yLo: the position's lower words (loWordsGLSL's packing), so x + sum(xLo) is the full value.

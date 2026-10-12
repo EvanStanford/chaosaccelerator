@@ -30,7 +30,7 @@
   function shapeKey(b) { return b.type === "porthole" ? "porthole " + b.color : b.type; }
   var PROPERTY_CODES = {
     x: "x", y: "y", angle: "ang", radius: "rad", length: "len", vx: "vx", vy: "vy",
-    bounces: "bnce", distance: "dist", lifespan: "life",
+    bounces: "bnce", distance: "dist", lifespan: "life", totalRotation: "turn", warps: "warp",
   };
   var EDGE_CODES = { sticky: "stik", wrap: "wrap", infinite: "infi" };
   var DISPLAY_CODES = { standard: "std", colorzoom: "czom", gradient: "grad", laplacian: "lapl", contours: "cont", ftle: "ftle" };

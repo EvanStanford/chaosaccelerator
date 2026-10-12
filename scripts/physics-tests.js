@@ -3017,6 +3017,37 @@
   );
 
   addTest(
+    "Port Hole Warps and Cumulative Rotation read off a run count each pass and leave out the port holes' own turn",
+    "a spinning ball dropped through a pair turned a quarter apart keeps its spin, so its rotation is spin times time; the logged angle also jumps by the turn between the two port holes, which is where it came out, not rotation. The GPU log carries the warp bits the map and Inspect read",
+    function () {
+      var spin = 3, steps = 150;
+      function scene() {
+        var ball = PhysicsEngine.createCircle(420, 250, 10, false);
+        ball.w = spin;
+        return portholeScene([ball], { x: 800, y: 300, angle: Math.PI / 2 });
+      }
+      var want = spin * steps * DT, pass = true, parts = [];
+      function check(label, rows) {
+        var warps = PhysicsEngine.warpCountsFromTrajectory(rows, 2)[steps - 1];
+        var turned = PhysicsEngine.rotationsFromTrajectory(scene(), rows, 2)[steps - 1];
+        var raw = rows[steps - 1][2].angle - scene().bodies[2].angle;
+        var ok = warps === 1 && Math.abs(turned - want) < 1e-3;
+        if (!ok) pass = false;
+        parts.push(label + ": " + warps + " warp(s), rotation " + turned.toFixed(4) + " (want " + want.toFixed(4) + ", the raw angle moved " + raw.toFixed(4) + ")");
+        return rows.map(function (row) { return row[2].warped ? 1 : 0; }).join("");
+      }
+      var js = check("JS", PhysicsEngine.runTrajectory(scene(), steps, DT));
+      ["f32", "df"].forEach(function (precision) {
+        if (check(precision, PhysicsGPU.runSceneOnGPU(scene(), steps, precision)) !== js) {
+          pass = false;
+          parts.push(precision + " warped on different steps from JS");
+        }
+      });
+      return { pass: pass, detail: parts.join("; ") };
+    }
+  );
+
+  addTest(
     "The whole front face lets a ball through, the thin ends included; the back and a lone port hole bounce",
     "the front half of the oval, nothing less: a ball meeting the front near a tip goes through like one meeting the middle, a ball that clears the tip entirely touches nothing, a ball onto the back bounces, and so does one onto the only port hole in the scene",
     function () {
@@ -3890,6 +3921,8 @@
         ["one body", { body: 1, bodyB: null, property: "y" }],
         ["one body, no bodyB key at all", { body: 1, property: "y" }],
         ["bounce count", { body: 2, bodyB: null, property: "bounces" }],
+        ["cumulative rotation", { body: 2, bodyB: null, property: "totalRotation" }],
+        ["port hole warps", { body: 2, property: "warps" }],
         ["pair average", { body: 0, bodyB: 2, property: "x" }],
         ["distance", { body: 0, bodyB: 2, property: "distance" }],
       ];
@@ -3898,6 +3931,8 @@
         ["lifespan with a body set", { body: 0, property: "lifespan" }],
         ["distance without a pair", { body: 0, bodyB: null, property: "distance" }],
         ["bounces with a pair", { body: 0, bodyB: 1, property: "bounces" }],
+        ["cumulative rotation with a pair", { body: 0, bodyB: 1, property: "totalRotation" }],
+        ["warps with a pair", { body: 0, bodyB: 1, property: "warps" }],
         ["body out of range", { body: 9, bodyB: null, property: "y" }],
         ["bodyB out of range", { body: 0, bodyB: 9, property: "x" }],
         ["no mapping at all", null],
