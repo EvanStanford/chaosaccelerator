@@ -1754,10 +1754,14 @@
   function trajectoryChunkInfo(n, consts, hingeAnchors, precision) {
     // Anchored bodies are not carried: every invocation re-declares them from the scene.
     var vars = playbackStateVariables({ precision: precision, n: n, consts: consts, hingeAnchors: hingeAnchors });
+    var words = global.PhysicsDF.wordsFor(precision);
     return {
       vars: vars,
       maxSteps: TRAJECTORY_MAX_CHUNK,
       layers: playbackStateLayerCount(vars),
+      words: words,
+      // Extra render targets for the lower words of x and y, two words each (see loWordsGLSL).
+      loOutputs: Math.ceil((words - 1) / 2),
     };
   }
 
@@ -1771,7 +1775,26 @@
       "const int TRAJECTORY_CHUNK = " + chunk.maxSteps + ";",
       "const float TRAJECTORY_SENTINEL = " + TRAJECTORY_SENTINEL + ".0;",
       "layout(location = 0) out vec4 pbOut0;",
-    ].join("\n");
+    ].concat(loOutputNames(chunk).map(function (name, k) { return "layout(location = " + (k + 1) + ") out vec4 " + name + ";"; })).join("\n");
+  }
+  function loOutputNames(chunk) {
+    var names = [];
+    for (var k = 1; k <= (chunk.loOutputs || 0); k++) names.push("pbOut" + k);
+    return names;
+  }
+  // Body o's lower position words, (x.y, y.y, x.z, y.z) then (x.w, y.w, 0, 0): the hi word alone cannot tell
+  // two Inspect runs apart below float32 resolution.
+  function loWordsGLSL(o, chunk) {
+    var comps = ["x", "y", "z", "w"], lines = [];
+    for (var k = 1; k <= chunk.loOutputs; k++) {
+      var parts = [];
+      for (var w = 2 * k - 1; w <= 2 * k; w++) {
+        parts.push(w < chunk.words ? "dbody" + o + ".x." + comps[w] : "0.0");
+        parts.push(w < chunk.words ? "dbody" + o + ".y." + comps[w] : "0.0");
+      }
+      lines.push("outLo" + k + " = vec4(" + parts.join(", ") + ");");
+    }
+    return lines.join(" ");
   }
 
   function generateTrajectoryMainGLSL(n, bodyDeclarationsGLSL, hingeAnchors, precision, chunk, springs) {
@@ -1801,10 +1824,13 @@
     lines.push("  vec3 outVal = vec3(0.0);");
     // Alpha carries BODYn_HALF: the grid's hover replay needs a resize-linked body's per-point size.
     lines.push("  float outHalf = 0.0;");
+    var loNames = loOutputNames(chunk);
+    loNames.forEach(function (name, k) { lines.push("  vec4 outLo" + (k + 1) + " = vec4(0.0);"); });
     for (var o = 0; o < n; o++) {
       var half = df ? "dfToFloat(BODY" + o + "_HALF)" : "BODY" + o + "_HALF";
       lines.push((o === 0 ? "  if" : "  else if") + " (bodyIdx == " + o + ") { outVal = vec3(" +
-        readField(o, "x") + ", " + readField(o, "y") + ", " + readField(o, "angle") + "); outHalf = " + half + "; }");
+        readField(o, "x") + ", " + readField(o, "y") + ", " + readField(o, "angle") + "); outHalf = " + half + ";" +
+        (loNames.length ? " " + loWordsGLSL(o, chunk) : "") + " }");
     }
     // The column past the last body is each row's sentinel, with the step's wrap and contact bits: see the runner.
     var wrapBits = [];
@@ -1813,6 +1839,7 @@
     }
     lines.push("  if (bodyIdx == " + n + ") { outVal = vec3(gl_FragCoord.y + 0.5, TRAJECTORY_SENTINEL, " + wrapBits.join(" + ") + "); outHalf = g_pairContacts; }");
     lines.push("  pbOut0 = vec4(outVal, outHalf);");
+    loNames.forEach(function (name, k) { lines.push("  " + name + " = outLo" + (k + 1) + ";"); });
     lines.push("}");
     return lines.join("\n");
   }
@@ -2199,6 +2226,8 @@
     // The log: a column wider than the bodies for each row's sentinel...
     var logWidth = numBodies + 1;
     var texture = floatTexture(logWidth, maxSteps);
+    var loTextures = [];
+    for (var lo = 0; lo < (chunk.loOutputs || 0); lo++) loTextures.push(floatTexture(logWidth, maxSteps));
     // ...and two state strips, swapped each chunk, a texel longer for the same reason.
     var stripWidth = chunk.layers + 1;
     var states = [floatTexture(stripWidth, 1), floatTexture(stripWidth, 1)];
@@ -2206,24 +2235,31 @@
     var sentinel = new Float32Array(4);
     var failure = null;
 
+    var drawBuffers = [gl.COLOR_ATTACHMENT0];
+    loTextures.forEach(function (_, k) { drawBuffers.push(gl.COLOR_ATTACHMENT0 + 1 + k); });
     function release() {
       gl.bindFramebuffer(gl.FRAMEBUFFER, logFbo);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, null, 0);
+      loTextures.forEach(function (t, k) { gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + 1 + k, gl.TEXTURE_2D, null, 0); });
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+      gl.readBuffer(gl.COLOR_ATTACHMENT0);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.deleteFramebuffer(stateFbo);
       gl.deleteTexture(states[0]);
       gl.deleteTexture(states[1]);
       gl.deleteTexture(texture);
+      loTextures.forEach(function (t) { gl.deleteTexture(t); });
     }
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, logFbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    loTextures.forEach(function (t, k) { gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + 1 + k, gl.TEXTURE_2D, t, 0); });
     var status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
     if (status !== gl.FRAMEBUFFER_COMPLETE) {
       release();
       throw new Error("GPU physics framebuffer incomplete (status " + status + ")");
     }
-    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+    gl.drawBuffers(drawBuffers);
     gl.activeTexture(gl.TEXTURE0);
     gl.uniform1i(u.state, 0);
 
@@ -2272,9 +2308,15 @@
     entry.chunkSteps = steps;
 
     var pixels = new Float32Array(logWidth * maxSteps * 4);
+    var loPixels = loTextures.map(function () { return new Float32Array(logWidth * maxSteps * 4); });
     if (!failure) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, logFbo);
       gl.readPixels(0, 0, logWidth, maxSteps, gl.RGBA, gl.FLOAT, pixels);
+      loPixels.forEach(function (buf, k) {
+        gl.readBuffer(gl.COLOR_ATTACHMENT0 + 1 + k);
+        gl.readPixels(0, 0, logWidth, maxSteps, gl.RGBA, gl.FLOAT, buf);
+      });
+      gl.readBuffer(gl.COLOR_ATTACHMENT0);
     }
     // The readback already waited for the GPU, so the error flag is free.
     var glError = gl.getError();
@@ -2289,6 +2331,17 @@
           x: pixels[idx], y: pixels[idx + 1], angle: pixels[idx + 2], half: pixels[idx + 3],
           wrapX: !!(wrapBits & (1 << (2 * b))), wrapY: !!(wrapBits & (2 << (2 * b))), contacts: 0,
         };
+        if (loPixels.length) {
+          // xLo/yLo: the position's lower words (loWordsGLSL's packing), so x + sum(xLo) is the full value.
+          var xLo = [], yLo = [];
+          for (var w = 1; w < chunk.words; w++) {
+            var at = idx + ((w - 1) % 2) * 2, buf = loPixels[(w - 1) >> 1];
+            xLo.push(buf[at]);
+            yLo.push(buf[at + 1]);
+          }
+          row[b].xLo = xLo;
+          row[b].yLo = yLo;
+        }
       }
       // contacts: bit j set when the body touched body j in this step.
       for (var ci = 0; pairBits && ci < numBodies; ci++) {

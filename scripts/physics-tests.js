@@ -5802,6 +5802,31 @@
     }
   );
 
+  // ---- The Inspect separation plot at extended precision ----
+  addTest(
+    "An extended-precision trajectory log carries the lower words of every position",
+    "the log kept only the float32 hi word, so two Inspect runs closer than about 3e-5 read as the same place and a qf-zoom separation plot sat at zero for the first half of the run",
+    function () {
+      function build() {
+        var probe = PhysicsEngine.createCircle(600, 250, 15, false);
+        return { bodies: [probe, PhysicsEngine.createCircle(600, 400, 40, true)], hinges: [], frameWidth: 1200, frameHeight: 800, edgeMode: "infinite", mutualGravity: true, collisionsEnabled: false };
+      }
+      var STEPS = 60;
+      var js = PhysicsEngine.runTrajectory(build(), STEPS, DT);
+      var f32 = PhysicsGPU.runSceneOnGPU(build(), STEPS, "f32");
+      var df = PhysicsGPU.runSceneOnGPU(build(), STEPS, "df");
+      var shape = !!(df[0][0].xLo && df[0][0].xLo.length === 1 && df[0][0].yLo && df[0][0].yLo.length === 1) && f32[0][0].xLo === undefined;
+      var hiGap = 0, fullGap = 0;
+      for (var s = 0; s < STEPS && shape; s++) {
+        var r = df[s][0], ref = js[s][0];
+        hiGap = Math.max(hiGap, Math.abs(r.x - ref.x), Math.abs(r.y - ref.y));
+        fullGap = Math.max(fullGap, Math.abs(r.x + r.xLo[0] - ref.x), Math.abs(r.y + r.yLo[0] - ref.y));
+      }
+      var pass = shape && fullGap < 1e-7 && hiGap > 1e-6;
+      return { pass: pass, detail: "df rows carry one lower word each and f32 rows none: " + shape + "; gap to the float64 engine over " + STEPS + " steps: hi word alone " + hiGap.toExponential(2) + ", hi + lo " + fullGap.toExponential(2) };
+    }
+  );
+
   // ---- Runner / report rendering ----
 
   function renderRow(tbody, name, bugRef, outcome) {

@@ -794,9 +794,11 @@ input[type="range"] {
   color: var(--text-dim);
 }
 
+/* 3px either side: the same 18px slot as .inspect-row-icon, so a row's numbers never move when its icon changes. */
 .inspect-dot {
   width: 12px;
   height: 12px;
+  margin: 0 3px;
   flex-shrink: 0;
   border-radius: 50%;
   border: 2px solid #000;
@@ -815,9 +817,8 @@ input[type="range"] {
   color: var(--text-dim);
 }
 
-.inspect-coords {
-  flex: 1;
-  font-variant-numeric: tabular-nums;
+.inspect-row-icon svg {
+  display: block;
 }
 
 .inspect-coords-group {
@@ -826,6 +827,36 @@ input[type="range"] {
   flex-direction: column;
   gap: 2px;
   font-variant-numeric: tabular-nums;
+}
+
+.inspect-row-tag {
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.separation-plot {
+  position: relative;
+}
+#separation-canvas {
+  display: block;
+  width: 100%;
+  height: 150px;
+}
+/* Over the plot's top-left corner, right of the axis label; a faint backdrop for when the curve starts up there. */
+#separation-lambda {
+  position: absolute;
+  left: 26px;
+  top: 4px;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: rgba(27, 30, 39, 0.7);
+  font-size: 11px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+}
+#separation-lambda sub {
+  font-size: 8px;
 }
 
 .inspect-row-remove {
@@ -1256,7 +1287,8 @@ input[type="range"] {
 #perf-details {
   margin-top: 0;
 }
-#perf-details[open] > summary {
+#perf-details[open] > summary,
+#separation-details[open] > summary {
   background: #1e212b;
 }
 #perf-details[open] {

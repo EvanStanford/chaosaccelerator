@@ -207,7 +207,6 @@ html.input-coarse #app {
 }
 html.input-coarse #app textarea,
 html.input-coarse #app input,
-html.input-coarse #app .inspect-coords,
 html.input-coarse #app .inspect-coords-group {
   -webkit-user-select: text;
   user-select: text;
@@ -279,6 +278,10 @@ html.input-coarse .collapsible > summary {
 }
 html.input-coarse .collapsible[open] > summary {
   top: -17px;
+}
+/* Lifted that far, the summary would paint over the readout above it. */
+html.input-coarse #separation-details[open] {
+  margin-top: 20px;
 }
 html.input-coarse input[type="range"] {
   min-height: 32px;
@@ -551,6 +554,8 @@ html.layout-mobile-landscape #grid-dock-sheet {
 #grid-dock-sheet #btn-inspect-clear-all { order: 7; margin-top: 0; }
 #grid-dock-sheet #inspect-list { order: 8; margin-top: 0; }
 #grid-dock-sheet #inspect-list:empty { display: none; }
+#grid-dock-sheet #separation-details { order: 4; margin-top: 0; }
+#grid-dock-sheet #separation-details[open] { margin-top: 20px; }
 #grid-dock-sheet #hover-preview {
   width: min(100%, 230px);
   align-self: center;
