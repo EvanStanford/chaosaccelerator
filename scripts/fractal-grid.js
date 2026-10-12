@@ -734,10 +734,14 @@
 
   // ---- Shader assembly: view -> world (X, Y) -> offset + cascade -> step loop -> Output -> color ----
 
+  // FTLE weighs a velocity difference as the distance it covers in this long.
+  var FTLE_VELOCITY_SECONDS = 1;
+
   // precision: "f32" or "df" (same physics end to end, see physics-df.js and
-  // pickPrecision). variant: "standard" or "derived", see compileScenePieces' end.
+  // pickPrecision). variant: "standard", "derived" or "ftle", see compileScenePieces' end.
   function buildFragmentShader(sceneToCompile, precision, variant) {
     var pieces = compileScenePieces(sceneToCompile, precision);
+    if (variant === "ftle") return pieces.ftleSource();
     return variant === "derived" ? pieces.derivedSource : pieces.gridSource;
   }
 
@@ -1144,6 +1148,7 @@
       "const int MODE_GRADIENT = 1;",
       "const int MODE_LAPLACIAN = 2;",
       "const int MODE_CONTOURS = 3;",
+      "const int MODE_FTLE = 4;",
       // t per full-res pixel spans decades (<= 0.5 folded; thousandths on a wash),
       // so a LOG ramp of ~four decades; DERIVED_FLOOR is what counts as flat.
       "const float DERIVED_FLOOR = 1e-4;",
@@ -1226,6 +1231,80 @@
       "",
     ];
 
+    // ---- FTLE: the moving bodies' state difference between two neighbouring starts ----
+    // Per body: position, velocity * FTLE_VELOCITY_SECONDS, and for a line or port hole the
+    // same two for its end relative to its center. Twin of ftleMotionDelta in JS.
+    var bodyPrefix = df ? "dbody" : "body";
+    var ftleBodies = [];
+    for (var fb = 0; fb < initial.n; fb++) {
+      if (initial.consts[fb].isAnchored) continue;
+      var fbBody = sceneToCompile.bodies[fb];
+      ftleBodies.push({ index: fb, half: fbBody.type === "circle" ? 0 : fbBody.length / 2 });
+    }
+    var ftleK = ftleBodies.reduce(function (k, f) { return k + (f.half > 0 ? 8 : 4); }, 0);
+    var ftleCapture = ftleBodies.length
+      ? "FtleMotion(" + ftleBodies.map(function (f) { return bodyPrefix + f.index; }).join(", ") + ")"
+      : "FtleMotion(0.0)";
+    var ftleLines = [
+      "uniform float u_ftleInit;",
+      "uniform float u_ftleRange;",
+      "const int FTLE_K = " + Math.max(ftleK, 1) + ";",
+      "const float FTLE_VELOCITY_SECONDS = " + PhysicsGPU.fnum(FTLE_VELOCITY_SECONDS) + ";",
+      "struct FtleMotion { " + (ftleBodies.length
+        ? ftleBodies.map(function (f) { return (df ? "DBody" : "Body") + " m" + f.index + ";"; }).join(" ")
+        : "float unused;") + " };",
+      "void ftleDelta(FtleMotion p, FtleMotion m, out float d[FTLE_K]) {",
+    ];
+    if (!ftleBodies.length) ftleLines.push("  d[0] = 0.0;");
+    var ftleWrap = sceneToCompile.edgeMode === "wrap";
+    var fj = 0;
+    ftleBodies.forEach(function (f) {
+      var P = "p.m" + f.index, M = "m.m" + f.index;
+      function diff(field) { return "(" + B.toFloat(B.sub(P + "." + field, M + "." + field)) + ")"; }
+      ftleLines.push("  {", "    float dx = " + diff("x") + ";", "    float dy = " + diff("y") + ";");
+      if (ftleWrap) {
+        var fw = PhysicsGPU.fnum(sceneToCompile.frameWidth), fh = PhysicsGPU.fnum(sceneToCompile.frameHeight);
+        ftleLines.push("    dx -= " + fw + " * floor(dx / " + fw + " + 0.5);", "    dy -= " + fh + " * floor(dy / " + fh + " + 0.5);");
+      }
+      ftleLines.push("    d[" + fj++ + "] = dx;", "    d[" + fj++ + "] = dy;");
+      ftleLines.push("    d[" + fj++ + "] = " + diff("vx") + " * FTLE_VELOCITY_SECONDS;");
+      ftleLines.push("    d[" + fj++ + "] = " + diff("vy") + " * FTLE_VELOCITY_SECONDS;");
+      if (f.half > 0) {
+        // The end's offset is half * (cos a, sin a); its change is a chord, exact at any angle difference.
+        var half = PhysicsGPU.fnum(f.half);
+        ftleLines.push(
+          "    float da = " + diff("angle") + ";",
+          "    da -= 6.2831853 * floor(da / 6.2831853 + 0.5);",
+          "    float am = " + B.toFloat(M + ".angle") + ";",
+          "    float ap = am + da;",
+          "    float chord = 2.0 * " + half + " * sin(0.5 * da);",
+          "    d[" + fj++ + "] = -chord * sin(am + 0.5 * da);",
+          "    d[" + fj++ + "] = chord * cos(am + 0.5 * da);",
+          "    float wp = " + B.toFloat(P + ".w") + ";",
+          "    float wm = " + B.toFloat(M + ".w") + ";",
+          "    d[" + fj++ + "] = " + half + " * FTLE_VELOCITY_SECONDS * (wm * sin(am) - wp * sin(ap));",
+          "    d[" + fj++ + "] = " + half + " * FTLE_VELOCITY_SECONDS * (wp * cos(ap) - wm * cos(am));");
+      }
+      ftleLines.push("  }");
+    });
+    ftleLines.push(
+      "}",
+      "",
+      // c1, c2: the differences across +-x and +-y, `spacing` full-res pixels either side.
+      "float ftleT(float c1[FTLE_K], float c2[FTLE_K], float spacing) {",
+      "  float a = 0.0, b = 0.0, e = 0.0;",
+      "  for (int j = 0; j < FTLE_K; j++) { a += c1[j] * c1[j]; b += c1[j] * c2[j]; e += c2[j] * c2[j]; }",
+      "  float h = 0.5 * (a - e);",
+      // Largest singular value of the 2-column difference matrix: the most any direction stretched.
+      "  float stretch = sqrt(max(0.5 * (a + e) + sqrt(h * h + b * b), 0.0)) / spacing;",
+      "  return clamp(log(max(stretch, 1e-30) / u_ftleInit) / u_ftleRange, 0.0, 1.0);",
+      "}",
+      "",
+      "vec3 ftleColor(float t) {",
+      "  return hsl2rgb(300.0 * (1.0 - t), 1.0, 0.5);",
+      "}",
+      "");
+
     var gridTailLines = [
       "const vec2 STENCIL[4] = vec2[4](",
       "  vec2( 1.0,  0.0), vec2(-1.0,  0.0), vec2( 0.0,  1.0), vec2( 0.0, -1.0)",
@@ -1251,6 +1330,43 @@
       "",
       "void main() {",
     ];
+
+    // The FTLE program: four runs per pixel from a single call site, as with sampleOutput().
+    function ftleSource() {
+      return PhysicsGPU.pruneUnusedGLSL([].concat(gridHeaderLines, colorLibraryLines, gridPhysicsLines, ftleLines, [
+        "void sampleMotion(" + B.scalar + " worldX, " + B.scalar + " worldY, out FtleMotion motion) {",
+        initial.declarationLines.map(function (l) { return "  " + l; }).join("\n"),
+        "  " + PhysicsGridCodegen.generateCanonicalBodyDeclarationsGLSL(initial).split("\n").join("\n  "),
+        "  " + PhysicsGPU.generateHingeAnchorLocalsGLSL(initial.hingeAnchors, precision).split("\n").join("\n  "),
+        stepLoopLines,
+        "  motion = " + ftleCapture + ";",
+        "}",
+        "",
+        "const vec2 STENCIL[4] = vec2[4](",
+        "  vec2( 1.0,  0.0), vec2(-1.0,  0.0), vec2( 0.0,  1.0), vec2( 0.0, -1.0)",
+        ");",
+        "",
+        "vec3 shadeFTLE(" + B.scalar + " worldX, " + B.scalar + " worldY) {",
+        "  float eps = u_scale / u_resolution.y;",
+        "  FtleMotion plus, here;",
+        "  float c1[FTLE_K], c2[FTLE_K], d[FTLE_K];",
+        "  for (int j = 0; j < FTLE_K; j++) { c1[j] = 0.0; c2[j] = 0.0; }",
+        "  for (int k = 0; k < 4; k++) {",
+        "    vec2 o = STENCIL[k] * eps;",
+        "    sampleMotion(" + B.add("worldX", B.fromFloat("o.x")) + ", " + B.add("worldY", B.fromFloat("o.y")) + ", here);",
+        "    if (k == 0 || k == 2) { plus = here; continue; }",
+        "    ftleDelta(plus, here, d);",
+        "    for (int j = 0; j < FTLE_K; j++) { if (k == 1) c1[j] = d[j]; else c2[j] = d[j]; }",
+        "  }",
+        "  return ftleColor(ftleT(c1, c2, 1.0));",
+        "}",
+        "",
+        "void main() {",
+      ], worldCoordLines, [
+        "  fragColor = vec4(shadeFTLE(worldX, worldY), 1.0);",
+        "}",
+      ]).join("\n"));
+    }
 
     var gridMainLines = [
       // Standard stays INLINE, not a call to sampleOutput(): measured, the call
@@ -1292,6 +1408,9 @@
         ["void main() {"], worldCoordLines, gridMainLines, standardTailLines).join("\n")),
       derivedSource: PhysicsGPU.pruneUnusedGLSL([].concat(gridHeaderLines, colorLibraryLines, gridPhysicsLines, sampleOutputLines, deltaTLines,
         gridTailLines, worldCoordLines, gridMainLines, derivedTailLines).join("\n")),
+      ftleSource: ftleSource,
+      ftleLines: ftleLines,
+      ftleCapture: ftleCapture,
       precision: df ? "df" : "f32",
       initial: initial,
       outScalar: outScalar,
@@ -1487,6 +1606,8 @@
       bounceMax: gl.getUniformLocation(prog, "u_bounceMax"),
       displayMode: gl.getUniformLocation(prog, "u_displayMode"),
       sampleField: gl.getUniformLocation(prog, "u_sampleField"),
+      ftleInit: gl.getUniformLocation(prog, "u_ftleInit"),
+      ftleRange: gl.getUniformLocation(prog, "u_ftleRange"),
     };
     frictionLocations(prog, pass.uniforms);
     pass.status = "ready";
@@ -1923,7 +2044,8 @@
 
   // Which of a scene's two programs the display mode calls for.
   function wantedVariant() {
-    return displayMode && displayMode.id !== 0 ? "derived" : "standard";
+    if (!displayMode || displayMode.id === 0) return "standard";
+    return displayMode.value === "ftle" ? "ftle" : "derived";
   }
 
   // Above float32: the sliced programs, or the single-draw one on a device
@@ -1998,12 +2120,14 @@
   var DISPLAY_MODES = [
     { id: 0, value: "standard", label: "Standard", samples: 1,
       blurb: "The Output value itself, straight through the rainbow ramp." },
-    { id: 1, value: "gradient", label: "Gradient", samples: 5,
-      blurb: "Steepness and direction of change, as brightness and hue." },
     { id: 2, value: "laplacian", label: "Laplacian", samples: 5,
       blurb: "Ridges and dips by sign as hue." },
     { id: 3, value: "contours", label: "Contours", samples: 5,
       blurb: "Concentric lines of equal magnitude." },
+    { id: 4, value: "ftle", label: "FTLE", samples: 5,
+      blurb: "Finite-Time Lyapunov Exponent: Rate of separation between neighboring simulations as hue." },
+    { id: 1, value: "gradient", label: "Gradient", samples: 5,
+      blurb: "Steepness and direction of change, as brightness and hue." },
   ];
   function displayModeByValue(value) {
     for (var i = 0; i < DISPLAY_MODES.length; i++) {
@@ -2392,6 +2516,54 @@
   }
 
   // Draws one sub-lattice: rendered pixel (i, j) carries full-res pixel (i*stride + originX, j*stride + originY).
+  // ---- FTLE scale ----
+  // JS twin of the GLSL ftleDelta: the moving bodies' state difference between scenes p and m.
+  function ftleMotionDelta(p, m) {
+    var d = [];
+    p.bodies.forEach(function (bp, i) {
+      var bm = m.bodies[i];
+      if (bp.isAnchored) return;
+      var dx = bp.x - bm.x, dy = bp.y - bm.y;
+      if (scene.edgeMode === "wrap") {
+        dx -= scene.frameWidth * Math.floor(dx / scene.frameWidth + 0.5);
+        dy -= scene.frameHeight * Math.floor(dy / scene.frameHeight + 0.5);
+      }
+      d.push(dx, dy, (bp.vx - bm.vx) * FTLE_VELOCITY_SECONDS, (bp.vy - bm.vy) * FTLE_VELOCITY_SECONDS);
+      if (bp.type === "circle") return;
+      var half = bp.length / 2, da = bp.angle - bm.angle;
+      da -= 2 * Math.PI * Math.floor(da / (2 * Math.PI) + 0.5);
+      var am = bm.angle, ap = am + da, chord = 2 * half * Math.sin(0.5 * da);
+      d.push(-chord * Math.sin(am + 0.5 * da), chord * Math.cos(am + 0.5 * da),
+        half * FTLE_VELOCITY_SECONDS * ((bm.w || 0) * Math.sin(am) - (bp.w || 0) * Math.sin(ap)),
+        half * FTLE_VELOCITY_SECONDS * ((bp.w || 0) * Math.cos(ap) - (bm.w || 0) * Math.cos(am)));
+    });
+    return d;
+  }
+  // Largest stretch per map unit of the starting states, near the authored start.
+  // Parameter Inputs (radius, length) move no state at the start: 1 then.
+  var ftleInitFor = null, ftleInitValue = 1;
+  function ftleInitStretch() {
+    if (ftleInitFor === scene) return ftleInitValue;
+    var h = 0.5, offset = PhysicsGridCodegen.computeOffsetSceneNumeric;
+    var c1 = ftleMotionDelta(offset(scene, h, 0), offset(scene, -h, 0));
+    var c2 = ftleMotionDelta(offset(scene, 0, h), offset(scene, 0, -h));
+    var a = 0, b = 0, e = 0;
+    for (var j = 0; j < c1.length; j++) { a += c1[j] * c1[j]; b += c1[j] * c2[j]; e += c2[j] * c2[j]; }
+    var half = 0.5 * (a - e);
+    var stretch = Math.sqrt(Math.max(0.5 * (a + e) + Math.sqrt(half * half + b * b), 0)) / (2 * h);
+    ftleInitFor = scene;
+    ftleInitValue = stretch > 1e-9 ? stretch : 1;
+    return ftleInitValue;
+  }
+  // u_ftleInit: starting separation of neighbours one full-res pixel either side. u_ftleRange: the
+  // log stretch at which they are a scene apart, the top of the hue ramp at this zoom.
+  function setFtleUniforms(u) {
+    if (!u.ftleInit || displayMode.value !== "ftle") return;
+    var init = 2 * (view.scale / canvas.height) * ftleInitStretch();
+    gl.uniform1f(u.ftleInit, init);
+    gl.uniform1f(u.ftleRange, Math.max(1, Math.log(Math.hypot(scene.frameWidth, scene.frameHeight) / init)));
+  }
+
   // Caller owns framebuffer/viewport/scissor. u_resolution is always the FULL-res canvas size, never the target's.
   function drawSublattice(stride, originX, originY, steps) {
     var pass = useCurrentPass();
@@ -2409,6 +2581,7 @@
     gl.uniform1i(pass.uniforms.durationSteps, simulationSteps);
     gl.uniform1f(pass.uniforms.bounceMax, bounceMaxValue);
     gl.uniform1i(pass.uniforms.displayMode, displayMode.id);
+    setFtleUniforms(pass.uniforms);
     noteGpuActivity("grid draw " + pass.precision + " stride " + stride + ", " + (steps === undefined ? renderedSteps() : steps) + " steps");
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   }
@@ -3282,7 +3455,7 @@
       var seed = INITIAL_PIXEL_BUDGET;
       var reference = ladderBudgets[passKey("f32", "standard")];
       if (reference && reference.throughput > 0) {
-        var ratio = (sliced ? PRECISION_COST_PRIOR[precision] || DF_COST_PRIOR : 1) * (variant === "derived" ? DERIVED_COST_PRIOR : 1);
+        var ratio = (sliced ? PRECISION_COST_PRIOR[precision] || DF_COST_PRIOR : 1) * (variant !== "standard" ? DERIVED_COST_PRIOR : 1);
         seed = clamp(reference.throughput * BUDGET_SAFETY / ratio, floor, MAX_PIXEL_BUDGET);
       } else if (sliced) {
         seed = INITIAL_PIXEL_BUDGET / (PRECISION_COST_PRIOR[precision] || DF_COST_PRIOR);
@@ -6591,6 +6764,31 @@
         "  return gradientColor(g);",
         "}",
         "",
+      ],
+      pieces.ftleLines,
+      ["FtleMotion motionAt(ivec2 texel) {"],
+      indentLines(PhysicsGridCodegen.generatePlaybackStateDeclarationsGLSL(vars), "  "),
+      indentLines(PhysicsGridCodegen.generatePlaybackStateLoadGLSL(vars, "u_state", "texel"), "  "),
+      [
+        "  return " + pieces.ftleCapture + ";",
+        "}",
+        "",
+        "vec3 shadeStencilFTLE(ivec2 texel) {",
+        "  float c1[FTLE_K], c2[FTLE_K];",
+        "  ftleDelta(motionAt(texel + ivec2(1, 0)), motionAt(texel + ivec2(2, 0)), c1);",
+        "  ftleDelta(motionAt(texel + ivec2(3, 0)), motionAt(texel + ivec2(4, 0)), c2);",
+        "  return ftleColor(ftleT(c1, c2, 1.0));",
+        "}",
+        "",
+        // Neighbouring texels are u_gridStride full-res pixels apart.
+        "vec3 shadePlaybackFTLE(ivec2 texel) {",
+        "  ivec2 hi = u_stateSize - 1;",
+        "  float c1[FTLE_K], c2[FTLE_K];",
+        "  ftleDelta(motionAt(clamp(texel + ivec2(1, 0), ivec2(0), hi)), motionAt(clamp(texel - ivec2(1, 0), ivec2(0), hi)), c1);",
+        "  ftleDelta(motionAt(clamp(texel + ivec2(0, 1), ivec2(0), hi)), motionAt(clamp(texel - ivec2(0, 1), ivec2(0), hi)), c2);",
+        "  return ftleColor(ftleT(c1, c2, u_gridStride));",
+        "}",
+        "",
         "void main() {",
         "  ivec2 targetPixel = ivec2(gl_FragCoord.xy) - u_targetOrigin;",
         "  ivec2 texel = ivec2(targetPixel.x * u_stencil, targetPixel.y);",
@@ -6599,6 +6797,10 @@
         pieces.hasGoal ? "  if (goalNextAt(texel) >= GOAL_LENGTH) t = -1.0;" : "",
         "  if (u_sampleField) { fragColor = vec4(t, 0.0, 0.0, 1.0); return; }",
         pieces.hasGoal ? "  if (t < 0.0) { fragColor = vec4(0.0); return; }" : "",
+        "  if (u_displayMode == MODE_FTLE) {",
+        "    fragColor = vec4(u_stencil == 5 ? shadeStencilFTLE(texel) : shadePlaybackFTLE(texel), 1.0);",
+        "    return;",
+        "  }",
         "  if (u_displayMode != MODE_STANDARD) {",
         "    fragColor = vec4(u_stencil == 5 ? shadeStencilDerived(texel, outputValue, t)",
         "                                    : shadePlaybackDerived(texel, outputValue, t), 1.0);",
@@ -6611,7 +6813,7 @@
   }
 
   var PLAYBACK_STEP_UNIFORMS = ["resolution", "gridStride", "gridOrigin", "centerHi", "centerLo", "centerLo2", "centerLo3", "scale", "state", "init", "baseStep", "steps", "group", "tileOrigin", "stencil"];
-  var PLAYBACK_COLOR_UNIFORMS = ["state", "stateSize", "stateSteps", "gridStride", "colorZoom", "lowSaturation", "durationSteps", "bounceMax", "displayMode", "targetOrigin", "stencil", "sampleField"];
+  var PLAYBACK_COLOR_UNIFORMS = ["state", "stateSize", "stateSteps", "gridStride", "colorZoom", "lowSaturation", "durationSteps", "bounceMax", "displayMode", "targetOrigin", "stencil", "sampleField", "ftleInit", "ftleRange"];
 
   function finishedPlaybackProgram(build, uniformNames) {
     var prog = build.program;
@@ -6920,6 +7122,7 @@
     gl.uniform1i(u.durationSteps, simulationSteps);
     gl.uniform1f(u.bounceMax, opts.bounceMax === undefined ? bounceMaxValue : opts.bounceMax);
     gl.uniform1i(u.displayMode, displayMode.id);
+    setFtleUniforms(u);
     gl.uniform2i(u.targetOrigin, x, y);
     gl.uniform1i(u.stencil, spec.stencil);
     gl.uniform1i(u.sampleField, opts.sample ? 1 : 0);
@@ -7276,6 +7479,7 @@
     gl.uniform1i(u.durationSteps, simulationSteps);
     gl.uniform1f(u.bounceMax, bounceMaxValue);
     gl.uniform1i(u.displayMode, displayMode.id);
+    setFtleUniforms(u);
     gl.uniform2i(u.targetOrigin, 0, 0);
     gl.uniform1i(u.stencil, 1);
     gl.uniform1i(u.sampleField, 0);

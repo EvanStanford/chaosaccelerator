@@ -33,7 +33,7 @@
     bounces: "bnce", distance: "dist", lifespan: "life",
   };
   var EDGE_CODES = { sticky: "stik", wrap: "wrap", infinite: "infi" };
-  var DISPLAY_CODES = { standard: "std", colorzoom: "czom", gradient: "grad", laplacian: "lapl", contours: "cont" };
+  var DISPLAY_CODES = { standard: "std", colorzoom: "czom", gradient: "grad", laplacian: "lapl", contours: "cont", ftle: "ftle" };
   var PRECISIONS = ["f32", "df", "tf", "qf", "auto"];
 
   function invert(map) {
