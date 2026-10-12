@@ -274,6 +274,7 @@
   var separationDetails = document.getElementById("separation-details");
   var separationCanvas = document.getElementById("separation-canvas");
   var separationLambda = document.getElementById("separation-lambda");
+  var separationPlayhead = document.getElementById("separation-playhead");
   var separationLambdaValue = document.getElementById("separation-lambda-value");
   var tipPopover = document.getElementById("tip-popover");
   var tipPopoverText = document.getElementById("tip-popover-text");
@@ -3025,7 +3026,13 @@
     var top = Math.log10(max);
     return { top: top, bottom: Math.min(Math.log10(min), top - 1) };
   }
+  // The drawn plot's frame: axes box, step count, log scale and values, for the curve and the playhead.
+  var separationLayout = null;
+  function separationX(l, s) { return l.left + (l.steps > 1 ? s / (l.steps - 1) : 0.5) * l.plotW; }
+  function separationY(l, v) { return l.top + l.plotH - (Math.log10(v) - l.scale.bottom) / (l.scale.top - l.scale.bottom) * l.plotH; }
   function drawSeparationPlot() {
+    separationLayout = null;
+    updateSeparationPlayhead();
     var pair = separationPair();
     if (!pair || !separationDetails.open) return;
     var width = separationCanvas.parentNode.clientWidth;
@@ -3058,29 +3065,27 @@
     ctx.textAlign = "right";
     ctx.fillText(String(steps), left + plotW, height - 16);
     ctx.textAlign = "center";
-    ctx.fillText("Frames", left + plotW / 2, height - 4);
+    ctx.fillText("Frame", left + plotW / 2, height - 4);
     ctx.save();
     ctx.translate(10, top + plotH / 2);
     ctx.rotate(-Math.PI / 2);
     ctx.fillText("Separation (log)", 0, 0);
     ctx.restore();
 
-    function xAt(s) { return left + (steps > 1 ? s / (steps - 1) : 0.5) * plotW; }
-    function yAt(scale, v) { return top + plotH - (Math.log10(v) - scale.bottom) / (scale.top - scale.bottom) * plotH; }
+    var l = { left: left, top: top, plotW: plotW, plotH: plotH, steps: steps, scale: separationScale(series.distance), distance: series.distance };
     // One stroke per run of positive values, each opened with a hair of a segment so a lone sample still
     // paints (a bare moveTo draws nothing).
-    var scale = separationScale(series.distance);
     ctx.lineWidth = 1.5;
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
-    if (scale) {
+    if (l.scale) {
       ctx.strokeStyle = accent;
       ctx.beginPath();
       var pen = false;
       for (var s = 0; s < steps; s++) {
         var v = series.distance[s];
         if (!(v > 0) || !isFinite(v)) { pen = false; continue; }
-        var x = xAt(s), y = yAt(scale, v);
+        var x = separationX(l, s), y = separationY(l, v);
         if (pen) ctx.lineTo(x, y); else { ctx.moveTo(x, y); ctx.lineTo(x + 0.01, y); }
         pen = true;
       }
@@ -3093,6 +3098,19 @@
     separationLambda.hidden = series.lambda === null;
     // Snapped so a hair below zero never prints as -0.000.
     if (series.lambda !== null) separationLambdaValue.textContent = (Math.abs(series.lambda) < 5e-4 ? 0 : series.lambda).toFixed(3);
+    separationLayout = l;
+    updateSeparationPlayhead();
+  }
+  // The playback bar's thumb over the plot: at the frame on screen, on the curve, or on the axis where the
+  // curve has no value there. Past the plot's last frame (both runs stopped) it parks at the end.
+  function updateSeparationPlayhead() {
+    var l = separationLayout;
+    if (!l || !playbackHasSession) { separationPlayhead.hidden = true; return; }
+    var s = Math.min(l.steps - 1, Math.floor(playbackStep)), v = l.distance[s];
+    var onCurve = l.scale && v > 0 && isFinite(v);
+    separationPlayhead.style.left = separationX(l, s) + "px";
+    separationPlayhead.style.top = (onCurve ? separationY(l, v) : l.top + l.plotH) + "px";
+    separationPlayhead.hidden = false;
   }
   function updateSeparationPlot() {
     var pair = separationPair();
@@ -5079,10 +5097,12 @@
     hoverPlayPauseBtn.disabled = !enabled;
     hoverProgressSlider.disabled = !enabled;
     hoverResetBtn.disabled = !enabled;
+    updateSeparationPlayhead();
   }
 
   function updateProgressSliderPosition() {
     hoverProgressSlider.value = String(Math.floor(playbackStep));
+    updateSeparationPlayhead();
   }
 
   // Auto-advance ceiling: the latest final frame on screen. Recomputed per call, since inspected points change under a running session.

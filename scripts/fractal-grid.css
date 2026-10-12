@@ -842,6 +842,17 @@ input[type="range"] {
   width: 100%;
   height: 150px;
 }
+/* The playback bar's thumb, on the curve at the frame being shown. */
+#separation-playhead {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-panel);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
 /* Over the plot's top-left corner, right of the axis label; a faint backdrop for when the curve starts up there. */
 #separation-lambda {
   position: absolute;
