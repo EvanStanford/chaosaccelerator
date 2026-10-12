@@ -84,33 +84,49 @@
     if (top >>> 31) m = -m;
     return { m: m, e: exponent === 0 ? -1074 : exponent - 1075 };
   }
+  // Two exact values added; a zero never drags the exponent down.
+  function addExact(a, b) {
+    if (a.m === BigInt(0)) return b;
+    if (b.m === BigInt(0)) return a;
+    var e = Math.min(a.e, b.e);
+    return { m: (a.m << BigInt(a.e - e)) + (b.m << BigInt(b.e - e)), e: e };
+  }
+  // hi + lo === m * 2^e exactly.
+  function exactSum(hi, lo) {
+    return addExact(exactParts(hi), exactParts(lo));
+  }
   function pow10(n) {
     var r = BigInt(1), ten = BigInt(10);
     for (var i = 0; i < n; i++) r *= ten;
     return r;
   }
 
-  // hi + lo, rounded to `decimals` places, trailing zeros dropped.
-  function formatDD(hi, lo, decimals) {
-    hi = Number(hi) || 0; lo = Number(lo) || 0;
-    if (!HAS_BIGINT || lo === 0) return trimFixed(hi.toFixed(Math.min(decimals, 100)));
-    var a = exactParts(hi), b = exactParts(lo);
-    var e = Math.min(a.e, b.e);
-    var m = (a.m << BigInt(a.e - e)) + (b.m << BigInt(b.e - e));
-    var scaled = m * pow10(decimals);
-    var negative = scaled < BigInt(0);
-    if (negative) scaled = -scaled;
-    var n;
-    if (e >= 0) {
-      n = scaled << BigInt(e);
-    } else {
-      var den = BigInt(1) << BigInt(-e);
-      n = (scaled + (den >> BigInt(1))) / den; // to nearest, halves away from zero
-    }
-    var digits = n.toString();
+  // num / den (den > 0) to `decimals` places, halves away from zero, trailing zeros kept.
+  function fixedRatio(num, den, decimals) {
+    var negative = num < BigInt(0);
+    if (negative) num = -num;
+    var two = BigInt(2);
+    var digits = ((num * pow10(decimals) * two + den) / (den * two)).toString();
     while (digits.length <= decimals) digits = "0" + digits;
     var cut = digits.length - decimals;
-    return trimFixed((negative ? "-" : "") + digits.slice(0, cut) + (decimals ? "." + digits.slice(cut) : ""));
+    return (negative ? "-" : "") + digits.slice(0, cut) + (decimals ? "." + digits.slice(cut) : "");
+  }
+
+  // hi + lo to `decimals` places, trailing zeros kept and never "-0": for showing.
+  function fixedDD(hi, lo, decimals) {
+    hi = Number(hi) || 0; lo = Number(lo) || 0;
+    var text;
+    if (!HAS_BIGINT || lo === 0) {
+      text = hi.toFixed(Math.min(decimals, 100));
+    } else {
+      var x = exactSum(hi, lo);
+      text = x.e >= 0 ? fixedRatio(x.m << BigInt(x.e), BigInt(1), decimals) : fixedRatio(x.m, BigInt(1) << BigInt(-x.e), decimals);
+    }
+    return /^-[0.]*$/.test(text) ? text.slice(1) : text;
+  }
+  // hi + lo, rounded to `decimals` places, trailing zeros dropped.
+  function formatDD(hi, lo, decimals) {
+    return trimFixed(fixedDD(hi, lo, decimals));
   }
   function trimFixed(text) {
     if (text.indexOf(".") !== -1) text = text.replace(/0+$/, "").replace(/\.$/, "");
@@ -129,24 +145,43 @@
     return negative ? -v : v;
   }
 
+  // p / q (q > 0) as a double-double: the nearest double, then what it misses.
+  function ddFromRatio(p, q) {
+    var hi = ratioToNumber(p, q);
+    var h = exactParts(hi), r, rq = q;
+    if (h.e >= 0) {
+      r = p - (h.m << BigInt(h.e)) * q;
+    } else {
+      r = (p << BigInt(-h.e)) - h.m * q;
+      rq = q << BigInt(-h.e);
+    }
+    var lo = ratioToNumber(r, rq);
+    var sum = hi + lo, bb = sum - hi;
+    return [sum, (hi - (sum - bb)) + (lo - bb)];
+  }
+
   var PLAIN_DECIMAL_RE = /^-?(?:\d+\.?\d*|\.\d+)$/;
+  // A plain decimal's exact value, num / den.
+  function decimalRatio(text) {
+    var negative = text.charAt(0) === "-";
+    var body = negative ? text.slice(1) : text;
+    var dot = body.indexOf(".");
+    var fraction = dot === -1 ? "" : body.slice(dot + 1);
+    var num = BigInt(((dot === -1 ? body : body.slice(0, dot)) + fraction) || "0");
+    return { num: negative ? -num : num, den: pow10(fraction.length) };
+  }
   function parseDD(text, what) {
     // Bounded so a hostile link can't buy seconds of BigInt arithmetic.
     if (text.length > 80 || !PLAIN_DECIMAL_RE.test(text)) return [parseNum(text, what), 0];
     var hi = Number(text);
     if (!HAS_BIGINT || !isFinite(hi)) return [hi, 0];
-    var negative = text.charAt(0) === "-";
-    var body = negative ? text.slice(1) : text;
-    var dot = body.indexOf(".");
-    var fraction = dot === -1 ? "" : body.slice(dot + 1);
-    var s = BigInt(((dot === -1 ? body : body.slice(0, dot)) + fraction) || "0");
-    if (negative) s = -s;
-    var h = exactParts(hi), q = pow10(fraction.length), p;
+    var exact = decimalRatio(text);
+    var h = exactParts(hi), q = exact.den, p;
     if (h.e >= 0) {
-      p = s - (h.m << BigInt(h.e)) * q;
+      p = exact.num - (h.m << BigInt(h.e)) * q;
     } else {
       var two = BigInt(1) << BigInt(-h.e);
-      p = s * two - h.m * q;
+      p = exact.num * two - h.m * q;
       q *= two;
     }
     var lo = ratioToNumber(p, q);
@@ -309,33 +344,72 @@
 
   // ---- The map's view ---- what FractalGrid.shareState() hands over and applyShareView()
   // takes back: { center: {x, xLo, y, yLo}, scale, zoom, display, lowSaturation, precision, speed,
-  // volume, inspect: [{type, a, b, count|size, twoPart}], movie: {keyframes, size: {width, height}, antialias, loop, subject, background, filled, pace} }.
+  // volume, inspect: [{type, a, b, count|size, twoPart, places}], movie: {keyframes, size: {width, height}, antialias, loop, subject, background, filled, pace} }.
   // A movie's subject is "map" (its keyframes) or "inspect" (the Inspect tab's points, played once, on a
   // "plain", "grid" or "black" background, bodies it outlines drawn solid if filled, slowed to a pace of 0.5 or 0.25).
   // A keyframe is {center, zoom, step, seconds, friction}; seconds and friction (a fraction 0 to 0.99) are null when unset.
-  // Inspect points are (u, v) in VIEW HEIGHTS FROM THE CENTER, not world coordinates.
+  // Inspect a and b are world points {x, xLo, y, yLo}, written as view heights from the center to the places
+  // (centerDecimals) of the zoom they were picked at; places is written only when it isn't the view's own.
 
-  function uvNum(v) {
-    v = Number(v) || 0;
-    return num(Math.abs(v) < 1e6 ? Math.round(v * 1e9) / 1e9 : v);
+  // The center and zoom as a reader of the link gets them back.
+  function inspectFrame(center, zoom) {
+    var scale = SCALE_AT_ZOOM_ONE / zoom;
+    return { x: center.x, xLo: center.xLo, y: center.y, yLo: center.yLo, scale: scale, places: centerDecimals(scale) };
   }
-  function encodeInspect(group) {
-    if (group.type === "point") return "p:" + uvNum(group.a[0]) + ":" + uvNum(group.a[1]);
-    var ends = [uvNum(group.a[0]), uvNum(group.a[1]), uvNum(group.b[0]), uvNum(group.b[1])].join(":");
-    if (group.type === "line") return "l:" + ends + ":" + group.count;
-    return "g:" + ends + ":" + group.size + (group.twoPart ? "t" : "");
+  // (hi + lo - centerHi - centerLo) / scale, exactly, to `decimals` places.
+  function offsetText(hi, lo, centerHi, centerLo, scale, decimals) {
+    hi = Number(hi) || 0; lo = Number(lo) || 0;
+    if (!HAS_BIGINT) return trimFixed((((hi - centerHi) + (lo - centerLo)) / scale).toFixed(Math.min(decimals, 100)));
+    var d = addExact(exactSum(hi, lo), exactSum(-centerHi, -centerLo)), s = exactParts(scale);
+    var num = d.m, den = s.m;
+    if (d.e >= s.e) num <<= BigInt(d.e - s.e);
+    else den <<= BigInt(s.e - d.e);
+    return trimFixed(fixedRatio(num, den, decimals));
   }
-  function decodeInspect(text) {
-    var parts = text.split(":"), what = "insp";
-    if (parts[0] === "p" && parts.length === 3) {
-      return { type: "point", a: [parseNum(parts[1], what), parseNum(parts[2], what)] };
+  // center + text * scale, exactly, as a double-double. Older links wrote floats, some with exponents.
+  function offsetPoint(text, centerHi, centerLo, scale, what) {
+    var u = parseNum(text, what);
+    if (!HAS_BIGINT) return [centerHi + u * scale, 0];
+    var num, den;
+    if (text.length <= 100 && PLAIN_DECIMAL_RE.test(text)) {
+      var exact = decimalRatio(text);
+      num = exact.num; den = exact.den;
+    } else {
+      var x = exactParts(u);
+      num = x.e >= 0 ? x.m << BigInt(x.e) : x.m;
+      den = x.e >= 0 ? BigInt(1) : BigInt(1) << BigInt(-x.e);
     }
-    if ((parts[0] !== "l" && parts[0] !== "g") || parts.length !== 6) throw new Error("insp has an entry that is not a point, line or grid");
-    var group = {
-      type: parts[0] === "l" ? "line" : "grid",
-      a: [parseNum(parts[1], what), parseNum(parts[2], what)],
-      b: [parseNum(parts[3], what), parseNum(parts[4], what)],
-    };
+    // (center * den + num * scale) / den
+    var c = exactSum(centerHi, centerLo), s = exactParts(scale);
+    var p = addExact({ m: c.m * den, e: c.e }, { m: num * s.m, e: s.e });
+    return p.e >= 0 ? ddFromRatio(p.m << BigInt(p.e), den) : ddFromRatio(p.m, den << BigInt(-p.e));
+  }
+
+  function encodeInspect(group, frame) {
+    var places = group.places >= 0 ? Math.min(45, Math.round(group.places)) : frame.places;
+    var decimals = Math.min(60, Math.max(0, Math.ceil(places + Math.log10(frame.scale))));
+    function at(p) {
+      return offsetText(p.x, p.xLo, frame.x, frame.xLo, frame.scale, decimals) + ":" + offsetText(p.y, p.yLo, frame.y, frame.yLo, frame.scale, decimals);
+    }
+    var text;
+    if (group.type === "point") text = "p:" + at(group.a);
+    else if (group.type === "line") text = "l:" + at(group.a) + ":" + at(group.b) + ":" + group.count;
+    else text = "g:" + at(group.a) + ":" + at(group.b) + ":" + group.size + (group.twoPart ? "t" : "");
+    return places === frame.places ? text : text + ":" + places;
+  }
+  function decodeInspect(text, frame) {
+    var parts = text.split(":"), what = "insp";
+    var length = parts[0] === "p" ? 3 : 6;
+    if ((parts[0] !== "p" && parts[0] !== "l" && parts[0] !== "g") || (parts.length !== length && parts.length !== length + 1)) {
+      throw new Error("insp has an entry that is not a point, line or grid");
+    }
+    function at(i) {
+      var x = offsetPoint(parts[i], frame.x, frame.xLo, frame.scale, what), y = offsetPoint(parts[i + 1], frame.y, frame.yLo, frame.scale, what);
+      return { x: x[0], xLo: x[1], y: y[0], yLo: y[1] };
+    }
+    var places = parts.length > length ? Math.min(45, parseIndex(parts[length], "insp's places")) : frame.places;
+    if (parts[0] === "p") return { type: "point", a: at(1), places: places };
+    var group = { type: parts[0] === "l" ? "line" : "grid", a: at(1), b: at(3), places: places };
     if (group.type === "line") {
       group.count = parseIndex(parts[5], "insp's sample count");
     } else {
@@ -392,6 +466,8 @@
 
   function encodeView(view) {
     var fields = [];
+    // Inspect points are written against the center and zoom as a reader gets them back.
+    var center = { x: 0, xLo: 0, y: 0, yLo: 0 }, readZoom = 1;
     if (view.center) {
       var decimals = decimalsFor(view);
       var cx = formatDD(view.center.x, view.center.xLo, decimals), cy = formatDD(view.center.y, view.center.yLo, decimals);
@@ -399,13 +475,19 @@
       if (cy !== "0") fields.push("ctry:" + cy);
       var zoom = zoomNum(view.zoom);
       if (zoom !== "1") fields.push("zoom:" + zoom);
+      var x = parseDD(cx, "ctrx"), y = parseDD(cy, "ctry");
+      center = { x: x[0], xLo: x[1], y: y[0], yLo: y[1] };
+      readZoom = Number(zoom) > 0 ? Number(zoom) : 1;
     }
     if (view.display && view.display !== "standard") fields.push("disp:" + DISPLAY_CODES[view.display]);
     if (view.lowSaturation === true) fields.push("lsat:t");
     if (view.precision && view.precision !== "f32") fields.push("prec:" + view.precision);
     if (view.speed !== undefined && num(view.speed) !== "1") fields.push("sped:" + num(view.speed));
     if (view.volume !== undefined && num(view.volume) !== "1") fields.push("snd:" + num(view.volume));
-    if (view.inspect && view.inspect.length) fields.push("insp:" + view.inspect.map(encodeInspect).join(";"));
+    if (view.inspect && view.inspect.length) {
+      var frame = inspectFrame(center, readZoom);
+      fields.push("insp:" + view.inspect.map(function (group) { return encodeInspect(group, frame); }).join(";"));
+    }
     var movie = view.movie;
     var hasKeyframes = movie && movie.keyframes && movie.keyframes.length, ofInspect = movie && movie.subject === "inspect";
     if (hasKeyframes) fields.push("kfrm:" + movie.keyframes.map(encodeKeyframe).join(";"));
@@ -430,15 +512,18 @@
     }
     var cx = attempt("ctrx", function (t) { return parseDD(t, "ctrx"); }, [0, 0]);
     var cy = attempt("ctry", function (t) { return parseDD(t, "ctry"); }, [0, 0]);
+    var center = { x: cx[0], xLo: cx[1], y: cy[0], yLo: cy[1] };
+    var zoom = attempt("zoom", function (t) { return parseZoom(t, "zoom"); }, 1);
+    var frame = inspectFrame(center, zoom);
     return {
-      center: { x: cx[0], xLo: cx[1], y: cy[0], yLo: cy[1] },
-      zoom: attempt("zoom", function (t) { return parseZoom(t, "zoom"); }, 1),
+      center: center,
+      zoom: zoom,
       display: attempt("disp", function (t) { return DISPLAYS_BY_CODE[t] || "standard"; }, "standard"),
       lowSaturation: attempt("lsat", function (t) { return parseBool(t, "lsat"); }, false),
       precision: attempt("prec", function (t) { return PRECISIONS.indexOf(t) === -1 ? "f32" : t; }, "f32"),
       speed: attempt("sped", function (t) { return parseNum(t, "sped"); }, 1),
       volume: attempt("snd", function (t) { return Math.min(1, Math.max(0, parseNum(t, "snd"))); }, 1),
-      inspect: attempt("insp", function (t) { return splitList(t).map(decodeInspect); }, []),
+      inspect: attempt("insp", function (t) { return splitList(t).map(function (entry) { return decodeInspect(entry, frame); }); }, []),
       movie: {
         keyframes: attempt("kfrm", function (t) { return splitList(t).map(decodeKeyframe); }, []),
         size: attempt("size", parseMovieSize, { width: DEFAULT_MOVIE_SIZE.width, height: DEFAULT_MOVIE_SIZE.height }),
@@ -505,6 +590,7 @@
     parseNum: parseNum,
     parseIndex: parseIndex,
     formatDD: formatDD,
+    fixedDD: fixedDD,
     parseDD: parseDD,
     centerDecimals: centerDecimals,
   };

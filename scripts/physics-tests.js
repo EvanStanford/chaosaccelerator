@@ -5018,22 +5018,36 @@
     function () {
       var scene = everythingScene();
       var center = PhysicsDF.twoSum64(213.41826094537, 3.1e-15);
+      // A world point (u, v) view heights from the center; 14 places is this view's own.
+      function at(u, v) {
+        var x = PhysicsDF.twoSum64(center[0], center[1] + u * 1e-5), y = PhysicsDF.twoSum64(-88.0421795513, v * 1e-5);
+        return { x: x[0], xLo: x[1], y: y[0], yLo: y[1] };
+      }
       var view = {
         center: { x: center[0], xLo: center[1], y: -88.0421795513, yLo: 0 }, scale: 1e-5, zoom: (200 / 0.17) / 1e-5,
         display: "colorzoom", lowSaturation: true, precision: "tf", speed: 4, volume: 0.35,
         inspect: [
-          { type: "point", a: [0.0115, -0.0075] },
-          { type: "line", a: [-0.2875, -0.1018], b: [0.2973, 0.143], count: 45 },
-          { type: "grid", a: [-0.3691, -0.1426], b: [0.3925, 0.2246], size: 5, twoPart: true },
-          { type: "grid", a: [0.1, 0.1], b: [0.2, 0.2], size: 2, twoPart: false },
+          { type: "point", a: at(0.0115, -0.0075), places: 14 },
+          { type: "line", a: at(-0.2875, -0.1018), b: at(0.2973, 0.143), count: 45, places: 14 },
+          { type: "grid", a: at(-0.3691, -0.1426), b: at(0.3925, 0.2246), size: 5, twoPart: true, places: 20 },
+          { type: "grid", a: at(0.1, 0.1), b: at(0.2, 0.2), size: 2, twoPart: false, places: 14 },
         ],
       };
+      function near(p, q, places) {
+        var tolerance = Math.pow(10, -places);
+        return !!q && Math.abs((q.x - p.x) + (q.xLo - p.xLo)) <= tolerance && Math.abs((q.y - p.y) + (q.yLo - p.yLo)) <= tolerance;
+      }
+      function sameGroup(group, i) {
+        var got = back.inspect[i];
+        return !!got && got.type === group.type && got.places === group.places && got.count === group.count && got.size === group.size &&
+          !!got.twoPart === !!group.twoPart && near(group.a, got.a, group.places) && (!group.b || near(group.b, got.b, group.places));
+      }
       var fragment = ShareUrl.encode({ page: "map", scene: scene, view: view });
       var back = ShareUrl.decode(fragment).view;
       var viewOk = back.display === "colorzoom" && back.lowSaturation === true && back.precision === "tf" && back.speed === 4 && back.volume === 0.35 &&
         Math.abs(back.zoom / view.zoom - 1) < 1e-9 && back.center.y === view.center.y &&
         Math.abs((back.center.x - view.center.x) + (back.center.xLo - view.center.xLo)) < 1e-14 &&
-        canonicalJSON(back.inspect) === canonicalJSON(view.inspect);
+        back.inspect.length === view.inspect.length && view.inspect.every(sameGroup);
       var untouched = ShareUrl.encode({
         page: "map", scene: scene,
         view: { center: { x: 0, xLo: 0, y: 0, yLo: 0 }, scale: 200 / 0.17, zoom: 1, display: "standard", lowSaturation: false, precision: "f32", speed: 1, volume: 1, inspect: [] },
@@ -5043,6 +5057,65 @@
         pass: viewOk && bare,
         detail: "view round trip " + (viewOk ? "exact" : "DIFFERS: " + canonicalJSON(back)) + "; untouched view adds nothing=" + bare +
           "; view fields: " + fragment.slice(fragment.indexOf("frmh:") + 9),
+      };
+    }
+  );
+
+  addTest(
+    "An Inspect point in a link keeps the digits of the zoom it was picked at, however far out the view is",
+    "share-url.js's insp field - a point is written as view heights from the link's center, which a view zoomed far out from where the point was picked can't hold in a float. The offsets are worked out exactly against the center and zoom as the link writes them, to the point's own places (written only when they differ from the view's), so it comes back within a millionth of its own pixel at every depth. Links from before places existed still read as they did",
+    function () {
+      if (typeof BigInt !== "function") return { pass: true, detail: "no BigInt in this browser: points keep float64 precision" };
+      function exact(x) {
+        var bitsView = new DataView(new ArrayBuffer(8));
+        bitsView.setFloat64(0, x);
+        var top = bitsView.getUint32(0), low = bitsView.getUint32(4), ex = (top >>> 20) & 0x7FF;
+        var m = BigInt(top & 0xFFFFF) * BigInt(4294967296) + BigInt(low);
+        if (ex) m += BigInt(4503599627370496);
+        return { m: (top >>> 31) ? -m : m, e: ex ? ex - 1075 : -1074 };
+      }
+      function ddDistance(a0, a1, b0, b1) { // |(a0 + a1) - (b0 + b1)|, exactly, then as a float
+        var parts = [exact(a0), exact(a1), exact(-b0), exact(-b1)].filter(function (p) { return p.m !== BigInt(0); });
+        if (!parts.length) return 0;
+        var e = Math.min.apply(null, parts.map(function (p) { return p.e; }));
+        var sum = BigInt(0);
+        parts.forEach(function (p) { sum += p.m << BigInt(p.e - e); });
+        if (sum < BigInt(0)) sum = -sum;
+        var cut = Math.max(0, sum.toString(2).length - 60);
+        return Number(sum >> BigInt(cut)) * Math.pow(2, e + cut);
+      }
+      var seed = 20261012;
+      function random() { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; }
+      var scene = everythingScene(), worst = 0, worstAt = "", wrongPlaces = 0, unstable = 0;
+      for (var i = 0; i < 300; i++) {
+        var pickZoom = Math.pow(10, random() * 26), pickScale = (200 / 0.17) / pickZoom;
+        var cx = PhysicsDF.twoSum64((random() - 0.5) * 400, (random() - 0.5) * 1e-14), cy = PhysicsDF.twoSum64((random() - 0.5) * 400, (random() - 0.5) * 1e-14);
+        var px = PhysicsDF.twoSum64(cx[0], cx[1] + (random() - 0.5) * pickScale), py = PhysicsDF.twoSum64(cy[0], cy[1] + (random() - 0.5) * pickScale);
+        var point = { x: px[0], xLo: px[1], y: py[0], yLo: py[1] }, places = ShareUrl.centerDecimals(pickScale);
+        // Shared from a view zoomed out by up to the whole range, centered somewhere else.
+        var zoom = pickZoom / Math.pow(10, random() * Math.log10(pickZoom));
+        var linkCenter = PhysicsDF.twoSum64(cx[0] + (random() - 0.5) * (200 / 0.17) / zoom, 0);
+        var view = { center: { x: linkCenter[0], xLo: linkCenter[1], y: cy[0], yLo: cy[1] }, scale: (200 / 0.17) / zoom, zoom: zoom,
+          inspect: [{ type: "point", a: point, places: places }] };
+        var fragment = ShareUrl.encode({ page: "map", scene: scene, view: view });
+        var got = ShareUrl.decode(fragment).view.inspect[0];
+        var pixels = Math.max(ddDistance(got.a.x, got.a.xLo, point.x, point.xLo), ddDistance(got.a.y, got.a.yLo, point.y, point.yLo)) / (pickScale / 1000);
+        if (pixels > worst) { worst = pixels; worstAt = "picked at " + pickZoom.toExponential(1) + "x, shared at " + zoom.toExponential(1) + "x"; }
+        if (got.places !== places) wrongPlaces++;
+        if (ShareUrl.encode(ShareUrl.decode(fragment)) !== fragment) unstable++;
+      }
+      var old = ShareUrl.decode("#map/body:ci:0:0:0:30,ctrx:-14.318359,ctry:57.44,zoom:3.2,insp:p:.0115:.0075;l:-.2875:-.1018:.2973:.143:30;p:1e-7:-2.5e-8").view;
+      var oldScale = (200 / 0.17) / 3.2;
+      function oldAt(p, u, v) {
+        return Math.abs((p.x + p.xLo) - (-14.318359 + u * oldScale)) < 1e-12 && Math.abs((p.y + p.yLo) - (57.44 + v * oldScale)) < 1e-12;
+      }
+      var oldOk = old.inspect.length === 3 && oldAt(old.inspect[0].a, 0.0115, 0.0075) && oldAt(old.inspect[1].a, -0.2875, -0.1018) &&
+        oldAt(old.inspect[1].b, 0.2973, 0.143) && old.inspect[1].count === 30 && oldAt(old.inspect[2].a, 1e-7, -2.5e-8) &&
+        old.inspect.every(function (group) { return group.places === ShareUrl.centerDecimals(oldScale); });
+      return {
+        pass: worst <= 1e-6 && wrongPlaces === 0 && unstable === 0 && oldOk,
+        detail: "worst of 300 points: " + worst.toExponential(2) + " of its own pixel (" + worstAt + "); places wrong " + wrongPlaces +
+          "; re-encoded differently " + unstable + "; links from before places read as they did=" + oldOk,
       };
     }
   );
@@ -5220,7 +5293,7 @@
       mapView.movie = { keyframes: [], size: { width: 640, height: 360 }, antialias: false, loop: false };
       var silent = !/kfrm|size|aa:|loop/.test(ShareUrl.encode({ page: "map", scene: scene, view: mapView }));
       // A movie of the Inspect tab: the view, its points, the size and the look; and a map with points keeps the size.
-      var inspectView = { center: { x: 1.5, xLo: 0, y: -2, yLo: 0 }, scale: 100, zoom: 3, speed: 2, volume: 0.5, inspect: [{ type: "point", a: [0.0115, -0.0075] }],
+      var inspectView = { center: { x: 1.5, xLo: 0, y: -2, yLo: 0 }, scale: 100, zoom: 3, speed: 2, volume: 0.5, inspect: [{ type: "point", a: { x: 6, xLo: 0, y: -4.9, yLo: 0 } }],
         movie: { keyframes: [], size: { width: 1000, height: 1000 }, antialias: true, loop: true, subject: "inspect", background: "grid", filled: true, pace: 0.25 } };
       var inspectBack = ShareUrl.decode(ShareUrl.encode({ page: "movi", scene: scene, view: inspectView })).view;
       var inspectOk = inspectBack.movie.subject === "inspect" && inspectBack.movie.background === "grid" && inspectBack.movie.filled === true && inspectBack.movie.pace === 0.25 &&

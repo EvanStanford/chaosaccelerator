@@ -852,10 +852,13 @@ input[type="range"] {
 
 .inspect-coords-group {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
   font-variant-numeric: tabular-nums;
+  /* Deep zooms give long coordinates. */
+  overflow-wrap: anywhere;
 }
 
 .inspect-row-tag {

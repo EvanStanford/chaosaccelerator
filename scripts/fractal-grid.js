@@ -2888,6 +2888,14 @@
     return svg;
   }
 
+  // Decimal places for a millionth of a pixel at the view's zoom (ShareUrl.centerDecimals).
+  function viewPlaces() { return ShareUrl.centerDecimals(view.scale); }
+  // A world point's x and y to a tenth of a pixel at the zoom whose places are given.
+  function coordTexts(p, places) {
+    var shown = Math.max(0, places - 5);
+    return [ShareUrl.fixedDD(p.x, p.xLo || 0, shown), ShareUrl.fixedDD(p.y, p.yLo || 0, shown)];
+  }
+
   function updateInspectList() {
     inspectListEl.innerHTML = "";
     var pair = separationDetails.open ? separationPair() : null;
@@ -2916,7 +2924,8 @@
       var corners = group.type === "point" ? [group.points[0].worldPoint] : [group.startWorld, group.endWorld];
       corners.forEach(function (p) {
         var line = document.createElement("div");
-        line.textContent = p.x.toFixed(6) + ", " + p.y.toFixed(6);
+        var text = coordTexts(p, group.places);
+        line.textContent = text[0] + ", " + text[1];
         coords.appendChild(line);
       });
       if (plotted) {
@@ -3193,19 +3202,20 @@
     };
   }
 
-  function lockPointAt(worldPoint) {
+  // places: ShareUrl.centerDecimals at the zoom the group was picked at; the view's when left out.
+  function lockPointAt(worldPoint, places) {
     if (totalInspectedPointCount() >= MAX_INSPECT_POINTS) return;
     var entry = computeTrajectoryEntry(worldPoint);
     if (!entry) return; // leave whatever was inspected before (if anything) alone
     entry.color = lockedPointColor(nextColorIndex);
     nextColorIndex++;
-    inspectedGroups.push({ type: "point", points: [entry] });
+    inspectedGroups.push({ type: "point", points: [entry], places: places === undefined ? viewPlaces() : places });
     disarmInspect();
     updateInspectUI();
   }
 
   // Inspect (Line) drag. Past MAX_INSPECT_POINTS only the first `available` points are added.
-  function lockLineOfPoints(startWorld, endWorld, sampleCount) {
+  function lockLineOfPoints(startWorld, endWorld, sampleCount, places) {
     sampleCount = sampleCount || inspectLineSampleCount;
     var available = MAX_INSPECT_POINTS - totalInspectedPointCount();
     if (available <= 0) return; // stays armed: Clear All (or removing a point) might free up room to retry
@@ -3219,13 +3229,18 @@
       points.push(entry);
     }
     disarmInspect();
-    if (points.length > 0) inspectedGroups.push({ type: "line", points: points, startWorld: startWorld, endWorld: endWorld, sampleCount: sampleCount });
+    if (points.length > 0) {
+      inspectedGroups.push({
+        type: "line", points: points, startWorld: startWorld, endWorld: endWorld, sampleCount: sampleCount,
+        places: places === undefined ? viewPlaces() : places,
+      });
+    }
     updateInspectUI();
   }
 
   // Inspect (Grid) drag. All-or-nothing (a partial grid reads as broken), staying armed on failure. The layout is
   // resolved from Grid Settings once, here: a later settings change only affects the NEXT drag.
-  function lockGridOfPoints(startWorld, endWorld, gridSize, twoPart) {
+  function lockGridOfPoints(startWorld, endWorld, gridSize, twoPart, places) {
     if (gridSize === undefined) { gridSize = inspectGridSize; twoPart = inspectGridTwoPart; }
     var layout = computeGridLayout(gridSize, twoPart);
     var worldPoints = evenlySpacedGrid(startWorld, endWorld, layout.size, layout.size)
@@ -3259,6 +3274,7 @@
       // What it was made with (the resolved layout can't be read back), for share links.
       gridSize: gridSize,
       twoPart: !!twoPart,
+      places: places === undefined ? viewPlaces() : places,
     });
     disarmInspect();
     updateInspectUI();
@@ -5666,7 +5682,8 @@
         : PhysicsEngine.computeOutputValue(offsetScene, scene.output);
       hoverCanvas.style.backgroundColor = hoverOutputColor(outputColorT(v0));
     }
-    hoverReadout.textContent = "X: " + worldPoint.x.toFixed(5) + ", Y: " + worldPoint.y.toFixed(5) + " - loading replay…";
+    var hovered = coordTexts(worldPoint, viewPlaces());
+    hoverReadout.textContent = "X: " + hovered[0] + ", Y: " + hovered[1] + " - loading replay\u2026";
   }
 
   // From the per-frame duration only (so replay length is proportional to step count), times
@@ -5721,7 +5738,8 @@
     }
 
     if (shown) {
-      hoverReadout.textContent = "X: " + activeReplay.worldPoint.x.toFixed(5) + ", Y: " + activeReplay.worldPoint.y.toFixed(5) +
+      var replayed = coordTexts(activeReplay.worldPoint, viewPlaces());
+      hoverReadout.textContent = "X: " + replayed[0] + ", Y: " + replayed[1] +
         " - Step " + (shown.step + 1) + " / " + activeReplay.trajectory.length;
     } else {
       var overallMaxStep = playbackClockCeiling();
@@ -8641,9 +8659,9 @@
   var pendingInspectFrames = 0;
 
   function describeInspectGroup(group) {
-    if (group.type === "point") return { type: "point", a: group.points[0].worldPoint };
-    if (group.type === "line") return { type: "line", a: group.startWorld, b: group.endWorld, count: group.sampleCount };
-    return { type: "grid", a: group.startWorld, b: group.endWorld, size: group.gridSize, twoPart: group.twoPart };
+    if (group.type === "point") return { type: "point", a: group.points[0].worldPoint, places: group.places };
+    if (group.type === "line") return { type: "line", a: group.startWorld, b: group.endWorld, count: group.sampleCount, places: group.places };
+    return { type: "grid", a: group.startWorld, b: group.endWorld, size: group.gridSize, twoPart: group.twoPart, places: group.places };
   }
 
   // One group a frame, none until the map has drawn a couple of frames (each
@@ -8656,9 +8674,9 @@
     if (effectivePrecision() !== wanted && precisionPending(wanted)) return;
     var next = pendingInspect.shift();
     if (!pendingInspect.length) pendingInspect = null;
-    if (next.type === "point") lockPointAt(next.a);
-    else if (next.type === "line") lockLineOfPoints(next.a, next.b, next.count);
-    else lockGridOfPoints(next.a, next.b, next.size, next.twoPart);
+    if (next.type === "point") lockPointAt(next.a, next.places);
+    else if (next.type === "line") lockLineOfPoints(next.a, next.b, next.count, next.places);
+    else lockGridOfPoints(next.a, next.b, next.size, next.twoPart, next.places);
     // A last group that failed to lock leaves the button as it was.
     if (!pendingInspect) updateMovieInspectButton();
   }
@@ -8668,11 +8686,7 @@
     var shared = {};
     Object.keys(scene).forEach(function (k) { shared[k] = scene[k]; });
     shared.simulationSteps = simulationSteps;
-    var inspect = inspectedGroups.map(describeInspectGroup).concat(pendingInspect || []).map(function (group) {
-      var out = { type: group.type, a: worldPointToUV(group.a), count: group.count, size: group.size, twoPart: group.twoPart };
-      if (group.b) out.b = worldPointToUV(group.b);
-      return out;
-    });
+    var inspect = inspectedGroups.map(describeInspectGroup).concat(pendingInspect || []);
     return {
       scene: shared,
       view: {
@@ -8725,8 +8739,9 @@
     var groups = shared.inspect.map(function (group) {
       return {
         type: group.type,
-        a: worldPointAtUV(group.a[0], group.a[1]),
-        b: group.b ? worldPointAtUV(group.b[0], group.b[1]) : null,
+        a: group.a,
+        b: group.b || null,
+        places: group.places,
         count: clamp(group.count || 0, 2, INSPECT_LINE_SAMPLE_MAX),
         size: clamp(group.size || 0, Number(inspectGridSizeSlider.min) || 1, Number(inspectGridSizeSlider.max) || 8),
         twoPart: !!group.twoPart,
