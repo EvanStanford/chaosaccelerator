@@ -30,9 +30,10 @@
   // acceleration by dt * phi(x), x = DF_FRICTION * dt, phi = (1 - e^-x)/x. phi is a series sized to the
   // word count; both factors are precomputed for the whole-step leg, which is nearly all of them.
 
-  // 1/(n+1)! coefficients until the first dropped term is below the last word at x = friction * DT.
+  // 1/(n+1)! coefficients until the first dropped term is below the last word at the longest leg, a hit
+  // body's kick of 1.5 steps.
   function phiLiterals(friction, words) {
-    var x = friction * FIXED_DT, bound = Math.pow(2, -(24 * words + 8)), lits = [];
+    var x = 1.5 * friction * FIXED_DT, bound = Math.pow(2, -(24 * words + 8)), lits = [];
     for (var n = 0; n < 40; n++) {
       lits.push(words > 2 ? PhysicsDF.literal(PhysicsDF.rationalWords(big(n % 2 ? -1 : 1), bigFactorial(n + 1), words)) : d((n % 2 ? -1 : 1) / factorial(n + 1)));
       if (Math.pow(x, n + 1) / factorial(n + 2) < bound) break;
@@ -78,10 +79,8 @@
     return { DF_FRICTION: PhysicsDF.splitWords(rate, 0, words), DF_FRICTION_STEP_DECAY: f[0], DF_FRICTION_STEP_PHI: f[1] };
   }
   function advanceVelocityGLSL(friction) {
-    var floor = global.PhysicsEngine.FRICTION_FLOOR;
     var lines = [
-    "DVec2 dfDragAndCap(DVec2 v, MF dt) {",
-    floor ? "  v = dv2Scale(v, dfSub(DF_ONE, dfMul(" + d(floor) + ", dt)));" : "",
+    "DVec2 dfCapSpeed(DVec2 v) {",
     "  MF sq = dv2LengthSq(v);",
     "  if (dfGreater(sq, dfSqr(DF_MAX_SPEED))) v = dv2Scale(v, dfDiv(DF_MAX_SPEED, dfSqrt(sq)));",
     "  return v;",
@@ -106,7 +105,7 @@
       "  MF s = dfMul(dt, phi);",
       "  v.x = dfAdd(dfMul(v.x, decay), dfMul(accel.x, s));",
       "  v.y = dfAdd(dfMul(v.y, decay), dfMul(accel.y, s));",
-      "  return dfDragAndCap(v, dt);",
+      "  return dfCapSpeed(v);",
       "}",
       // Plain gravity: its x component is zero, and a df multiply-add of zero is real work.
       "DVec2 dfAdvanceVelocityGravity(DVec2 v, MF dt) {",
@@ -114,18 +113,18 @@
       "  dfFrictionLeg(dt, decay, phi);",
       "  v.x = dfMul(v.x, decay);",
       "  v.y = dfAdd(dfMul(v.y, decay), dfMul(DF_GRAVITY, dfMul(dt, phi)));",
-      "  return dfDragAndCap(v, dt);",
+      "  return dfCapSpeed(v);",
       "}");
     } else {
       lines.push(
       "DVec2 dfAdvanceVelocity(DVec2 v, MF dt, DVec2 accel) {",
       "  v.x = dfAdd(v.x, dfMul(accel.x, dt));",
       "  v.y = dfAdd(v.y, dfMul(accel.y, dt));",
-      "  return dfDragAndCap(v, dt);",
+      "  return dfCapSpeed(v);",
       "}",
       "DVec2 dfAdvanceVelocityGravity(DVec2 v, MF dt) {",
       "  v.y = dfAdd(v.y, dfMul(DF_GRAVITY, dt));",
-      "  return dfDragAndCap(v, dt);",
+      "  return dfCapSpeed(v);",
       "}");
     }
     return lines.filter(Boolean).join("\n");
@@ -144,6 +143,7 @@
     "const MF DF_POSITION_PERCENT = " + d(POSITION_PERCENT) + ";",
     // 1/60 is inexact in binary, so unlike the float32 DT this carries extra digits.
     "const MF DF_DT = " + d(FIXED_DT) + ";",
+    "const MF DF_HALF_DT = " + d(FIXED_DT / 2) + ";",
     "const MF DF_GRAVITY = " + d(global.PhysicsEngine.GRAVITY) + ";",
     "const MF DF_ZERO = MF(0.0);",
     "const MF DF_ONE = DF_ONE_CONST;",

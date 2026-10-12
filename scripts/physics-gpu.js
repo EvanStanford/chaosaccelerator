@@ -28,22 +28,20 @@
   // ---- The reusable GLSL physics library: a direct port of physics-engine.js ----
 
   function factorial(n) { var r = 1; for (var i = 2; i <= n; i++) r *= i; return r; }
-  // phi(x) = (1 - e^-x)/x, six terms: x = FRICTION * dt stays under 0.08, so the rest is below float32.
+  // phi(x) = (1 - e^-x)/x, six terms: x = FRICTION * dt stays under 0.12 (a kick leg runs to 1.5 steps), so the
+  // rest is below float32.
   function frictionPhiGLSL() {
     var expr = fnum(-1 / factorial(6));
     for (var n = 4; n >= 0; n--) expr = fnum((n % 2 ? -1 : 1) / factorial(n + 1)) + " + x * (" + expr + ")";
     return "float frictionPhi(float x) {\n  return " + expr + ";\n}";
   }
   // PhysicsEngine.advanceVelocity; accel is the body's whole acceleration (per-body under Mutual Gravity).
-  // With friction the leg is the exact solution of dv/dt = a - FRICTION v; at 0 the text has no friction in
-  // it beyond the floor's line, which every scene has always had.
+  // With friction the leg is the exact solution of dv/dt = a - FRICTION v; at 0 the text has no friction in it.
   function advanceVelocityGLSL(friction) {
-    var floor = global.PhysicsEngine.FRICTION_FLOOR;
     return [
       friction > 0 ? frictionPhiGLSL() : "",
       "vec2 advanceVelocity(vec2 v, float dt, vec2 accel) {",
       friction > 0 ? "  float x = FRICTION * dt, phi = frictionPhi(x);\n  v = v * (1.0 - x * phi) + accel * (dt * phi);" : "  v += accel * dt;",
-      floor ? "  v *= 1.0 - " + fnum(floor) + " * dt;" : "",
       "  float sq = dot(v, v);",
       "  if (sq > MAX_SPEED * MAX_SPEED) v *= MAX_SPEED / sqrt(sq);",
       "  return v;",
@@ -790,13 +788,20 @@
     // One generator, two spellings: df has no operators, so dfAdd(a, b) where f32 says a + b.
     var E = df ? {
       body: "dbody", bodyType: "DBody", scalarType: "MF", vecType: "DVec2",
-      DT: "DF_DT",
+      DT: "DF_DT", halfDT: "DF_HALF_DT",
       zero: "DF_ZERO",
       vec: function (x, y) { return "dv2(" + x + ", " + y + ")"; },
       add: function (a, b) { return "dfAdd(" + a + ", " + b + ")"; },
       sub: function (a, b) { return "dfSub(" + a + ", " + b + ")"; },
       mul: function (a, b) { return "dfMul(" + a + ", " + b + ")"; },
       min: function (a, b) { return "dfMin(" + a + ", " + b + ")"; },
+      less: function (a, b) { return "dfLess(" + a + ", " + b + ")"; },
+      div: function (a, b) { return "dfDiv(" + a + ", " + b + ")"; },
+      neg: function (a) { return "dfNeg(" + a + ")"; },
+      vadd: function (a, b) { return "dv2Add(" + a + ", " + b + ")"; },
+      vsub: function (a, b) { return "dv2Sub(" + a + ", " + b + ")"; },
+      rotateBy: function (v, sn, cs) { return "dv2RotateBy(" + v + ", " + sn + ", " + cs + ")"; },
+      spinOk: function (w) { return "!dfGreater(dfMul(dfAbs(" + w + "), DF_DT), DF_ONE)"; },
       negVec: function (v) { return "dv2Neg(" + v + ")"; },
       zeroVec: "dv2Zero()",
       advanceVelocity: "dfAdvanceVelocity", noContact: "dfNoContact()",
@@ -807,13 +812,20 @@
       solveHingeVelocity: "dfSolveHingeVelocity", solveHingePosition: "dfSolveHingePosition",
     } : {
       body: "body", bodyType: "Body", scalarType: "float", vecType: "vec2",
-      DT: "DT",
+      DT: "DT", halfDT: "0.5 * DT",
       zero: "0.0",
       vec: function (x, y) { return "vec2(" + x + ", " + y + ")"; },
       add: function (a, b) { return "(" + a + ") + (" + b + ")"; },
       sub: function (a, b) { return "(" + a + ") - (" + b + ")"; },
       mul: function (a, b) { return "(" + a + ") * (" + b + ")"; },
       min: function (a, b) { return "min(" + a + ", " + b + ")"; },
+      less: function (a, b) { return a + " < " + b; },
+      div: function (a, b) { return "(" + a + ") / (" + b + ")"; },
+      neg: function (a) { return "-(" + a + ")"; },
+      vadd: function (a, b) { return "(" + a + ") + (" + b + ")"; },
+      vsub: function (a, b) { return "(" + a + ") - (" + b + ")"; },
+      rotateBy: function (v, sn, cs) { return "rotateBy(" + v + ", " + sn + ", " + cs + ")"; },
+      spinOk: function (w) { return "abs(" + w + ") * DT <= " + fnum(global.PhysicsEngine.HINGE_SHAKE_SPIN_LIMIT); },
       negVec: function (v) { return "-" + v; },
       zeroVec: "vec2(0.0)",
       advanceVelocity: "advanceVelocity", noContact: "noContact()",
@@ -1158,6 +1170,132 @@
     }
     lines.push("");
 
+    // ---- Hinge impulses for the start pose: PhysicsEngine.shakeHinges, unrolled ----
+    // Hinges with a side that can move; the free bodies they move; each side as the engine sees it.
+    var shaken = hingeAnchors.filter(function (hg) {
+      return !((hg.aIsWorld || consts[hg.a].isAnchored) && consts[hg.b].isAnchored);
+    });
+    var shakeBodies = [];
+    shaken.forEach(function (hg) {
+      [hg.aIsWorld ? null : hg.a, hg.b].forEach(function (idx) {
+        if (idx !== null && !consts[idx].isAnchored && shakeBodies.indexOf(idx) === -1) shakeBodies.push(idx);
+      });
+    });
+    shakeBodies.sort(function (a, b) { return a - b; });
+    var shakeSides = shaken.map(function (hg, h) {
+      function side(idx, isWorld, param, sign) {
+        if (isWorld) return { fixed: param, world: true };
+        if (consts[idx].isAnchored) return { fixed: "shF" + param, body: idx, param: param };
+        return { body: idx, sign: sign, param: param, r0: "shR0" + param };
+      }
+      return [side(hg.a, hg.aIsWorld, "HINGE" + h + "_A", -1), side(hg.b, false, "HINGE" + h + "_B", 1)];
+    });
+    var H = shaken.length, N = 2 * H, shakeIters = global.PhysicsEngine.hingeShakeIterations(H);
+    function shJ(r, c) { return "shJ" + r + "_" + c; }
+    if (H) {
+      shakeBodies.forEach(function (i) {
+        lines.push("  " + E.scalarType + " shW" + i + " = " + (turned[i] ? spinExpr(i, E.DT) : B(i) + ".w") + ";");
+        lines.push("  " + E.vecType + " shDv" + i + " = " + E.zeroVec + "; " + E.scalarType + " shDw" + i + " = " + E.zero + ";");
+        lines.push(df
+          ? "  MF shS0_" + i + ", shC0_" + i + "; dfSinCos(" + B(i) + ".angle, shS0_" + i + ", shC0_" + i + ");"
+          : "  float shS0_" + i + " = sin(" + B(i) + ".angle), shC0_" + i + " = cos(" + B(i) + ".angle);");
+      });
+      lines.push("  bool shOk = " + shakeBodies.map(function (i) { return E.spinOk("shW" + i); }).join(" && ") + ";");
+      shaken.forEach(function (hg, h) {
+        shakeSides[h].forEach(function (sd) {
+          if (sd.world) return;
+          if (sd.fixed) {
+            // An anchored body: its anchor stays where it is all step.
+            var arm = df ? "dfRotate(" + sd.param + ".x, " + sd.param + ".y, " + B(sd.body) + ".angle)" : "rotateVec(" + sd.param + ", " + B(sd.body) + ".angle)";
+            lines.push("  " + E.vecType + " " + sd.fixed + " = " + E.vadd(E.vec(B(sd.body) + ".x", B(sd.body) + ".y"), arm) + ";");
+            return;
+          }
+          lines.push("  " + E.vecType + " " + sd.r0 + " = " + E.rotateBy(sd.param, "shS0_" + sd.body, "shC0_" + sd.body) + ";");
+        });
+      });
+      lines.push("  if (shOk) {");
+      lines.push("    for (int sh = 0; sh < " + shakeIters + "; sh++) {");
+      shakeBodies.forEach(function (i) {
+        lines.push("      " + E.scalarType + " shAE" + i + " = " + E.add(B(i) + ".angle", E.mul(E.add("shW" + i, "shDw" + i), E.DT)) + ";");
+        lines.push(df
+          ? "      MF shSE" + i + ", shCE" + i + "; dfSinCos(shAE" + i + ", shSE" + i + ", shCE" + i + ");"
+          : "      float shSE" + i + " = sin(shAE" + i + "), shCE" + i + " = cos(shAE" + i + ");");
+        lines.push("      " + E.vecType + " shPE" + i + " = " + E.vec(
+          E.add(B(i) + ".x", E.mul(E.add("vFull" + i + ".x", "shDv" + i + ".x"), E.DT)),
+          E.add(B(i) + ".y", E.mul(E.add("vFull" + i + ".y", "shDv" + i + ".y"), E.DT))) + ";");
+      });
+      shaken.forEach(function (hg, h) {
+        var ends = shakeSides[h].map(function (sd, k) {
+          if (sd.fixed) return sd.fixed;
+          var arm = "shRE" + sd.param;
+          lines.push("      " + E.vecType + " " + arm + " = " + E.rotateBy(sd.param, "shSE" + sd.body, "shCE" + sd.body) + ";");
+          return E.vadd("shPE" + sd.body, arm);
+        });
+        lines.push("      " + E.vecType + " shG" + h + " = " + E.vsub(ends[1], ends[0]) + ";");
+      });
+      for (var r = 0; r < N; r++) {
+        lines.push("      " + E.scalarType + " " + (function () {
+          var decl = [];
+          for (var c = 0; c < N; c++) decl.push(shJ(r, c) + " = " + E.zero);
+          return decl.join(", ");
+        })() + ";");
+      }
+      shaken.forEach(function (hg, h) {
+        lines.push("      " + E.scalarType + " shB" + (2 * h) + " = " + E.div(E.neg("shG" + h + ".x"), E.DT) + ", shB" + (2 * h + 1) + " = " + E.div(E.neg("shG" + h + ".y"), E.DT) + ";");
+      });
+      // dGap_h / dP_k: every body both hinges touch, end arm of h paired with start arm of k.
+      function addTo(name, expr, plus) {
+        return name + " = " + (plus ? E.add(name, expr) : E.sub(name, expr)) + ";";
+      }
+      shaken.forEach(function (hg, h) {
+        shaken.forEach(function (hk, k) {
+          shakeSides[h].forEach(function (sh) {
+            if (sh.fixed) return;
+            shakeSides[k].forEach(function (sk) {
+              if (sk.fixed || sk.body !== sh.body) return;
+              var plus = sh.sign === sk.sign, m = "BODY" + sh.body + "_INV_MASS", inv = "BODY" + sh.body + "_INV_INERTIA";
+              var rn = "shRE" + sh.param, r0 = sk.r0;
+              lines.push("      " + addTo(shJ(2 * h, 2 * k), E.add(m, E.mul(E.mul(inv, rn + ".y"), r0 + ".y")), plus));
+              lines.push("      " + addTo(shJ(2 * h, 2 * k + 1), E.mul(E.mul(E.neg(inv), rn + ".y"), r0 + ".x"), plus));
+              lines.push("      " + addTo(shJ(2 * h + 1, 2 * k), E.mul(E.mul(E.neg(inv), rn + ".x"), r0 + ".y"), plus));
+              lines.push("      " + addTo(shJ(2 * h + 1, 2 * k + 1), E.add(m, E.mul(E.mul(inv, rn + ".x"), r0 + ".x")), plus));
+            });
+          });
+        });
+      });
+      // Elimination without pivoting, then back substitution, in the engine's order.
+      for (var ei = 0; ei < N; ei++) {
+        for (var ej = ei + 1; ej < N; ej++) {
+          var f = "shF" + ej + "_" + ei;
+          lines.push("      " + E.scalarType + " " + f + " = " + E.div(shJ(ej, ei), shJ(ei, ei)) + ";");
+          for (var ek = ei + 1; ek < N; ek++) lines.push("      " + shJ(ej, ek) + " = " + E.sub(shJ(ej, ek), E.mul(f, shJ(ei, ek))) + ";");
+          lines.push("      shB" + ej + " = " + E.sub("shB" + ej, E.mul(f, "shB" + ei)) + ";");
+        }
+      }
+      for (var bi = N - 1; bi >= 0; bi--) {
+        var sum = "shB" + bi;
+        for (var bj = bi + 1; bj < N; bj++) sum = E.sub(sum, E.mul(shJ(bi, bj), "shB" + bj));
+        lines.push("      shB" + bi + " = " + E.div(sum, shJ(bi, bi)) + ";");
+      }
+      shaken.forEach(function (hg, h) {
+        var Px = "shB" + (2 * h), Py = "shB" + (2 * h + 1);
+        shakeSides[h].forEach(function (sd) {
+          if (sd.fixed) return;
+          var plus = sd.sign > 0, m = "BODY" + sd.body + "_INV_MASS", inv = "BODY" + sd.body + "_INV_INERTIA";
+          lines.push("      " + addTo("shDv" + sd.body + ".x", E.mul(Px, m), plus));
+          lines.push("      " + addTo("shDv" + sd.body + ".y", E.mul(Py, m), plus));
+          lines.push("      " + addTo("shDw" + sd.body, E.mul(inv, E.sub(E.mul(sd.r0 + ".x", Py), E.mul(sd.r0 + ".y", Px))), plus));
+        });
+      });
+      lines.push("    }");
+      lines.push("  }");
+      shakeBodies.forEach(function (i) {
+        lines.push("  vFull" + i + " = " + E.vadd("vFull" + i, "shDv" + i) + ";");
+      });
+      lines.push("");
+    }
+    function isShaken(idx) { return shakeBodies.indexOf(idx) !== -1; }
+
     // Probes: real position, velocity vFull, so swept tests match leg 1's motion.
     for (var p = 0; p < n; p++) {
       if (consts[p].isAnchored) continue;
@@ -1330,22 +1468,30 @@
     });
     lines.push("");
 
-    // Leg 1: move at vFull for tHit (matching detection), then drop velocity to vPre
-    // (gravity only up to tHit): reflecting with a full step of gravity early or late differs by 2*(g.n)*DT.
+    // Leg 1: move at vFull for tHit (matching detection). A hit body's kick before the solve runs to tHit plus
+    // half a step and leg 2 takes the rest (PhysicsEngine.step's bodyTKick).
     for (var g3 = 0; g3 < n; g3++) {
       if (consts[g3].isAnchored) continue;
       var t1 = paired[g3] ? "body" + g3 + "THit" : E.DT;
       lines.push("  " + B(g3) + ".x = " + E.add(B(g3) + ".x", E.mul("vFull" + g3 + ".x", t1)) + ";");
       lines.push("  " + B(g3) + ".y = " + E.add(B(g3) + ".y", E.mul("vFull" + g3 + ".y", t1)) + ";");
-      if (turned[g3]) {
+      var spinFull = turned[g3] ? spinExpr(g3, E.DT) : B(g3) + ".w", spinHit = turned[g3] ? spinExpr(g3, t1) : B(g3) + ".w";
+      if (isShaken(g3)) {
+        // The hinge impulse (already in vFull) joins the spin and the velocity here.
+        lines.push("  " + B(g3) + ".angle = " + E.add(B(g3) + ".angle", E.mul(E.add(spinFull, "shDw" + g3), t1)) + ";");
+        lines.push("  " + B(g3) + ".w = " + E.add(spinHit, "shDw" + g3) + ";");
+      } else if (turned[g3]) {
         // Angular twin: rotate at the whole step's spin, leave w with the torque by tHit.
-        lines.push("  " + B(g3) + ".angle = " + E.add(B(g3) + ".angle", E.mul(spinExpr(g3, E.DT), t1)) + ";");
-        lines.push("  " + B(g3) + ".w = " + spinExpr(g3, t1) + ";");
+        lines.push("  " + B(g3) + ".angle = " + E.add(B(g3) + ".angle", E.mul(spinFull, t1)) + ";");
+        lines.push("  " + B(g3) + ".w = " + spinHit + ";");
       } else {
         lines.push("  " + B(g3) + ".angle = " + E.add(B(g3) + ".angle", E.mul(B(g3) + ".w", t1)) + ";");
       }
       if (paired[g3]) {
-        lines.push("  " + E.vecType + " vPre" + g3 + " = " + advance(g3, "u" + g3, t1) + ";");
+        var tk1 = "body" + g3 + "TKick";
+        lines.push("  " + E.scalarType + " " + tk1 + " = " + E.DT + ";");
+        lines.push("  if (" + E.less(t1, E.DT) + ") " + tk1 + " = " + E.add(t1, E.halfDT) + ";");
+        lines.push("  " + E.vecType + " vPre" + g3 + " = " + (isShaken(g3) ? E.vadd(advance(g3, "u" + g3, tk1), "shDv" + g3) : advance(g3, "u" + g3, tk1)) + ";");
         lines.push("  " + B(g3) + ".vx = vPre" + g3 + ".x; " + B(g3) + ".vy = vPre" + g3 + ".y;");
       } else {
         lines.push("  " + B(g3) + ".vx = vFull" + g3 + ".x; " + B(g3) + ".vy = vFull" + g3 + ".y;");
@@ -1409,7 +1555,9 @@
     }
 
     var solves = hingeAnchors.length || pairs.length;
-    if (solves) lines.push("  for (int iter = 0; iter < " + VELOCITY_ITERATIONS + "; iter++) {");
+    // One 2x2 solve is exact for a lone hinge with nothing else to solve (PhysicsEngine.step).
+    var velIterCount = hingeAnchors.length === 1 && !pairs.length ? 1 : VELOCITY_ITERATIONS;
+    if (solves) lines.push("  for (int iter = 0; iter < " + velIterCount + "; iter++) {");
     hingeAnchors.forEach(function (hg, hi) { lines.push("    " + hingeCall(hg, hi, "velocity")); });
     pairs.forEach(function (pair) {
       var varName = "pair_" + pair[0] + "_" + pair[1];
@@ -1420,12 +1568,12 @@
     });
     if (solves) lines.push("  }");
     lines.push("");
-    // Leg 2: the rest of the step and of gravity on the post-impulse velocity; no contact means identity.
+    // Leg 2: the rest of the step, and of the kick, on the post-impulse velocity; no contact means identity.
     for (var g2 = 0; g2 < n; g2++) {
       if (consts[g2].isAnchored || !paired[g2]) continue;
       var t2 = "body" + g2 + "TRest";
       lines.push("  " + E.scalarType + " " + t2 + " = " + E.sub(E.DT, "body" + g2 + "THit") + ";");
-      lines.push("  " + E.vecType + " vPost" + g2 + " = " + advance(g2, E.vec(B(g2) + ".vx", B(g2) + ".vy"), t2) + ";");
+      lines.push("  " + E.vecType + " vPost" + g2 + " = " + advance(g2, E.vec(B(g2) + ".vx", B(g2) + ".vy"), E.sub(E.DT, "body" + g2 + "TKick")) + ";");
       lines.push("  " + B(g2) + ".vx = vPost" + g2 + ".x; " + B(g2) + ".vy = vPost" + g2 + ".y;");
       // The rest of a spring's torque onto the post-impulse spin, before the turn reads it.
       if (turned[g2]) lines.push("  " + B(g2) + ".w = " + spinExpr(g2, t2) + ";");
@@ -1439,8 +1587,24 @@
       }
     }
     lines.push("");
+    // The shake lands the joints closed; hinges project only on steps a contact or the spin guard spoiled.
+    var projectWhen = [];
+    if (hingeAnchors.length && pairs.length) {
+      var hits = [];
+      pairs.forEach(function (pair) {
+        var vn = "pair_" + pair[0] + "_" + pair[1];
+        pairSlots(pair).forEach(function (slot) { hits.push(vn + "." + slot + ".hit"); });
+      });
+      lines.push("  bool shAnyHit = " + hits.join(" || ") + ";");
+      projectWhen.push("shAnyHit");
+    }
+    if (hingeAnchors.length && H) projectWhen.push("!shOk");
     if (solves) lines.push("  for (int iter = 0; iter < " + POSITION_ITERATIONS + "; iter++) {");
-    hingeAnchors.forEach(function (hg, hi) { lines.push("    " + hingeCall(hg, hi, "position")); });
+    if (hingeAnchors.length) {
+      if (projectWhen.length) lines.push("    if (" + projectWhen.join(" || ") + ") {");
+      hingeAnchors.forEach(function (hg, hi) { lines.push("    " + (projectWhen.length ? "  " : "") + hingeCall(hg, hi, "position")); });
+      if (projectWhen.length) lines.push("    }");
+    }
     pairs.forEach(function (pair) {
       var varName = "pair_" + pair[0] + "_" + pair[1];
       pairSlots(pair).forEach(function (slot) {

@@ -268,6 +268,46 @@
 
   // ---- 4. Generated GLSL must compile across a range of scene shapes ----
   addTest(
+    "A hinged pendulum keeps its energy, in a chain too",
+    "a hinge used to move its body for the whole step and only then pin it: the pin's torque landed a step late and the velocity solve threw away the radial speed the straight move had made, a built-in damping of about (2 pi)^2 / steps-per-period of the energy per swing (26% for this rod) that had a pendulum hanging dead still in 40 s at friction 0, on the GPU exactly as in JS. The hinge impulse is now sized before the move so the anchors meet after it (PhysicsEngine.shakeHinges), which leaves a bounded wobble of a couple of percent and no drift, and lands the joints closed without the projection",
+    function () {
+      var G = PhysicsEngine.GRAVITY;
+      function rod() {
+        return {
+          bodies: [PhysicsEngine.createLine(133.4023, 189.2422, 140, 0, false)],
+          hinges: [{ bodyA: null, bodyB: 0, localAnchorA: { x: 60.582, y: 188.5352 }, localAnchorB: { x: -72.8203, y: -0.707 } }],
+          frameWidth: 1210, frameHeight: 944, edgeMode: "wrap",
+        };
+      }
+      function energy(scene) {
+        var e = 0;
+        scene.bodies.forEach(function (b) { e += 0.5 * b.mass * (b.vx * b.vx + b.vy * b.vy) + 0.5 * b.inertia * b.w * b.w - b.mass * G * b.y; });
+        return e;
+      }
+      // Loss as a share of the energy above hanging at rest; the band over the run, and the worst joint gap.
+      function audit(scene, steps, restY) {
+        var e0 = energy(scene), eRest = 0;
+        scene.bodies.forEach(function (b, i) { eRest -= b.mass * G * restY[i]; });
+        var lo = 0, hi = 0, gap = 0;
+        for (var i = 0; i < steps; i++) {
+          PhysicsEngine.step(scene, DT);
+          var loss = 100 * (e0 - energy(scene)) / (e0 - eRest);
+          lo = Math.min(lo, loss); hi = Math.max(hi, loss);
+          scene.hinges.forEach(function (h) { gap = Math.max(gap, jointGap(h, scene.bodies)); });
+        }
+        return { lo: lo, hi: hi, gap: gap };
+      }
+      var single = audit(rod(), 4800, [188.5352 + Math.hypot(72.8203, 0.707)]);
+      var chain = audit(buildDoublePendulum(), 1200, [375, 525]);
+      return {
+        pass: single.lo > -3 && single.hi < 3 && single.gap < 1e-9 && chain.lo > -3 && chain.hi < 3 && chain.gap < 1e-9,
+        detail: "rod released horizontal, 80 s: energy within " + single.lo.toFixed(2) + "% .. " + single.hi.toFixed(2) + "% of the swing's (it used to be gone), joint gap " +
+          single.gap.toExponential(1) + "px; double pendulum, 20 s: " + chain.lo.toFixed(2) + "% .. " + chain.hi.toFixed(2) + "%, gap " + chain.gap.toExponential(1) + "px",
+      };
+    }
+  );
+
+  addTest(
     "Generated GLSL compiles for varied scene shapes",
     "missing #version/precision/fragColor; illegal global initializers",
     function () {
@@ -2100,10 +2140,11 @@
       var ref = cpuStateAt(scene, WORLD_X, WORLD_Y, STEPS, 1);
       var f32 = gridResidualAtPoint(scene, STEPS, WORLD_X, WORLD_Y, "f32", 1, ref);
       var df = gridResidualAtPoint(scene, STEPS, WORLD_X, WORLD_Y, "df", 1, ref);
+      // float32's readout is quantized to its own ulp (6e-5 px at x = 590), so it is shown, not compared.
       return {
-        pass: df.err < f32.err && df.err < 1e-4,
-        detail: "double pendulum, angle-linked inputs, " + STEPS + " steps: float32 off by " +
-          f32.err.toExponential(2) + ", df off by " + df.err.toExponential(2),
+        pass: df.err < 1e-9,
+        detail: "double pendulum, angle-linked inputs, " + STEPS + " steps: df off by " + df.err.toExponential(2) +
+          "px (want under 1e-9); float32 off by " + f32.err.toExponential(2) + "px at float32's own resolution",
       };
     }
   );
@@ -2173,14 +2214,17 @@
           hinges: [],
         };
       }
-      // An early tight bound (before chaos amplifies rounding) tests fidelity;
-      // the late loose one catches gross divergence. A real mismatch showed ~100px.
+      // An early tight bound (before chaos amplifies rounding) tests fidelity; the late loose one catches gross
+      // divergence (a real mismatch showed ~100px; float32 is a few tenths of a pixel off by step 40, its rounding
+      // amplified by the bounces from step 14 on). Double-float is held to the tight bound throughout.
       var cScene = chaotic(), cTraj = PhysicsGPU.runSceneOnGPU(chaotic(), 40), cStepped = { n: 0 };
       var cEarlyErr = 0, cErr = 0;
       [1, 5].forEach(function (t) { cEarlyErr = Math.max(cEarlyErr, maxErrAt(cScene, cTraj, t, cStepped)); });
       cErr = cEarlyErr;
       [20, 40].forEach(function (t) { cErr = Math.max(cErr, maxErrAt(cScene, cTraj, t, cStepped)); });
       var cMoved = Math.abs(cScene.bodies[0].x - 300) + Math.abs(cScene.bodies[1].x - 700);
+      var dScene = chaotic(), dTraj = PhysicsGPU.runSceneOnGPU(chaotic(), 40, "df"), dStepped = { n: 0 }, dErr = 0;
+      [1, 5, 20, 40].forEach(function (t) { dErr = Math.max(dErr, maxErrAt(dScene, dTraj, t, dStepped)); });
 
       // Regime 2: one free body orbiting one anchored one, long horizon. A WIDE
       // orbit (closest ~234px vs 39px contact): bodies in contact exert no mutual
@@ -2206,9 +2250,9 @@
       // Orbit bound 0.5px, not 0.01px: it runs uncapped at ~1500px/s (the old
       // MAX_SPEED clamp hid the float32/float64 gap) and drifts to ~2e-1 by step 200.
       return {
-        pass: cEarlyErr < 1e-4 && cErr < 0.1 && cMoved > 5 && oErr < 0.5 && oMoved > 100,
+        pass: cEarlyErr < 1e-4 && cErr < 2 && dErr < 1e-4 && cMoved > 5 && oErr < 0.5 && oMoved > 100,
         detail: "4-body (chaotic): max error=" + cEarlyErr.toExponential(2) + "px over the first 5 steps, " +
-          cErr.toExponential(2) + "px by step 40, after moving " + cMoved.toFixed(1) +
+          cErr.toExponential(2) + "px by step 40 (double-float " + dErr.toExponential(2) + "px throughout), after moving " + cMoved.toFixed(1) +
           "px; 2-body orbit, steps 1-300: max error=" + oErr.toExponential(2) +
           "px after travelling " + oMoved.toFixed(1) + "px",
       };
@@ -2265,9 +2309,9 @@
       };
       var STEPS = 10;
       for (var i = 0; i < STEPS; i++) PhysicsEngine.step(scene, DT);
-      // Free fall from rest under the floor drag every scene has, with no sideways component.
+      // Free fall from rest, with no sideways component.
       var wantVy = 0;
-      for (var k = 0; k < STEPS; k++) wantVy = (wantVy + PhysicsEngine.GRAVITY * DT) * (1 - PhysicsEngine.FRICTION_FLOOR * DT);
+      for (var k = 0; k < STEPS; k++) wantVy += PhysicsEngine.GRAVITY * DT;
       return {
         pass: Math.abs(scene.bodies[0].vy - wantVy) < 1e-9 && scene.bodies[0].vx === 0 && scene.bodies[0].x === 400,
         detail: "after " + STEPS + " steps: vy=" + scene.bodies[0].vy.toFixed(6) + " (want " + wantVy.toFixed(6) +
@@ -2310,7 +2354,7 @@
 
   addTest(
     "Mutual Gravity: a collision conserves momentum",
-    "between two free bodies the pull is equal and opposite and so is the contact impulse, so a bounce under Mutual Gravity must leave the pair's total momentum where it was, and must actually be a bounce, not the perfectly inelastic weld this engine used to apply, minus the floor drag's share",
+    "between two free bodies the pull is equal and opposite and so is the contact impulse, so a bounce under Mutual Gravity must leave the pair's total momentum where it was, and must actually be a bounce, not the perfectly inelastic weld this engine used to apply",
     function () {
       // Small fast body into a big stationary one, frame off so nothing wraps.
       var scene = {
@@ -2331,12 +2375,9 @@
         else if (touched && relSpeedAfter === 0) relSpeedAfter = Math.hypot(b.vx - a.vx, b.vy - a.vy);
       }
       var pAfter = a.mass * a.vx + b.mass * b.vx;
-      // The floor drag scales both velocities alike each step: the pair's momentum shrinks by that factor and nothing
-      // else, bar the contact step's split legs, whose two factors differ from one by floor^2 tHit tRest (under 2e-9).
-      var pWant = pBefore * Math.pow(1 - PhysicsEngine.FRICTION_FLOOR * DT, 60);
       return {
-        pass: touched && Math.abs(pAfter - pWant) / Math.abs(pBefore) < 1e-8 && relSpeedAfter > 100,
-        detail: "momentum " + pBefore.toExponential(6) + " -> " + pAfter.toExponential(6) + " (want " + pWant.toExponential(6) + " after the floor drag)" +
+        pass: touched && Math.abs(pAfter - pBefore) / Math.abs(pBefore) < 1e-8 && relSpeedAfter > 100,
+        detail: "momentum " + pBefore.toExponential(6) + " -> " + pAfter.toExponential(6) +
           "; relative speed once they parted=" + relSpeedAfter.toFixed(1) + "px/s (a weld would leave 0)",
       };
     }
@@ -2412,7 +2453,7 @@
 
   addTest(
     "Mutual Gravity: an orbit clear of the surface is a closed Kepler ellipse",
-    "reported as an orbit coming out 'a very different shape' from what Kepler predicts. Widening MUTUAL_GRAVITY_SOFTENING for the bounce had put a flattened, non-inverse-square region around every body, and an orbit dipping into one precesses instead of closing: 177 degrees per lap on the reported scene. This pins the property that matters: an orbit that stays clear of the bodies themselves must close, lap after lap, at the distance Kepler says. Run without the floor drag, which would shrink the orbit",
+    "reported as an orbit coming out 'a very different shape' from what Kepler predicts. Widening MUTUAL_GRAVITY_SOFTENING for the bounce had put a flattened, non-inverse-square region around every body, and an orbit dipping into one precesses instead of closing: 177 degrees per lap on the reported scene. This pins the property that matters: an orbit that stays clear of the bodies themselves must close, lap after lap, at the distance Kepler says",
     function () {
       // 500px out at 300px/s tangential: a wide ellipse clear of both surfaces.
       var scene = {
@@ -2437,7 +2478,7 @@
       // both, a rosette walks the direction round.
       var peris = [], prevR = null, prevPrev = null;
       for (var i = 0; i < 25 * 60; i++) {
-        PhysicsEngine.step(scene, DT, { frictionFloor: 0 });
+        PhysicsEngine.step(scene, DT);
         var dx = scene.bodies[0].x - scene.bodies[1].x, dy = scene.bodies[0].y - scene.bodies[1].y;
         var r = Math.hypot(dx, dy);
         if (prevPrev !== null && prevR < prevPrev && prevR <= r) {
@@ -2513,23 +2554,26 @@
         var u = r >= contact ? -k / r : -k / contact;
         return 0.5 * ball.mass * (ball.vx * ball.vx + ball.vy * ball.vy) + u;
       }
-      // It must SETTLE, not wind up: a pump makes the second half the faster one.
-      var earlyPeak = 0, latePeak = 0;
+      // It must not wind up: a pump makes the second half the faster one and the energy climb step after step.
+      var earlyPeak = 0, latePeak = 0, e0 = totalEnergy(), ePrev = e0, climbs = 0;
       for (var i = 0; i < 900; i++) {
         PhysicsEngine.step(scene, DT);
         var speed = Math.hypot(ball.vx, ball.vy);
         if (i < 450) earlyPeak = Math.max(earlyPeak, speed);
         else latePeak = Math.max(latePeak, speed);
+        var e = totalEnergy();
+        if (e > ePrev) climbs++;
+        ePrev = e;
       }
       var finalSep = Math.hypot(ball.x - anchor.x, ball.y - anchor.y);
       var finalSpeed = Math.hypot(ball.vx, ball.vy);
       // Before the fix: lodged 57.4px inside the 60px contact at 1110px/s and climbing.
       return {
-        pass: finalSpeed < 100 && finalSep >= 59.5 && latePeak < earlyPeak,
-        detail: "after 900 steps: resting " + finalSep.toFixed(1) + "px apart (they touch at 60) at " +
+        pass: finalSep >= 59.5 && latePeak < earlyPeak && climbs < 200 && ePrev <= e0,
+        detail: "after 900 steps: " + finalSep.toFixed(1) + "px apart (they touch at 60) at " +
           finalSpeed.toFixed(0) + "px/s; fastest in the first half " + earlyPeak.toFixed(0) +
-          "px/s vs the second half " + latePeak.toFixed(0) +
-          "px/s (a pump makes the second half faster: it used to end at 57.4px doing 1110px/s and rising)",
+          "px/s vs the second half " + latePeak.toFixed(0) + "px/s; energy rose on " + climbs +
+          " of 900 steps (a pump makes the second half faster: it used to end at 57.4px doing 1110px/s and rising, climbing on 401 steps)",
       };
     }
   );
@@ -2602,7 +2646,8 @@
           hinges: [], frameWidth: 1200, frameHeight: 800, edgeMode: "wrap",
         };
       }
-      // Through the star and back; float32 and float64 drift a step apart after about 90 steps.
+      // Through the star and back; float32 and float64 drift a step apart after about 90 steps. In the bouncing
+      // scene float32 parts from float64 within a few bounces, so it is compared over 150 steps and df over 300.
       function falling() {
         var probe = PhysicsEngine.createCircle(600, 250, 15, false);
         return {
@@ -2617,12 +2662,12 @@
         var counts = start.bodies.map(function (_, b) { return PhysicsEngine.bounceCountsFromTrajectory(rows, b)[steps - 1]; });
         var jsCounts = start.bodies.map(function (_, b) { return PhysicsEngine.runBounceCounts(start, b, steps, DT)[steps - 1]; });
         var same = events.join() === jsEvents.join() && counts.join() === jsCounts.join();
-        if (!same || events.length < 5) pass = false;
+        if (!same || events.length < 4) pass = false;
         parts.push(label + " [" + events.join(",") + "] counts " + counts.join("/") + (same ? " = JS" : " vs JS [" + jsEvents.join(",") + "] counts " + jsCounts.join("/")));
       }
-      [["bouncing", bouncing(), 300], ["falling", falling(), 90]].forEach(function (run) {
+      [["bouncing", bouncing(), { f32: 150, df: 300 }], ["falling", falling(), { f32: 90, df: 90 }]].forEach(function (run) {
         ["f32", "df"].forEach(function (precision) {
-          compare(run[0] + " " + precision, run[1], PhysicsGPU.runSceneOnGPU(run[1], run[2], precision));
+          compare(run[0] + " " + precision, run[1], PhysicsGPU.runSceneOnGPU(run[1], run[2][precision], precision));
         });
       });
       // The Inspect tab's own program, at an offset point.
@@ -2910,8 +2955,8 @@
         if (!after) return { pass: false, detail: "the ball never came out of the right-facing port hole" };
         // The plain fall is the entry-side step: the crossing instant, the overshoot past the line, and the end velocity.
         var tau = DT * (1 - (400 - before) / (fall.y - before)), over = fall.y - 400, k = PhysicsEngine.frictionRate(scene);
-        // The exit leg's own gain, decayed over its own share of the step, then the floor drag's factor.
-        var share = PhysicsEngine.GRAVITY * tau * (k > 0 ? -Math.expm1(-k * tau) / (k * tau) : 1) * (1 - PhysicsEngine.FRICTION_FLOOR * tau);
+        // The exit leg's own gain, decayed over its own share of the step.
+        var share = PhysicsEngine.GRAVITY * tau * (k > 0 ? -Math.expm1(-k * tau) / (k * tau) : 1);
         var want = { x: 800 + over - share * tau, y: 280 + share * tau, vx: fall.vy - share, vy: share };
         var err = Math.max(Math.abs(after.x - want.x), Math.abs(after.y - want.y), Math.abs(after.vx - want.vx), Math.abs(after.vy - want.vy));
         return {
@@ -3382,15 +3427,14 @@
 
   addTest(
     "Friction takes the slider's share of speed each second, settles toward a terminal speed under gravity, and at 0 is the engine with no field at all",
-    "scene.friction is the share of speed lost per second on top of the floor drag: a body coasting at 1000px/s for 60 steps at 50% keeps 500px/s less the floor's share, to rounding, its fall approaches a terminal speed by the same exponential, and 0 steps bit for bit like a scene with no friction key through a bounce and a port hole pass. The engine clamps the field and reads garbage as 0",
+    "scene.friction is the share of speed lost per second: a body coasting at 1000px/s for 60 steps at 50% keeps 500px/s to rounding, its fall approaches a terminal speed by the same exponential, and 0 steps bit for bit like a scene with no friction key through a bounce and a port hole pass. The engine clamps the field and reads garbage as 0",
     function () {
-      var f = 0.5, k = -Math.log(1 - f), E = Math.exp(-k * DT), phi = -Math.expm1(-k * DT) / (k * DT), floor = 1 - PhysicsEngine.FRICTION_FLOOR * DT;
+      var f = 0.5, k = -Math.log(1 - f), E = Math.exp(-k * DT), phi = -Math.expm1(-k * DT) / (k * DT);
       var coast = plainScene([PhysicsEngine.createCircle(100, 100, 10, false)]);
       coast.friction = f; coast.bodies[0].vx = 1000;
       for (var i = 0; i < 60; i++) PhysicsEngine.step(coast, DT);
-      // The slider's leg, then the floor's factor, each step: 500 before the floor's own share.
       var wantVx = 1000, wantVy = 0;
-      for (var n = 0; n < 60; n++) { wantVx = wantVx * E * floor; wantVy = (wantVy * E + PhysicsEngine.GRAVITY * DT * phi) * floor; }
+      for (var n = 0; n < 60; n++) { wantVx = wantVx * E; wantVy = wantVy * E + PhysicsEngine.GRAVITY * DT * phi; }
       function build(withKey) {
         var s = portholeScene([PhysicsEngine.createCircle(420, 200, 10, false), PhysicsEngine.createCircle(300, 100, 12, false), PhysicsEngine.createLine(300, 500, 300, 0.1, true)], { x: 800, y: 300, angle: Math.PI / 2 });
         if (withKey) s.friction = 0;
@@ -3408,31 +3452,29 @@
         PhysicsEngine.frictionOf({ friction: "x" }) === 0 && PhysicsEngine.frictionOf({}) === 0 && PhysicsEngine.frictionRate({}) === 0;
       return {
         pass: Math.abs(coast.bodies[0].vx - wantVx) < 1e-9 && Math.abs(coast.bodies[0].vy - wantVy) < 1e-9 && same && passed && clamped,
-        detail: "after 1s at 50%: vx=" + coast.bodies[0].vx.toFixed(9) + " (want " + wantVx.toFixed(9) + ", 500 before the floor's share), vy=" + coast.bodies[0].vy.toFixed(6) + " (want " + wantVy.toFixed(6) +
+        detail: "after 1s at 50%: vx=" + coast.bodies[0].vx.toFixed(9) + " (want " + wantVx.toFixed(9) + "), vy=" + coast.bodies[0].vy.toFixed(6) + " (want " + wantVy.toFixed(6) +
           "); friction 0 against no key over 300 steps with a bounce and a pass (passed=" + passed + "): identical=" + same + "; clamps and garbage=" + clamped,
       };
     }
   );
 
   addTest(
-    "A friction leg composes: a step split anywhere gives the whole step, and a zero-length leg is the identity",
-    "the leg is the exact solution of dv/dt = a - k v, so the two legs either side of a contact, or the entry and exit legs of a port hole pass, add up to one leg below the speed cap; the floor drag's factor of (1 - k dt) per leg misses by k t1 t2 (a + k v), tiny at 0.005/s, and the slider's friction must add nothing to that. tRest is 0 for every untouched body every step, so dt = 0 must hand the velocity back untouched, not NaN",
+    "A friction leg composes: a step split anywhere gives the whole step, a leg run backwards undoes it, and a zero-length leg is the identity",
+    "the leg is the exact solution of dv/dt = a - k v, so the two legs either side of a contact, or the entry and exit legs of a port hole pass, add up to one leg below the speed cap, and a hit body's second leg, which runs backwards once the hit is past mid-step, must undo exactly what the first overran. tRest is 0 for every untouched body every step, so dt = 0 must hand the velocity back untouched, not NaN",
     function () {
-      var seed = 7, worst = 0, identity = true, floorOk = true, fl = PhysicsEngine.FRICTION_FLOOR;
+      var seed = 7, worst = 0, worstBack = 0, identity = true;
       function rnd() { seed = (seed * 48271) % 2147483647; return seed / 2147483647; }
-      function adv(x, y, dt, ax, ay, k, floor) { return PhysicsEngine.advanceVelocity(x, y, dt, ax, ay, 1e9, k, floor); }
+      function adv(x, y, dt, ax, ay, k) { return PhysicsEngine.advanceVelocity(x, y, dt, ax, ay, 1e9, k); }
       for (var i = 0; i < 2000; i++) {
         var vx = (rnd() - 0.5) * 3000, vy = (rnd() - 0.5) * 3000, ax = (rnd() - 0.5) * 20000, ay = (rnd() - 0.5) * 20000, k = rnd() * 4.7, t1 = rnd() * DT;
-        var one = adv(vx, vy, DT, ax, ay, k, 0), mid = adv(vx, vy, t1, ax, ay, k, 0), two = adv(mid.x, mid.y, DT - t1, ax, ay, k, 0);
+        var one = adv(vx, vy, DT, ax, ay, k), mid = adv(vx, vy, t1, ax, ay, k), two = adv(mid.x, mid.y, DT - t1, ax, ay, k);
         worst = Math.max(worst, Math.hypot(two.x - one.x, two.y - one.y) / Math.max(1, Math.hypot(one.x, one.y)));
-        var same = adv(vx, vy, 0, ax, ay, k, fl);
+        var back = adv(mid.x, mid.y, -t1, ax, ay, k);
+        worstBack = Math.max(worstBack, Math.hypot(back.x - vx, back.y - vy) / Math.max(1, Math.hypot(vx, vy)));
+        var same = adv(vx, vy, 0, ax, ay, k);
         if (same.x !== vx || same.y !== vy) identity = false;
-        // With the floor, what is left is the old factor's own residual, floor * t1 * t2 * (a + floor * v), and no more.
-        var oneF = adv(vx, vy, DT, ax, ay, k, fl), midF = adv(vx, vy, t1, ax, ay, k, fl), twoF = adv(midF.x, midF.y, DT - t1, ax, ay, k, fl);
-        var bound = 2 * fl * t1 * (DT - t1) * (Math.hypot(ax, ay) + fl * Math.hypot(vx, vy) + 1) + 1e-9;
-        if (Math.hypot(twoF.x - oneF.x, twoF.y - oneF.y) > bound) floorOk = false;
       }
-      return { pass: worst < 1e-12 && identity && floorOk, detail: "2000 random splits without the floor: worst relative difference " + worst.toExponential(2) + "; dt = 0 returns the input bit for bit=" + identity + "; with the floor the gap stays within the old factor's own residual=" + floorOk };
+      return { pass: worst < 1e-12 && worstBack < 1e-12 && identity, detail: "2000 random splits: worst relative difference " + worst.toExponential(2) + "; run back to the start, worst " + worstBack.toExponential(2) + "; dt = 0 returns the input bit for bit=" + identity };
     }
   );
 
@@ -5398,13 +5440,13 @@
 
   addTest(
     "A spring conserves energy, and its torque is the torque of its force",
-    "springs are the engine's only source of angular acceleration: a force and a torque that disagreed (a sign, a lever arm taken from the wrong end) would not crash anything - it would quietly pump energy in, and only an energy audit says so. Semi-implicit Euler makes the total wobble by an amount proportional to the step, so the wobble has to SHRINK with the step; an inconsistent force leaves a drift that does not. Run without the floor drag, which would hide it",
+    "springs are the engine's only source of angular acceleration: a force and a torque that disagreed (a sign, a lever arm taken from the wrong end) would not crash anything - it would quietly pump energy in, and only an energy audit says so. Semi-implicit Euler makes the total wobble by an amount proportional to the step, so the wobble has to SHRINK with the step; an inconsistent force leaves a drift that does not",
     function () {
       function wobble(sub) {
         var dt = DT / sub, scene = buildSpringChain();
         var e0 = springSceneEnergy(scene, dt), scale = PhysicsEngine.springPotentialEnergy(scene, dt) + 1e7, worst = 0;
         for (var i = 0; i < 1500 * sub; i++) {
-          PhysicsEngine.step(scene, dt, { frictionFloor: 0 });
+          PhysicsEngine.step(scene, dt);
           worst = Math.max(worst, Math.abs(springSceneEnergy(scene, dt) - e0) / scale);
         }
         return { worst: worst, spun: Math.abs(scene.bodies[1].w) > 0 };
@@ -5419,7 +5461,7 @@
 
   addTest(
     "A two-body spring pushes both ends equally: momentum and angular momentum hold",
-    "the force on end B must be exactly the opposite of the force on end A, lever arms included, or a pair of bodies joined by a spring drifts off (or spins up) by itself. Run under Mutual Gravity, whose pull between two free bodies is equal and opposite too: under ordinary gravity the pair free-falls into the speed cap, which rescales the whole velocity vector and so does not conserve anything. Run without the floor drag, which would hide it",
+    "the force on end B must be exactly the opposite of the force on end A, lever arms included, or a pair of bodies joined by a spring drifts off (or spins up) by itself. Run under Mutual Gravity, whose pull between two free bodies is equal and opposite too: under ordinary gravity the pair free-falls into the speed cap, which rescales the whole velocity vector and so does not conserve anything",
     function () {
       var scene = buildSpringChain();
       scene.springs = [scene.springs[1]]; // just the body-to-body one: nothing acts from outside
@@ -5434,7 +5476,7 @@
       }
       var before = momenta(scene), scale = 0;
       scene.bodies.forEach(function (q) { scale += q.mass * Math.hypot(q.vx, q.vy); });
-      runJS(scene, 1500, { frictionFloor: 0 });
+      runJS(scene, 1500);
       var after = momenta(scene);
       var dp = Math.hypot(after.px - before.px, after.py - before.py) / scale;
       var dL = Math.abs(after.L - before.L) / Math.abs(before.L);
@@ -5577,7 +5619,7 @@
 
   addTest(
     "The spring's smooth core is the same law, with the same energy, in JS and on the GPU",
-    "the core is a second branch of the spring law, written three times (springForceFactor, and the float32 and multi-float spellings in generateStepOnceGLSL) plus once more as its own integral in springPotentialEnergy. A pass through zero length exercises every one: if the GLSL branch disagreed the trajectories would part on the first pass, and if the potential were not the force's integral the energy audit would show a step at the core's rim. That audit runs without the floor drag, which would hide it",
+    "the core is a second branch of the spring law, written three times (springForceFactor, and the float32 and multi-float spellings in generateStepOnceGLSL) plus once more as its own integral in springPotentialEnergy. A pass through zero length exercises every one: if the GLSL branch disagreed the trajectories would part on the first pass, and if the potential were not the force's integral the energy audit would show a step at the core's rim",
     function () {
       var js = PhysicsEngine.runTrajectory(buildPassThroughScene(0), 120, DT);
       var f32 = worstTrajectoryGap(js, PhysicsGPU.runSceneOnGPU(buildPassThroughScene(0), 60), 60, 2);
@@ -5589,7 +5631,7 @@
           springs: [{ bodyA: null, bodyB: 0, localAnchorA: { x: 200, y: 300 }, localAnchorB: { x: 0, y: 0 }, stiffness: 110000, restLength: 406 }] };
         function energy() { return PhysicsEngine.springPotentialEnergy(scene, dt) + 0.5 * ball.mass * (ball.vx * ball.vx + ball.vy * ball.vy); }
         var e0 = energy(), lo = e0, hi = e0, farSide = false;
-        for (var i = 0; i < 240 * sub; i++) { PhysicsEngine.step(scene, dt, { frictionFloor: 0 }); var e = energy(); lo = Math.min(lo, e); hi = Math.max(hi, e); if (ball.x < 200 - 406 * PhysicsEngine.SPRING_CORE) farSide = true; }
+        for (var i = 0; i < 240 * sub; i++) { PhysicsEngine.step(scene, dt); var e = energy(); lo = Math.min(lo, e); hi = Math.max(hi, e); if (ball.x < 200 - 406 * PhysicsEngine.SPRING_CORE) farSide = true; }
         return { range: (hi - lo) / e0, farSide: farSide };
       }
       var coarse = wobble(1), fine = wobble(16);

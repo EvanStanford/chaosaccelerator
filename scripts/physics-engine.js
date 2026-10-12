@@ -63,12 +63,10 @@
     return t * t * (3 - 2 * t);
   }
 
-  // Friction: scene.friction is the share of speed lost per second on top of the floor (0 = the floor, the
-  // default). As a rate k = -ln(1 - f), a leg of length dt is the closed-form solution of dv/dt = a - k v, so
-  // legs compose (below the speed cap) and dt=0 is the identity: v' = v e^-x + a dt phi(x), x = k dt,
-  // phi = (1 - e^-x)/x. The floor is the light drag every scene has always had, kept as the factor
-  // (1 - FRICTION_FLOOR*dt) after the leg so an older scene runs bit for bit as before. Spin is left alone.
-  var FRICTION_FLOOR = 0.005;
+  // Friction: scene.friction is the share of speed lost per second (0 = none, the default). As a rate
+  // k = -ln(1 - f), a leg of length dt is the closed-form solution of dv/dt = a - k v, so legs compose (below
+  // the speed cap), dt=0 is the identity and a negative leg undoes a positive one: v' = v e^-x + a dt phi(x),
+  // x = k dt, phi = (1 - e^-x)/x. Spin is left alone.
   var FRICTION_MAX = 0.99;
   function frictionOf(scene) {
     var f = Number(scene.friction);
@@ -79,17 +77,15 @@
     return f > 0 ? -Math.log(1 - f) : 0;
   }
   // Must agree with the GLSL copies in physics-gpu.js and physics-gpu-df.js.
-  function advanceVelocity(vx, vy, dt, ax, ay, maxSpeed, friction, floor) {
+  function advanceVelocity(vx, vy, dt, ax, ay, maxSpeed, friction) {
     if (friction > 0) {
-      var x = friction * dt, phi = x > 0 ? -Math.expm1(-x) / x : 1, decay = 1 - x * phi;
+      var x = friction * dt, phi = x !== 0 ? -Math.expm1(-x) / x : 1, decay = 1 - x * phi;
       vx = vx * decay + ax * dt * phi;
       vy = vy * decay + ay * dt * phi;
     } else {
       vx += ax * dt;
       vy += ay * dt;
     }
-    var drag = 1 - floor * dt;
-    vx *= drag; vy *= drag;
     var speedSq = vx * vx + vy * vy;
     if (speedSq > maxSpeed * maxSpeed) {
       var scale = maxSpeed / Math.sqrt(speedSq);
@@ -882,6 +878,126 @@
     return { x: bodyB.x + rB.x, y: bodyB.y + rB.y };
   }
 
+  // ---- Hinge impulses for the start pose (RATTLE's position half) ----
+  // One impulse per hinge at the step's start, along the start-pose arms, sized so the two anchors meet
+  // after the whole-step move x += (vFull + dv) dt, angle += (spin + dw) dt. The gap is nonlinear in the
+  // impulse (the arms turn), so Newton on every hinge at once: a dense 2H x 2H system, eliminated without
+  // pivoting in the order the GLSL unrolls. Must agree with generateStepOnceGLSL's shake block.
+  function hingeShakeIterations(hingeCount) { return hingeCount === 1 ? 2 : 3; }
+  // Past a radian per step the predicted arms are meaningless and the Jacobian can lose its sign.
+  var HINGE_SHAKE_SPIN_LIMIT = 1;
+  function rotateBy(v, sn, cs) { return { x: v.x * cs - v.y * sn, y: v.x * sn + v.y * cs }; }
+  // Returns {x, y, w} per body a shaken hinge moves (null elsewhere), with dv already in vFull; null when the
+  // scene has nothing to shake or a hinged body turns too fast this step (the projection then closes the joints).
+  function shakeHinges(scene, bodies, vFull, alpha, swing, dt) {
+    var hinges = [], i, h, k, it;
+    for (h = 0; h < scene.hinges.length; h++) {
+      var hg = scene.hinges[h];
+      var aFixed = hg.bodyA === null || bodies[hg.bodyA].isAnchored, bFixed = bodies[hg.bodyB].isAnchored;
+      if (!aFixed || !bFixed) hinges.push(hg);
+    }
+    if (!hinges.length) return null;
+    var n = bodies.length, dv = new Array(n), w0 = new Array(n), s0 = new Array(n), c0 = new Array(n);
+    function touch(idx) {
+      if (idx === null || bodies[idx].isAnchored || dv[idx]) return;
+      dv[idx] = { x: 0, y: 0, w: 0 };
+      w0[idx] = springSpin(bodies[idx].w, alpha[idx], swing[idx], dt);
+      s0[idx] = Math.sin(bodies[idx].angle); c0[idx] = Math.cos(bodies[idx].angle);
+    }
+    for (h = 0; h < hinges.length; h++) { touch(hinges[h].bodyA); touch(hinges[h].bodyB); }
+    for (i = 0; i < n; i++) if (dv[i] && Math.abs(w0[i]) * dt > HINGE_SHAKE_SPIN_LIMIT) return null;
+    // Each hinge's two sides: a fixed point, or a free body with its sign and start-pose arm.
+    var sides = hinges.map(function (hinge) {
+      function side(idx, local, sign) {
+        if (idx === null) return { fixed: local };
+        var b = bodies[idx];
+        if (b.isAnchored) { var r = rotateVec(local, b.angle); return { fixed: { x: b.x + r.x, y: b.y + r.y } }; }
+        return { body: idx, sign: sign, local: local, r0: rotateBy(local, s0[idx], c0[idx]) };
+      }
+      return [side(hinge.bodyA, hinge.localAnchorA, -1), side(hinge.bodyB, hinge.localAnchorB, 1)];
+    });
+    var H = hinges.length, N = 2 * H, iters = hingeShakeIterations(H);
+    var xE = new Array(n), yE = new Array(n), sE = new Array(n), cE = new Array(n), rE = new Array(H), g = new Array(H);
+    var J = new Array(N * N), rhs = new Array(N);
+    for (it = 0; it < iters; it++) {
+      for (i = 0; i < n; i++) {
+        if (!dv[i]) continue;
+        var aE = bodies[i].angle + (w0[i] + dv[i].w) * dt;
+        sE[i] = Math.sin(aE); cE[i] = Math.cos(aE);
+        xE[i] = bodies[i].x + (vFull[i].x + dv[i].x) * dt;
+        yE[i] = bodies[i].y + (vFull[i].y + dv[i].y) * dt;
+      }
+      for (h = 0; h < H; h++) {
+        var ends = [], arms = [];
+        for (k = 0; k < 2; k++) {
+          var sd = sides[h][k];
+          if (sd.fixed) { ends.push(sd.fixed); arms.push(null); continue; }
+          var r = rotateBy(sd.local, sE[sd.body], cE[sd.body]);
+          arms.push(r);
+          ends.push({ x: xE[sd.body] + r.x, y: yE[sd.body] + r.y });
+        }
+        rE[h] = arms;
+        g[h] = { x: ends[1].x - ends[0].x, y: ends[1].y - ends[0].y };
+      }
+      for (i = 0; i < N * N; i++) J[i] = 0;
+      for (h = 0; h < H; h++) {
+        rhs[2 * h] = -g[h].x / dt; rhs[2 * h + 1] = -g[h].y / dt;
+        for (k = 0; k < H; k++) {
+          for (var ph = 0; ph < 2; ph++) {
+            var sh = sides[h][ph];
+            if (sh.fixed) continue;
+            for (var pk = 0; pk < 2; pk++) {
+              var sk = sides[k][pk];
+              if (sk.fixed || sk.body !== sh.body) continue;
+              var b = bodies[sh.body], sg = sh.sign * sk.sign, rn = rE[h][ph], r0 = sk.r0;
+              J[(2 * h) * N + 2 * k] += sg * (b.invMass + b.invInertia * rn.y * r0.y);
+              J[(2 * h) * N + 2 * k + 1] += sg * (-b.invInertia * rn.y * r0.x);
+              J[(2 * h + 1) * N + 2 * k] += sg * (-b.invInertia * rn.x * r0.y);
+              J[(2 * h + 1) * N + 2 * k + 1] += sg * (b.invMass + b.invInertia * rn.x * r0.x);
+            }
+          }
+        }
+      }
+      for (i = 0; i < N; i++) {
+        for (var j = i + 1; j < N; j++) {
+          var f = J[j * N + i] / J[i * N + i];
+          for (k = i + 1; k < N; k++) J[j * N + k] -= f * J[i * N + k];
+          rhs[j] -= f * rhs[i];
+        }
+      }
+      for (i = N - 1; i >= 0; i--) {
+        var sum = rhs[i];
+        for (j = i + 1; j < N; j++) sum -= J[i * N + j] * rhs[j];
+        rhs[i] = sum / J[i * N + i];
+      }
+      for (h = 0; h < H; h++) {
+        var Px = rhs[2 * h], Py = rhs[2 * h + 1];
+        for (k = 0; k < 2; k++) {
+          var sp = sides[h][k];
+          if (sp.fixed) continue;
+          var bb = bodies[sp.body], d = dv[sp.body];
+          d.x += sp.sign * Px * bb.invMass; d.y += sp.sign * Py * bb.invMass;
+          d.w += sp.sign * bb.invInertia * (sp.r0.x * Py - sp.r0.y * Px);
+        }
+      }
+    }
+    for (i = 0; i < n; i++) if (dv[i]) vFull[i] = { x: vFull[i].x + dv[i].x, y: vFull[i].y + dv[i].y };
+    return dv;
+  }
+
+  // A pair the GPU would sweep: not both anchored, not hinge-joined. Decides the velocity pass count.
+  function hasCollidablePairs(scene) {
+    if (!collisionsEnabled(scene)) return false;
+    var bodies = scene.bodies;
+    for (var i = 0; i < bodies.length; i++) {
+      for (var j = i + 1; j < bodies.length; j++) {
+        if (bodies[i].isAnchored && bodies[j].isAnchored) continue;
+        if (!hingeConnects(scene.hinges, i, j)) return true;
+      }
+    }
+    return false;
+  }
+
   // ---- Frame-wrap helpers: a world-hinged body wraps by its PIN and its whole hinged assembly
   // translates with it (keeps every hinge satisfied on a torus); a hinge child never wraps alone.
   // ---- Edge modes (all share frameWidth/frameHeight):
@@ -1027,7 +1143,7 @@
     return { x: S.vx - S.w * (y - S.y), y: S.vy + S.w * (x - S.x) };
   }
 
-  function applyPortholeTransports(scene, portals, groupOf, startPose, u, acc, dt, maxSpeed, friction, floor) {
+  function applyPortholeTransports(scene, portals, groupOf, startPose, u, acc, dt, maxSpeed, friction) {
     var bodies = scene.bodies;
     for (var i = 0; i < bodies.length; i++) {
       var g = groupOf[i];
@@ -1067,10 +1183,10 @@
           var fin = frameVelocityAt(Ps, starX, starY), fout = frameVelocityAt(Qs, exitStarX, exitStarY);
           // Two legs split at the crossing, turned there or not: their difference is what the step's
           // whole-step velocity got wrong.
-          var pre = advanceVelocity(u[m].x, u[m].y, tStar, a.x, a.y, maxSpeed, friction, floor);
+          var pre = advanceVelocity(u[m].x, u[m].y, tStar, a.x, a.y, maxSpeed, friction);
           var preX = pre.x - fin.x, preY = pre.y - fin.y;
-          var turned = advanceVelocity(preX * cs - preY * sn + fout.x, preX * sn + preY * cs + fout.y, tau, outX, outY, maxSpeed, friction, floor);
-          var straight = advanceVelocity(pre.x, pre.y, tau, a.x, a.y, maxSpeed, friction, floor);
+          var turned = advanceVelocity(preX * cs - preY * sn + fout.x, preX * sn + preY * cs + fout.y, tau, outX, outY, maxSpeed, friction);
+          var straight = advanceVelocity(pre.x, pre.y, tau, a.x, a.y, maxSpeed, friction);
           var strX = straight.x - fin.x, strY = straight.y - fin.y;
           var dvx = turned.x - (strX * cs - strY * sn + fout.x), dvy = turned.y - (strX * sn + strY * cs + fout.y);
           var ox = b.x - leadStarX, oy = b.y - leadStarY, vx = b.vx - fin.x, vy = b.vy - fin.y;
@@ -1090,15 +1206,14 @@
 
   function step(scene, dt, opts) {
     opts = opts || {};
-    var velIter = opts.velocityIterations || VELOCITY_ITERATIONS;
+    // One 2x2 solve is exact for a lone hinge, so a scene with nothing else to solve takes one pass.
+    var velIter = opts.velocityIterations || (scene.hinges.length === 1 && !hasCollidablePairs(scene) ? 1 : VELOCITY_ITERATIONS);
     var posIter = opts.positionIterations || POSITION_ITERATIONS;
     var bodies = scene.bodies;
     var i, j;
 
-    // Fixed for the whole step; both legs and the detection sweep must agree on them. opts.frictionFloor
-    // lets a caller run without the floor (conservation checks); the shaders always have it.
+    // Fixed for the whole step; both legs and the detection sweep must agree on them.
     var maxSpeed = speedCapFor(scene), friction = frictionRate(scene);
-    var floor = opts.frictionFloor === undefined ? FRICTION_FLOOR : opts.frictionFloor;
     var acc = computeAccelerations(scene);
     // Springs add angular acceleration (alpha) and the swing tally; all zeros without springs.
     var alpha = new Array(bodies.length).fill(0), swing = new Array(bodies.length).fill(0);
@@ -1109,8 +1224,9 @@
     for (i = 0; i < bodies.length; i++) {
       if (bodies[i].isAnchored) continue;
       u[i] = { x: bodies[i].vx, y: bodies[i].vy };
-      vFull[i] = advanceVelocity(u[i].x, u[i].y, dt, acc[i].x, acc[i].y, maxSpeed, friction, floor);
+      vFull[i] = advanceVelocity(u[i].x, u[i].y, dt, acc[i].x, acc[i].y, maxSpeed, friction);
     }
+    var shake = scene.hinges.length ? shakeHinges(scene, bodies, vFull, alpha, swing, dt) : null;
 
     var probes = new Array(bodies.length);
     for (i = 0; i < bodies.length; i++) {
@@ -1173,18 +1289,22 @@
       for (i = 0; i < contacts.length; i++) contactsOut.push({ a: contacts[i].a, b: contacts[i].b });
     }
 
-    // Leg 1: move at vFull for tHit (matching detection), then set velocity to gravity applied only
-    // up to tHit before the solve (reflecting v+g*dt vs v then adding g*dt differ by 2*(g.n)*dt).
+    // Leg 1: move at vFull for tHit (matching detection). A hit body's kick runs to tHit plus half a step
+    // and leg 2 takes the rest: the stored velocity trails the position by half a step.
+    var bodyTKick = new Array(bodies.length);
     for (i = 0; i < bodies.length; i++) {
       var b1 = bodies[i];
       if (b1.isAnchored) continue;
       var th = bodyTHit[i];
+      bodyTKick[i] = th < dt ? th + dt / 2 : dt;
       b1.x += vFull[i].x * th; b1.y += vFull[i].y * th;
-      // Angular twin: turn at the whole step's spin, keep only the torque acted by tHit.
-      b1.angle += springSpin(b1.w, alpha[i], swing[i], dt) * th;
-      b1.w = springSpin(b1.w, alpha[i], swing[i], th);
-      var vPre = advanceVelocity(u[i].x, u[i].y, th, acc[i].x, acc[i].y, maxSpeed, friction, floor);
-      b1.vx = vPre.x; b1.vy = vPre.y;
+      // Angular twin: turn at the whole step's spin, keep only the torque acted by tHit. A hinge impulse
+      // (already in vFull) joins the spin and the velocity here.
+      var sh = shake && shake[i], dw = sh ? sh.w : 0;
+      b1.angle += (springSpin(b1.w, alpha[i], swing[i], dt) + dw) * th;
+      b1.w = springSpin(b1.w, alpha[i], swing[i], th) + dw;
+      var vPre = advanceVelocity(u[i].x, u[i].y, bodyTKick[i], acc[i].x, acc[i].y, maxSpeed, friction);
+      b1.vx = vPre.x + (sh ? sh.x : 0); b1.vy = vPre.y + (sh ? sh.y : 0);
     }
 
     var iter;
@@ -1195,25 +1315,27 @@
       }
     }
 
-    // Leg 2: the rest of the step and of gravity on the POST-impulse velocity; identity if no contact.
+    // Leg 2: the rest of the step, and of the kick, on the POST-impulse velocity; identity if no contact.
     for (i = 0; i < bodies.length; i++) {
       var b2 = bodies[i];
       if (b2.isAnchored) continue;
       var tRest = dt - bodyTHit[i];
-      var vPost = advanceVelocity(b2.vx, b2.vy, tRest, acc[i].x, acc[i].y, maxSpeed, friction, floor);
+      var vPost = advanceVelocity(b2.vx, b2.vy, dt - bodyTKick[i], acc[i].x, acc[i].y, maxSpeed, friction);
       b2.vx = vPost.x; b2.vy = vPost.y;
       b2.w = springSpin(b2.w, alpha[i], swing[i], tRest);
       b2.x += vPost.x * tRest; b2.y += vPost.y * tRest; b2.angle += b2.w * tRest;
     }
 
+    // The shake lands the joints closed; the projection is for steps a contact or the spin guard spoiled.
+    var projectHinges = scene.hinges.length && (contacts.length > 0 || !shake);
     for (iter = 0; iter < posIter; iter++) {
-      for (i = 0; i < scene.hinges.length; i++) solveHingePosition(scene.hinges[i], bodies);
+      if (projectHinges) for (i = 0; i < scene.hinges.length; i++) solveHingePosition(scene.hinges[i], bodies);
       for (i = 0; i < contacts.length; i++) {
         solveContactPosition(contacts[i], bodies[contacts[i].a], bodies[contacts[i].b]);
       }
     }
 
-    if (portals) applyPortholeTransports(scene, portals, passGroup, startPose, u, acc, dt, maxSpeed, friction, floor);
+    if (portals) applyPortholeTransports(scene, portals, passGroup, startPose, u, acc, dt, maxSpeed, friction);
 
     // Edge wrapping, last (matches the GLSL). Only roots decide; world-hinged by PIN; sprung by group.
     if (wrapsAtEdges(scene)) {
@@ -1453,7 +1575,6 @@
     LINE_LINEAR_DENSITY: LINE_LINEAR_DENSITY,
     // Exported so physics-gpu.js's GLSL bakes the same numbers.
     GRAVITY: GRAVITY,
-    FRICTION_FLOOR: FRICTION_FLOOR,
     FRICTION_MAX: FRICTION_MAX,
     frictionOf: frictionOf,
     frictionRate: frictionRate,
@@ -1495,6 +1616,9 @@
     worldToLocal: worldToLocal,
     getHingeWorldPoint: getHingeWorldPoint,
     hingeConnects: hingeConnects,
+    hasCollidablePairs: hasCollidablePairs,
+    hingeShakeIterations: hingeShakeIterations,
+    HINGE_SHAKE_SPIN_LIMIT: HINGE_SHAKE_SPIN_LIMIT,
     SPRING_CORE: SPRING_CORE,
     springForceFactor: springForceFactor,
     SPRING_STABILITY: SPRING_STABILITY,
