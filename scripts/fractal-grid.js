@@ -4971,6 +4971,8 @@
 
   var hoverCanvas = document.getElementById("hover-canvas");
   var hoverCtx = hoverCanvas.getContext("2d");
+  // Drawing coordinates; the backing store follows the on-screen size (sizeHoverCanvas).
+  var HOVER_VIEW_W = 280, HOVER_VIEW_H = 200;
   var hoverEmptyState = document.getElementById("hover-empty-state");
   var hoverReadout = document.getElementById("hover-readout");
   var hoverPlayPauseBtn = document.getElementById("hover-play-pause");
@@ -5246,7 +5248,25 @@
       offsetY: height / 2 - scale * (minY + maxY) / 2,
     };
   }
-  var hoverFit = fitScene(hoverCanvas.width, hoverCanvas.height);
+  var hoverFit = fitScene(HOVER_VIEW_W, HOVER_VIEW_H);
+
+  function setHoverTransform() {
+    var k = hoverCanvas.width / HOVER_VIEW_W;
+    hoverCtx.setTransform(k * hoverFit.scale, 0, 0, k * hoverFit.scale, k * hoverFit.offsetX, k * hoverFit.offsetY);
+  }
+
+  // Backing store at display resolution; resizing clears it, so the current frame is redrawn.
+  function sizeHoverCanvas() {
+    var dpr = window.devicePixelRatio || 1;
+    var w = Math.round(hoverCanvas.clientWidth * dpr), h = Math.round(hoverCanvas.clientHeight * dpr);
+    if (w <= 0 || h <= 0 || (hoverCanvas.width === w && hoverCanvas.height === h)) return;
+    hoverCanvas.width = w;
+    hoverCanvas.height = h;
+    if (!hoverEmptyState.hidden) return;
+    if (activeReplay || inspectedGroups.length > 0) renderPlaybackFrame();
+    else if (hoverWorldPoint) showHoverInstant(hoverWorldPoint);
+  }
+  new ResizeObserver(sizeHoverCanvas).observe(hoverCanvas);
 
   // drawHoverBody: type/isAnchored come from the authored scene, x/y/angle/half from the trajectory row;
   // colorOverride replaces the isAnchored colors so an inspected point reads as "the other scene".
@@ -5595,7 +5615,7 @@
     hoverEmptyState.hidden = true;
     hoverCtx.setTransform(1, 0, 0, 1, 0, 0);
     hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);
-    hoverCtx.setTransform(hoverFit.scale, 0, 0, hoverFit.scale, hoverFit.offsetX, hoverFit.offsetY);
+    setHoverTransform();
     drawFrameBoundary();
     var previewTracked = trackedBodySlots();
     offsetScene.bodies.forEach(function (body, i) {
@@ -5661,7 +5681,7 @@
     var step = Math.floor(playbackStep);
     hoverCtx.setTransform(1, 0, 0, 1, 0, 0);
     hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);
-    hoverCtx.setTransform(hoverFit.scale, 0, 0, hoverFit.scale, hoverFit.offsetX, hoverFit.offsetY);
+    setHoverTransform();
     drawFrameBoundary();
 
     var shown = activeReplay ? replayFrame(activeReplay, step) : null;
@@ -7863,6 +7883,7 @@
     var mq = window.matchMedia("(resolution: " + window.devicePixelRatio + "dppx)");
     mq.addEventListener("change", function () {
       resizeCanvas();
+      sizeHoverCanvas();
       watchDevicePixelRatio();
     }, { once: true });
   }
@@ -8458,14 +8479,14 @@
     var fill = background === "black" ? "#000" : global.getComputedStyle(hoverCanvas.parentNode).backgroundColor;
     return {
       points: groups.reduce(function (n, group) { return n + group.points.length; }, 0),
-      aspect: scene.frameWidth && scene.frameHeight ? scene.frameWidth / scene.frameHeight : hoverCanvas.width / hoverCanvas.height,
+      aspect: scene.frameWidth && scene.frameHeight ? scene.frameWidth / scene.frameHeight : HOVER_VIEW_W / HOVER_VIEW_H,
       steps: snapshot ? snapshot.steps : lockedClockCeiling(groups),
       stepsPerSecond: snapshot ? snapshot.stepsPerSecond : hoverStepsPerSecond(),
       // The pause on the last frame before the tab loops.
       endHoldSeconds: REPLAY_LOOP_DELAY_MS / 1000,
       voices: inspectVoices(groups),
       draw: function (ctx, width, height, step) {
-        var k = width / hoverCanvas.width;
+        var k = width / HOVER_VIEW_W;
         var savedCtx = hoverCtx, savedFit = hoverFit, savedGroups = inspectedGroups, savedFilled = fillOutlinedBodies;
         hoverCtx = ctx;
         hoverFit = fitScene(width / k, height / k);
@@ -8504,7 +8525,7 @@
     var replay = replayAt(world, precision);
     if (!replay.trajectory.length) return null;
     return {
-      aspect: scene.frameWidth && scene.frameHeight ? scene.frameWidth / scene.frameHeight : hoverCanvas.width / hoverCanvas.height,
+      aspect: scene.frameWidth && scene.frameHeight ? scene.frameWidth / scene.frameHeight : HOVER_VIEW_W / HOVER_VIEW_H,
       // The run's length, and how fast Inspect plays it at 1x.
       steps: replay.trajectory.length,
       stepsPerSecond: 1000 / HOVER_MS_PER_FRAME,
