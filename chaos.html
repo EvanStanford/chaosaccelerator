@@ -8,17 +8,17 @@
 <meta name="theme-color" content="#14161c">
 <title>Chaos Accelerator</title>
 <!-- Both views share this document so transition.js can show them at once. -->
-<link rel="stylesheet" href="scripts/physics.css?v=m106">
-<link rel="stylesheet" href="scripts/fractal-grid.css?v=m106">
-<link rel="stylesheet" href="scripts/app-shell.css?v=m106">
-<link rel="stylesheet" href="scripts/fractal-stats.css?v=m106">
-<link rel="stylesheet" href="scripts/responsive-layout.css?v=m106">
+<link rel="stylesheet" href="scripts/physics.css?v=m107">
+<link rel="stylesheet" href="scripts/fractal-grid.css?v=m107">
+<link rel="stylesheet" href="scripts/app-shell.css?v=m107">
+<link rel="stylesheet" href="scripts/fractal-stats.css?v=m107">
+<link rel="stylesheet" href="scripts/responsive-layout.css?v=m107">
 <!-- mobile.css after the app sheets: it must win their cascade without !important. -->
-<link rel="stylesheet" href="scripts/mobile.css?v=m106">
-<link rel="stylesheet" href="scripts/eighties-app.css?v=m106">
-<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m106" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="scripts/mobile.css?v=m107">
+<link rel="stylesheet" href="scripts/eighties-app.css?v=m107">
+<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m107" as="font" type="font/woff2" crossorigin>
 <!-- In <head> on purpose: both views measure their canvas area as they start. -->
-<script src="scripts/layout-mode.js?v=m106"></script>
+<script src="scripts/layout-mode.js?v=m107"></script>
 <!-- A #map/ link should open on the map: hide the editor (still laid out) until transition.js picks the view. -->
 <script>
   if (/^#map\//.test(location.hash)) document.documentElement.classList.add("opening-map");
@@ -143,7 +143,7 @@
                 </label>
                 <label class="field">
                   <span>Simulation Duration: <input type="number" class="steps-number" id="simulation-steps-readout" min="1" max="5000" step="1" value="1000" inputmode="numeric" title="Type an exact number of steps, or use the slider for round hundreds" aria-label="Simulation duration in steps"></span>
-                  <input type="range" id="simulation-steps-slider" min="1" max="50" value="10" title="How many steps Play (and a scene sent to the Fractal Grid) simulates">
+                  <input type="range" id="simulation-steps-slider" min="1" max="50" value="10" title="How many steps Play (and a scene sent to the map) simulates">
                 </label>
                 <label class="field">
                   <span>Edge Handling</span>
@@ -184,7 +184,7 @@
               </button>
               <input type="range" id="playback-progress-slider" min="1" max="1000" step="1" value="1" disabled aria-label="Playback progress">
               <button id="btn-speed" class="icon-button speed-btn" type="button" title="Playback speed" aria-label="Playback speed" aria-haspopup="true" aria-expanded="false">1.0x</button>
-              <button id="btn-reset" class="icon-button" type="button" title="Reset" aria-label="Reset">&#8634;</button>
+              <button id="btn-reset" class="icon-button" type="button" title="Reset" aria-label="Reset"><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="2.5" height="14" rx="1"></rect><path d="M19 6.1v11.8a.6.6 0 0 1-.94.5L9.6 12.5a.6.6 0 0 1 0-1l8.46-5.9a.6.6 0 0 1 .94.5z"></path></svg></button>
             </div>
             <p class="readout" id="step-readout"></p>
           </div>
@@ -276,7 +276,7 @@
               <section class="panel-section">
                 <div id="hover-preview">
                   <canvas id="hover-canvas" width="280" height="200"></canvas>
-                  <div id="hover-empty-state">Hover the grid to preview a pixel</div>
+                  <div id="hover-empty-state">Hover over the map to inspect a point.</div>
                 </div>
                 <div class="playback-controls" id="hover-playback-controls">
                   <button id="hover-play-pause" class="icon-button" type="button" title="Play" aria-label="Play" disabled><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72a.6.6 0 0 0 .92.5l10.55-6.86a.6.6 0 0 0 0-1L8.92 4.64a.6.6 0 0 0-.92.5z"></path></svg></button>
@@ -285,7 +285,7 @@
                   </button>
                   <input type="range" id="hover-progress-slider" min="0" max="0" step="1" value="0" disabled aria-label="Playback progress">
                   <button id="hover-speed-btn" class="icon-button speed-btn" type="button" title="Playback speed" aria-label="Playback speed" aria-haspopup="true" aria-expanded="false">1.0x</button>
-                  <button id="hover-reset" class="icon-button" type="button" title="Reset" aria-label="Reset" disabled>&#8634;</button>
+                  <button id="hover-reset" class="icon-button" type="button" title="Reset" aria-label="Reset" disabled><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="2.5" height="14" rx="1"></rect><path d="M19 6.1v11.8a.6.6 0 0 1-.94.5L9.6 12.5a.6.6 0 0 1 0-1l8.46-5.9a.6.6 0 0 1 .94.5z"></path></svg></button>
                 </div>
                 <p class="readout" id="hover-readout"></p>
                 <details class="collapsible" id="separation-details" hidden>
@@ -302,8 +302,8 @@
                 <div class="field-row" id="inspect-arm-row">
                   <!-- Touch only (mobile.css): a tap locks a point only after this is pressed, like Line and Grid (armInspect). -->
                   <button id="btn-inspect-point" title="Then tap the map to inspect that point">Inspect (Point)</button>
-                  <button id="btn-inspect-line" title="Drag the grid to inspect an evenly-spaced line of points">Inspect (Line)</button>
-                  <button id="btn-inspect-grid" title="Drag the grid to inspect a 3&times;3 grid of points">Inspect (Grid)</button>
+                  <button id="btn-inspect-line" title="Drag the map to inspect an evenly-spaced line of points">Inspect (Line)</button>
+                  <button id="btn-inspect-grid" title="Drag the map to inspect a 3&times;3 grid of points">Inspect (Grid)</button>
                 </div>
                 <p class="section-label">Add superlatives from current view window:</p>
                 <div class="tool-grid">
@@ -537,7 +537,7 @@
                     </label>
                     <label class="field">
                       <span>Map Evolution memory</span>
-                      <select id="perf-playback-memory-select" title="The most graphics memory Map Evolution's simulation state may take. Less memory means it plays on a coarser grid.">
+                      <select id="perf-playback-memory-select" title="The most graphics memory Map Evolution's simulation state may take. Less memory means it plays at a lower resolution.">
                         <option value="96">Up to 96 MB</option>
                         <option value="256">Up to 256 MB</option>
                       </select>
@@ -574,19 +574,28 @@
                   <button id="grid-btn-playback-close" class="icon-button menu-collapse" type="button" title="Collapse Map Evolution" aria-label="Collapse Map Evolution">&#9660;</button>
                 </div>
                 <div class="menu-card-body">
-                  <div class="playback-controls">
-                    <button id="grid-play-pause" class="icon-button" type="button" title="Play" aria-label="Play"><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72a.6.6 0 0 0 .92.5l10.55-6.86a.6.6 0 0 0 0-1L8.92 4.64a.6.6 0 0 0-.92.5z"></path></svg></button>
-                    <input type="range" id="grid-timeline-slider" min="0" max="500" step="1" value="500" aria-label="Timeline frame">
-                    <button id="grid-speed-btn" class="icon-button speed-btn" type="button" title="Playback speed" aria-label="Playback speed" aria-haspopup="true" aria-expanded="false">1.0x</button>
-                    <button id="grid-restart" class="icon-button" type="button" title="Back to frame 0" aria-label="Back to frame 0">
-                      <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="2.5" height="14" rx="1"></rect><path d="M19 6.1v11.8a.6.6 0 0 1-.94.5L9.6 12.5a.6.6 0 0 1 0-1l8.46-5.9a.6.6 0 0 1 .94.5z"></path></svg>
-                    </button>
-                  </div>
-                  <p class="readout" id="grid-timeline-readout"></p>
                   <label class="field">
-                    <span>Simulation Duration (Frames): <input type="number" class="steps-number" id="steps-readout" min="1" max="5000" step="1" value="500" inputmode="numeric" title="Type an exact number of frames, or use the slider for round hundreds" aria-label="Simulation duration in frames"></span>
+                    <span>Simulation Duration (Steps): <input type="number" class="steps-number" id="steps-readout" min="1" max="5000" step="1" value="500" inputmode="numeric" title="Type an exact number of steps, or use the slider for round hundreds" aria-label="Simulation duration in steps"></span>
                     <input type="range" id="steps-slider" min="1" max="50" value="5">
                   </label>
+                  <label class="toggle-field" title="On, the map plays along with the Inspect tab's preview and shares its controls. Off, Inspect plays on its own and the map keeps its own timeline.">
+                    <span>Playback</span>
+                    <span class="toggle-switch">
+                      <input type="checkbox" id="evolution-inspect-checkbox">
+                      <span class="toggle-slider"></span>
+                    </span>
+                  </label>
+                  <div id="grid-timeline-section" hidden>
+                    <div class="playback-controls">
+                      <button id="grid-play-pause" class="icon-button" type="button" title="Play" aria-label="Play"><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72a.6.6 0 0 0 .92.5l10.55-6.86a.6.6 0 0 0 0-1L8.92 4.64a.6.6 0 0 0-.92.5z"></path></svg></button>
+                      <input type="range" id="grid-timeline-slider" min="0" max="500" step="1" value="500" aria-label="Timeline step">
+                      <button id="grid-speed-btn" class="icon-button speed-btn" type="button" title="Playback speed" aria-label="Playback speed" aria-haspopup="true" aria-expanded="false">1.0x</button>
+                      <button id="grid-restart" class="icon-button" type="button" title="Back to step 0" aria-label="Back to step 0">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="2.5" height="14" rx="1"></rect><path d="M19 6.1v11.8a.6.6 0 0 1-.94.5L9.6 12.5a.6.6 0 0 1 0-1l8.46-5.9a.6.6 0 0 1 .94.5z"></path></svg>
+                      </button>
+                    </div>
+                    <p class="readout" id="grid-timeline-readout"></p>
+                  </div>
                 </div>
               </div>
             </section>
@@ -613,7 +622,7 @@
                       <button id="movie-paused-resume" type="button">Resume</button>
                     </div>
                   </div>
-                  <p class="readout hint" id="movie-hint">Pan and zoom to a view, pick a frame in Map Evolution if you like, then add it. The camera travels smoothly from each keyframe to the next.</p>
+                  <p class="readout hint" id="movie-hint">Pan and zoom to a view, pick a step in Map Evolution if you like, then add it. The camera travels smoothly from each keyframe to the next.</p>
                   <button id="movie-add-keyframe" type="button">Add Keyframe</button>
                   <ol id="movie-keyframe-list"></ol>
                   <div class="field" title="Width and height in pixels, up to 4096 each. Video needs the width a multiple of 4 and the height even, so a size rounds down to those.">
@@ -768,23 +777,23 @@
 
 </div>
 
-<script src="scripts/app-message.js?v=m106"></script>
-<script src="scripts/physics-engine.js?v=m106"></script>
-<script src="scripts/physics-coords.js?v=m106"></script>
-<script src="scripts/share-url.js?v=m106"></script>
-<script src="scripts/movie-path.js?v=m106"></script>
-<script src="scripts/movie-store.js?v=m106"></script>
-<script src="scripts/physics-sound.js?v=m106"></script>
-<script src="scripts/physics-hinge-geometry.js?v=m106"></script>
-<script src="scripts/physics-df.js?v=m106"></script>
-<script src="scripts/physics-gpu.js?v=m106"></script>
-<script src="scripts/physics-gpu-df.js?v=m106"></script>
-<script src="scripts/physics-grid-codegen.js?v=m106"></script>
-<script src="scripts/physics-ui.js?v=m106"></script>
-<script src="scripts/fractal-stats.js?v=m106"></script>
-<script src="scripts/fractal-stats-panel.js?v=m106"></script>
-<script src="scripts/fractal-grid.js?v=m106"></script>
-<script src="scripts/transition.js?v=m106"></script>
+<script src="scripts/app-message.js?v=m107"></script>
+<script src="scripts/physics-engine.js?v=m107"></script>
+<script src="scripts/physics-coords.js?v=m107"></script>
+<script src="scripts/share-url.js?v=m107"></script>
+<script src="scripts/movie-path.js?v=m107"></script>
+<script src="scripts/movie-store.js?v=m107"></script>
+<script src="scripts/physics-sound.js?v=m107"></script>
+<script src="scripts/physics-hinge-geometry.js?v=m107"></script>
+<script src="scripts/physics-df.js?v=m107"></script>
+<script src="scripts/physics-gpu.js?v=m107"></script>
+<script src="scripts/physics-gpu-df.js?v=m107"></script>
+<script src="scripts/physics-grid-codegen.js?v=m107"></script>
+<script src="scripts/physics-ui.js?v=m107"></script>
+<script src="scripts/fractal-stats.js?v=m107"></script>
+<script src="scripts/fractal-stats-panel.js?v=m107"></script>
+<script src="scripts/fractal-grid.js?v=m107"></script>
+<script src="scripts/transition.js?v=m107"></script>
 <script>
   // ---- The '80s switch: the same saved setting as the other pages (eighties-theme.js) ----
   (function () {

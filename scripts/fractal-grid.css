@@ -481,6 +481,39 @@ input[type="range"] {
   transition: transform 0.15s ease;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
+/* Off, the Playback with Inspect tab switch asks for attention: a pulsing glow, a sweep of light, the label lit. */
+#evolution-inspect-checkbox:not(:checked) + .toggle-slider {
+  overflow: hidden;
+  background: color-mix(in srgb, var(--accent) 35%, var(--border));
+  box-shadow: 0 0 0 1px var(--accent), 0 0 10px var(--accent);
+  animation: toggle-nudge-glow 1.6s ease-in-out infinite;
+}
+#evolution-inspect-checkbox:not(:checked) + .toggle-slider::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 40%;
+  left: -40%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  animation: toggle-nudge-sweep 1.6s ease-in-out infinite;
+}
+.toggle-field:has(#evolution-inspect-checkbox:not(:checked)) > span:first-child {
+  color: var(--accent);
+  font-weight: 600;
+}
+@keyframes toggle-nudge-glow {
+  0%, 100% { box-shadow: 0 0 0 1px var(--accent), 0 0 4px var(--accent); }
+  50% { box-shadow: 0 0 0 2px var(--accent), 0 0 14px var(--accent); }
+}
+@keyframes toggle-nudge-sweep {
+  0%, 35% { left: -40%; }
+  100% { left: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #evolution-inspect-checkbox:not(:checked) + .toggle-slider,
+  #evolution-inspect-checkbox:not(:checked) + .toggle-slider::after { animation: none; }
+}
 .toggle-switch input:checked + .toggle-slider {
   background: var(--accent);
 }
@@ -764,10 +797,6 @@ input[type="range"] {
 }
 
 /* ---- The timeline transport: the Map Evolution card's body (see #menu-playback in chaos.html) ---- */
-/* .playback-controls' margin-top is meaningless as the first thing in this body. */
-#grid-playback-panel .playback-controls {
-  margin-top: 0;
-}
 #grid-view #grid-timeline-readout {
   margin: 6px 0 0 0;
   text-align: center;

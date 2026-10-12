@@ -292,6 +292,8 @@
   var inspectGridSizeReadout = document.getElementById("inspect-grid-size-readout");
   var inspectGridTwoPartCheckbox = document.getElementById("inspect-grid-two-part-checkbox");
   var gridPlayPauseBtn = document.getElementById("grid-play-pause");
+  var evolutionInspectCheckbox = document.getElementById("evolution-inspect-checkbox");
+  var gridTimelineSection = document.getElementById("grid-timeline-section");
   var gridRestartBtn = document.getElementById("grid-restart");
   var gridTimelineSlider = document.getElementById("grid-timeline-slider");
   var gridTimelineReadout = document.getElementById("grid-timeline-readout");
@@ -639,15 +641,15 @@
 
   var settingsMenu = makeMenu("menu-settings", "grid-btn-settings", "right");
 
-  // Collapsing Inspect stops the preview outright (it has sound) and disarms
-  // Line/Grid, but keeps inspectedGroups so reopening restores them.
+  // Collapsing Inspect stops the preview (it has sound) and disarms Line/Grid, but keeps inspectedGroups so
+  // reopening restores them. With the map following locked points the preview plays on, muted, for Map Evolution.
   var inspectMenu = makeMenu("menu-inspect", "grid-btn-inspect", "left",
     function (open) {
       if (open) {
         if (inspectedGroups.length > 0) beginInspectOnlySession();
         else showHoverEmpty();
       } else {
-        showHoverEmpty();
+        if (!(mapFollowsInspect() && inspectedGroups.length > 0)) showHoverEmpty();
         disarmInspect();
       }
       updateInspectMarkers();
@@ -663,15 +665,17 @@
 
   var displayMenu = makeMenu("menu-display", "grid-btn-display", "left");
 
-  // OPEN, the map follows the Inspect preview's step (followInspection); shut, it is frozen at the end.
+  // Open with Playback with Inspect tab on, the map follows the Inspect preview's step (followInspection); shut, it is frozen at the end.
   var playbackMenu = makeMenu("menu-playback", "grid-btn-playback", "right",
     function (open) {
       if (open) {
         pauseTimeline();
         mapLinked = false;
+        followPreviewIfOn();
       } else {
         freezeMapAtEnd();
       }
+      refreshHoverPreview();
     });
 
   var renderProgressMenu = makeMenu("menu-render-progress", "grid-btn-render-progress", "left");
@@ -1452,7 +1456,7 @@
     var CONTEXT_CREATION_RETRY_MS = 12000;
     var retrying = afterLoss && lossRec.n <= CONTEXT_LOSS_MAX_AUTO_RELOADS;
     showEmptyState(retrying ? "The browser refused a WebGL2 context after resetting the page's graphics. Trying again shortly."
-      : "This browser/device doesn't support WebGL2, which the physics grid needs.");
+      : "This browser/device doesn't support WebGL2, which the map needs.");
     if (!retrying) mapUnusable("This browser/device doesn't support WebGL2, which the map needs.");
     var retryAt = performance.now() + CONTEXT_CREATION_RETRY_MS;
     function paintDebugLog() {
@@ -1470,7 +1474,7 @@
   try {
     vs = PhysicsGPU.compileShader(gl, gl.VERTEX_SHADER, PhysicsGPU.VERTEX_SOURCE);
   } catch (err) {
-    showEmptyState("Couldn't build the grid shader: " + (err.message || err));
+    showEmptyState("Couldn't build the map shader: " + (err.message || err));
     mapUnusable("Couldn't build the map: " + (err.message || err));
     return;
   }
@@ -1706,7 +1710,7 @@
 
   if (!requestPass("f32", "standard", true)) {
     var buildError = passes[passKey("f32", "standard")].error || "unknown error";
-    showEmptyState("Couldn't build the grid shader: " + buildError);
+    showEmptyState("Couldn't build the map shader: " + buildError);
     mapUnusable("Couldn't build the map: " + buildError);
     return;
   }
@@ -3065,7 +3069,7 @@
     ctx.textAlign = "right";
     ctx.fillText(String(steps), left + plotW, height - 16);
     ctx.textAlign = "center";
-    ctx.fillText("Frame", left + plotW / 2, height - 4);
+    ctx.fillText("Step", left + plotW / 2, height - 4);
     ctx.save();
     ctx.translate(10, top + plotH / 2);
     ctx.rotate(-Math.PI / 2);
@@ -3129,7 +3133,7 @@
   function restartCurrentPreview() {
     if (inspectedGroups.length > 0) {
       beginInspectOnlySession();
-    } else if (isHoveringGrid && hoverWorldPoint) {
+    } else if (isHoveringGrid && hoverWorldPoint && !hoverPreviewSuppressed()) {
       runHoverAt(hoverWorldPoint);
     } else {
       showHoverEmpty();
@@ -3819,7 +3823,7 @@
   }
   function playbackProgressLabelText() {
     if (timeline.catchingUp) {
-      return "Playback: catching up to frame " + timeline.step.toLocaleString() +
+      return "Playback: catching up to step " + timeline.step.toLocaleString() +
         " (" + Math.floor(timeline.catchUpFraction * 100) + "%)";
     }
     return "Playback: " + (timeline.stride <= 1 ? "1 sim/px" : "1 sim per " + timeline.stride + "px");
@@ -4919,7 +4923,7 @@
   function updateInspectGridSettingsUI() {
     var label = inspectGridSize + "×" + inspectGridSize;
     inspectGridSizeReadout.textContent = label;
-    btnInspectGrid.title = "Drag the grid to inspect a " + label + " grid of points";
+    btnInspectGrid.title = "Drag the map to inspect a " + label + " grid of points";
   }
   inspectGridSizeSlider.value = String(inspectGridSize);
   inspectGridTwoPartCheckbox.checked = inspectGridTwoPart;
@@ -5007,6 +5011,8 @@
   var playbackHasSession = false;
   // Stamped when code (not a click) starts playback: a Pause within PLAY_PAUSE_GRACE_MS is dropped as an intended Play.
   var playbackAutoStartedAt = -Infinity;
+  // Set by a user's Pause (or scrub), cleared only by their Play: no new session autoplays in between.
+  var userPaused = false;
   var PLAY_PAUSE_GRACE_MS = 300;
 
   function updatePlayPauseButtonUI() {
@@ -5109,6 +5115,8 @@
 
   // Auto-advance ceiling: the latest final frame on screen. Recomputed per call, since inspected points change under a running session.
   function playbackClockCeiling() {
+    // Following the map, the clock runs the whole duration so the map reaches its last frame.
+    if (mapFollowsInspect()) return playbackConfiguredMax;
     return Math.max(activeReplay ? activeReplay.effectiveMaxStep : 1, lockedClockCeiling(inspectedGroups));
   }
 
@@ -5214,9 +5222,10 @@
     updateProgressSliderPosition();
     hoverEmptyState.hidden = false;
     // Asked fresh each time: a tablet can gain or lose a mouse.
-    hoverEmptyState.textContent = message || (global.LayoutMode && !global.LayoutMode.canHover()
+    hoverEmptyState.textContent = message || (hoverPreviewSuppressed() ? "Click a point on the map to inspect it."
+      : global.LayoutMode && !global.LayoutMode.canHover()
       ? "Press Inspect (Point), then tap the map to see that spot\u2019s simulation"
-      : "Hover the grid to preview a pixel");
+      : "Hover over the map to inspect a point.");
     // A placeholder, not blank: an empty line would collapse and reflow everything below.
     hoverReadout.textContent = "X: 0, Y: 0";
     hoverCanvas.style.backgroundColor = "";
@@ -5698,15 +5707,15 @@
 
     if (shown) {
       hoverReadout.textContent = "X: " + activeReplay.worldPoint.x.toFixed(5) + ", Y: " + activeReplay.worldPoint.y.toFixed(5) +
-        " - step " + (shown.step + 1) + " / " + activeReplay.trajectory.length;
+        " - Step " + (shown.step + 1) + " / " + activeReplay.trajectory.length;
     } else {
       var overallMaxStep = playbackClockCeiling();
       var inspectedCount = totalInspectedPointCount();
       hoverReadout.textContent = "Inspecting " + inspectedCount + " point" + (inspectedCount === 1 ? "" : "s") +
-        " - step " + (Math.min(overallMaxStep - 1, step) + 1) + " / " + overallMaxStep;
+        " - Step " + (Math.min(overallMaxStep - 1, step) + 1) + " / " + overallMaxStep;
     }
     updateProgressSliderPosition();
-    // Every frame passes through here, so this one call keeps the map in lockstep; a no-op with Map Evolution shut.
+    // Every frame passes through here, so this one call keeps the map in lockstep; a no-op unless mapFollowsInspect().
     syncMapToInspection();
   }
 
@@ -5720,7 +5729,8 @@
   // Sounds for steps newly reached between frames (auto-advance only, never scrubbing): fromStep < e <= toStep,
   // INCLUSIVE, since the clock caps at ceiling-1 and a strict < would drop every edge sound.
   function checkPlaybackSounds(fromStep, toStep) {
-    if (PhysicsSound.isMuted() || toStep <= fromStep) return;
+    // Silent while the Inspect card is collapsed: nothing shows what is bouncing.
+    if (PhysicsSound.isMuted() || toStep <= fromStep || !inspectMenu.isOpen()) return;
     var entries = activeVoiceEntries();
     var freqs = PhysicsSound.chordFrequencies(entries.length);
     entries.forEach(function (entry, i) {
@@ -5756,9 +5766,9 @@
     renderPlaybackFrame();
     if (playbackStep >= ceiling - 1) {
       hoverRafId = null;
-      // With Map Evolution open this is the map's clock too, and a map run ends on its last frame;
+      // Following the map, this is the map's clock too, and a map run ends on its last frame;
       // Play from there restarts at 0. Inspect alone loops.
-      if (playbackMenu.isOpen()) {
+      if (mapFollowsInspect()) {
         playbackPlaying = false;
         updatePlayPauseButtonUI();
         syncMapToInspection();
@@ -5767,7 +5777,7 @@
       hoverLoopTimer = setTimeout(function () {
         hoverLoopTimer = null;
         if (!playbackPlaying) return;
-        if (playbackMenu.isOpen()) { playbackPlaying = false; updatePlayPauseButtonUI(); syncMapToInspection(); return; }
+        if (mapFollowsInspect()) { playbackPlaying = false; updatePlayPauseButtonUI(); syncMapToInspection(); return; }
         playbackStep = 0;
         playbackLastTickTime = performance.now();
         playbackAutoStartedAt = performance.now();
@@ -5796,7 +5806,13 @@
     syncMapToInspection();
   }
 
+  function pauseByUser() {
+    userPaused = true;
+    pausePlayback();
+  }
+
   function resumePlayback() {
+    userPaused = false;
     if (playbackStep >= playbackClockCeiling() - 1) playbackStep = 0;
     playbackPlaying = true;
     updatePlayPauseButtonUI();
@@ -5808,6 +5824,7 @@
   // stops whatever was animating so a slow compile can't draw over a later session.
   function beginPlaybackSession(replay, autoplay) {
     if (autoplay === undefined) autoplay = true;
+    if (userPaused) autoplay = false;
     stopHoverReplay();
     unlinkMapWhereItIs();
     activeReplay = replay || null;
@@ -5820,6 +5837,7 @@
     playbackAutoStartedAt = performance.now();
     updatePlayPauseButtonUI();
     if (autoplay) ensurePlaybackAdvancing();
+    if (mapFollowsInspect()) linkMapToPreview();
     renderPlaybackFrame();
     hoverEmptyState.hidden = true;
   }
@@ -5829,7 +5847,7 @@
     if (playbackPlaying) {
       if (performance.now() - playbackAutoStartedAt < PLAY_PAUSE_GRACE_MS) return;
       linkMapToPreview();
-      pausePlayback();
+      pauseByUser();
     } else {
       linkMapToPreview();
       resumePlayback();
@@ -5839,7 +5857,7 @@
   hoverProgressSlider.addEventListener("input", function () {
     if (!playbackHasSession) return;
     linkMapToPreview();
-    pausePlayback();
+    pauseByUser();
     playbackStep = Number(hoverProgressSlider.value);
     renderPlaybackFrame();
   });
@@ -5847,7 +5865,7 @@
   hoverResetBtn.addEventListener("click", function () {
     if (!playbackHasSession) return;
     linkMapToPreview();
-    pausePlayback();
+    pauseByUser();
     playbackStep = 0;
     renderPlaybackFrame();
   });
@@ -5933,14 +5951,14 @@
       return;
     }
     if (replay.trajectory.length === 0) { global.AppMessage.toast("This scene has no bodies to replay."); showHoverEmpty(); return; }
-    // With Map Evolution open a run is user-started: land on the first frame and wait.
-    beginPlaybackSession(replay, /* autoplay */ !playbackMenu.isOpen());
+    // Following the map, a run is user-started: land on the first frame and wait.
+    beginPlaybackSession(replay, /* autoplay */ !mapFollowsInspect());
   }
 
   // Cursor off the grid with points inspected: keep playing them together instead of the empty state.
   // inspectedGroups is read fresh each frame, so removals show immediately.
   function beginInspectOnlySession() {
-    beginPlaybackSession(null, /* autoplay */ !playbackMenu.isOpen());
+    beginPlaybackSession(null, /* autoplay */ !mapFollowsInspect());
   }
 
   canvas.addEventListener("mousemove", function (e) {
@@ -5955,7 +5973,7 @@
     hoverKey = key;
     hoverWorldPoint = world;
     // Updated above regardless, so removing the last inspected point can fall back to this cell; with any point locked the panel is theirs.
-    if (inspectedGroups.length > 0) return;
+    if (inspectedGroups.length > 0 || hoverPreviewSuppressed()) return;
     stopHoverReplay(); // a previous cell's replay may still be animating: don't let it keep drawing over the new cell's preview
     if (hoverUpgradeTimer) clearTimeout(hoverUpgradeTimer);
     showHoverInstant(world);
@@ -5969,6 +5987,8 @@
     // hoverSpeedPopup is position:fixed outside the row, so checked separately.
     if (e.relatedTarget && (hoverPlaybackControlsEl.contains(e.relatedTarget) || hoverSpeedPopup.contains(e.relatedTarget))) return;
     isHoveringGrid = false;
+    // Locked points own the panel while hovering, so their session is still the one showing.
+    if (inspectedGroups.length > 0 && playbackHasSession && !activeReplay) return;
     // Moving onto the Inspect bar isn't "done looking" either. (The card may be in the dock, outside #menu-inspect.)
     if (e.relatedTarget && (inspectMenuEl.contains(e.relatedTarget) || inspectMenu.card.contains(e.relatedTarget)) && inspectedGroups.length > 0 && playbackHasSession) return;
     if (inspectedGroups.length > 0) { beginInspectOnlySession(); } else { showHoverEmpty(); }
@@ -7735,15 +7755,12 @@
 
   // ---- The map in lockstep with Inspect ----
   //
-  // With Map Evolution open the map plays the step the Inspect preview shows:
+  // With Map Evolution open and Playback with Inspect tab on, the map shows the step the Inspect preview shows:
   // the preview's clock is the one clock and both cards' transports drive it
   // (previewOwnsTimeline), or the map's own timeline with no preview session.
-  // NOT until asked, though: hovering parks a preview on frame 1, so the map
-  // ignores it until a transport control is touched (mapLinked); returning to the finished field clears it.
   var mapLinked = false;
   function linkMapToPreview() { mapLinked = true; }
 
-  // A new thing to preview (another cell, a lock) is not a request to move the map: unlink and stay put.
   function unlinkMapWhereItIs() {
     if (!mapLinked) return;
     mapLinked = false;
@@ -7752,14 +7769,50 @@
     updateTimelineUI();
   }
 
+  function mapFollowsInspect() {
+    return playbackMenu.isOpen() && evolutionInspectCheckbox.checked;
+  }
+
+  function setMapFollowsInspect(on) {
+    evolutionInspectCheckbox.checked = on;
+    gridTimelineSection.hidden = !on;
+    // Collapsed Inspect: the locked points' session is only for the map, so it comes and goes with the switch.
+    if (!inspectMenu.isOpen() && inspectedGroups.length > 0) {
+      if (on && !playbackHasSession) beginInspectOnlySession();
+      else if (!on) showHoverEmpty();
+    }
+    unlinkMapWhereItIs();
+    followPreviewIfOn();
+    updateTimelineUI();
+    refreshHoverPreview();
+  }
+  // Following the Inspect tab with the Map Evolution card open, the map plays locked points only: a hovered
+  // pixel would drive the whole map.
+  function hoverPreviewSuppressed() {
+    return mapFollowsInspect() && playbackMenu.isOpen();
+  }
+  // The hover preview comes or goes with that rule; locked points play on untouched.
+  function refreshHoverPreview() {
+    if (inspectedGroups.length === 0) restartCurrentPreview();
+  }
+
+  // The map jumps to the preview's step and follows it from there.
+  function followPreviewIfOn() {
+    if (!previewOwnsTimeline()) return;
+    linkMapToPreview();
+    syncMapToInspection();
+  }
+
+  evolutionInspectCheckbox.addEventListener("change", function () { setMapFollowsInspect(evolutionInspectCheckbox.checked); });
+
   function previewOwnsTimeline() {
-    return hasFloatColorBuffer && playbackMenu.isOpen() && inspectMenu.isOpen() && playbackHasSession
+    return hasFloatColorBuffer && mapFollowsInspect() && (inspectMenu.isOpen() || inspectedGroups.length > 0) && playbackHasSession
       // Mid-run on its own clock: keep controlling THAT, or Pause would leave the map running.
       && (mapLinked || !timeline.playing);
   }
 
   function followInspection(step, playing) {
-    if (!playbackMenu.isOpen() || !mapLinked || !hasFloatColorBuffer) return;
+    if (!mapFollowsInspect() || !mapLinked || !hasFloatColorBuffer) return;
     step = clamp(step, 0, simulationSteps);
     if (timeline.following && step === timeline.followTarget && playing === timeline.followPlaying) return;
     if (!timeline.following) {
@@ -7828,7 +7881,7 @@
     gridSpeedBtn.disabled = false;
     gridTimelineSlider.max = String(simulationSteps);
     gridTimelineSlider.value = String(renderedSteps());
-    var text = "Frame " + renderedSteps().toLocaleString() + " / " + simulationSteps.toLocaleString();
+    var text = "Step " + renderedSteps() + " / " + simulationSteps;
     if (timeline.drawing && timeline.catchingUp) {
       text += timeline.following ? " · catching up"
         : playing ? " · catching up " + Math.floor(timeline.catchUpFraction * 100) + "%" : "";
@@ -7845,7 +7898,7 @@
         // Same grace window as Inspect's own button.
         if (performance.now() - playbackAutoStartedAt < PLAY_PAUSE_GRACE_MS) return;
         linkMapToPreview();
-        pausePlayback();
+        pauseByUser();
       } else {
         linkMapToPreview();
         resumePlayback();
@@ -7857,7 +7910,7 @@
   gridRestartBtn.addEventListener("click", function () {
     if (previewOwnsTimeline()) {
       linkMapToPreview();
-      pausePlayback();
+      pauseByUser();
       playbackStep = 0;
       renderPlaybackFrame();
       return;
@@ -7868,7 +7921,7 @@
     var frame = Number(gridTimelineSlider.value);
     if (previewOwnsTimeline()) {
       linkMapToPreview();
-      pausePlayback();
+      pauseByUser();
       playbackStep = clamp(frame - 1, 0, playbackClockCeiling() - 1);
       renderPlaybackFrame();
       return;
@@ -8055,13 +8108,21 @@
   }
 
   function goToKeyframe(k) {
-    // A frame short of the last is only on screen with Map Evolution open, so open it and unlink from the preview's clock.
+    // A step short of the last is only on screen with Map Evolution open.
     if (k.step < simulationSteps) playbackMenu.set(true);
-    unlinkMapWhereItIs();
     view.center.x = k.center.x; view.center.xLo = k.center.xLo;
     view.center.y = k.center.y; view.center.yLo = k.center.yLo;
     view.scale = k.scale;
-    seekTimeline(Math.min(k.step, simulationSteps));
+    if (previewOwnsTimeline()) {
+      // Keeps Inspect on the same step; map step N is preview row N-1.
+      linkMapToPreview();
+      pausePlayback();
+      playbackStep = clamp(k.step - 1, 0, playbackClockCeiling() - 1);
+      renderPlaybackFrame();
+    } else {
+      unlinkMapWhereItIs();
+      seekTimeline(Math.min(k.step, simulationSteps));
+    }
     updateZoomReadout();
     markDirty();
   }
@@ -8170,9 +8231,9 @@
         apply: function (zoom) { k.scale = clamp(DEFAULT_SCALE / zoom, MIN_SCALE, MAX_SCALE); },
       }));
 
-      what.appendChild(movieField("frame", "Frame of keyframe " + (i + 1), {
-        title: "The simulation frame the map shows at this keyframe.",
-        stepHint: "a frame",
+      what.appendChild(movieField("step", "Step of keyframe " + (i + 1), {
+        title: "The simulation step the map shows at this keyframe.",
+        stepHint: "a step",
         show: function () { return Math.min(k.step, simulationSteps).toLocaleString(); },
         edit: function () { return String(Math.min(k.step, simulationSteps)); },
         parse: function (text) {
@@ -8220,7 +8281,7 @@
       var actions = document.createElement("div");
       actions.className = "movie-keyframe-actions";
       actions.appendChild(movieButton("⌖", "Go to this keyframe", function () { goToKeyframe(k); }));
-      actions.appendChild(movieButton("⟳", "Replace with the current view and frame", function () {
+      actions.appendChild(movieButton("⟳", "Replace with the current view and step", function () {
         movie.keyframes[i] = currentKeyframe(k.seconds, k.friction);
         updateMovieUI();
       }));
