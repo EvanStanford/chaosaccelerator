@@ -3154,7 +3154,7 @@
   }
   // Not while a link's points are still being rebuilt: the movie would miss the rest.
   function updateMovieInspectButton() {
-    btnMovieInspect.disabled = inspectedGroups.length === 0 || !!pendingInspect;
+    btnMovieInspect.disabled = inspectedGroups.length === 0 || !!pendingInspect || recomputingInspect;
   }
   // Back from the player can bring this page back as it was left, button disabled.
   global.addEventListener("pageshow", updateMovieInspectButton);
@@ -4763,26 +4763,41 @@
   function updateStepsUI(value) {
     if (stepsReadout.value !== String(value)) stepsReadout.value = String(value);
   }
-  // Locked points cached OLD-length trajectories: recompile in place, keeping colors. A failed point
+  // Locked points cached OLD-length trajectories: recompute in place, keeping colors. A failed point
   // group is removed; a line/grid point keeps its stale trajectory so the group's shape survives.
+  // One point per task, so the page stays usable and a newer duration cancels the rest.
+  var recomputeJob = 0;
+  var recomputingInspect = false;
   function recomputeLockedTrajectories() {
-    for (var g = inspectedGroups.length - 1; g >= 0; g--) {
-      var group = inspectedGroups[g];
-      if (group.type === "point") {
-        var next = computeTrajectoryEntry(group.points[0].worldPoint);
-        if (!next) { inspectedGroups.splice(g, 1); continue; }
-        next.color = group.points[0].color;
-        group.points[0] = next;
-      } else {
-        for (var i = 0; i < group.points.length; i++) {
-          var recomputed = computeTrajectoryEntry(group.points[i].worldPoint);
-          if (!recomputed) continue;
-          recomputed.color = group.points[i].color;
-          group.points[i] = recomputed;
+    var job = ++recomputeJob;
+    var queue = [];
+    inspectedGroups.forEach(function (group) {
+      group.points.forEach(function (point, i) { queue.push({ group: group, i: i }); });
+    });
+    recomputingInspect = true;
+    updateMovieInspectButton();
+    function next() {
+      if (job !== recomputeJob) return;
+      var item = queue.shift();
+      if (!item) {
+        recomputingInspect = false;
+        updateInspectUI();
+        return;
+      }
+      var g = inspectedGroups.indexOf(item.group);
+      if (g >= 0) {
+        var old = item.group.points[item.i];
+        var entry = computeTrajectoryEntry(old.worldPoint);
+        if (entry) {
+          entry.color = old.color;
+          item.group.points[item.i] = entry;
+        } else if (item.group.type === "point") {
+          inspectedGroups.splice(g, 1);
         }
       }
+      setTimeout(next, 0);
     }
-    updateInspectUI();
+    setTimeout(next, 0);
   }
   syncStepsUI();
   stepsSlider.addEventListener("input", function () { updateStepsUI(stepsFromSlider()); });
