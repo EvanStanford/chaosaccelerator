@@ -15,7 +15,7 @@
 <meta name="description" content="Fractals people have made with Chaos Accelerator, and how to add yours.">
 <script>
   // Before first paint, so a page with the '80s switched off never flashes them.
-  try { if (localStorage.getItem("eightiesOff") === "1") document.documentElement.classList.add("eighties-off"); } catch (e) {}
+  try { if (localStorage.getItem("eightiesOff") !== "0") document.documentElement.classList.add("eighties-off"); } catch (e) {}
 </script>
 <link rel="stylesheet" href="../scripts/landing.css?v=m107">
 <link rel="stylesheet" href="../scripts/eighties.css?v=m107">

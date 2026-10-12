@@ -13,7 +13,7 @@
   // app with replace(), so Back does not land on a page that forwards again.
   if (/^#(bldr|map)\//.test(location.hash)) location.replace("chaos.html" + location.hash);
   // Before first paint, so a page with the '80s switched off never flashes them.
-  try { if (localStorage.getItem("eightiesOff") === "1") document.documentElement.classList.add("eighties-off"); } catch (e) {}
+  try { if (localStorage.getItem("eightiesOff") !== "0") document.documentElement.classList.add("eighties-off"); } catch (e) {}
 </script>
 <link rel="stylesheet" href="scripts/landing.css?v=m107">
 <link rel="stylesheet" href="scripts/eighties.css?v=m107">
@@ -115,8 +115,8 @@
 </main>
 <a class="watermark" href="chaos.html">chaosaccelerator.com</a>
 <label class="eighties-toggle" id="eighties-toggle">
-  <span class="toggle-switch"><input type="checkbox" checked><span class="toggle-slider"></span></span>
-  <span class="eighties-toggle-label">Disable '80s</span>
+  <span class="toggle-switch"><input type="checkbox"><span class="toggle-slider"></span></span>
+  <span class="eighties-toggle-label">Enable '80s</span>
 </label>
 <script src="scripts/eighties-ride.js?v=m107"></script>
 <script src="scripts/eighties-theme.js?v=m107"></script>
@@ -248,7 +248,7 @@
     sun: document.getElementById("sun"),
     lane: tour.lane,
     drift: document.querySelector(".billboard"),
-  });
+  }, true);
 
   // ---- The gallery slide ----
   (function () {

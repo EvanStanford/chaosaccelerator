@@ -1,12 +1,13 @@
 // CPAL-1.0 License. See chaosaccelerator.com/license.html
 
-// The eighties theme's shared page parts: the corner menu's X, the '80s switch (a copy at the end of the
-// corner menu, synced with any other on the page and remembered), and the grid behind the page.
+// The eighties theme's shared page parts: the corner menu's X, the '80s setting (off unless saved on; only
+// the landing page's switches change it) and the grid behind the page.
 (function (global) {
   "use strict";
 
   var X_ICON = "<svg viewBox=\"0 0 24 24\" width=\"20\" height=\"20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" " +
     "stroke-linecap=\"round\" aria-hidden=\"true\"><path d=\"M6 6l12 12M18 6L6 18\"></path></svg>";
+
   var SWITCH = "<label class=\"eighties-toggle\"><span class=\"toggle-switch\"><input type=\"checkbox\">" +
     "<span class=\"toggle-slider\"></span></span><span class=\"eighties-toggle-label\"></span></label>";
 
@@ -18,7 +19,8 @@
   }
 
   // rideOptions: EightiesRide.start's options, started the first time the '80s are shown.
-  function start(rideOptions) {
+  // menuSwitch: a copy of the switch at the end of the corner menu (the landing page only).
+  function start(rideOptions, menuSwitch) {
     var root = document.documentElement;
     var btn = document.getElementById("corner-menu-btn");
 
@@ -30,7 +32,7 @@
         btn.focus();
       });
 
-    item(SWITCH);
+    if (menuSwitch) item(SWITCH);
     var boxes = document.querySelectorAll(".eighties-toggle input");
     var labels = document.querySelectorAll(".eighties-toggle-label");
     var ride = null;
