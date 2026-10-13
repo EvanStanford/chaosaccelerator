@@ -2299,6 +2299,129 @@
     }
   );
 
+  // ---- Gravity Substeps (Settings > Performance) ----
+  function fastPass(offset, collisions) {
+    var p = PhysicsEngine.createCircle(-1500 + offset, 0.5, 30, false), c = PhysicsEngine.createCircle(0, 0, 30, true);
+    p.vx = 3000;
+    return { bodies: [p, c], hinges: [], springs: [], frameWidth: 1000, frameHeight: 1000, edgeMode: "infinite",
+      mutualGravity: true, collisionsEnabled: collisions, friction: 0 };
+  }
+  function withSubsteps(on, fn) {
+    PhysicsEngine.setGravitySubsteps(on);
+    try { return fn(); } finally { PhysicsEngine.setGravitySubsteps(false); }
+  }
+
+  addTest(
+    "Gravity Substeps: only Mutual Gravity changes, and an unused flag leaves the shader text alone",
+    "the setting is page state the engine and both shader spellings read; a constant pull has nothing to substep",
+    function () {
+      function dropScene() {
+        var b = PhysicsEngine.createCircle(300, 100, 20, false), l = PhysicsEngine.createLine(300, 600, 400, 0.1, true);
+        b.vx = 120;
+        return { bodies: [b, l], hinges: [], springs: [], frameWidth: 1000, frameHeight: 1000, edgeMode: "sticky", mutualGravity: false };
+      }
+      var plain = runJS(dropScene(), 200).bodies[0];
+      var flagged = withSubsteps(true, function () { return runJS(dropScene(), 200).bodies[0]; });
+      var same = plain.x === flagged.x && plain.y === flagged.y && plain.vx === flagged.vx && plain.vy === flagged.vy;
+      var sc = fastPass(0, false), consts = sc.bodies.map(PhysicsGPU.bodyConst), texts = {};
+      ["f32", "df"].forEach(function (prec) {
+        texts[prec] = [undefined, 1].map(function (k) {
+          return PhysicsGPU.generateStepOnceGLSL(2, consts, [], [], undefined, prec, true, false, [], { gravitySubsteps: k });
+        });
+      });
+      var textSame = texts.f32[0] === texts.f32[1] && texts.df[0] === texts.df[1];
+      return {
+        pass: same && textSame,
+        detail: "uniform-gravity bounce bit-identical with the setting on: " + same + "; stepOnce text unchanged by gravitySubsteps 1: " + textSame,
+      };
+    }
+  );
+
+  addTest(
+    "Gravity Substeps: a fast close pass no longer depends on where the steps fall",
+    "one gravity sample per step made the outcome of a pass that covers its closest distance in a step or two repeat with the step phase: sine-wave stripes on the map",
+    function () {
+      function spread(on) {
+        return withSubsteps(on, function () {
+          var lo = Infinity, hi = -Infinity;
+          for (var k = 0; k < 12; k++) {
+            var p = runJS(fastPass(50 * k / 12, false), 240).bodies[0], v = Math.hypot(p.vx, p.vy);
+            lo = Math.min(lo, v); hi = Math.max(hi, v);
+          }
+          return hi - lo;
+        });
+      }
+      var off = spread(false), on = spread(true);
+      return {
+        pass: off > 20 && on < off / 20,
+        detail: "outgoing speed across one step of start offset varies by " + off.toFixed(2) + " px/s off, " + on.toFixed(3) + " px/s on",
+      };
+    }
+  );
+
+  addTest(
+    "Gravity Substeps: JS engine and GPU compiler agree",
+    "the substep loop and its contact clamp are hand-synced in physics-engine.js and both spellings of generateStepOnceGLSL",
+    function () {
+      function bounce() {
+        var p = PhysicsEngine.createCircle(-30, -400, 20, false), c = PhysicsEngine.createCircle(0, 0, 60, true), q = PhysicsEngine.createCircle(200, -300, 15, false);
+        p.vx = 150; q.vx = -100;
+        return { bodies: [p, q, c], hinges: [], springs: [], frameWidth: 1000, frameHeight: 1000, edgeMode: "infinite",
+          mutualGravity: true, collisionsEnabled: true, friction: 0.15 };
+      }
+      return withSubsteps(true, function () {
+        var errs = {};
+        [["pass", function () { return fastPass(0, false); }], ["bounce", bounce]].forEach(function (c) {
+          var cpu = PhysicsEngine.runTrajectory(c[1](), 120, DT);
+          ["f32", "df"].forEach(function (prec) {
+            var gpu = PhysicsGPU.runSceneOnGPU(c[1](), 120, prec), e = 0;
+            for (var i = 0; i < 120; i++) {
+              for (var b = 0; b < cpu[i].length; b++) e = Math.max(e, Math.abs(gpu[i][b].x - cpu[i][b].x), Math.abs(gpu[i][b].y - cpu[i][b].y));
+            }
+            errs[c[0] + " " + prec] = e;
+          });
+        });
+        return {
+          pass: errs["pass df"] < 1e-3 && errs["bounce df"] < 1e-3 && errs["pass f32"] < 0.5 && errs["bounce f32"] < 0.5,
+          detail: Object.keys(errs).map(function (k) { return k + " " + errs[k].toExponential(1) + "px"; }).join(", ") + " over 120 steps",
+        };
+      });
+    }
+  );
+
+  addTest(
+    "Gravity Substeps: a bounce on a planet stays nearer the fine-step answer than without",
+    "the substep path runs on into the planet, where touching bodies don't pull; without the contact-distance clamp the bounce step's pull came out weak and bounces gained energy until the body escaped",
+    function () {
+      function firstApex(d, sub, on) {
+        return withSubsteps(on, function () {
+          var p = PhysicsEngine.createCircle(0, -d, 20, false), c = PhysicsEngine.createCircle(0, 0, 60, true);
+          var sc = { bodies: [p, c], hinges: [], springs: [], frameWidth: 1000, frameHeight: 1000, edgeMode: "infinite", mutualGravity: true, collisionsEnabled: true, friction: 0 };
+          var prev = null;
+          for (var i = 0; i < 2400 * sub; i++) {
+            PhysicsEngine.step(sc, DT / sub);
+            var r = Math.hypot(p.x, p.y), vr = (p.x * p.vx + p.y * p.vy) / r;
+            if (prev !== null && prev > 0 && vr <= 0) return r;
+            prev = vr;
+          }
+          return 0;
+        });
+      }
+      var offErr = 0, onErr = 0, onWorst = 0, N = 8;
+      for (var k = 0; k < N; k++) {
+        var d = 400 + 40 * k / N, ref = firstApex(d, 32, false);
+        offErr += Math.abs(firstApex(d, 1, false) - ref) / ref / N;
+        var e = Math.abs(firstApex(d, 1, true) - ref) / ref;
+        onErr += e / N; onWorst = Math.max(onWorst, e);
+      }
+      return {
+        pass: onErr < offErr && onWorst < 0.4,
+        detail: "first apex after a 400-440px drop, mean error vs 32 steps per frame: " + (100 * offErr).toFixed(0) + "% off, " +
+          (100 * onErr).toFixed(0) + "% on (worst " + (100 * onWorst).toFixed(0) + "%)",
+      };
+    }
+  );
+
   addTest(
     "Mutual Gravity off leaves the old constant-gravity behaviour exactly as it was",
     "computeAccelerations replaced a hardcoded downward scalar for EVERY scene, so the default path had to come out bit-for-bit unchanged",

@@ -393,7 +393,8 @@
     lines.push("");
     lines.push(PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(scene), PhysicsEngine.frictionRate(scene)));
     lines.push("");
-    lines.push(PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), initial.springs, { pairContacts: true, warpBits: true }));
+    lines.push(PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), initial.springs,
+      { pairContacts: true, warpBits: true, gravitySubsteps: PhysicsEngine.gravitySubstepsFor(scene) }));
     lines.push("");
     // Locals, declared first: a global's initializer must be constant, a uniform is not.
     var B = backendFor(precision);

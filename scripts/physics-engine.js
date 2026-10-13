@@ -153,6 +153,83 @@
     return acc;
   }
 
+  // ---- Gravity Substeps (Settings > Performance): page state, not scene data. Under Mutual Gravity a step's
+  // pull is taken GRAVITY_SUBSTEPS times, so a fast close pass doesn't hang on where the step boundaries fall.
+  var GRAVITY_SUBSTEPS = 3;
+  var gravitySubstepsOn = false;
+  function setGravitySubsteps(on) { gravitySubstepsOn = !!on; }
+  function gravitySubstepsFor(scene) { return gravitySubstepsOn && scene.mutualGravity ? GRAVITY_SUBSTEPS : 1; }
+
+  // The constant acceleration a leg of dt takes from velocity u to v: advanceVelocity's inverse below the cap.
+  function legAcceleration(u, v, dt, friction) {
+    if (friction > 0) {
+      var x = friction * dt, phi = -Math.expm1(-x) / x, decay = 1 - x * phi;
+      return { x: (v.x - u.x * decay) / (dt * phi), y: (v.y - u.y * decay) / (dt * phi) };
+    }
+    return { x: (v.x - u.x) / dt, y: (v.y - u.y) / dt };
+  }
+
+  // The pull at substep positions. With collisions on, a pair touching at the step's start stays pull-free, and
+  // one apart pulls at no less than contact distance: the substeps run on past the bounce the step will find.
+  function substepAccelerations(scene, poses, apart) {
+    var bodies = scene.bodies, n = bodies.length, acc = new Array(n);
+    for (var i = 0; i < n; i++) {
+      var ax = 0, ay = 0;
+      if (!bodies[i].isAnchored) {
+        for (var j = 0; j < n; j++) {
+          if (j === i || (apart && !apart[i][j])) continue;
+          var dx = poses[j].x - poses[i].x, dy = poses[j].y - poses[i].y;
+          if (apart) {
+            var contact = halfExtent(bodies[i]) + halfExtent(bodies[j]);
+            var r2 = Math.max(dx * dx + dy * dy, contact * contact);
+            var k = MUTUAL_GRAVITY_CONSTANT * gravitationalMass(bodies[j]) / (r2 * Math.sqrt(r2));
+            ax += k * dx; ay += k * dy;
+          } else {
+            var p = mutualPull(scene, bodies[i], bodies[j], dx, dy);
+            ax += p.x; ay += p.y;
+          }
+        }
+      }
+      acc[i] = { x: ax, y: ay };
+    }
+    return acc;
+  }
+
+  // Kick-drift substeps of h = dt / GRAVITY_SUBSTEPS, so velocities trail positions by h / 2 (step's contact kick
+  // follows). Springs keep their start value. vFull becomes the chord, acc the constant acceleration from u to the end.
+  function substepGravity(scene, gravityStart, acc, u, vFull, dt, maxSpeed, friction) {
+    var bodies = scene.bodies, n = bodies.length, h = dt / GRAVITY_SUBSTEPS, i, s;
+    var poses = bodies.map(function (b) { return { x: b.x, y: b.y }; });
+    var a = new Array(n), other = new Array(n), v = new Array(n);
+    var apart = collisionsEnabled(scene) ? bodies.map(function (bi) {
+      return bodies.map(function (bj) {
+        var dx = bj.x - bi.x, dy = bj.y - bi.y, contact = halfExtent(bi) + halfExtent(bj);
+        return dx * dx + dy * dy >= contact * contact;
+      });
+    }) : null;
+    for (i = 0; i < n; i++) {
+      if (bodies[i].isAnchored) continue;
+      a[i] = acc[i];
+      other[i] = { x: acc[i].x - gravityStart[i].x, y: acc[i].y - gravityStart[i].y };
+      v[i] = u[i];
+    }
+    for (s = 0; s < GRAVITY_SUBSTEPS; s++) {
+      var g = s > 0 ? substepAccelerations(scene, poses, apart) : null;
+      for (i = 0; i < n; i++) {
+        if (bodies[i].isAnchored) continue;
+        if (g) a[i] = { x: g[i].x + other[i].x, y: g[i].y + other[i].y };
+        v[i] = advanceVelocity(v[i].x, v[i].y, h, a[i].x, a[i].y, maxSpeed, friction);
+        poses[i].x += v[i].x * h;
+        poses[i].y += v[i].y * h;
+      }
+    }
+    for (i = 0; i < n; i++) {
+      if (bodies[i].isAnchored) continue;
+      vFull[i] = { x: (poses[i].x - bodies[i].x) / dt, y: (poses[i].y - bodies[i].y) / dt };
+      acc[i] = legAcceleration(u[i], v[i], dt, friction);
+    }
+  }
+
   // The acceleration on port hole chain member m at (x, y) from outside its chain, the part that does
   // not turn with it: gravity, or every body outside `members` pulling from its step-start pose.
   function outsideAcceleration(scene, m, members, x, y, poses) {
@@ -1224,6 +1301,8 @@
     // Fixed for the whole step; both legs and the detection sweep must agree on them.
     var maxSpeed = speedCapFor(scene), friction = frictionRate(scene);
     var acc = computeAccelerations(scene);
+    var substeps = gravitySubstepsFor(scene);
+    var gravityStart = substeps > 1 ? acc.map(function (a) { return { x: a.x, y: a.y }; }) : null;
     // Springs add angular acceleration (alpha) and the swing tally; all zeros without springs.
     var alpha = new Array(bodies.length).fill(0), swing = new Array(bodies.length).fill(0);
     if (sceneSprings(scene).length) addSpringAccelerations(scene, acc, alpha, swing, dt);
@@ -1235,6 +1314,7 @@
       u[i] = { x: bodies[i].vx, y: bodies[i].vy };
       vFull[i] = advanceVelocity(u[i].x, u[i].y, dt, acc[i].x, acc[i].y, maxSpeed, friction);
     }
+    if (gravityStart) substepGravity(scene, gravityStart, acc, u, vFull, dt, maxSpeed, friction);
     var shake = scene.hinges.length ? shakeHinges(scene, bodies, vFull, alpha, swing, dt) : null;
 
     var probes = new Array(bodies.length);
@@ -1301,14 +1381,14 @@
       for (i = 0; i < contacts.length; i++) contactsOut.push({ a: contacts[i].a, b: contacts[i].b });
     }
 
-    // Leg 1: move at vFull for tHit (matching detection). A hit body's kick runs to tHit plus half a step
-    // and leg 2 takes the rest: the stored velocity trails the position by half a step.
+    // Leg 1: move at vFull for tHit (matching detection). A hit body's kick runs to tHit plus half a (sub)step
+    // and leg 2 takes the rest: the stored velocity trails the position by that much.
     var bodyTKick = new Array(bodies.length);
     for (i = 0; i < bodies.length; i++) {
       var b1 = bodies[i];
       if (b1.isAnchored) continue;
       var th = bodyTHit[i];
-      bodyTKick[i] = th < dt ? th + dt / 2 : dt;
+      bodyTKick[i] = th < dt ? th + dt / (2 * substeps) : dt;
       b1.x += vFull[i].x * th; b1.y += vFull[i].y * th;
       // Angular twin: turn at the whole step's spin, keep only the torque acted by tHit. A hinge impulse
       // (already in vFull) joins the spin and the velocity here.
@@ -1636,6 +1716,9 @@
     gravitationalMass: gravitationalMass,
     halfExtent: halfExtent,
     computeAccelerations: computeAccelerations,
+    GRAVITY_SUBSTEPS: GRAVITY_SUBSTEPS,
+    setGravitySubsteps: setGravitySubsteps,
+    gravitySubstepsFor: gravitySubstepsFor,
     runBounceCounts: runBounceCounts,
     runBounceEvents: runBounceEvents,
     bounceCountsFromTrajectory: bounceCountsFromTrajectory,

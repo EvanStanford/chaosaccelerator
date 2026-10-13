@@ -114,6 +114,13 @@
       "  v.x = dfMul(v.x, decay);",
       "  v.y = dfAdd(dfMul(v.y, decay), dfMul(DF_GRAVITY, dfMul(dt, phi)));",
       "  return dfCapSpeed(v);",
+      "}",
+      // Gravity Substeps: the constant acceleration a whole leg takes from u to v.
+      "DVec2 dfLegAcceleration(DVec2 u, DVec2 v, MF dt) {",
+      "  MF decay, phi;",
+      "  dfFrictionLeg(dt, decay, phi);",
+      "  MF s = dfMul(dt, phi);",
+      "  return dv2(dfDiv(dfSub(v.x, dfMul(u.x, decay)), s), dfDiv(dfSub(v.y, dfMul(u.y, decay)), s));",
       "}");
     } else {
       lines.push(
@@ -125,6 +132,9 @@
       "DVec2 dfAdvanceVelocityGravity(DVec2 v, MF dt) {",
       "  v.y = dfAdd(v.y, dfMul(DF_GRAVITY, dt));",
       "  return dfCapSpeed(v);",
+      "}",
+      "DVec2 dfLegAcceleration(DVec2 u, DVec2 v, MF dt) {",
+      "  return dv2(dfDiv(dfSub(v.x, u.x), dt), dfDiv(dfSub(v.y, u.y), dt));",
       "}");
     }
     return lines.filter(Boolean).join("\n");
