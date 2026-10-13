@@ -8,17 +8,17 @@
 <meta name="theme-color" content="#14161c">
 <title>Chaos Accelerator</title>
 <!-- Both views share this document so transition.js can show them at once. -->
-<link rel="stylesheet" href="scripts/physics.css?v=m110">
-<link rel="stylesheet" href="scripts/fractal-grid.css?v=m110">
-<link rel="stylesheet" href="scripts/app-shell.css?v=m110">
-<link rel="stylesheet" href="scripts/fractal-stats.css?v=m110">
-<link rel="stylesheet" href="scripts/responsive-layout.css?v=m110">
+<link rel="stylesheet" href="scripts/physics.css?v=m111">
+<link rel="stylesheet" href="scripts/fractal-grid.css?v=m111">
+<link rel="stylesheet" href="scripts/app-shell.css?v=m111">
+<link rel="stylesheet" href="scripts/fractal-stats.css?v=m111">
+<link rel="stylesheet" href="scripts/responsive-layout.css?v=m111">
 <!-- mobile.css after the app sheets: it must win their cascade without !important. -->
-<link rel="stylesheet" href="scripts/mobile.css?v=m110">
-<link rel="stylesheet" href="scripts/eighties-app.css?v=m110">
-<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m110" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="scripts/mobile.css?v=m111">
+<link rel="stylesheet" href="scripts/eighties-app.css?v=m111">
+<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m111" as="font" type="font/woff2" crossorigin>
 <!-- In <head> on purpose: both views measure their canvas area as they start. -->
-<script src="scripts/layout-mode.js?v=m110"></script>
+<script src="scripts/layout-mode.js?v=m111"></script>
 <!-- A #map/ link should open on the map: hide the editor (still laid out) until transition.js picks the view. -->
 <script>
   if (/^#map\//.test(location.hash)) document.documentElement.classList.add("opening-map");
@@ -643,6 +643,12 @@
                   <p class="readout" id="movie-summary"></p>
                   <button id="movie-done" type="button" disabled>Done</button>
                   <button id="movie-inspect" type="button" class="secondary" disabled title="A high quality movie of what the Inspect tab plays for its locked points, at the size above cut to the scene's shape.">... or movie of the Inspect tab</button>
+                  <button id="movie-export" type="button" class="secondary" title="A JSON file of the view on screen at the size above: every simulation's map coordinates, raw Output value and color, with the antialiasing samples when antialiasing is on.">... or export raw data</button>
+                  <div id="movie-export-progress" hidden>
+                    <p id="movie-export-text"></p>
+                    <div class="movie-export-track"><div id="movie-export-bar"></div></div>
+                    <button id="movie-export-cancel" type="button" class="secondary">Cancel</button>
+                  </div>
                 </div>
               </div>
             </section>
@@ -770,22 +776,22 @@
 
 </div>
 
-<script src="scripts/app-message.js?v=m110"></script>
-<script src="scripts/physics-engine.js?v=m110"></script>
-<script src="scripts/physics-coords.js?v=m110"></script>
-<script src="scripts/share-url.js?v=m110"></script>
-<script src="scripts/movie-path.js?v=m110"></script>
-<script src="scripts/movie-store.js?v=m110"></script>
-<script src="scripts/physics-sound.js?v=m110"></script>
-<script src="scripts/physics-hinge-geometry.js?v=m110"></script>
-<script src="scripts/physics-df.js?v=m110"></script>
-<script src="scripts/physics-gpu.js?v=m110"></script>
-<script src="scripts/physics-gpu-df.js?v=m110"></script>
-<script src="scripts/physics-grid-codegen.js?v=m110"></script>
-<script src="scripts/physics-ui.js?v=m110"></script>
-<script src="scripts/fractal-stats.js?v=m110"></script>
-<script src="scripts/fractal-stats-panel.js?v=m110"></script>
-<script src="scripts/fractal-grid.js?v=m110"></script>
-<script src="scripts/transition.js?v=m110"></script>
+<script src="scripts/app-message.js?v=m111"></script>
+<script src="scripts/physics-engine.js?v=m111"></script>
+<script src="scripts/physics-coords.js?v=m111"></script>
+<script src="scripts/share-url.js?v=m111"></script>
+<script src="scripts/movie-path.js?v=m111"></script>
+<script src="scripts/movie-store.js?v=m111"></script>
+<script src="scripts/physics-sound.js?v=m111"></script>
+<script src="scripts/physics-hinge-geometry.js?v=m111"></script>
+<script src="scripts/physics-df.js?v=m111"></script>
+<script src="scripts/physics-gpu.js?v=m111"></script>
+<script src="scripts/physics-gpu-df.js?v=m111"></script>
+<script src="scripts/physics-grid-codegen.js?v=m111"></script>
+<script src="scripts/physics-ui.js?v=m111"></script>
+<script src="scripts/fractal-stats.js?v=m111"></script>
+<script src="scripts/fractal-stats-panel.js?v=m111"></script>
+<script src="scripts/fractal-grid.js?v=m111"></script>
+<script src="scripts/transition.js?v=m111"></script>
 </body>
 </html>

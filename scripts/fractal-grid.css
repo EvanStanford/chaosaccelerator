@@ -1125,9 +1125,42 @@ input[type="range"] {
 #movie-done {
   width: 100%;
 }
-#grid-view #movie-inspect {
+#grid-view #movie-inspect,
+#grid-view #movie-export {
   display: block;
   margin: 8px auto 0;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+#movie-export-progress {
+  margin: 10px 0 0 0;
+  padding: 10px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--bg-input);
+}
+#grid-view #movie-export[hidden],
+#movie-export-progress[hidden] {
+  display: none;
+}
+#movie-export-progress p {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  color: var(--text);
+}
+.movie-export-track {
+  height: 6px;
+  margin-bottom: 8px;
+  border-radius: 3px;
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+#movie-export-bar {
+  width: 0;
+  height: 100%;
+  background: var(--accent);
+}
+#movie-export-cancel {
   padding: 4px 10px;
   font-size: 12px;
 }

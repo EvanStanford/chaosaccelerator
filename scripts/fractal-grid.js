@@ -1415,10 +1415,13 @@
     var goalTailLine = goalOrder ? "  if (t < 0.0) { fragColor = vec4(0.0); return; }" : "";
 
     // ---- Two programs from the same pieces ----
-    // STANDARD: with u_sampleField it writes raw t to a float target, so every
-    // measurement reads the program that drew. DERIVED is built only when picked.
+    // STANDARD: with u_sampleField 1 it writes raw t to a float target, so every
+    // measurement reads the program that drew; 2 writes the Output's words (MF is vecN). DERIVED is built only when picked.
+    var rawWords = outScalar === "float" ? 1 : PhysicsDF.wordsFor(precision);
+    var rawColor = rawWords === 4 ? "outputValue" : "vec4(outputValue" + new Array(5 - rawWords).join(", 0.0") + ")";
     var standardTailLines = [
-      "  if (u_sampleField) { fragColor = vec4(t, 0.0, 0.0, 1.0); return; }",
+      "  if (u_sampleField == 2) { fragColor = " + rawColor + "; return; }",
+      "  if (u_sampleField == 1) { fragColor = vec4(t, 0.0, 0.0, 1.0); return; }",
       goalTailLine,
       "  fragColor = vec4(colorMap(t), 1.0);",
       "}",
@@ -1434,7 +1437,7 @@
     ];
 
     return {
-      gridSource: PhysicsGPU.pruneUnusedGLSL([].concat(gridHeaderLines, ["uniform bool u_sampleField;", ""], colorLibraryLines, gridPhysicsLines,
+      gridSource: PhysicsGPU.pruneUnusedGLSL([].concat(gridHeaderLines, ["uniform int u_sampleField;", ""], colorLibraryLines, gridPhysicsLines,
         ["void main() {"], worldCoordLines, gridMainLines, standardTailLines).join("\n")),
       derivedSource: PhysicsGPU.pruneUnusedGLSL([].concat(gridHeaderLines, colorLibraryLines, gridPhysicsLines, sampleOutputLines, deltaTLines,
         gridTailLines, worldCoordLines, gridMainLines, derivedTailLines).join("\n")),
@@ -1447,6 +1450,7 @@
       outZero: outZero,
       outputLines: outputLines,
       tLine: tLine,
+      rawColor: rawColor,
       outputBodyIndices: outputIndices,
       stepOnceSource: stepOnceSource,
       stepLoop: stepLoop,
@@ -2594,9 +2598,9 @@
   }
   // u_ftleInit: starting separation of neighbours one full-res pixel either side. u_ftleRange: the
   // log stretch at which they are a scene apart, the top of the hue ramp at this zoom.
-  function setFtleUniforms(u) {
+  function setFtleUniforms(u, heightPx) {
     if (!u.ftleInit || displayMode.value !== "ftle") return;
-    var init = 2 * (view.scale / canvas.height) * ftleInitStretch();
+    var init = 2 * (view.scale / (heightPx || canvas.height)) * ftleInitStretch();
     gl.uniform1f(u.ftleInit, init);
     gl.uniform1f(u.ftleRange, Math.max(1, Math.log(Math.hypot(scene.frameWidth, scene.frameHeight) / init)));
   }
@@ -2605,8 +2609,15 @@
   function drawSublattice(stride, originX, originY, steps) {
     var pass = useCurrentPass();
     if (!pass) return;
-    gl.uniform1i(pass.uniforms.sampleField, 0);
-    gl.uniform2f(pass.uniforms.resolution, canvas.width, canvas.height);
+    if (steps === undefined) steps = renderedSteps();
+    setGridUniforms(pass, canvas.width, canvas.height, stride, originX, originY, steps, bounceMaxValue, 0);
+    noteGpuActivity("grid draw " + pass.precision + " stride " + stride + ", " + steps + " steps");
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+  }
+  // A bound grid program's uniforms for a full-res picture width x height px.
+  function setGridUniforms(pass, width, height, stride, originX, originY, steps, bounceMax, sampleField) {
+    gl.uniform1i(pass.uniforms.sampleField, sampleField);
+    gl.uniform2f(pass.uniforms.resolution, width, height);
     gl.uniform1f(pass.uniforms.gridStride, stride);
     gl.uniform2f(pass.uniforms.gridOrigin, originX, originY);
     setCenterUniforms(pass.uniforms);
@@ -2614,13 +2625,11 @@
     gl.uniform1f(pass.uniforms.scale, view.scale);
     gl.uniform1i(pass.uniforms.colorZoom, colorZoomEnabled ? 1 : 0);
     gl.uniform1i(pass.uniforms.lowSaturation, lowSaturationEnabled ? 1 : 0);
-    gl.uniform1i(pass.uniforms.maxSteps, steps === undefined ? renderedSteps() : steps);
+    gl.uniform1i(pass.uniforms.maxSteps, steps);
     gl.uniform1i(pass.uniforms.durationSteps, simulationSteps);
-    gl.uniform1f(pass.uniforms.bounceMax, bounceMaxValue);
+    gl.uniform1f(pass.uniforms.bounceMax, bounceMax);
     gl.uniform1i(pass.uniforms.displayMode, displayMode.id);
-    setFtleUniforms(pass.uniforms);
-    noteGpuActivity("grid draw " + pass.precision + " stride " + stride + ", " + (steps === undefined ? renderedSteps() : steps) + " steps");
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    setFtleUniforms(pass.uniforms, height);
   }
 
   // ---- Inspect: locked reference points played back alongside the hover ----
@@ -6881,7 +6890,8 @@
       // Where texel (0, 0) lands in the TARGET, and state texels per target pixel; playback: (0, 0), 1.
       "uniform ivec2 u_targetOrigin;",
       "uniform int u_stencil;",
-      "uniform bool u_sampleField;",
+      // 0 color, 1 raw t, 2 the raw Output value.
+      "uniform int u_sampleField;",
       "out vec4 fragColor;",
       "",
     ].concat(
@@ -6959,9 +6969,10 @@
         "  ivec2 targetPixel = ivec2(gl_FragCoord.xy) - u_targetOrigin;",
         "  ivec2 texel = ivec2(targetPixel.x * u_stencil, targetPixel.y);",
         "  " + outScalar + " outputValue = outputAt(texel);",
+        "  if (u_sampleField == 2) { fragColor = " + pieces.rawColor + "; return; }",
         pieces.tLine,
         pieces.hasGoal ? "  if (goalNextAt(texel) >= GOAL_LENGTH) t = -1.0;" : "",
-        "  if (u_sampleField) { fragColor = vec4(t, 0.0, 0.0, 1.0); return; }",
+        "  if (u_sampleField == 1) { fragColor = vec4(t, 0.0, 0.0, 1.0); return; }",
         pieces.hasGoal ? "  if (t < 0.0) { fragColor = vec4(0.0); return; }" : "",
         "  if (u_displayMode == MODE_FTLE) {",
         "    fragColor = vec4(u_stencil == 5 ? shadeStencilFTLE(texel) : shadePlaybackFTLE(texel), 1.0);",
@@ -7271,7 +7282,8 @@
     return k;
   }
 
-  // The color pass into fbo at (x, y). opts.sample writes raw t; opts.blend = n averages in as the n-th AA sample.
+  // The color pass into fbo at (x, y). opts.sample writes raw t, opts.raw the raw Output; opts.blend = n averages in
+  // as the n-th AA sample; opts.height is the full-res height pixels are spaced by, the canvas's if left out.
   function resolveSliceJob(job, fbo, x, y, opts) {
     opts = opts || {};
     var spec = job.spec, st = job.state, prog = job.programs.color, u = prog.uniforms;
@@ -7288,10 +7300,10 @@
     gl.uniform1i(u.durationSteps, simulationSteps);
     gl.uniform1f(u.bounceMax, opts.bounceMax === undefined ? bounceMaxValue : opts.bounceMax);
     gl.uniform1i(u.displayMode, displayMode.id);
-    setFtleUniforms(u);
+    setFtleUniforms(u, opts.height);
     gl.uniform2i(u.targetOrigin, x, y);
     gl.uniform1i(u.stencil, spec.stencil);
-    gl.uniform1i(u.sampleField, opts.sample ? 1 : 0);
+    gl.uniform1i(u.sampleField, opts.raw ? 2 : opts.sample ? 1 : 0);
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
     gl.viewport(x, y, spec.cols, spec.rows);
     gl.disable(gl.SCISSOR_TEST);
@@ -8073,6 +8085,7 @@
     if (dirty) { resetProgressive(); dirty = false; }
     releasePlaybackIfViewMoved();
     if (!presentGestureFrame(now) && !stepPlayback(now)) stepProgressive(now);
+    stepExport();
     requestAnimationFrame(frame);
   });
 
@@ -8097,6 +8110,7 @@
   // Leaving the grid for the editor (transition.js): hiding #grid-view stops neither the preview loop, its sounds, nor the timeline.
   global.FractalGrid.pausePlayback = function () {
     pausePlayback();
+    endExport(null);
     releaseAllPlayback();
     markDirty();
     updateTimelineUI();
@@ -8530,6 +8544,575 @@
     saving.then(go, go);
   });
   updateMovieUI();
+
+  // ---- Raw data export ----
+  //
+  // The view as JSON at the Movie card's size: each simulation's map point, raw Output and drawn color. Drawn beside
+  // the map as a movie frame would be, a band of rows at a time (every sample of it), and written as bands finish.
+  var btnMovieExport = document.getElementById("movie-export");
+  var movieExportProgress = document.getElementById("movie-export-progress");
+  var movieExportText = document.getElementById("movie-export-text");
+  var movieExportBar = document.getElementById("movie-export-bar");
+  var btnMovieExportCancel = document.getElementById("movie-export-cancel");
+  var EXPORT_LINK_BASE = "https://chaosaccelerator.com/chaos.html#";
+  // Significant digits per multi-float Output; a float32 one gets the shortest text that reads back the same.
+  var EXPORT_DIGITS = { df: 15, tf: 22, qf: 29 };
+  // Drawing and writing time per frame, and the most drawn bands left waiting for the writing.
+  var EXPORT_DRAW_MS = 8;
+  var EXPORT_WRITE_MS = 8;
+  var EXPORT_BANDS_AHEAD = 2;
+  // Pixel-steps a frame may issue; the GPU keeping up with the last frame's decides the next.
+  var EXPORT_MAX_BUDGET = 2e9;
+  // Text gathered into one Blob part at a time, so the strings can go.
+  var EXPORT_PART_CHARS = 8 * 1024 * 1024;
+  var EXPORT_CONFIRM_BYTES = 1024 * 1024 * 1024;
+  var HEX_BYTE = [];
+  for (var hexByte = 0; hexByte < 256; hexByte++) HEX_BYTE.push((hexByte < 16 ? "0" : "") + hexByte.toString(16));
+  var exportJob = null;
+  if (!hasFloatColorBuffer) {
+    btnMovieExport.disabled = true;
+    btnMovieExport.title = "Exporting raw data needs floating-point render targets, which this browser doesn't provide";
+  }
+
+  function formatBytes(bytes) {
+    var units = ["B", "KB", "MB", "GB"], u = 0;
+    while (bytes >= 1024 && u < units.length - 1) { bytes /= 1024; u++; }
+    return (u === 0 || bytes >= 100 ? Math.round(bytes) : bytes.toFixed(1)) + " " + units[u];
+  }
+
+  // Fixed at the click: the view, step and look on screen, and the card's size and antialiasing.
+  function newExportJob() {
+    var width = movie.size.width, height = movie.size.height, spacing = view.scale / height;
+    var center = { x: view.center.x, xLo: view.center.xLo, y: view.center.y, yLo: view.center.yLo };
+    var stencil = displayMode.id !== 0 ? 5 : 1;
+    var bandRows = clamp(Math.floor(SLICE_MAX_TEXELS / (stencil * width)), 1, height);
+    var state = global.FractalGrid.shareState();
+    var job = {
+      width: width, height: height, center: center, scale: view.scale, step: renderedSteps(),
+      samples: movie.antialias ? MAX_AA_SAMPLES : 1,
+      precision: precisionMode === "auto" ? precisionForSpacing(spacing, center) : precisionMode,
+      // Lifespan and the counts are one float32 at any precision.
+      tally: ["lifespan", "bounces", "warps"].indexOf(scene.output.property) !== -1,
+      look: { mode: displayMode, colorZoom: colorZoomEnabled, lowSaturation: lowSaturationEnabled, duration: simulationSteps },
+      stencil: stencil,
+      bandRows: bandRows,
+      bands: Math.ceil(height / bandRows),
+      chunkCols: Math.min(width, Math.floor(MAX_TEXTURE_SIZE / stencil), Math.floor(SLICE_MAX_TEXELS / (stencil * bandRows))),
+      // Map coordinates to a thousandth of a pixel.
+      decimals: clamp(Math.ceil(3 - Math.log10(spacing)), 0, 60),
+      view: state.view,
+      fragment: ShareUrl.encode({ page: ShareUrl.PAGE_MAP, scene: PhysicsCoords.toAuthoredJSON(state.scene), view: state.view }),
+      generation: sceneGeneration,
+      ready: false, band: 0, sample: 0, chunk: 0, row: 0, slice: null, sampleDrawn: false, raw: null, pending: [],
+      fence: null, behind: false, budget: 0,
+      parts: [], partChars: 0, blobs: [], entries: 0, rowsWritten: 0,
+    };
+    job.estimate = estimateExportBytes(job);
+    return job;
+  }
+
+  // The file's size in bytes, roughly, from the widths of its numbers.
+  function estimateExportBytes(job) {
+    var reach = Math.max(Math.abs(job.center.x), Math.abs(job.center.y)) + job.scale * job.width / job.height;
+    var axis = 3 + Math.max(0, Math.floor(Math.log10(reach))) + job.decimals;
+    var raw = (job.tally || job.precision === "f32" ? 9 : EXPORT_DIGITS[job.precision]) + 3;
+    var sample = 29 + 2 * axis + raw;
+    var entry = 61 + 2 * axis + raw + (job.samples > 1 ? 28 + (job.samples - 1) * sample : 0);
+    return job.width * job.height * entry;
+  }
+
+  btnMovieExport.addEventListener("click", function () {
+    if (exportJob || !hasFloatColorBuffer) return;
+    var job = newExportJob();
+    function begin() {
+      if (exportJob) return;
+      exportJob = job;
+      btnMovieExport.hidden = true;
+      movieExportProgress.hidden = false;
+      showExportProgress(job);
+    }
+    if (job.estimate < EXPORT_CONFIRM_BYTES) begin();
+    else global.AppMessage.prompt("This file will be about " + formatBytes(job.estimate) + ". Export it anyway?",
+      ["Cancel", "Export"], "Export", function (answer) { if (answer === "Export") begin(); });
+  });
+  btnMovieExportCancel.addEventListener("click", function () { endExport(null); });
+
+  // The export's view and look stand in for the map's while `run` draws: the draw helpers read them.
+  function withExportLook(job, run) {
+    var saved = [view.center, view.scale, displayMode, colorZoomEnabled, lowSaturationEnabled, simulationSteps];
+    view.center = job.center;
+    view.scale = job.scale;
+    displayMode = job.look.mode;
+    colorZoomEnabled = job.look.colorZoom;
+    lowSaturationEnabled = job.look.lowSaturation;
+    simulationSteps = job.look.duration;
+    try {
+      run();
+    } finally {
+      view.center = saved[0];
+      view.scale = saved[1];
+      displayMode = saved[2];
+      colorZoomEnabled = saved[3];
+      lowSaturationEnabled = saved[4];
+      simulationSteps = saved[5];
+    }
+  }
+
+  // Once a frame, after the map's own work: draws while the GPU keeps up, then writes what is drawn.
+  function stepExport() {
+    var job = exportJob;
+    if (!job) return;
+    try {
+      if (job.generation !== sceneGeneration || (job.entry && playbackGpu.programs[job.precision] !== job.entry)) {
+        endExport("Raw data export stopped: the map's scene changed");
+        return;
+      }
+      if (!job.ready) {
+        withExportLook(job, function () { prepareExport(job); });
+        if (!job.ready) return;
+      }
+      if (!exportGpuBehind(job)) {
+        var spent = 0, startedAt = performance.now();
+        withExportLook(job, function () {
+          while (job.band < job.bands && job.pending.length < EXPORT_BANDS_AHEAD && (spent === 0 || spent < job.budget)) {
+            spent += exportWork(job, Math.max(1, job.budget - spent));
+          }
+        });
+        // Read-backs wait for the GPU, so a frame they made long shrinks the next one's work too.
+        var took = performance.now() - startedAt;
+        if (took > EXPORT_DRAW_MS) job.budget = Math.max(SLICE_STEPS_MIN, job.budget * EXPORT_DRAW_MS / took);
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        if (spent > 0) {
+          job.fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+          gl.flush();
+        }
+      }
+      writeExportText(job);
+      if (job.band >= job.bands && !job.pending.length) finishExport(job);
+      else showExportProgress(job);
+    } catch (err) {
+      endExport("Exporting raw data failed: " + (err.message || err));
+    }
+  }
+
+  // Float32 in one draw where the map draws it so, otherwise the sliced programs (built, a rung lower if they can't be
+  // at this one, and their steps per draw measured); then the count divisor and the targets. job.ready once all are.
+  function prepareExport(job) {
+    job.singleDraw = job.precision === "f32" && !f32NeedsSlicing();
+    if (!job.singleDraw) {
+      var programs = playbackProgramsFor(job.precision);
+      if (!programs && playbackProgramsPending(job.precision)) return;
+      if (programs && !sliceSteps[job.precision]) calibrateSliceSteps(job.precision, programs);
+      if (!programs || sliceTooHeavy[job.precision]) {
+        var lower = PRECISION_LADDER.indexOf(job.precision) - 1;
+        if (lower < 0) endExport("Exporting raw data failed: the map's programs couldn't be built");
+        else job.precision = PRECISION_LADDER[lower];
+        return;
+      }
+      job.programs = programs;
+      job.entry = playbackGpu.programs[job.precision];
+    }
+    job.words = job.tally ? 1 : PhysicsDF.wordsFor(job.precision);
+    // Whole-picture targets: the map's arithmetic for a pixel starts from its place in the picture.
+    var side = BOUNCE_MAX_SAMPLE_SIZE;
+    job.rawTarget = makeTarget(Math.max(job.width, side), Math.max(job.height, side), gl.RGBA32F, gl.FLOAT);
+    job.rawRead = new Float32Array(Math.max(job.width, side) * Math.max(job.bandRows, side) * 4);
+    job.color = makeTarget(job.width, job.height);
+    if (job.samples > 1) job.average = makeTarget(job.width, job.height, gl.RGBA16F, gl.HALF_FLOAT);
+    if (!presentProgram) presentProgram = buildPresentProgram();
+    job.bounceMax = isViewScaledOutput() ? exportBounceMax(job) : bounceMaxValue;
+    job.axes = [];
+    for (var s = 0; s < job.samples; s++) job.axes.push(exportAxisTexts(job, s));
+    job.budget = job.singleDraw ? 4 * exportRowCost(job) : (sliceSteps[job.precision] || SLICE_STEPS_MIN) * 4096;
+    job.ready = true;
+  }
+
+  // The largest count or turn in view, as the map measures it for its colors, drawn the way the export draws.
+  function exportBounceMax(job) {
+    var n = BOUNCE_MAX_SAMPLE_SIZE, duration = job.look.duration;
+    if (job.singleDraw) {
+      var pass = exportGridPass("standard");
+      gl.bindFramebuffer(gl.FRAMEBUFFER, job.rawTarget.fbo);
+      gl.viewport(0, 0, n, n);
+      gl.disable(gl.SCISSOR_TEST);
+      setGridUniforms(pass, n, n, 1, 0, 0, duration, 0, 2);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    } else {
+      var slice = beginSliceJob("export", job.programs, {
+        cols: n, rows: n, stencil: 1, tileX: 0, tileY: 0, stride: 1, originX: 0, originY: 0, resW: n, resH: n, totalSteps: duration,
+      });
+      do { advanceSliceJob(slice, sliceSteps[job.precision] || SLICE_STEPS_MIN); } while (slice.done < duration);
+      resolveSliceJob(slice, job.rawTarget.fbo, 0, 0, { raw: true });
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, job.rawTarget.fbo);
+    gl.readPixels(0, 0, n, n, gl.RGBA, gl.FLOAT, job.rawRead);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return viewMaxOf(job.rawRead.subarray(0, n * n * 4));
+  }
+
+  // Every column's map X and every row's map Y for one sample, as decimals; row 0 is the bottom, as in GL.
+  function exportAxisTexts(job, sample) {
+    var off = aaOffset(sample), xs = [], ys = [];
+    for (var col = 0; col < job.width; col++) {
+      var x = ddAddNumber(job.center.x, job.center.xLo, (col + 0.5 + off.x - 0.5 * job.width) / job.height * job.scale);
+      xs.push(ShareUrl.fixedDD(x[0], x[1], job.decimals));
+    }
+    for (var row = 0; row < job.height; row++) {
+      var y = ddAddNumber(job.center.y, job.center.yLo, (row + 0.5 + off.y - 0.5 * job.height) / job.height * job.scale);
+      ys.push(ShareUrl.fixedDD(y[0], y[1], job.decimals));
+    }
+    return { x: xs, y: ys };
+  }
+
+  // True while the GPU is still on the export's last frame; the next frame's work grows or shrinks by that.
+  function exportGpuBehind(job) {
+    if (!job.fence) return false;
+    if (gl.getSyncParameter(job.fence, gl.SYNC_STATUS) !== gl.SIGNALED) {
+      job.behind = true;
+      return true;
+    }
+    gl.deleteSync(job.fence);
+    job.fence = null;
+    job.budget = clamp(job.budget * (job.behind ? 0.75 : 1.25), SLICE_STEPS_MIN, EXPORT_MAX_BUDGET);
+    job.behind = false;
+    return false;
+  }
+
+  function exportRowCost(job) { return job.width * Math.max(1, job.step) * (job.look.mode.samples + 1); }
+  function exportColorTarget(job) { return job.sample ? job.average : job.color; }
+  // Sample n (0-based) blends in at 1 / (n + 1); the first is drawn as it is.
+  function exportBlend(job) { return job.sample ? job.sample + 1 : 0; }
+
+  // One draw of the band in flight; once a sample of it is all drawn, it joins the band's colors. Returns pixel-steps.
+  function exportWork(job, allowance) {
+    var rows = Math.min(job.bandRows, job.height - job.band * job.bandRows);
+    var y0 = job.height - job.band * job.bandRows - rows;
+    if (!job.raw) job.raw = [];
+    if (job.raw.length === job.sample) job.raw.push(new Float32Array(job.width * rows * job.words));
+    var cost = job.singleDraw ? exportDrawRows(job, rows, y0, allowance) : exportDrawChunk(job, rows, y0, allowance);
+    if (!job.sampleDrawn) return cost;
+    job.sampleDrawn = false;
+    // The pixel's own sample enters the average at 8 bits, as on the map.
+    if (job.samples > 1 && !job.sample) exportPresent(job.color, job.average, y0, rows);
+    if (++job.sample < job.samples) return cost;
+    if (job.samples > 1) exportPresent(job.average, job.color, y0, rows);
+    var colors = new Uint8Array(job.width * rows * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, job.color.fbo);
+    gl.readPixels(0, y0, job.width, rows, gl.RGBA, gl.UNSIGNED_BYTE, colors);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    job.pending.push({ y0: y0, rows: rows, raw: job.raw, colors: colors, written: 0, col: 0 });
+    job.raw = null;
+    job.sample = 0;
+    job.band += 1;
+    return cost;
+  }
+
+  // Sliced: one step draw of the band's chunk in flight, or once its run is done, its colors and raw values.
+  function exportDrawChunk(job, rows, y0, allowance) {
+    var x0 = job.chunk * job.chunkCols, cols = Math.min(job.chunkCols, job.width - x0), area = cols * rows;
+    if (!job.slice) {
+      var off = aaOffset(job.sample);
+      job.slice = beginSliceJob("export", job.programs, {
+        cols: cols, rows: rows, stencil: job.stencil, tileX: x0, tileY: y0, stride: 1, originX: off.x, originY: off.y,
+        resW: job.width, resH: job.height, totalSteps: job.step,
+      });
+    }
+    var slice = job.slice;
+    if (!slice.started || slice.done < job.step) {
+      var steps = clamp(Math.floor(allowance / area), 1, sliceSteps[job.precision] || SLICE_STEPS_MIN);
+      return area * Math.max(1, advanceSliceJob(slice, steps)) * job.programs.groups;
+    }
+    job.slice = null;
+    resolveSliceJob(slice, exportColorTarget(job).fbo, x0, y0, { blend: exportBlend(job), bounceMax: job.bounceMax, height: job.height });
+    resolveSliceJob(slice, job.rawTarget.fbo, x0, y0, { raw: true });
+    exportReadRaw(job, x0, y0, cols, rows);
+    job.chunk += 1;
+    if (x0 + cols < job.width) return area;
+    job.chunk = 0;
+    job.sampleDrawn = true;
+    return area;
+  }
+
+  // Float32 whose run fits one draw, as the map draws it: rows of colors with the map's own program, the same rows'
+  // raw Output with the standard one, and those read back once the band is drawn.
+  function exportDrawRows(job, rows, y0, allowance) {
+    var n = clamp(Math.floor(allowance / exportRowCost(job)), 1, rows - job.row);
+    exportGridDraw(job, false, y0 + job.row, n);
+    exportGridDraw(job, true, y0 + job.row, n);
+    job.row += n;
+    if (job.row >= rows) {
+      exportReadRaw(job, 0, y0, job.width, rows);
+      job.row = 0;
+      job.sampleDrawn = true;
+    }
+    return n * exportRowCost(job);
+  }
+
+  function exportGridPass(variant) {
+    var pass = requestPass("f32", variant, true);
+    if (!pass) throw new Error("the map's float32 program couldn't be built");
+    gl.useProgram(pass.program);
+    bindQuad(pass.posLoc);
+    return pass;
+  }
+
+  // Picture rows [row, row + n) of the sample being drawn: its colors, or with `raw` its raw Output.
+  function exportGridDraw(job, raw, row, n) {
+    var pass = exportGridPass(raw ? "standard" : wantedVariant());
+    var off = aaOffset(job.sample), blend = raw ? 0 : exportBlend(job);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, (raw ? job.rawTarget : exportColorTarget(job)).fbo);
+    gl.viewport(0, 0, job.width, job.height);
+    gl.enable(gl.SCISSOR_TEST);
+    gl.scissor(0, row, job.width, n);
+    setGridUniforms(pass, job.width, job.height, 1, off.x, off.y, job.step, job.bounceMax, raw ? 2 : 0);
+    if (blend) {
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.CONSTANT_ALPHA, gl.ONE_MINUS_CONSTANT_ALPHA);
+      gl.blendColor(0, 0, 0, 1 / blend);
+    }
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    gl.disable(gl.BLEND);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  // Pixels [x0, x0 + cols) x [y0, y0 + rows) of the sample being drawn into its raw values, words as the GPU wrote them.
+  function exportReadRaw(job, x0, y0, cols, rows) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, job.rawTarget.fbo);
+    gl.readPixels(x0, y0, cols, rows, gl.RGBA, gl.FLOAT, job.rawRead);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    var raw = job.raw[job.sample], words = job.words;
+    for (var r = 0; r < rows; r++) {
+      for (var c = 0; c < cols; c++) {
+        var from = (r * cols + c) * 4, to = (r * job.width + x0 + c) * words;
+        for (var k = 0; k < words; k++) raw[to + k] = job.rawRead[from + k];
+      }
+    }
+  }
+
+  // drawPresent for rows [y0, y0 + rows) only.
+  function exportPresent(from, to, y0, rows) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, to.fbo);
+    gl.viewport(0, 0, to.width, to.height);
+    gl.disable(gl.BLEND);
+    gl.enable(gl.SCISSOR_TEST);
+    gl.scissor(0, y0, to.width, rows);
+    gl.useProgram(presentProgram.program);
+    bindQuad(presentProgram.posLoc);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, from.tex);
+    gl.uniform1i(presentProgram.src, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  // Finished bands as JSON, top row first, a few hundred entries at a time until this frame's writing time is up.
+  function writeExportText(job) {
+    var until = performance.now() + EXPORT_WRITE_MS;
+    while (job.pending.length && performance.now() < until) {
+      var band = job.pending[0], glRow = band.y0 + band.rows - 1 - band.written;
+      var end = Math.min(job.width, band.col + 256);
+      var text = exportEntries(job, band, glRow, band.col, end);
+      job.parts.push(text);
+      job.partChars += text.length;
+      if (job.partChars >= EXPORT_PART_CHARS) {
+        job.blobs.push(new Blob(job.parts));
+        job.parts = [];
+        job.partChars = 0;
+      }
+      band.col = end;
+      if (end < job.width) continue;
+      band.col = 0;
+      band.written += 1;
+      job.rowsWritten += 1;
+      if (band.written === band.rows) job.pending.shift();
+    }
+  }
+
+  // Pixels [from, to) of GL row glRow, one entry a line.
+  function exportEntries(job, band, glRow, from, to) {
+    var lines = [], base = (glRow - band.y0) * job.width, own = job.axes[0];
+    for (var col = from; col < to; col++) {
+      var i = base + col;
+      var text = '{"x": ' + own.x[col] + ', "y": ' + own.y[glRow] + ', "raw_value": ' + exportRawText(job, band.raw[0], i);
+      if (job.samples > 1) {
+        var others = [];
+        for (var s = 1; s < job.samples; s++) {
+          others.push('{"x": ' + job.axes[s].x[col] + ', "y": ' + job.axes[s].y[glRow] + ', "raw_value": ' + exportRawText(job, band.raw[s], i) + "}");
+        }
+        text += ', "antialias_samples": [' + others.join(", ") + "]";
+      }
+      var k = i * 4;
+      lines.push(text + ', "mapped_color": "#' + HEX_BYTE[band.colors[k]] + HEX_BYTE[band.colors[k + 1]] + HEX_BYTE[band.colors[k + 2]] + '"}');
+    }
+    var first = job.entries === 0;
+    job.entries += lines.length;
+    return (first ? "    " : ",\n    ") + lines.join(",\n    ");
+  }
+
+  // Pixel i's Output: its words summed into a double-double without loss, then written to the precision's digits.
+  function exportRawText(job, raw, i) {
+    if (job.words === 1) return float32Text(raw[i]);
+    var at = i * job.words, hi = 0, lo = 0;
+    for (var k = 0; k < job.words; k++) {
+      var b = raw[at + k], s = hi + b, bb = s - hi;
+      lo += (hi - (s - bb)) + (b - bb);
+      hi = s;
+    }
+    var top = hi + lo;
+    lo -= top - hi;
+    hi = top;
+    if (!isFinite(hi) || !isFinite(lo)) return "null";
+    if (hi === 0) return "0";
+    var digits = EXPORT_DIGITS[job.precision];
+    if (digits <= 15) return trimNumberText(hi.toPrecision(digits));
+    return trimNumberText(ShareUrl.fixedDD(hi, lo, clamp(digits - 1 - Math.floor(Math.log10(Math.abs(hi))), 0, 100)));
+  }
+
+  // The shortest text that reads back as the same float32; null for NaN or infinity, which JSON lacks.
+  function float32Text(v) {
+    if (!isFinite(v)) return "null";
+    if (v === 0) return "0";
+    for (var p = 6; p < 9; p++) {
+      var text = v.toPrecision(p);
+      if (Math.fround(Number(text)) === v) return trimNumberText(text);
+    }
+    return trimNumberText(v.toPrecision(9));
+  }
+
+  // "12.500" to "12.5", "1.20e+7" to "1.2e+7", "-0" to "0".
+  function trimNumberText(text) {
+    var e = text.indexOf("e"), mantissa = e === -1 ? text : text.slice(0, e);
+    if (mantissa.indexOf(".") !== -1) mantissa = mantissa.replace(/0+$/, "").replace(/\.$/, "");
+    if (mantissa === "-0") mantissa = "0";
+    return mantissa + (e === -1 ? "" : text.slice(e));
+  }
+
+  // A number written as given, digits a double would drop included.
+  function ExportNumber(text) { this.text = text; }
+  function exportDecimal(hi, lo, decimals) { return new ExportNumber(trimNumberText(ShareUrl.fixedDD(hi, lo || 0, decimals))); }
+
+  // Two-space indented JSON, as JSON.stringify(value, null, 2) writes it, plus ExportNumbers.
+  function jsonText(value, indent) {
+    if (value instanceof ExportNumber) return value.text;
+    if (value === null || typeof value !== "object") return JSON.stringify(value === undefined ? null : value);
+    var inner = indent + "  ";
+    if (Array.isArray(value)) {
+      if (!value.length) return "[]";
+      return "[\n" + value.map(function (v) { return inner + jsonText(v, inner); }).join(",\n") + "\n" + indent + "]";
+    }
+    var keys = Object.keys(value);
+    if (!keys.length) return "{}";
+    return "{\n" + keys.map(function (k) { return inner + JSON.stringify(k) + ": " + jsonText(value[k], inner); }).join(",\n") + "\n" + indent + "}";
+  }
+
+  function snakeKeys(value) {
+    if (Array.isArray(value)) return value.map(snakeKeys);
+    if (!value || typeof value !== "object" || value instanceof ExportNumber) return value;
+    var out = {};
+    Object.keys(value).forEach(function (k) {
+      out[k.replace(/[A-Z]/g, function (c) { return "_" + c.toLowerCase(); })] = snakeKeys(value[k]);
+    });
+    return out;
+  }
+
+  // The link's view, points with the digits the link gives them.
+  function exportViewJSON(v) {
+    var places = ShareUrl.centerDecimals(v.scale);
+    function point(p, decimals) { return { x: exportDecimal(p.x, p.xLo, decimals), y: exportDecimal(p.y, p.yLo, decimals) }; }
+    return {
+      center: point(v.center, places),
+      zoom: v.zoom,
+      display: v.display,
+      low_saturation: v.lowSaturation,
+      precision: v.precision,
+      speed: v.speed,
+      volume: v.volume,
+      inspect: v.inspect.map(function (group) {
+        var decimals = group.places >= 0 ? group.places : places;
+        var out = { type: group.type, a: point(group.a, decimals) };
+        if (group.b) out.b = point(group.b, decimals);
+        if (group.type === "line") out.count = group.count;
+        if (group.type === "grid") { out.size = group.size; out.two_part = !!group.twoPart; }
+        return out;
+      }),
+      movie: {
+        keyframes: v.movie.keyframes.map(function (k) {
+          return { center: point(k.center, ShareUrl.centerDecimals(k.scale)), zoom: k.zoom, step: k.step, seconds: k.seconds, friction: k.friction };
+        }),
+        size: { width: v.movie.size.width, height: v.movie.size.height },
+        antialias: v.movie.antialias,
+        loop: v.movie.loop,
+      },
+    };
+  }
+
+  // Everything before the first entry: created_with and the link, then the link's scene and view, then the export's own facts.
+  function exportHeaderText(job) {
+    var s = ShareUrl.decode(job.fragment).scene;
+    var sceneJSON = snakeKeys({
+      bodies: s.bodies, hinges: s.hinges, springs: s.springs, xInput: s.xInput, yInput: s.yInput, output: s.output,
+      edgeMode: s.edgeMode, mutualGravity: s.mutualGravity, collisionsEnabled: s.collisionsEnabled, friction: s.friction,
+      simulationSteps: s.simulationSteps, frameWidth: s.frameWidth, frameHeight: s.frameHeight,
+    });
+    sceneJSON.view = exportViewJSON(job.view);
+    var text = jsonText({
+      created_with: "chaosaccelerator.com",
+      link: EXPORT_LINK_BASE + job.fragment,
+      scene: sceneJSON,
+      metadata: {
+        exported_at: new Date().toISOString(),
+        width: job.width,
+        height: job.height,
+        antialiasing: job.samples > 1,
+        simulation_step: job.step,
+        precision: job.precision,
+        precision_name: PRECISION_LABELS[job.precision],
+        pixel_size: job.scale / job.height,
+        gpu: gpuRendererName || null,
+      },
+    }, "");
+    return text.slice(0, -2) + ',\n  "outputs": [\n';
+  }
+
+  function finishExport(job) {
+    var blob = new Blob([exportHeaderText(job)].concat(job.blobs, job.parts, ["\n  ]\n}\n"]), { type: "application/json" });
+    endExport(null);
+    var save = document.createElement("a");
+    save.href = URL.createObjectURL(blob);
+    save.download = "chaosaccelerator-raw-data.json";
+    document.body.appendChild(save);
+    save.click();
+    save.remove();
+    setTimeout(function () { URL.revokeObjectURL(save.href); }, 60000);
+  }
+
+  // Stops the export, finished or not, and frees what it held; `message` says why when it stopped early.
+  function endExport(message) {
+    var job = exportJob;
+    if (!job) return;
+    exportJob = null;
+    if (job.fence) gl.deleteSync(job.fence);
+    freeTarget(job.rawTarget);
+    freeTarget(job.color);
+    freeTarget(job.average);
+    releaseSliceState("export");
+    movieExportProgress.hidden = true;
+    btnMovieExport.hidden = false;
+    if (message) global.AppMessage.toast(message);
+  }
+
+  // Drawing and writing count half each.
+  function showExportProgress(job) {
+    var rows = Math.min(job.bandRows, job.height - job.band * job.bandRows);
+    var inSample = job.singleDraw ? job.row / rows
+      : (job.chunk + (job.slice ? job.slice.done / Math.max(1, job.step) : 0)) / Math.ceil(job.width / job.chunkCols);
+    var drawn = job.band < job.bands ? job.band * job.bandRows + rows * (job.sample + inSample) / job.samples : job.height;
+    var percent = Math.floor(clamp((drawn + job.rowsWritten) / (2 * job.height), 0, 1) * 100);
+    movieExportText.textContent = "Exporting raw data: " + percent + "% of about " + formatBytes(job.estimate);
+    movieExportBar.style.width = percent + "%";
+  }
 
   // ---- One finished picture, on request ----
   //
