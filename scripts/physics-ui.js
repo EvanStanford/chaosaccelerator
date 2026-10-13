@@ -115,7 +115,7 @@
     { key: "angle", label: "Rotation" },
     { key: "totalRotation", label: "Cumulative Rotation" },
     { key: "bounces", label: "Bounce Count" },
-    { key: "warps", label: "Port Hole Warps" },
+    { key: "warps", label: "Port Hole Warp Count" },
   ];
   var OUTPUT_PAIR_PROPERTIES = [
     { key: "x", label: "Average X" },
@@ -123,7 +123,7 @@
     { key: "angle", label: "Average Rotation" },
     { key: "distance", label: "Distance Apart" },
   ];
-  // Cumulative Rotation needs a body that moves; Port Hole Warps one that can go through a placed pair.
+  // Cumulative Rotation needs a body that moves; Port Hole Warp Count one that can go through a placed pair.
   function outputPropertiesFor(output) {
     if (PhysicsEngine.isPairOutput(output)) return OUTPUT_PAIR_PROPERTIES;
     var body = output && scene.bodies[output.body];
@@ -325,7 +325,7 @@
     c.ellipse(0, 0, o.a - PORTHOLE_RIM / 2, o.b - PORTHOLE_RIM / 2, 0, 0, Math.PI * 2);
     c.closePath();
   }
-  // opts: selected, anchored, paint (a color override), underlay {width, color} (a ring outside the outline).
+  // opts: selected, anchored (a gray rim), paint (a color override), underlay {width, color} (a ring outside the outline).
   // Layered as a circle on the floor seen from its near side, the bulge on the far rim: the streaks
   // born on the bulge's half go under the bulge, the ones born on the near half over everything.
   function drawPorthole(c, x, y, angle, length, color, opts) {
@@ -343,10 +343,9 @@
     }
     if (opts.selected) {
       c.lineWidth = PORTHOLE_RIM + 6; c.strokeStyle = "#ffcf4d"; c.stroke();
-    } else if (opts.anchored) {
-      c.lineWidth = PORTHOLE_RIM + 3; c.strokeStyle = "#7a8199"; c.stroke();
     }
-    c.lineWidth = PORTHOLE_RIM; c.strokeStyle = paint; c.stroke();
+    // An anchored port hole's rim is the anchored gray; its light keeps the port hole's color.
+    c.lineWidth = PORTHOLE_RIM; c.strokeStyle = opts.anchored && !opts.paint ? "#5a6178" : paint; c.stroke();
     c.fillStyle = "#000"; c.fill();
     drawPortholeStreaks(c, far, paint, light);
     c.save();
@@ -1589,8 +1588,9 @@
   var activePointerId = null;
 
   canvas.addEventListener("pointerdown", function (e) {
-    if (isPlaying) return;
     if (!e.isPrimary) return;
+    // A click on the scene while playing is the Reset button; it starts no edit.
+    if (isPlaying) { resetToInitialScene(); return; }
     activePointerId = e.pointerId;
     pointerSlop = e.pointerType === "touch" ? TOUCH_HIT_SLOP : 0;
     try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* already gone: the window listeners still see it */ }
@@ -2717,6 +2717,8 @@
   var outputTallies = null;
   // Steps (0-indexed) at which a pair started touching: the bounce sound's triggers, whatever the Output.
   var bounceEvents = [];
+  // Steps (0-indexed) in which something went through a port hole.
+  var warpEvents = [];
 
   // The property's exact range (mirrors fractal-grid.js): x/y wrap into [0, frame); mod(angle, TAU)
   // is the current facing, so the color runs the whole spectrum every turn instead of saturating.
@@ -3146,6 +3148,12 @@
           break;
         }
       }
+      for (var wi = 0; wi < warpEvents.length; wi++) {
+        if (warpEvents[wi] >= prevStepCount && warpEvents[wi] < stepCount) {
+          PhysicsSound.playWarp(singleVoiceFreq());
+          break;
+        }
+      }
       if (wrapStopOverride && prevStepCount < effectiveMaxSteps && stepCount >= effectiveMaxSteps) {
         PhysicsSound.playEdge(singleVoiceFreq());
       }
@@ -3177,6 +3185,7 @@
       : outputProp === "totalRotation" ? PhysicsEngine.rotationsFromTrajectory(initialScene, trajectory, scene.output.body)
       : null;
     bounceEvents = PhysicsEngine.runBounceEvents(initialScene, scene.simulationSteps, PhysicsGPU.FIXED_DT);
+    warpEvents = PhysicsEngine.warpEventsFromTrajectory(trajectory);
     if (scene.edgeMode === "sticky" && scene.output) {
       var watchedIndices = PhysicsHingeGeometry.wrapWatchedBodyIndices(scene);
       var targetBodyIndex = outputProp === "lifespan" || outputProp === "bounces" || outputProp === "warps" ? null : scene.output.body;

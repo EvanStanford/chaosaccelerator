@@ -1,6 +1,6 @@
 // CPAL-1.0 License. See chaosaccelerator.com/license.html
 
-// Sound effects: a bounce clave tick and a sticky-edge palm-muted pluck, synthesized with Web Audio
+// Sound effects: a bounce clave tick, a sticky-edge palm-muted pluck and a port hole shimmer, synthesized with Web Audio
 // oscillators so every voice can be pitched exactly. Shared by physics-ui.js and fractal-grid.js.
 (function (global) {
   "use strict";
@@ -114,6 +114,7 @@
     g.connect(out);
     osc.start(now);
     osc.stop(now + attack + decay + 0.02);
+    return osc;
   }
   var noiseBuffer = null;
   function noise(c, now, attack, decay, peak, lowpassHz, out) {
@@ -150,6 +151,17 @@
     tone(c, now, "sawtooth", freq, 0.002, 0.18, 0.5, lp, out);
     noise(c, now, 0.001, 0.008, 0.2, 4000, out);
   }
+  // Port hole warp: a sine at 3x the note with a fast 28 Hz vibrato.
+  function warpVoice(c, now, freq, out) {
+    var osc = tone(c, now, "sine", freq * 3, 0.01, 0.3, 0.35, null, out);
+    var lfo = c.createOscillator(), depth = c.createGain();
+    lfo.frequency.value = 28;
+    depth.gain.value = freq * 0.25;
+    lfo.connect(depth);
+    depth.connect(osc.frequency);
+    lfo.start(now);
+    lfo.stop(now + 0.34);
+  }
   function playBounce(freq) {
     var c = startVoice();
     if (c) bounceVoice(c, c.currentTime, freq, masterGain);
@@ -157,6 +169,10 @@
   function playEdge(freq) {
     var c = startVoice();
     if (c) edgeVoice(c, c.currentTime, freq, masterGain);
+  }
+  function playWarp(freq) {
+    var c = startVoice();
+    if (c) warpVoice(c, c.currentTime, freq, masterGain);
   }
 
   // The same voices in another context (a movie's), at full volume through a limiter of their own.
@@ -166,6 +182,7 @@
     return {
       bounce: function (freq, when) { bounceVoice(c, when, freq, out); },
       edge: function (freq, when) { edgeVoice(c, when, freq, out); },
+      warp: function (freq, when) { warpVoice(c, when, freq, out); },
     };
   }
 
@@ -173,6 +190,7 @@
     chordFrequencies: chordFrequencies,
     playBounce: playBounce,
     playEdge: playEdge,
+    playWarp: playWarp,
     track: track,
     setVolume: setVolume,
     getVolume: getVolume,

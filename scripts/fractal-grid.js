@@ -3231,6 +3231,7 @@
       wrapOverride: wrapOverride,
       lifespanValue: isLifespan ? lifespanValue : null,
       bounceEvents: bounceEventsAt(worldPoint, trajectory),
+      warpEvents: PhysicsEngine.warpEventsFromTrajectory(trajectory),
     };
   }
 
@@ -5799,6 +5800,11 @@
     return entries;
   }
 
+  // Whether `events` has a step in (fromStep, toStep], at or before lastStep.
+  function stepsReached(events, fromStep, toStep, lastStep) {
+    return (events || []).some(function (e) { return e <= lastStep && e > fromStep && e <= toStep; });
+  }
+
   // Sounds for steps newly reached between frames (auto-advance only, never scrubbing): fromStep < e <= toStep,
   // INCLUSIVE, since the clock caps at ceiling-1 and a strict < would drop every edge sound.
   function checkPlaybackSounds(fromStep, toStep) {
@@ -5816,6 +5822,7 @@
         if (ev > fromStep && ev <= toStep) { bounced = true; break; }
       }
       if (bounced) PhysicsSound.playBounce(freqs[i]);
+      if (stepsReached(entry.warpEvents, fromStep, toStep, lastVisibleStep)) PhysicsSound.playWarp(freqs[i]);
       // The edge stop is one terminal event: only when first reached, and only for a genuine edge stop (wrapOverride).
       var finalStep = entry.effectiveMaxStep - 1;
       if (entry.wrapOverride && finalStep > fromStep && finalStep <= toStep) {
@@ -6028,6 +6035,7 @@
       tallies: runTalliesAt(worldPoint, trajectory),
       extraWrapOverrides: extraWrapOverrides,
       bounceEvents: bounceEventsAt(worldPoint, trajectory),
+      warpEvents: PhysicsEngine.warpEventsFromTrajectory(trajectory),
     };
   }
 
@@ -6165,7 +6173,7 @@
     if (prop === "distance") return "Distance Apart";
     if (prop === "lifespan") return "Scene lifespan";
     if (prop === "bounces") return "Bounce Count";
-    if (prop === "warps") return "Port Hole Warps";
+    if (prop === "warps") return "Port Hole Warp Count";
     if (prop === "totalRotation") return "Cumulative Rotation";
     return prop;
   }
@@ -8572,7 +8580,10 @@
     var freqs = PhysicsSound.chordFrequencies(entries.length);
     return entries.map(function (entry, i) {
       var last = entry.effectiveMaxStep - 1;
-      return { freq: freqs[i], bounces: (entry.bounceEvents || []).filter(function (e) { return e <= last; }), edgeStep: entry.wrapOverride ? last : null };
+      return {
+        freq: freqs[i], bounces: (entry.bounceEvents || []).filter(function (e) { return e <= last; }),
+        warps: (entry.warpEvents || []).filter(function (e) { return e <= last; }), edgeStep: entry.wrapOverride ? last : null,
+      };
     });
   }
 
@@ -8604,7 +8615,7 @@
                 packed[k++] = row[i].x; packed[k++] = row[i].y; packed[k++] = row[i].angle; packed[k++] = row[i].half;
               }
             });
-            return { color: entry.color, effectiveMaxStep: entry.effectiveMaxStep, wrapOverride: entry.wrapOverride, bounceEvents: entry.bounceEvents || [], bodies: bodies, trajectory: packed };
+            return { color: entry.color, effectiveMaxStep: entry.effectiveMaxStep, wrapOverride: entry.wrapOverride, bounceEvents: entry.bounceEvents || [], warpEvents: entry.warpEvents || [], bodies: bodies, trajectory: packed };
           }),
         };
       }),
@@ -8623,7 +8634,7 @@
             for (var i = 0; i < point.bodies; i++, k += 4) row.push({ x: data[k], y: data[k + 1], angle: data[k + 2], half: data[k + 3] });
             rows.push(row);
           }
-          return { color: point.color, effectiveMaxStep: point.effectiveMaxStep, wrapOverride: point.wrapOverride, bounceEvents: point.bounceEvents, trajectory: rows };
+          return { color: point.color, effectiveMaxStep: point.effectiveMaxStep, wrapOverride: point.wrapOverride, bounceEvents: point.bounceEvents, warpEvents: point.warpEvents || [], trajectory: rows };
         }),
       };
     });

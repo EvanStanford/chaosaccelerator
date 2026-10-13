@@ -3017,7 +3017,7 @@
   );
 
   addTest(
-    "Port Hole Warps and Cumulative Rotation read off a run count each pass and leave out the port holes' own turn",
+    "Port Hole Warp Count and Cumulative Rotation read off a run count each pass and leave out the port holes' own turn",
     "a spinning ball dropped through a pair turned a quarter apart keeps its spin, so its rotation is spin times time; the logged angle also jumps by the turn between the two port holes, which is where it came out, not rotation. The GPU log carries the warp bits the map and Inspect read",
     function () {
       var spin = 3, steps = 150;

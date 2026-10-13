@@ -538,8 +538,8 @@
     openVideo(frameWidth, frameHeight, true).then(function () { filmInspectFrame(tab, 0); });
   }
 
-  // The Inspect tab's sounds for the move from frame `from` to frame `to`, into `track` at `when`: a voice bounces
-  // or stops at an edge once for the steps in between, as the tab sounds them.
+  // The Inspect tab's sounds for the move from frame `from` to frame `to`, into `track` at `when`: a voice bounces,
+  // warps or stops at an edge once for the steps in between, as the tab sounds them.
   var filmVoices = [];
   function soundInspectStep(track, from, to, when) {
     var a = frames[from].step, b = frames[to].step;
@@ -547,6 +547,7 @@
     filmVoices.forEach(function (voice) {
       if (voice.bounces.some(function (e) { return e > a && e <= b; })) track.bounce(voice.freq, when);
       if (voice.edgeStep !== null && voice.edgeStep > a && voice.edgeStep <= b) track.edge(voice.freq, when);
+      if ((voice.warps || []).some(function (e) { return e > a && e <= b; })) track.warp(voice.freq, when);
     });
   }
 

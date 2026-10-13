@@ -1094,7 +1094,7 @@
       return "Cumulative Rotation reads one body, but a second is set";
     }
     if (output.property === "warps" && isPairOutput(output)) {
-      return "Port Hole Warps reads one body, but a second is set";
+      return "Port Hole Warp Count reads one body, but a second is set";
     }
     return null;
   }
@@ -1493,6 +1493,15 @@
     return counts;
   }
 
+  // Steps (0-indexed) in which some body went through a port hole: the warp sound's triggers.
+  function warpEventsFromTrajectory(rows) {
+    var events = [];
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].some(function (r) { return r.warped; })) events.push(i);
+    }
+    return events;
+  }
+
   function wrapToPi(a) { return a - 2 * Math.PI * Math.floor(a / (2 * Math.PI) + 0.5); }
 
   // turns[i] is the body's rotation in radians from `scene` to the end of step i+1, less each warp's own
@@ -1631,6 +1640,7 @@
     runBounceEvents: runBounceEvents,
     bounceCountsFromTrajectory: bounceCountsFromTrajectory,
     warpCountsFromTrajectory: warpCountsFromTrajectory,
+    warpEventsFromTrajectory: warpEventsFromTrajectory,
     rotationsFromTrajectory: rotationsFromTrajectory,
     bounceEventsFromTrajectory: bounceEventsFromTrajectory,
     runTrajectory: runTrajectory,
