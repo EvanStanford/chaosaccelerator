@@ -199,7 +199,7 @@
     return centerDecimals(view.scale > 0 ? view.scale : SCALE_AT_ZOOM_ONE / view.zoom);
   }
 
-  // ---- The scene ---- the AUTHORED scene JSON (centered, +y up), what Export writes and Import reads.
+  // ---- The scene ---- the AUTHORED scene JSON (centered, +y up), as the samples and the editor's autosave hold it.
 
   function encodeBody(b) {
     var parts = [

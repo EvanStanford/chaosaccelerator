@@ -327,14 +327,6 @@ html.layout-mobile #transition-skip {
   bottom: calc(max(var(--chrome-bottom), var(--safe-bottom)) + 16px);
 }
 
-html.layout-mobile .modal {
-  max-width: calc(100vw - 24px);
-  max-height: calc(100dvh - 24px - var(--safe-top) - var(--safe-bottom));
-}
-html.layout-mobile .modal-textarea {
-  height: min(260px, 38dvh);
-}
-
 /* ---- The small-window layout: the editor ---- */
 
 #editor-topbar {

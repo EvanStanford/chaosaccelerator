@@ -1,11 +1,11 @@
 // CPAL-1.0 License. See chaosaccelerator.com/license.html
 
-// Scene builder UI: canvas drawing, tools and handles, the side panel, playback,
-// scene import/export and the hand-off to the fractal grid.
+// Scene builder UI: canvas drawing, tools and handles, the side panel, playback
+// and the hand-off to the fractal grid.
 (function (global) {
   "use strict";
 
-  // Default only: simulationSteps travels with the scene (export/import, grid handoff).
+  // Default only: simulationSteps travels with the scene (links, autosave, grid handoff).
   var DEFAULT_SIMULATION_STEPS = 1000;
   // Notches match fractal-grid.js's slider notch-for-notch.
   var SIMULATION_STEPS_PER_NOTCH = 100;
@@ -53,18 +53,7 @@
   var simulationStepsReadout = document.getElementById("simulation-steps-readout");
   var frictionSlider = document.getElementById("friction-slider");
   var frictionReadout = document.getElementById("friction-readout");
-  var btnExportScene = document.getElementById("btn-export-scene");
-  var btnImportScene = document.getElementById("btn-import-scene");
-  var modalBackdrop = document.getElementById("modal-backdrop");
   var editorView = document.getElementById("editor-view"); // undo/redo only fire while this is the view up
-  var modalTitle = document.getElementById("modal-title");
-  var btnModalClose = document.getElementById("btn-modal-close");
-  var exportModalContent = document.getElementById("export-modal-content");
-  var exportJsonTextarea = document.getElementById("export-json-textarea");
-  var importModalContent = document.getElementById("import-modal-content");
-  var importJsonTextarea = document.getElementById("import-json-textarea");
-  var btnModalLoadScene = document.getElementById("btn-modal-load-scene");
-  var importJsonErrorEl = document.getElementById("import-json-error");
   var btnSampleDoublePendulum = document.getElementById("btn-sample-double-pendulum");
   var btnSamplePinball = document.getElementById("btn-sample-pinball");
   var btnSampleBinaryStar = document.getElementById("btn-sample-binary-star");
@@ -1340,7 +1329,6 @@
 
   window.addEventListener("keydown", function (e) {
     if (e.key !== "Escape") return;
-    if (!modalBackdrop.hidden) { closeModal(); return; }
     if (drawingShape) { drawingShape = null; render(); } // cancel the in-progress drag instead of still placing it on the eventual mouseup
     if (velocityDrag) { velocityDrag = null; render(); } // same, for a velocity aim in progress: leave the body's existing velocity alone
     if (hingeDrag) { hingeDrag = null; deleteZoneArmed = false; canvas.classList.remove("dragging"); render(); } // same, for a hinge on its way to the delete zone: it stays
@@ -1917,9 +1905,9 @@
     var isUndo = key === "z" && !e.shiftKey;
     var isRedo = (key === "z" && e.shiftKey) || (!IS_APPLE && key === "y");
     if (!isUndo && !isRedo) return;
-    // Builder only, not during playback or over the Import/Export modal.
-    if (editorView.hidden || isPlaying || !modalBackdrop.hidden) return;
-    // A focused text field owns its own undo, unless hidden: the Export textarea keeps focus after its modal closes.
+    // Builder only, not during playback.
+    if (editorView.hidden || isPlaying) return;
+    // A focused text field owns its own undo, unless it was hidden while focused.
     var focused = document.activeElement;
     if (focused && focused.offsetParent === null) focused = null;
     if (focused && (focused.tagName === "TEXTAREA" || focused.isContentEditable ||
@@ -2480,7 +2468,7 @@
       yInput: parseMapping(parsed.yInput, "yInput"),
       output: parseMapping(parsed.output, "output", OUTPUT_PROPERTIES, true),
       edgeMode: PhysicsEngine.edgeModeOf(parsed),
-      // Rounded like the export and the link, so a hand-edited value runs the same after a reload.
+      // Rounded like the autosave and the link, so a hand-edited value runs the same after a reload.
       friction: roundNum(PhysicsEngine.frictionOf(parsed)),
       mutualGravity: parsed.mutualGravity === true,
       collisionsEnabled: PhysicsEngine.collisionsEnabled(parsed),
@@ -2513,33 +2501,9 @@
 
   // Common tail for anything replacing the whole scene: refresh panels that read scene state directly.
   function finishSceneReplace() {
-    importJsonErrorEl.textContent = "";
-    importJsonErrorEl.className = "readout";
     refreshMappingUI();
     selectBody(-1);
     resizeCanvas(); // re-syncs frameWidth/frameHeight to the live canvas size, same as on initial load
-  }
-
-  function loadSceneFromImportModal() {
-    var parsed;
-    try {
-      parsed = JSON.parse(importJsonTextarea.value);
-    } catch (err) {
-      importJsonErrorEl.textContent = "Invalid JSON: " + err.message;
-      importJsonErrorEl.className = "readout error";
-      return;
-    }
-    var data;
-    try {
-      data = parseSceneData(PhysicsCoords.toEngineJSON(parsed, liveFrame()));
-    } catch (err) {
-      importJsonErrorEl.textContent = err.message;
-      importJsonErrorEl.className = "readout error";
-      return;
-    }
-    applySceneData(data);
-    finishSceneReplace();
-    closeModal();
   }
 
   function loadSample(url, label) {
@@ -2605,7 +2569,7 @@
   }
 
   // ---- Scenes that arrive by link ----
-  // The address bar carries the whole scene (share-url.js, transition.js): the same authored JSON Export writes.
+  // The address bar carries the whole scene (share-url.js, transition.js): the same authored JSON the autosave keeps.
 
   function sceneIdentity(authored) {
     var copy = {};
@@ -2628,39 +2592,6 @@
     }
   }
 
-  // ---- Export / Import modal: one shared dialog shell (#modal-backdrop) ----
-  function openModal(title, contentEl) {
-    modalTitle.textContent = title;
-    exportModalContent.hidden = contentEl !== exportModalContent;
-    importModalContent.hidden = contentEl !== importModalContent;
-    modalBackdrop.hidden = false;
-  }
-  function closeModal() {
-    modalBackdrop.hidden = true;
-  }
-
-  btnExportScene.addEventListener("click", function () {
-    // A compact one-liner: meant to be pasted whole, not read in place.
-    exportJsonTextarea.value = JSON.stringify(PhysicsCoords.toAuthoredJSON(serializeScene()));
-    openModal("Export Scene", exportModalContent);
-    exportJsonTextarea.focus();
-    exportJsonTextarea.select();
-  });
-
-  btnImportScene.addEventListener("click", function () {
-    importJsonTextarea.value = "";
-    importJsonErrorEl.textContent = "";
-    importJsonErrorEl.className = "readout";
-    openModal("Import Scene", importModalContent);
-    importJsonTextarea.focus();
-  });
-
-  btnModalLoadScene.addEventListener("click", loadSceneFromImportModal);
-  btnModalClose.addEventListener("click", closeModal);
-  modalBackdrop.addEventListener("click", function (e) {
-    if (e.target === modalBackdrop) closeModal(); // the dimmed backdrop itself, not the dialog inside it
-  });
-
   // ---- Play / reset ----
 
   // Enabled-only now: controls no longer gray out during playback (see lockedDuringPlaybackControls).
@@ -2673,7 +2604,6 @@
   // Touching any of these mid-run first does what Reset does, then runs the control's own handler.
   // Not listed: the playback transport, outputBodyBSelect and the Advanced disclosures.
   var lockedDuringPlaybackControls = toolButtons.concat([
-    btnExportScene, btnImportScene,
     btnSampleDoublePendulum, btnSamplePinball, btnSampleBinaryStar, btnClearAll,
     mutualGravityCheckbox, collisionsCheckbox,
     edgeModeSelect, frictionSlider, frictionReadout, simulationStepsSlider, simulationStepsReadout,

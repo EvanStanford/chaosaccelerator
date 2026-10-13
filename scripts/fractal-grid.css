@@ -16,8 +16,8 @@
   --bg-panel-float: rgba(27, 30, 39, 0.86);
   /* How far a floating card's shadow reaches; both scroll columns pad by this and pull it back with negative margin. */
   --menu-shadow-room: 40px;
-  /* Kept clear for the back link and the collapsed menu buttons, one term per button. */
-  --menu-reserved: calc((var(--settings-btn-size) + 8px) * 4 + 20px);
+  /* Kept clear for the back link, the two collapsed menu buttons and the render ring under them, a term each. */
+  --menu-reserved: calc((var(--settings-btn-size) + 8px) * 3 + var(--settings-btn-size) * 0.75 + 8px);
 }
 
 * { box-sizing: border-box; }
