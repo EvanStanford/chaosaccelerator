@@ -1,19 +1,89 @@
 {
   "challenges": [
     {
-      "id": "triple-rally",
-      "title": "Triple Rally",
-      "blurb": "One ball, three anchored circles. Somewhere on the map the ball hits body 1, then 0, then 2, and then does it all again before it leaves the frame. Find that spot.",
-      "scene": "body:ci:-15.7656:143.1094:0:53.3997!;ci:-197.0312:-199.6875:0:13.3957!;ci:155.7461:-200.9023:0:27.4025!;ci:-17.2734:-49.9414:0:17.3124,xinp:3.vx,yinp:3.vy,outp:3.y,step:500,frmw:979,frmh:934",
+      "id": "fast-forward",
+      "title": "Fast Forward",
+      "scene": "body:ci:-68.2617:371.9414:0:30;ln:-155:160:-.7854:350!;ln:155:160:-.7854:350!;ln:155:-87.5:-2.3562:350!;ln:-155:-87.5:-2.3562:350!,xinp:0.vx,yinp:0.vy,outp:0.y,edge:wrap,step:80,frmw:1192,frmh:862,ctry:430",
       "goal": [
         1,
-        0,
+        2,
+        3,
+        4
+      ],
+      "video": "media/fast-forward.mp4?v=m127"
+    },
+    {
+      "id": "fast-forward-2",
+      "title": "Fast Forward, Level 2",
+      "scene": "body:ci:-68.2617:371.9414:0:30;ln:-155:160:-.7854:350!;ln:155:160:-.7854:350!;ln:155:-87.5:-2.3562:350!;ln:-155:-87.5:-2.3562:350!,xinp:0.vx,yinp:0.vy,outp:0.y,edge:wrap,step:142,frmw:1192,frmh:862,ctry:600",
+      "goal": [
+        1,
+        2,
+        3,
+        4,
+        1,
+        2,
+        3,
+        4
+      ],
+      "video": "media/fast-forward-2.mp4?v=m127"
+    },
+    {
+      "id": "triple-rally",
+      "title": "Triple Rally",
+      "scene": "body:ci:-17.2734:-49.9414:0:17.3124;ci:-197.0312:-199.6875:0:13.3957!;ci:155.7461:-200.9023:0:27.4025!;ci:-15.7656:143.1094:0:53.3997!,xinp:0.vx,yinp:0.vy,outp:0.y,step:500,frmw:979,frmh:934,prec:auto",
+      "goal": [
+        1,
+        3,
         2,
         1,
-        0,
+        3,
         2
       ],
-      "video": "media/triple-rally.mp4"
+      "video": "media/triple-rally.mp4?v=m127"
+    },
+    {
+      "id": "double-dribble",
+      "title": "Double Dribble",
+      "scene": "body:ci:-23.6445:93.6367:0:30;ci:-9.4883:-55.2891:0:30;ln:20.5332:-261.709:.0001:979.918!,xinp:0.vx,yinp:0.vy,outp:0.x,step:800,frmw:1192,frmh:862,prec:auto",
+      "goal": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "video": "media/double-dribble.mp4?v=m127"
+    },
+    {
+      "id": "downhill-dribble",
+      "title": "Downhill Dribble",
+      "scene": "body:ci:-59.332:200.1055:0:30;ci:76.6484:-116.5352:0:30:-142.4062:-54.5977;ln:-44.2402:-244.8887:-.0469:800!;ci:-64.9531:32.3555:0:30:85.1602:49.4844;ci:498.3906:-118.4531:0:7.9709!,xinp:0.vx,yinp:0.vy,outp:0.x,step:300,frmw:1192,frmh:862,prec:auto",
+      "goal": [
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "image": "media/downhill-dribble.png?v=m127"
+    },
+    {
+      "id": "frequent-flyer",
+      "title": "Frequent Flyer",
+      "scene": "body:ci:-59.1484:244.0703:0:30;po:-258.7266:-33.2336:-.5392:200!;pg:143.6172:-33.1492:-5.6352:66.6667!,xinp:0.vx,yinp:0.vy,outp:0.x,edge:wrap,step:300,frmw:1192,frmh:862,zoom:.25",
+      "goal": [
+        "w2",
+        "w2",
+        "w2",
+        "w2"
+      ],
+      "image": "media/frequent-flyer.png?v=m127"
     }
   ]
 }

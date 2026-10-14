@@ -1,9 +1,11 @@
 /* CPAL-1.0 License. See chaosaccelerator.com/license.html */
 
 /* Loaded into chaos.html by layout-mode.js inside a challenge frame (?goal= is a Trick Shot, ?rose=1 is
-   Analysis Maxing). A frame has no use for the site menu, the Movie card or the Challenges card. */
+   Rose Plot Targets, ?lyap=1 a Lyapunov challenge). A frame has no use for the site menu, the builder's
+   home button, the Movie card or the Challenges card. */
 
 html.challenge #corner-menu,
+html.challenge #btn-home,
 html.challenge #menu-movie,
 html.challenge #grid-btn-movie,
 html.challenge #menu-challenges,
@@ -28,7 +30,34 @@ html.challenge-trick #grid-canvas-area {
   background-size: 180px 220px;
 }
 
-/* Analysis Maxing: the builder stays, the Analysis card keeps only its Rose Plot section. */
+/* Rose Plot Targets: the builder stays, the Analysis card keeps only its Rose Plot section. */
 html.challenge-rose .stats-section:not(:first-of-type) {
   display: none !important;
+}
+
+/* Lyapunov: the builder stays; the map keeps only the Inspect card, with no grids or superlatives and the
+   Separation plot always open. */
+html.challenge-lyap #menu-stats,
+html.challenge-lyap #grid-btn-stats,
+html.challenge-lyap #menu-display,
+html.challenge-lyap #grid-btn-display,
+html.challenge-lyap #menu-playback,
+html.challenge-lyap #grid-btn-playback,
+html.challenge-lyap #menu-settings,
+html.challenge-lyap #grid-btn-settings,
+html.challenge-lyap #btn-inspect-grid,
+html.challenge-lyap #grid-inspect-panel .section-label,
+html.challenge-lyap #grid-inspect-panel .tool-grid,
+html.challenge-lyap #separation-details > summary,
+html.challenge-nofriction #friction-field {
+  display: none !important;
+}
+html.challenge-lyap #separation-lambda {
+  position: static;
+  padding: 6px 0 0;
+  background: none;
+  font-size: 13px;
+}
+html.challenge-lyap #separation-lambda sub {
+  font-size: 10px;
 }

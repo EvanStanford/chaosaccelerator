@@ -9,6 +9,8 @@
   // Everything runs on demand: nothing touches WebGL until FractalGrid.start(scene).
   // Started once and kept alive; a later scene goes through setScene().
   var started = false;
+  // A Lyapunov challenge page's { onResult } (challenges/), bound while the builder is still up.
+  var lyapunovChallenge = null;
   global.FractalGrid = {
     start: function (scene) {
       if (started) { global.FractalGrid.setScene(scene); return; }
@@ -27,6 +29,7 @@
     resetView: function () {},
     renderNow: function () {},
     pausePlayback: function () {},
+    setLyapunovChallenge: function (challenge) { lyapunovChallenge = challenge || null; },
   };
 
   // One Settings body (#shared-settings-body) is MOVED between the builder's panel
@@ -281,6 +284,7 @@
   var separationLambda = document.getElementById("separation-lambda");
   var separationPlayhead = document.getElementById("separation-playhead");
   var separationLambdaValue = document.getElementById("separation-lambda-value");
+  var lyapunovMode = !!global.LayoutMode && global.LayoutMode.challengeKind() === "lyap";
   var tipPopover = document.getElementById("tip-popover");
   var tipPopoverText = document.getElementById("tip-popover-text");
   var tipPopoverOk = document.getElementById("tip-popover-ok");
@@ -755,35 +759,52 @@
     return variant === "derived" ? pieces.derivedSource : pieces.gridSource;
   }
 
-  // Trick Shot (challenges/): the bounce order a pixel's Output body must start with to be in the goal
-  // region, from the page's ?goal= (layout-mode.js). Null unless the scene can play it.
+  // Trick Shot (challenges/): the events a pixel's Output body must start with to be in the goal region,
+  // from the page's ?goal= (layout-mode.js), as { body, warp } (warp: in through that port hole, else a
+  // bounce off that body). Null unless the scene can play it.
   function challengeGoalOrder(sceneToCompile, outputBodies) {
-    var order = global.LayoutMode && global.LayoutMode.challengeGoal();
-    if (!order || outputBodies.length !== 1 || !PhysicsEngine.collisionsEnabled(sceneToCompile)) return null;
+    var tokens = global.LayoutMode && global.LayoutMode.challengeGoal();
+    if (!tokens || outputBodies.length !== 1) return null;
+    var portals = PhysicsEngine.portholePair(sceneToCompile.bodies) || [];
+    var order = tokens.map(function (t) { return { body: Number(t.replace("w", "")), warp: t.charAt(0) === "w" }; });
     for (var i = 0; i < order.length; i++) {
-      if (!(order[i] >= 0 && order[i] < sceneToCompile.bodies.length) || order[i] === outputBodies[0]) return null;
+      var e = order[i];
+      if (e.warp ? portals.indexOf(e.body) === -1
+        : !(e.body >= 0 && e.body < sceneToCompile.bodies.length) || e.body === outputBodies[0] || !PhysicsEngine.collisionsEnabled(sceneToCompile)) return null;
     }
     return order;
   }
+  // A warp's code in goalWant: past any body index.
+  var GOAL_WARP_CODE = 64;
+  function goalCode(e) { return e.warp ? GOAL_WARP_CODE + e.body : e.body; }
   function goalDeclarationLines(order) {
     var lines = ["const float GOAL_LENGTH = " + PhysicsGPU.fnum(order.length) + ";", "int goalWant(int i) {"];
-    order.forEach(function (body, i) { lines.push("  if (i == " + i + ") return " + body + ";"); });
+    order.forEach(function (e, i) { lines.push("  if (i == " + i + ") return " + goalCode(e) + ";"); });
     lines.push("  return -1;", "}");
     return lines;
   }
-  // Per step: a partner touched now and not last step is a bounce; each must be the next one wanted.
-  // goalNext counts the matches, -1 once the order is broken; goalMask is last step's partners as bits.
-  function goalStepLines(order, outputBody, n) {
-    var lines = ["    {", "      int goalHits = 0;"];
-    for (var k = 0; k < n; k++) {
-      if (k !== outputBody) lines.push("      if (g_touch" + k + ") goalHits |= " + (1 << k) + ";");
+  // Per step: a partner touched now and not last step is a bounce, then a pass through a port hole; each
+  // must be the next one wanted. Events the order never names are ignored. goalNext counts the matches,
+  // -1 once the order is broken; goalMask is last step's partners as bits.
+  function goalStepLines(order) {
+    var bounces = [], warps = [];
+    order.forEach(function (e) {
+      var list = e.warp ? warps : bounces;
+      if (list.indexOf(e.body) === -1) list.push(e.body);
+    });
+    bounces.sort(function (a, b) { return a - b; });
+    var lines = ["    {"];
+    function match(test, e) {
+      lines.push("      if (" + test + " && goalNext >= 0.0 && goalNext < GOAL_LENGTH) " +
+        "goalNext = goalWant(int(goalNext)) == " + goalCode(e) + " ? goalNext + 1.0 : -1.0;");
     }
-    lines.push("      int goalNew = goalHits & ~int(goalMask);", "      goalMask = float(goalHits);");
-    for (var j = 0; j < n; j++) {
-      if (j === outputBody) continue;
-      lines.push("      if ((goalNew & " + (1 << j) + ") != 0 && goalNext >= 0.0 && goalNext < GOAL_LENGTH) " +
-        "goalNext = goalWant(int(goalNext)) == " + j + " ? goalNext + 1.0 : -1.0;");
+    if (bounces.length) {
+      lines.push("      int goalHits = 0;");
+      bounces.forEach(function (k) { lines.push("      if (g_touch" + k + ") goalHits |= " + (1 << k) + ";"); });
+      lines.push("      int goalNew = goalHits & ~int(goalMask);", "      goalMask = float(goalHits);");
+      bounces.forEach(function (k) { match("(goalNew & " + (1 << k) + ") != 0", { body: k, warp: false }); });
     }
+    warps.forEach(function (k) { match("g_warp && g_warpFrom == " + k, { body: k, warp: true }); });
     lines.push("    }");
     return lines;
   }
@@ -807,6 +828,7 @@
     var hasPortals = !!PhysicsEngine.portholePair(sceneToCompile.bodies);
     var goalOrder = challengeGoalOrder(sceneToCompile, outputBodies);
     var goalLines = goalOrder ? goalDeclarationLines(goalOrder) : [];
+    var goalWarps = !!goalOrder && goalOrder.some(function (e) { return e.warp; });
     var isInfinitePosition = sceneToCompile.edgeMode === "infinite" && (outProp === "x" || outProp === "y" || isDistance);
     var rangeMax = outputRangeMax(sceneToCompile, outProp);
     // Circular outputs use the full 360; capped ranges stop at 300 so the ends differ.
@@ -851,7 +873,7 @@
       ? { width: sceneToCompile.frameWidth, height: sceneToCompile.frameHeight } : undefined;
     var stepOnceSource = PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, sceneToCompile.mutualGravity, PhysicsEngine.collisionsEnabled(sceneToCompile), initial.springs,
       { contactBody: isBounces ? sceneToCompile.output.body : null, touchBody: goalOrder ? outputBodies[0] : null,
-        warpBody: (isWarps || isTotalRotation) && hasPortals ? sceneToCompile.output.body : null,
+        warpBody: (isWarps || isTotalRotation || goalWarps) && hasPortals ? outputBodies[0] : null, warpFrom: goalWarps,
         gravitySubsteps: PhysicsEngine.gravitySubstepsFor(sceneToCompile) });
     var stepOnceCall = "stepOnce(" + PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, precision, initial.springs) + ");";
 
@@ -879,7 +901,7 @@
     }
     if (goalOrder) {
       bounceInitLines.push("  float goalNext = 0.0;", "  float goalMask = 0.0;");
-      bounceStepLines = bounceStepLines.concat(goalStepLines(goalOrder, outputBodies[0], initial.n));
+      bounceStepLines = bounceStepLines.concat(goalStepLines(goalOrder));
     }
     var trackedIndices = watchedIndices.slice();
     outputIndices.forEach(function (idx) {
@@ -2463,6 +2485,9 @@
 
   function checkColorSpreadAndMaybeSuggestColorZoom() {
     if (colorZoomEnabled) return;
+    // Trick Shot and Lyapunov frames hide the Display card.
+    var challenge = global.LayoutMode && global.LayoutMode.challengeKind();
+    if (challenge === "trick" || challenge === "lyap") return;
     // Only about the finished picture: partway along the timeline a narrow spread is often just early.
     if (timeline.playing || renderedSteps() < simulationSteps) return;
     var grid = sampleValueGrid(SAMPLE_SIZE, SAMPLE_SIZE);
@@ -3094,10 +3119,10 @@
     separationLayout = null;
     updateSeparationPlayhead();
     var pair = separationPair();
-    if (!pair || !separationDetails.open) return;
+    if ((!pair && !lyapunovMode) || !separationDetails.open) return;
     var width = separationCanvas.parentNode.clientWidth;
     if (width <= 0) return;
-    var series = separationSeries(pair);
+    var series = pair ? separationSeries(pair) : null;
     var dpr = window.devicePixelRatio || 1, height = SEPARATION_PLOT_HEIGHT;
     separationCanvas.width = Math.max(1, Math.round(width * dpr));
     separationCanvas.height = Math.max(1, Math.round(height * dpr));
@@ -3108,7 +3133,7 @@
     function pick(name, fallback) { var v = cs.getPropertyValue(name).trim(); return v || fallback; }
     var dim = pick("--text-dim", "#9399ad"), border = pick("--border", "#2c3040"), accent = pick("--accent", "#5b8cff");
     var left = 22, right = 6, top = 6, bottom = 28;
-    var plotW = width - left - right, plotH = height - top - bottom, steps = series.distance.length;
+    var plotW = width - left - right, plotH = height - top - bottom, steps = series ? series.distance.length : simulationSteps;
 
     ctx.font = SEPARATION_FONT;
     ctx.textBaseline = "alphabetic";
@@ -3131,6 +3156,12 @@
     ctx.rotate(-Math.PI / 2);
     ctx.fillText("Separation (log)", 0, 0);
     ctx.restore();
+    if (!series) {
+      separationLambda.hidden = true;
+      ctx.textAlign = "center";
+      ctx.fillText("Inspect two points to compare their runs", left + plotW / 2, top + plotH / 2);
+      return;
+    }
 
     var l = { left: left, top: top, plotW: plotW, plotH: plotH, steps: steps, scale: separationScale(series.distance), distance: series.distance };
     // One stroke per run of positive values, each opened with a hair of a segment so a lone sample still
@@ -3174,14 +3205,37 @@
   }
   function updateSeparationPlot() {
     var pair = separationPair();
-    separationDetails.hidden = !pair;
+    separationDetails.hidden = !pair && !lyapunovMode;
     if (!pair) separationCache = null;
     drawSeparationPlot();
+    reportLyapunov(pair);
   }
   separationDetails.addEventListener("toggle", function () {
     updateInspectList();
     drawSeparationPlot();
   });
+
+  // A Lyapunov challenge frame (challenges/): the plot stays open and the exponent gets its own line.
+  // The page's onResult hears each new pair's { lambda, distance }, or null without a pair.
+  var lyapunovReported;
+  if (lyapunovMode) {
+    separationDetails.open = true;
+    separationLambda.insertBefore(document.createTextNode("Lyapunov exponent: "), separationLambda.firstChild);
+  }
+  function reportLyapunov(pair) {
+    if (!lyapunovChallenge) return;
+    var series = pair ? separationSeries(pair) : null;
+    if (series === lyapunovReported) return;
+    lyapunovReported = series;
+    try {
+      lyapunovChallenge.onResult(series ? { lambda: series.lambda, distance: series.distance } : null);
+    } catch (err) { /* the page's problem */ }
+  }
+  global.FractalGrid.setLyapunovChallenge = function (challenge) {
+    lyapunovChallenge = challenge || null;
+    lyapunovReported = undefined;
+    reportLyapunov(separationPair());
+  };
   // The canvas only has a width once its card and section are open and laid out; the observer draws then.
   new ResizeObserver(function () { drawSeparationPlot(); }).observe(separationCanvas.parentNode);
 

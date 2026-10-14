@@ -160,9 +160,11 @@
     }
   }
 
-  // Analysis Maxing (challenges/): { target, onResult }. target is a share of the rose's weight per equal
+  // Rose Plot Targets (challenges/): { target, onResult }. target is a share of the rose's weight per equal
   // slice of the 180 degrees, in percent; it is drawn as an outline over the rose, on the same radial scale.
   var roseChallenge = null;
+  // The page's score line, shown under the rose.
+  var roseChallengeText = "";
 
   // ---- The orientation rose ----
   // 180 bins drawn twice (theta and theta + 180): a line has no direction. Screen orientation: right 0, up 90.
@@ -215,6 +217,22 @@
     }
     ctx.stroke();
 
+    // The target first, so the current plot draws over it.
+    if (targetFine && max > 0) {
+      ctx.beginPath();
+      for (var ts = 0; ts < n * 2; ts++) {
+        var tb = ts % n;
+        var ta = (tb + 0.5) * Math.PI / n + (ts >= n ? Math.PI : 0);
+        var tr = (targetFine[tb] / max) * radius;
+        var tx = cx + Math.cos(ta) * tr, ty = cy - Math.sin(ta) * tr;
+        if (ts === 0) ctx.moveTo(tx, ty); else ctx.lineTo(tx, ty);
+      }
+      ctx.closePath();
+      ctx.strokeStyle = "#c9a227";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
     if (max > 0) {
       ctx.beginPath();
       for (var s = 0; s < n * 2; s++) {
@@ -231,20 +249,6 @@
       ctx.fill();
       ctx.strokeStyle = p.accent;
       ctx.lineWidth = 1.5;
-      ctx.stroke();
-    }
-    if (targetFine && max > 0) {
-      ctx.beginPath();
-      for (var ts = 0; ts < n * 2; ts++) {
-        var tb = ts % n;
-        var ta = (tb + 0.5) * Math.PI / n + (ts >= n ? Math.PI : 0);
-        var tr = (targetFine[tb] / max) * radius;
-        var tx = cx + Math.cos(ta) * tr, ty = cy - Math.sin(ta) * tr;
-        if (ts === 0) ctx.moveTo(tx, ty); else ctx.lineTo(tx, ty);
-      }
-      ctx.closePath();
-      ctx.strokeStyle = "#c9a227";
-      ctx.lineWidth = 2;
       ctx.stroke();
     }
 
@@ -271,6 +275,7 @@
     var canvas = document.createElement("canvas");
     holder.appendChild(canvas);
     body.appendChild(holder);
+    if (roseChallenge) body.appendChild(el("p", "rose-challenge-score", roseChallengeText));
     return function () { drawRose(canvas, g); };
   }
 
@@ -661,5 +666,9 @@
     create: create,
     SECTIONS: SECTIONS,
     setRoseChallenge: function (challenge) { roseChallenge = challenge || null; },
+    setRoseChallengeText: function (text) {
+      roseChallengeText = text || "";
+      Array.prototype.forEach.call(document.querySelectorAll(".rose-challenge-score"), function (node) { node.textContent = roseChallengeText; });
+    },
   };
 })(window);

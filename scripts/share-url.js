@@ -315,8 +315,9 @@
   }
   function splitList(text) { return text === "" ? [] : text.split(";"); }
 
+  // "body:" with nothing after it is an empty scene; no body field at all is no scene.
   function decodeScene(fields) {
-    if (!fields.body) return null;
+    if (fields.body === undefined) return null;
     if (fields.edge !== undefined && !EDGES_BY_CODE[fields.edge]) throw new Error("edge is not a known mode: \"" + fields.edge + "\"");
     var bodies = splitList(fields.body).map(decodeBody);
     var portholes = {};

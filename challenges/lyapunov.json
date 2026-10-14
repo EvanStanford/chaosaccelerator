@@ -1,0 +1,17 @@
+{
+  "challenges": [
+    {
+      "id": "settle-down",
+      "title": "Settle Down",
+      "scene": "body:,frmw:979,frmh:934"
+    },
+    {
+      "id": "settle-down-frictionless",
+      "title": "Settle Down Without Friction",
+      "lockedTitle": "Settle Down With Constraint",
+      "after": "settle-down",
+      "scene": "body:,frmw:979,frmh:934",
+      "noFriction": true
+    }
+  ]
+}

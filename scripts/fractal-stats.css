@@ -178,3 +178,12 @@
 .stats-stale .stats-section {
   opacity: 0.45;
 }
+
+/* A Rose Plot Targets challenge's score, right under the rose. */
+.rose-challenge-score {
+  margin: 6px 0 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}

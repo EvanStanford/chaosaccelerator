@@ -469,8 +469,9 @@
   var HINGE_RADIUS = 6;
   var HINGE_HIT_PAD = 4; // a 6px dot is a small thing to land a mouse on
 
-  function drawHinge(hinge, grabbed) {
-    var p = PhysicsEngine.getHingeWorldPoint(hinge, scene.bodies);
+  // bodies: another scene's, for a picture of it; the editor's by default.
+  function drawHinge(hinge, grabbed, bodies) {
+    var p = PhysicsEngine.getHingeWorldPoint(hinge, bodies || scene.bodies);
     ctx.beginPath();
     ctx.arc(p.x, p.y, HINGE_RADIUS, 0, Math.PI * 2);
     ctx.fillStyle = "#ffcf4d";
@@ -2178,11 +2179,9 @@
 
   // ---- "Not ready yet" guidance for the Fractal-ize button ----
   // Never the native `disabled` attribute: a disabled button stops firing the hover events this depends on.
-  // Checked in a fixed order so the message names the single earliest blocker. One body counts once
-  // something is attached to it (a lone ball on a spring). Shared with gridSceneFromShared.
+  // Checked in a fixed order so the message names the single earliest blocker. Shared with gridSceneFromShared.
   function hasSomethingToMap(s) {
-    var attached = (s.springs || []).length > 0 || (s.hinges || []).length > 0;
-    return s.bodies.length > 1 || (s.bodies.length === 1 && attached);
+    return s.bodies.length > 0;
   }
 
   function gridReadiness() {
@@ -3274,6 +3273,16 @@
       ctx = targetCtx;
       try {
         drawSpringShape(a, b, stiffness, restLength, false, 1, color);
+      } finally {
+        ctx = previous;
+      }
+    },
+    // Every hinge pin of a scene, as the editor draws them.
+    drawSceneHinges: function (targetCtx, sceneToDraw) {
+      var previous = ctx;
+      ctx = targetCtx;
+      try {
+        (sceneToDraw.hinges || []).forEach(function (h) { drawHinge(h, false, sceneToDraw.bodies); });
       } finally {
         ctx = previous;
       }

@@ -6,8 +6,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#14161c">
 <title>Challenges: Chaos Accelerator</title>
-<link rel="stylesheet" href="../scripts/landing.css?v=m113">
-<link rel="stylesheet" href="challenges.css?v=m113">
+<link rel="stylesheet" href="../scripts/landing.css?v=m127">
+<link rel="stylesheet" href="challenges.css?v=m127">
 </head>
 <body>
 
@@ -18,15 +18,12 @@
   <header class="page-head">
     <a class="back-link" href="../index.html">&larr; Chaos Accelerator</a>
     <h1>Challenges</h1>
-    <script src="../scripts/corner-menu.js?v=m113"></script>
+    <script src="../scripts/corner-menu.js?v=m127"></script>
   </header>
 
   <section class="challenge-intro">
     <h2>Trick Shot</h2>
-    <p>Each trick shot is a scene where, at one very particular starting point, the ball bounces off the
-      other objects in a set order. On the map that order shows up as a region painted <b>GOAL!</b>.
-      Zoom in until you find it, then click it. The Inspect card is your friend: hover the map to watch
-      any starting point play out.</p>
+    <p>Find the starting point that bounces the ball in the specified order.</p>
   </section>
 
   <section id="challenge-list" class="challenge-list" aria-live="polite">
@@ -34,14 +31,20 @@
   </section>
 
   <section class="challenge-intro">
-    <h2>Analysis Maxing</h2>
-    <p>Each of these hands you a target shape for the map's <b>Rose Plot</b>, the chart in the Analysis card
-      that shows which way the sharp lines in a view run. Build any scene, open its map, and shape the view
-      until every slice of the plot fits inside the target. Your closest attempt is kept, with a link back to
-      that view.</p>
+    <h2>Rose Plot Targets</h2>
+    <p>Create a map that lies within the given goal rose plot.</p>
   </section>
 
   <section id="rose-list" class="challenge-list" aria-live="polite"></section>
+
+  <section class="challenge-intro">
+    <h2>Order From Chaos</h2>
+    <p>Build a scene whose Lyapunov exponent is negative.</p>
+  </section>
+
+  <section id="lyap-list" class="challenge-list" aria-live="polite"></section>
+
+  <p class="reset-all"><button id="btn-reset-all" class="danger" type="button">Reset all</button></p>
 </main>
 
 <section id="play-page" class="play-page" hidden>
@@ -58,15 +61,22 @@
 
     <aside id="target-panel" class="target-panel">
       <video id="target-video" muted loop autoplay playsinline></video>
-      <canvas id="target-rose" class="target-rose" width="240" height="240" hidden></canvas>
+      <img id="target-image" class="target-image" alt="The scene at the start" hidden>
+      <canvas id="target-rose" class="target-rose" width="480" height="480" hidden></canvas>
+      <canvas id="target-plot" class="target-plot" width="480" height="320" hidden></canvas>
       <p id="target-order" class="target-order"></p>
       <p id="target-help" class="target-help"></p>
     </aside>
 
     <aside id="best-panel" class="target-panel best-panel" hidden>
-      <canvas id="best-rose" class="target-rose" width="240" height="240"></canvas>
+      <button id="best-close" class="panel-close" type="button" title="Hide best" aria-label="Hide best">&times;</button>
+      <canvas id="best-rose" class="target-rose" width="480" height="480"></canvas>
+      <canvas id="best-plot" class="target-plot" width="480" height="320" hidden></canvas>
       <p id="best-text" class="target-order"></p>
-      <p class="target-help"><a id="best-link" target="_blank" rel="noopener">Open the best view in a new tab</a></p>
+      <p class="best-actions">
+        <button id="best-load" class="bar-btn" type="button">Load best</button>
+        <a id="best-link" target="_blank" rel="noopener">Open in a new tab</a>
+      </p>
     </aside>
 
     <div id="toast" class="toast" hidden></div>
@@ -86,6 +96,17 @@
   </div>
 </section>
 
-<script src="challenges.js?v=m113"></script>
+<dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-title">
+  <div class="confirm-card">
+    <h2 id="confirm-title"></h2>
+    <p id="confirm-text"></p>
+    <p class="confirm-actions">
+      <button id="confirm-cancel" class="bar-btn" type="button">Cancel</button>
+      <button id="confirm-ok" class="danger" type="button"></button>
+    </p>
+  </div>
+</dialog>
+
+<script src="challenges.js?v=m127"></script>
 </body>
 </html>

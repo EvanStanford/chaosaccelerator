@@ -39,21 +39,27 @@
     }
   })();
 
-  // Inside a challenge frame (challenges/): "?goal=1.0.2" is a Trick Shot, the bounce order the goal region
-  // starts with (fractal-grid.js paints goal pixels clear); "?rose=1" is Analysis Maxing. The classes trim
-  // the map's cards (challenges/challenge-frame.css).
+  // Inside a challenge frame (challenges/): "?goal=1.0.w2" is a Trick Shot, bounce off body 1, then body 0,
+  // then in through port hole body 2; "?rose=1" is Rose Plot Targets; "?lyap=1" a Lyapunov challenge,
+  // "&fric=0" keeping friction off. The classes trim the map's cards (challenges/challenge-frame.css).
+  var search = global.location.search || "";
   var challengeGoal = (function () {
-    var m = /[?&]goal=([0-9.]+)/.exec(global.location.search || "");
+    var m = /[?&]goal=([0-9w.]+)/.exec(search);
     if (!m) return null;
-    var order = m[1].split(".").filter(function (t) { return t !== ""; }).map(Number);
-    return order.length ? order : null;
+    var order = m[1].split(".").filter(function (t) { return t !== ""; });
+    var valid = order.every(function (t) { return /^w?\d+$/.test(t); });
+    return valid && order.length ? order : null;
   })();
-  var challengeKind = challengeGoal ? "trick" : (/[?&]rose=1\b/.test(global.location.search || "") ? "rose" : null);
+  var challengeKind = challengeGoal ? "trick"
+    : /[?&]rose=1\b/.test(search) ? "rose"
+      : /[?&]lyap=1\b/.test(search) ? "lyap" : null;
+  var challengeNoFriction = challengeKind === "lyap" && /[?&]fric=0\b/.test(search);
   if (challengeKind) {
     root.classList.add("challenge", "challenge-" + challengeKind);
+    if (challengeNoFriction) root.classList.add("challenge-nofriction");
     var challengeSheet = document.createElement("link");
     challengeSheet.rel = "stylesheet";
-    challengeSheet.href = "challenges/challenge-frame.css";
+    challengeSheet.href = "challenges/challenge-frame.css?v=m127";
     document.head.appendChild(challengeSheet);
   }
 

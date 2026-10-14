@@ -8,17 +8,17 @@
 <meta name="theme-color" content="#14161c">
 <title>Chaos Accelerator</title>
 <!-- Both views share this document so transition.js can show them at once. -->
-<link rel="stylesheet" href="scripts/physics.css?v=m113">
-<link rel="stylesheet" href="scripts/fractal-grid.css?v=m113">
-<link rel="stylesheet" href="scripts/app-shell.css?v=m113">
-<link rel="stylesheet" href="scripts/fractal-stats.css?v=m113">
-<link rel="stylesheet" href="scripts/responsive-layout.css?v=m113">
+<link rel="stylesheet" href="scripts/physics.css?v=m127">
+<link rel="stylesheet" href="scripts/fractal-grid.css?v=m127">
+<link rel="stylesheet" href="scripts/app-shell.css?v=m127">
+<link rel="stylesheet" href="scripts/fractal-stats.css?v=m127">
+<link rel="stylesheet" href="scripts/responsive-layout.css?v=m127">
 <!-- mobile.css after the app sheets: it must win their cascade without !important. -->
-<link rel="stylesheet" href="scripts/mobile.css?v=m113">
-<link rel="stylesheet" href="scripts/eighties-app.css?v=m113">
-<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m113" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="scripts/mobile.css?v=m127">
+<link rel="stylesheet" href="scripts/eighties-app.css?v=m127">
+<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m127" as="font" type="font/woff2" crossorigin>
 <!-- In <head> on purpose: both views measure their canvas area as they start. -->
-<script src="scripts/layout-mode.js?v=m113"></script>
+<script src="scripts/layout-mode.js?v=m127"></script>
 <!-- A #map/ link should open on the map: hide the editor (still laid out) until transition.js picks the view. -->
 <script>
   if (/^#map\//.test(location.hash)) document.documentElement.classList.add("opening-map");
@@ -153,7 +153,7 @@
                     <option value="infinite">Infinite Space</option>
                   </select>
                 </label>
-                <label class="field">
+                <label class="field" id="friction-field">
                   <span>Friction (% per second): <input type="number" class="steps-number" id="friction-readout" min="0" max="99" step="0.01" value="0" inputmode="decimal" title="Type an exact percent, or use the slider" aria-label="Friction in percent of speed lost per second"></span>
                   <input type="range" id="friction-slider" min="0" max="100" step="1" value="0" title="The share of its speed every moving object loses each second, on top of the light drag every scene has (0). Applied continuously through bounces, edge warps and port holes alike; under gravity a body settles toward a terminal speed. Movement only; spin is untouched" aria-label="Friction">
                 </label>
@@ -753,22 +753,22 @@
 
 </div>
 
-<script src="scripts/app-message.js?v=m113"></script>
-<script src="scripts/physics-engine.js?v=m113"></script>
-<script src="scripts/physics-coords.js?v=m113"></script>
-<script src="scripts/share-url.js?v=m113"></script>
-<script src="scripts/movie-path.js?v=m113"></script>
-<script src="scripts/movie-store.js?v=m113"></script>
-<script src="scripts/physics-sound.js?v=m113"></script>
-<script src="scripts/physics-hinge-geometry.js?v=m113"></script>
-<script src="scripts/physics-df.js?v=m113"></script>
-<script src="scripts/physics-gpu.js?v=m113"></script>
-<script src="scripts/physics-gpu-df.js?v=m113"></script>
-<script src="scripts/physics-grid-codegen.js?v=m113"></script>
-<script src="scripts/physics-ui.js?v=m113"></script>
-<script src="scripts/fractal-stats.js?v=m113"></script>
-<script src="scripts/fractal-stats-panel.js?v=m113"></script>
-<script src="scripts/fractal-grid.js?v=m113"></script>
-<script src="scripts/transition.js?v=m113"></script>
+<script src="scripts/app-message.js?v=m127"></script>
+<script src="scripts/physics-engine.js?v=m127"></script>
+<script src="scripts/physics-coords.js?v=m127"></script>
+<script src="scripts/share-url.js?v=m127"></script>
+<script src="scripts/movie-path.js?v=m127"></script>
+<script src="scripts/movie-store.js?v=m127"></script>
+<script src="scripts/physics-sound.js?v=m127"></script>
+<script src="scripts/physics-hinge-geometry.js?v=m127"></script>
+<script src="scripts/physics-df.js?v=m127"></script>
+<script src="scripts/physics-gpu.js?v=m127"></script>
+<script src="scripts/physics-gpu-df.js?v=m127"></script>
+<script src="scripts/physics-grid-codegen.js?v=m127"></script>
+<script src="scripts/physics-ui.js?v=m127"></script>
+<script src="scripts/fractal-stats.js?v=m127"></script>
+<script src="scripts/fractal-stats-panel.js?v=m127"></script>
+<script src="scripts/fractal-grid.js?v=m127"></script>
+<script src="scripts/transition.js?v=m127"></script>
 </body>
 </html>

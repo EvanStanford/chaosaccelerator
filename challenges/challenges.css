@@ -20,7 +20,8 @@
 .challenge-card h3 { margin: 0 0 6px; font-size: 20px; }
 .challenge-card .solved { font-size: 13px; color: #c9a227; margin-left: 8px; }
 .challenge-card p { margin: 0 0 12px; color: var(--text-dim); line-height: 1.5; }
-.challenge-card video { width: 100%; border-radius: 6px; background: #0c0d11; display: block; }
+.challenge-card video,
+.challenge-card img.card-still { width: 100%; border-radius: 6px; background: #0c0d11; display: block; }
 .challenge-card .order { font-size: 13px; color: var(--text); font-variant-numeric: tabular-nums; }
 .challenge-card button {
   font: inherit;
@@ -32,8 +33,67 @@
   cursor: pointer;
 }
 .challenge-card button:hover { background: var(--accent-hover); }
+.challenge-card button:disabled,
+.challenge-card button:disabled:hover { color: var(--text-dim); background: var(--border); cursor: default; }
+.challenge-card button.secondary { color: var(--text); background: transparent; border: 1px solid var(--border); }
+.challenge-card button.secondary:hover { background: var(--bg-input, #232735); }
+.challenge-card button.danger,
+.reset-all button,
+.confirm-actions .danger {
+  color: #ff5f56;
+  background: transparent;
+  border: 1px solid #ff5f56;
+}
+.challenge-card button.danger:hover,
+.reset-all button:hover:not(:disabled),
+.confirm-actions .danger:hover { color: #fff; background: #ff5f56; }
+.reset-all { margin: 28px 0 0; text-align: right; }
+.reset-all button { font: inherit; padding: 8px 14px; border-radius: 6px; cursor: pointer; }
+.reset-all button:disabled { opacity: 0.4; cursor: default; }
+
+/* The reset confirmation, in the GOAL! card's frame with a red edge. */
+.confirm-dialog {
+  padding: 0;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  max-width: min(420px, calc(100vw - 32px));
+}
+.confirm-dialog::backdrop { background: rgba(12, 13, 17, 0.6); }
+.confirm-card {
+  padding: 20px 24px;
+  background: var(--bg-panel);
+  border: 1px solid #ff5f56;
+  border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+}
+.confirm-card h2 { margin: 0 0 8px; font-size: 20px; }
+.confirm-card p { margin: 0 0 16px; color: var(--text-dim); line-height: 1.5; }
+.confirm-card .confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin: 0; }
+.confirm-actions .danger { margin: 0; font: inherit; font-size: 14px; padding: 6px 12px; border-radius: 6px; cursor: pointer; }
 
 .challenge-card canvas.card-rose { width: 100%; aspect-ratio: 1; display: block; background: #0c0d11; border-radius: 6px; }
+/* An attempted challenge's best, a box of its own between the title and the chart. */
+.challenge-card.has-best { grid-template-columns: max-content minmax(0, 1fr) 220px; }
+.challenge-card.has-best > div:first-child { grid-column: 1; grid-row: 1; }
+.challenge-card.has-best > canvas { grid-column: 3; grid-row: 1; }
+.best-box {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: start;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  padding: 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.best-box.has-scene { grid-template-columns: minmax(0, 1fr) 206px; }
+.best-box .best-solved { margin: 0 0 4px; font-weight: 600; color: #c9a227; }
+.card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.challenge-card img.card-scene { width: 100%; display: block; border: 1px solid var(--border); border-radius: 6px; background: #14161c; }
+.challenge-card canvas.card-plot { width: 100%; aspect-ratio: 3 / 2; display: block; background: #0c0d11; border-radius: 6px; }
 
 /* ---- Play mode ---- */
 .play-page {
@@ -84,12 +144,31 @@
   border-radius: 10px;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
 }
-.target-panel video { width: 100%; border-radius: 6px; background: #0c0d11; display: block; }
+.target-panel video,
+.target-panel img.target-image { width: 100%; border-radius: 6px; background: #0c0d11; display: block; }
 .target-rose { width: 100%; aspect-ratio: 1; border-radius: 6px; background: #0c0d11; display: block; }
+.target-plot { width: 100%; aspect-ratio: 3 / 2; border-radius: 6px; background: #0c0d11; display: block; }
 .best-panel { right: auto; left: 12px; }
+.panel-close {
+  display: block;
+  margin: -6px -6px 2px auto;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--text-dim);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.panel-close:hover { color: var(--text); background: var(--bg-input, #232735); }
 .target-order { margin: 8px 0 4px; font-size: 13px; font-variant-numeric: tabular-nums; }
 .target-help { margin: 0; font-size: 12px; color: var(--text-dim); line-height: 1.45; }
 .target-help b { color: var(--text); }
+.best-actions { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 12px; }
 
 .toast {
   position: absolute;
@@ -104,29 +183,33 @@
   pointer-events: none;
 }
 
+/* Top center, over the map only where it sits: the rest stays usable. */
 .win-panel {
   position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(12, 13, 17, 0.6);
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - 24px);
 }
 .win-card {
-  padding: 24px 28px;
+  padding: 14px 20px;
   text-align: center;
   background: var(--bg-panel);
   border: 1px solid #c9a227;
   border-radius: 12px;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
-  max-width: 420px;
+  max-width: 460px;
 }
-.win-card h2 { margin: 0 0 8px; font-size: 40px; color: #c9a227; letter-spacing: 0.04em; }
-.win-card p { margin: 0 0 14px; color: var(--text-dim); }
+.win-card h2 { margin: 0 0 4px; font-size: 28px; color: #c9a227; letter-spacing: 0.04em; }
+.win-card p { margin: 0 0 10px; color: var(--text-dim); }
 .win-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
 
 @media (max-width: 760px) {
-  .challenge-card { grid-template-columns: 1fr; }
+  .challenge-card, .challenge-card.has-best, .best-box.has-scene { grid-template-columns: 1fr; }
+  .challenge-card.has-best > div:first-child,
+  .challenge-card.has-best > canvas,
+  .challenge-card.has-best > .best-box { grid-column: auto; grid-row: auto; }
   .target-panel { width: min(260px, calc(100vw - 24px)); bottom: auto; top: 12px; }
   .best-panel { top: auto; bottom: 12px; }
   .score { display: none; }

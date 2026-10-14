@@ -774,11 +774,11 @@
   // precision: "f32" or "df"/"tf"/"qf" (see PhysicsDF). mutualGravity: n-body pull.
   // collisions: only Mutual Gravity's accel loop needs it (touching-bodies rule).
   // springs: see the Springs section above.
-  // flags { contactBody, touchBody, pairContacts, warpBody, warpBits }: g_contactN for that one body (the
-  // map's Bounce Count), g_touchK per other body for that one (the goal order), g_pairContacts, every
-  // pair's contact as a bit (the trajectory log), g_warp and g_warpTurn, whether that one body went
-  // through a port hole and the turn the crossing gave it, and g_warpBits, every body's warp as a bit
-  // (the trajectory log); none by default.
+  // flags { contactBody, touchBody, pairContacts, warpBody, warpFrom, warpBits }: g_contactN for that one
+  // body (the map's Bounce Count), g_touchK per other body for that one (the goal order), g_pairContacts,
+  // every pair's contact as a bit (the trajectory log), g_warp and g_warpTurn, whether that one body went
+  // through a port hole and the turn the crossing gave it, with warpFrom g_warpFrom, the port hole it went
+  // in by (the goal order), and g_warpBits, every body's warp as a bit (the trajectory log); none by default.
   function generateStepOnceGLSL(n, consts, pairs, hingeAnchors, frame, precision, mutualGravity, collisions, springs, flags) {
     var df = global.PhysicsDF.isExtended(precision);
     if (df) global.PhysicsDF.usePrecision(precision);
@@ -873,9 +873,11 @@
     var pairContacts = !!(flags && flags.pairContacts);
     var warpBody = flags && typeof flags.warpBody === "number" ? flags.warpBody : -1;
     var warpBits = !!(flags && flags.warpBits);
+    var warpFrom = warpBody >= 0 && !!(flags && flags.warpFrom);
     if (contactBody >= 0) lines.push("bool g_contact" + contactBody + " = false;");
     if (pairContacts) lines.push("float g_pairContacts = 0.0;");
     if (warpBody >= 0) lines.push("bool g_warp = false;", E.scalarType + " g_warpTurn;");
+    if (warpFrom) lines.push("int g_warpFrom = -1;");
     if (warpBits) lines.push("float g_warpBits = 0.0;");
     for (var td = 0; td < n; td++) if (touchBody >= 0 && td !== touchBody) lines.push("bool g_touch" + td + " = false;");
     // The step's edge wrap per body, 0.0 or a frame span: the sticky stop and the trajectory log read these.
@@ -1865,7 +1867,7 @@
             } else {
               lines.push(df ? "      " + B(m) + ".angle = dfAdd(" + B(m) + ".angle, phPhi);" : "      " + B(m) + ".angle += phPhi;");
             }
-            if (m === warpBody) lines.push("      g_warp = true; g_warpTurn = phPhi;");
+            if (m === warpBody) lines.push("      g_warp = true; g_warpTurn = phPhi;" + (warpFrom ? " g_warpFrom = " + pi + ";" : ""));
             if (warpBits) lines.push("      g_warpBits += " + fnum(Math.pow(2, m)) + ";");
             lines.push("    }");
           });
