@@ -2017,6 +2017,15 @@
     return PROPERTIES_BY_TYPE[scene.bodies[bodyIndex].type];
   }
 
+  // A Lyapunov challenge frame asking for velocity inputs (challenges/): the inputs offer nothing else.
+  var velocityInputsOnly = !!(global.LayoutMode && global.LayoutMode.challengeVelocityInputs && global.LayoutMode.challengeVelocityInputs());
+  function inputAllowed(key) { return !velocityInputsOnly || key === "vx" || key === "vy"; }
+  function firstInputKey(bodyIndex) {
+    var props = propsListFor(bodyIndex);
+    var allowed = props.filter(function (p) { return inputAllowed(p.key); });
+    return (allowed[0] || props[0]).key;
+  }
+
   function populatePropertySelect(select, bodyIndex, selectedKey, propsList) {
     select.innerHTML = "";
     if (bodyIndex === null || bodyIndex === undefined || !scene.bodies[bodyIndex]) {
@@ -2025,10 +2034,12 @@
     }
     select.disabled = false;
     var props = propsList || propsListFor(bodyIndex);
+    var isInput = select === xInputPropertySelect || select === yInputPropertySelect;
     props.forEach(function (p) {
       var opt = document.createElement("option");
       opt.value = p.key;
       opt.textContent = p.label;
+      opt.disabled = isInput && !inputAllowed(p.key);
       select.appendChild(opt);
     });
     if (selectedKey && props.some(function (p) { return p.key === selectedKey; })) {
@@ -2080,7 +2091,7 @@
       scene.xInput = null;
     } else {
       var bodyIndex = Number(xInputBodySelect.value);
-      scene.xInput = { body: bodyIndex, property: propsListFor(bodyIndex)[0].key };
+      scene.xInput = { body: bodyIndex, property: firstInputKey(bodyIndex) };
     }
     populatePropertySelect(xInputPropertySelect, scene.xInput ? scene.xInput.body : null, scene.xInput ? scene.xInput.property : null);
     render();
@@ -2097,7 +2108,7 @@
       scene.yInput = null;
     } else {
       var bodyIndex = Number(yInputBodySelect.value);
-      scene.yInput = { body: bodyIndex, property: propsListFor(bodyIndex)[0].key };
+      scene.yInput = { body: bodyIndex, property: firstInputKey(bodyIndex) };
     }
     populatePropertySelect(yInputPropertySelect, scene.yInput ? scene.yInput.body : null, scene.yInput ? scene.yInput.property : null);
     render();
@@ -2196,7 +2207,7 @@
       return {
         ready: false,
         message: "Try setting one of the bodies as input first",
-        highlight: [document.querySelector('[data-tool="input"]')],
+        highlight: [document.querySelector(velocityInputsOnly ? '[data-tool="input-velocity"]' : '[data-tool="input"]')],
       };
     }
     if (!scene.output) {

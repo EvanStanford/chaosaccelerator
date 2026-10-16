@@ -12,6 +12,36 @@
       "after": "settle-down",
       "scene": "body:,frmw:979,frmh:934",
       "noFriction": true
+    },
+    {
+      "id": "settle-down-from-rest",
+      "title": "Settle Down From Rest",
+      "scene": "body:,frmw:979,frmh:934",
+      "after": "settle-down-frictionless",
+      "rules": {
+        "velocityInputs": true
+      }
+    },
+    {
+      "id": "settle-down-alone",
+      "title": "Settle Down Alone",
+      "scene": "body:,frmw:979,frmh:934",
+      "after": "settle-down-from-rest",
+      "rules": {
+        "velocityInputs": true,
+        "maxBodies": 2
+      }
+    },
+    {
+      "id": "perfectly-still",
+      "title": "Perfectly Still",
+      "scene": "body:,frmw:979,frmh:934",
+      "after": "settle-down-alone",
+      "noFriction": true,
+      "rules": {
+        "minSteps": 1000,
+        "nearby": true
+      }
     }
   ]
 }

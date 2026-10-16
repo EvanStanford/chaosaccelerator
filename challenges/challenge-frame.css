@@ -35,8 +35,8 @@ html.challenge-rose .stats-section:not(:first-of-type) {
   display: none !important;
 }
 
-/* Lyapunov: the builder stays; the map keeps only the Inspect card, with no grids or superlatives and the
-   Separation plot always open. */
+/* Lyapunov: the builder stays; the map keeps only the Inspect card, inspecting lines only (no points, grids
+   or superlatives), and the Separation plot always open. */
 html.challenge-lyap #menu-stats,
 html.challenge-lyap #grid-btn-stats,
 html.challenge-lyap #menu-display,
@@ -46,10 +46,12 @@ html.challenge-lyap #grid-btn-playback,
 html.challenge-lyap #menu-settings,
 html.challenge-lyap #grid-btn-settings,
 html.challenge-lyap #btn-inspect-grid,
+html.challenge-lyap #btn-inspect-point,
 html.challenge-lyap #grid-inspect-panel .section-label,
 html.challenge-lyap #grid-inspect-panel .tool-grid,
 html.challenge-lyap #separation-details > summary,
-html.challenge-nofriction #friction-field {
+html.challenge-nofriction #friction-field,
+html.challenge-velocity-inputs .tool-btn[data-tool="input"] {
   display: none !important;
 }
 html.challenge-lyap #separation-lambda {

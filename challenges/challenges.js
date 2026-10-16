@@ -9,8 +9,8 @@
 //   .setRoseChallenge), which draws it over the Rose Plot and reports each measurement back here. The score
 //   is the share of the rose inside the target, the higher the better; the best score and its map link are
 //   kept per challenge.
-//   Lyapunov: ?lyap=1 (&fric=0 without friction). The frame reports each inspected pair's exponent
-//   (FractalGrid.setLyapunovChallenge); below zero wins, and the most negative is kept.
+//   Lyapunov: ?lyap=1 (&fric=0 without friction, &vin=1 velocity inputs only). The frame reports the inspected
+//   runs' exponent (FractalGrid.setLyapunovChallenge); below zero wins, and the most negative is kept.
 (function () {
   "use strict";
 
@@ -23,6 +23,8 @@
   // Exponents show to 3 places; this is the first that shows as negative.
   var LYAP_WIN = -0.0005;
   var LYAP_PLOT_SAMPLES = 120;
+  // "nearby": the two furthest runs start no further apart than a hundredth of the zoom 1 view's height.
+  var NEARBY_GAP = (200 / 0.17) / 100;
 
   function $(id) { return document.getElementById(id); }
   var listPage = $("list-page"), listEl = $("challenge-list"), roseListEl = $("rose-list"), lyapListEl = $("lyap-list");
@@ -251,6 +253,13 @@
       h.appendChild(badge);
     }
     text.appendChild(h);
+    var rules = c.kind === "lyap" && !locked ? rulesText(c) : "";
+    if (rules) {
+      var rulesLine = document.createElement("p");
+      rulesLine.className = "order";
+      rulesLine.textContent = rules;
+      text.appendChild(rulesLine);
+    }
     var note = document.createElement("p");
     note.className = "order";
     if (!best) text.appendChild(note);
@@ -366,7 +375,8 @@
   // its own address: two that differ only after the "#" would not reload the frame.
   function frameAddress(c, hash) {
     var query = c.kind === "trick" ? "?goal=" + c.goal.join(".")
-      : c.kind === "rose" ? "?rose=1" : "?lyap=1" + (c.noFriction ? "&fric=0" : "");
+      : c.kind === "rose" ? "?rose=1"
+        : "?lyap=1" + (c.noFriction ? "&fric=0" : "") + (c.rules && c.rules.velocityInputs ? "&vin=1" : "");
     var start = c.kind === "trick" ? "#map/" + c.scene : hash || "#bldr/" + c.scene;
     return APP + query + "&challenge=" + c.id + start;
   }
@@ -407,7 +417,8 @@
     if (c.kind === "lyap") {
       drawLyapShape(targetPlot, null);
       targetOrder.textContent = "Goal: Lyapunov exponent below 0";
-      targetHelp.innerHTML = "Build a scene, open its map and inspect a line to show the Lyapunov exponent. A scene with a negative Lyapunov exponent will reduce separation over time.";
+      targetHelp.textContent = "Build a scene, open its map and inspect a line to show the Lyapunov exponent. A scene with a negative Lyapunov exponent will reduce separation over time." +
+        (rulesText(c) ? " " + rulesText(c) : "");
       updateLyapScore(null);
     }
     setTargetShown(true);
@@ -656,15 +667,34 @@
   // status: what to show without an exponent.
   function updateLyapScore(lambda, status) {
     var c = challenges[current], best = bestOf(c.id);
-    var html = "Lyapunov exponent: <b>" + (lambda === null ? status || "inspect two points" : exponentText(lambda)) + "</b>";
+    var html = "Lyapunov exponent: <b>" + (lambda === null ? status || "inspect a line" : exponentText(lambda)) + "</b>";
     if (best) html += " &middot; Best: <b>" + exponentText(best.lambda) + "</b>";
     scoreEl.innerHTML = html;
     scoreEl.classList.toggle("score-win", lambda !== null && lambda <= LYAP_WIN);
   }
 
-  function frameFriction() {
-    var w = engine.contentWindow;
-    try { return w.PhysicsEngine.frictionOf(w.FractalGrid.shareState().scene); } catch (err) { return 0; }
+  // A Lyapunov level's extra rules ("rules" in lyapunov.json, plus noFriction), as one line.
+  function rulesText(c) {
+    var r = c.rules || {}, parts = [];
+    if (c.noFriction) parts.push("no friction");
+    if (r.velocityInputs) parts.push("both inputs are velocities");
+    if (r.maxBodies) parts.push("at most " + r.maxBodies + " objects");
+    if (r.minSteps) parts.push("every run lasts at least " + r.minSteps + " frames, none stopping at an edge");
+    if (r.nearby) parts.push("a short line (no longer than the screen's height at 100x zoom)");
+    return parts.length ? "Rules: " + parts.join(", ") + "." : "";
+  }
+  function isVelocity(mapping) { return !!mapping && (mapping.property === "vx" || mapping.property === "vy"); }
+  // Why a result breaks the level's rules, or null. Every level inspects lines only.
+  function ruleProblem(c, result) {
+    var w = engine.contentWindow, state, scene, r = c.rules || {};
+    try { state = w.FractalGrid.shareState(); scene = state.scene; } catch (err) { return null; }
+    if (state.view.inspect.some(function (g) { return g.type !== "line"; })) return "Inspect with a line for this one.";
+    if (c.noFriction && w.PhysicsEngine.frictionOf(scene) > 0) return "Friction has to stay off for this one.";
+    if (r.velocityInputs && !(isVelocity(scene.xInput) && isVelocity(scene.yInput))) return "Both inputs have to be velocities for this one.";
+    if (r.maxBodies && scene.bodies.length > r.maxBodies) return "Use at most " + r.maxBodies + " objects for this one.";
+    if (r.minSteps && !(result.shortest >= r.minSteps)) return "Every run has to last at least " + r.minSteps + " frames, none stopping at an edge, for this one.";
+    if (r.nearby && !(result.gap <= NEARBY_GAP)) return "Draw a shorter line, no longer than the screen's height at 100x zoom.";
+    return null;
   }
 
   function onLyapResult(result) {
@@ -673,10 +703,11 @@
     var lambda = result && typeof result.lambda === "number" && isFinite(result.lambda) ? result.lambda : null;
     var separates = !!result && Array.prototype.some.call(result.distance, function (v) { return v > 0; });
     var status = !result ? null : separates ? "too short to measure" : "none, the runs never separate";
-    if (lambda !== null && c.noFriction && frameFriction() > 0) {
-      showToast("Friction has to stay off for this one.");
+    var problem = lambda !== null ? ruleProblem(c, result) : null;
+    if (problem) {
+      showToast(problem);
       lambda = null;
-      status = "not counted with friction on";
+      status = "not counted, see the rules";
     }
     if (lambda !== null) {
       fillPicture(c);
@@ -692,7 +723,7 @@
     updateLyapScore(lambda, status);
     if (lambda !== null && lambda <= LYAP_WIN && !wonThisPlay) {
       wonThisPlay = true;
-      win("The two runs draw together: a negative Lyapunov exponent.");
+      win("The runs draw together: a negative Lyapunov exponent.");
     }
   }
 

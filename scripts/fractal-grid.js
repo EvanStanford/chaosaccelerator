@@ -2941,25 +2941,6 @@
 
   var INSPECT_ROW_GROUP_GLYPH = { line: "┊", grid: "⊞" };
 
-  // A small rising curve in `color`: the icon of a row the separation plot is drawn from.
-  function separationRowIcon(color) {
-    var svg = document.createElementNS(SVG_NS, "svg");
-    svg.setAttribute("viewBox", "0 0 16 16");
-    svg.setAttribute("width", "16");
-    svg.setAttribute("height", "16");
-    var d = "M1.5 14.5 C5.5 14.5 8.5 12 10.5 7.5 S13 2 14.5 1.5";
-    [["#000000", "4.5"], [color, "2.5"]].forEach(function (stroke) {
-      var path = document.createElementNS(SVG_NS, "path");
-      path.setAttribute("d", d);
-      path.setAttribute("fill", "none");
-      path.setAttribute("stroke", stroke[0]);
-      path.setAttribute("stroke-width", stroke[1]);
-      path.setAttribute("stroke-linecap", "round");
-      svg.appendChild(path);
-    });
-    return svg;
-  }
-
   // Decimal places for a millionth of a pixel at the view's zoom (ShareUrl.centerDecimals).
   function viewPlaces() { return ShareUrl.centerDecimals(view.scale); }
   // A world point's x and y to a tenth of a pixel at the zoom whose places are given.
@@ -2970,11 +2951,9 @@
 
   function updateInspectList() {
     inspectListEl.innerHTML = "";
-    var pair = separationDetails.open ? separationPair() : null;
     inspectedGroups.forEach(function (group, i) {
       var li = document.createElement("li");
       li.className = "inspect-row";
-      var plotted = !!pair && pair.groups.indexOf(i) !== -1;
       var removeBtn = document.createElement("button");
       removeBtn.className = "inspect-row-remove";
       removeBtn.textContent = "×";
@@ -2982,14 +2961,13 @@
       removeBtn.addEventListener("click", function () { removeInspectedGroup(i); });
 
       var icon = document.createElement("span");
-      if (group.type === "point" && !plotted) {
+      if (group.type === "point") {
         icon.className = "inspect-dot";
         icon.style.background = group.points[0].color.fill;
       } else {
         icon.className = "inspect-row-icon";
         icon.setAttribute("aria-hidden", "true");
-        if (plotted) icon.appendChild(separationRowIcon(group.type === "point" ? group.points[0].color.fill : "currentColor"));
-        else icon.textContent = INSPECT_ROW_GROUP_GLYPH[group.type];
+        icon.textContent = INSPECT_ROW_GROUP_GLYPH[group.type];
       }
       var coords = document.createElement("div");
       coords.className = "inspect-coords-group";
@@ -3000,12 +2978,6 @@
         line.textContent = text[0] + ", " + text[1];
         coords.appendChild(line);
       });
-      if (plotted) {
-        var tag = document.createElement("div");
-        tag.className = "inspect-row-tag";
-        tag.textContent = "Separation plot";
-        coords.appendChild(tag);
-      }
       li.appendChild(icon);
       li.appendChild(coords);
       li.appendChild(removeBtn);
@@ -3013,60 +2985,54 @@
     });
   }
 
-  // ---- Separation plot: how far apart two inspected runs are, frame by frame ----
-  // The pair: the first line's two ends or the first grid's opposite corners; with neither, the first two points.
-  function separationPair() {
-    var i, group;
-    for (i = 0; i < inspectedGroups.length; i++) {
-      group = inspectedGroups[i];
-      if (group.type === "point" || group.points.length < 2) continue;
-      var a = group.points[0], b = group.points[group.points.length - 1];
-      if (group.type === "grid") {
-        group.points.forEach(function (entry) {
-          var p = entry.worldPoint;
-          if (p.row === 0 && p.col === 0) a = entry;
-          if (p.row === group.rows - 1 && p.col === group.cols - 1) b = entry;
-        });
-      }
-      return { a: a, b: b, groups: [i] };
-    }
-    var pointGroups = [];
-    for (i = 0; i < inspectedGroups.length && pointGroups.length < 2; i++) {
-      if (inspectedGroups[i].type === "point") pointGroups.push(i);
-    }
-    if (pointGroups.length < 2) return null;
-    return { a: inspectedGroups[pointGroups[0]].points[0], b: inspectedGroups[pointGroups[1]].points[0], groups: pointGroups };
+  // ---- Separation plot: how spread out every inspected run is, frame by frame ----
+  // Every inspected point, in list order; null under two.
+  function separationEntries() {
+    var entries = [];
+    inspectedGroups.forEach(function (group) { entries = entries.concat(group.points); });
+    return entries.length >= 2 ? entries : null;
   }
 
-  // The distance between the two runs' bodies at each step (positions only; wrapped edges take the
-  // nearest image), with its largest Lyapunov exponent. Cached per pair: entries never change.
+  // RMS distance between every two runs over every body's on-screen position, via N * sum |Xi - mean|^2;
+  // a run stopped at a Sticky Edge holds still until the last one stops. Cached per set of runs.
   var separationCache = null;
-  function separationSeries(pair) {
-    if (separationCache && separationCache.a === pair.a && separationCache.b === pair.b) return separationCache;
-    var wrap = PhysicsEngine.edgeModeOf(scene) === "wrap" && scene.frameWidth > 0 && scene.frameHeight > 0;
-    var steps = Math.max(pair.a.effectiveMaxStep, pair.b.effectiveMaxStep);
+  function sameEntries(a, b) {
+    if (a.length !== b.length) return false;
+    for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  }
+  function separationSeries(entries) {
+    if (separationCache && sameEntries(separationCache.entries, entries)) return separationCache;
+    var n = entries.length, steps = 0, s, i, k;
+    entries.forEach(function (entry) { steps = Math.max(steps, entry.effectiveMaxStep); });
     var distance = new Float64Array(steps);
     // The hi word plus the lower words an extended-precision log carries (PhysicsGPU xLo/yLo).
     function delta(a, b, field) {
       var d = b[field] - a[field], la = a[field + "Lo"], lb = b[field + "Lo"];
-      if (la && lb) for (var k = 0; k < la.length && k < lb.length; k++) d += lb[k] - la[k];
+      if (la && lb) for (var w = 0; w < la.length && w < lb.length; w++) d += lb[w] - la[w];
       return d;
     }
-    for (var s = 0; s < steps; s++) {
-      var rowA = inspectedRowAt(pair.a, s), rowB = inspectedRowAt(pair.b, s), sum = 0;
-      for (var i = 0; i < rowA.length && i < rowB.length; i++) {
-        var dx = delta(rowA[i], rowB[i], "x"), dy = delta(rowA[i], rowB[i], "y");
-        if (wrap) {
-          dx -= Math.round(dx / scene.frameWidth) * scene.frameWidth;
-          dy -= Math.round(dy / scene.frameHeight) * scene.frameHeight;
+    var offsets = null, mean = null;
+    for (s = 0; s < steps; s++) {
+      // Each run's offset from the first, which keeps the lower words; the spread is the same about any origin.
+      var base = inspectedRowAt(entries[0], s), m = base.length * 2;
+      if (!offsets) { offsets = new Float64Array(n * m); mean = new Float64Array(m); }
+      mean.fill(0);
+      for (i = 0; i < n; i++) {
+        var row = inspectedRowAt(entries[i], s);
+        for (k = 0; k < base.length; k++) {
+          var dx = delta(base[k], row[k], "x"), dy = delta(base[k], row[k], "y");
+          offsets[i * m + 2 * k] = dx; offsets[i * m + 2 * k + 1] = dy;
+          mean[2 * k] += dx / n; mean[2 * k + 1] += dy / n;
         }
-        sum += dx * dx + dy * dy;
       }
-      distance[s] = Math.sqrt(sum);
+      var spread = 0;
+      for (i = 0; i < n; i++) {
+        for (k = 0; k < m; k++) { var e = offsets[i * m + k] - mean[k]; spread += e * e; }
+      }
+      distance[s] = Math.sqrt(2 * spread / (n - 1));
     }
-    // Fitted only while both runs still move: past the earlier Sticky Edges stop one of them is frozen.
-    var live = distance.subarray(0, Math.min(pair.a.effectiveMaxStep, pair.b.effectiveMaxStep));
-    separationCache = { a: pair.a, b: pair.b, distance: distance, lambda: separationExponent(live) };
+    separationCache = { entries: entries.slice(), distance: distance, lambda: separationExponent(distance) };
     return separationCache;
   }
 
@@ -3118,11 +3084,11 @@
   function drawSeparationPlot() {
     separationLayout = null;
     updateSeparationPlayhead();
-    var pair = separationPair();
-    if ((!pair && !lyapunovMode) || !separationDetails.open) return;
+    var entries = separationEntries();
+    if ((!entries && !lyapunovMode) || !separationDetails.open) return;
     var width = separationCanvas.parentNode.clientWidth;
     if (width <= 0) return;
-    var series = pair ? separationSeries(pair) : null;
+    var series = entries ? separationSeries(entries) : null;
     var dpr = window.devicePixelRatio || 1, height = SEPARATION_PLOT_HEIGHT;
     separationCanvas.width = Math.max(1, Math.round(width * dpr));
     separationCanvas.height = Math.max(1, Math.round(height * dpr));
@@ -3159,7 +3125,7 @@
     if (!series) {
       separationLambda.hidden = true;
       ctx.textAlign = "center";
-      ctx.fillText("Inspect two points to compare their runs", left + plotW / 2, top + plotH / 2);
+      ctx.fillText("Inspect a line to compare its runs", left + plotW / 2, top + plotH / 2);
       return;
     }
 
@@ -3184,7 +3150,7 @@
     } else {
       ctx.fillStyle = dim;
       ctx.textAlign = "center";
-      ctx.fillText("The two runs never separate", left + plotW / 2, top + plotH / 2);
+      ctx.fillText("The runs never separate", left + plotW / 2, top + plotH / 2);
     }
     separationLambda.hidden = series.lambda === null;
     // Snapped so a hair below zero never prints as -0.000.
@@ -3193,7 +3159,7 @@
     updateSeparationPlayhead();
   }
   // The playback bar's thumb over the plot: at the frame on screen, on the curve, or on the axis where the
-  // curve has no value there. Past the plot's last frame (both runs stopped) it parks at the end.
+  // curve has no value there. Past the plot's last frame (every run stopped) it parks at the end.
   function updateSeparationPlayhead() {
     var l = separationLayout;
     if (!l || !playbackHasSession) { separationPlayhead.hidden = true; return; }
@@ -3204,37 +3170,45 @@
     separationPlayhead.hidden = false;
   }
   function updateSeparationPlot() {
-    var pair = separationPair();
-    separationDetails.hidden = !pair && !lyapunovMode;
-    if (!pair) separationCache = null;
+    var entries = separationEntries();
+    separationDetails.hidden = !entries && !lyapunovMode;
+    // A closed plot outside a challenge lets go of the runs it last measured.
+    if (!entries || (!separationDetails.open && !lyapunovChallenge)) separationCache = null;
     drawSeparationPlot();
-    reportLyapunov(pair);
+    reportLyapunov(entries);
   }
-  separationDetails.addEventListener("toggle", function () {
-    updateInspectList();
-    drawSeparationPlot();
-  });
+  separationDetails.addEventListener("toggle", drawSeparationPlot);
 
-  // A Lyapunov challenge frame (challenges/): the plot stays open and the exponent gets its own line.
-  // The page's onResult hears each new pair's { lambda, distance }, or null without a pair.
+  // A Lyapunov challenge frame (challenges/): plot always open, exponent on its own line, lines only. onResult
+  // gets { lambda, distance, gap, shortest }: the furthest start gap (input units) and the shortest run (frames).
   var lyapunovReported;
   if (lyapunovMode) {
     separationDetails.open = true;
     separationLambda.insertBefore(document.createTextNode("Lyapunov exponent: "), separationLambda.firstChild);
   }
-  function reportLyapunov(pair) {
+  function reportLyapunov(entries) {
     if (!lyapunovChallenge) return;
-    var series = pair ? separationSeries(pair) : null;
+    var series = entries ? separationSeries(entries) : null;
     if (series === lyapunovReported) return;
     lyapunovReported = series;
+    var gap = 0, shortest = Infinity;
+    if (series) {
+      for (var i = 0; i < entries.length; i++) {
+        shortest = Math.min(shortest, entries[i].effectiveMaxStep);
+        for (var j = i + 1; j < entries.length; j++) {
+          var a = entries[i].worldPoint, b = entries[j].worldPoint;
+          gap = Math.max(gap, Math.hypot(worldPointDelta(a, b, "x"), worldPointDelta(a, b, "y")));
+        }
+      }
+    }
     try {
-      lyapunovChallenge.onResult(series ? { lambda: series.lambda, distance: series.distance } : null);
+      lyapunovChallenge.onResult(series ? { lambda: series.lambda, distance: series.distance, gap: gap, shortest: shortest } : null);
     } catch (err) { /* the page's problem */ }
   }
   global.FractalGrid.setLyapunovChallenge = function (challenge) {
     lyapunovChallenge = challenge || null;
     lyapunovReported = undefined;
-    reportLyapunov(separationPair());
+    reportLyapunov(separationEntries());
   };
   // The canvas only has a width once its card and section are open and laid out; the observer draws then.
   new ResizeObserver(function () { drawSeparationPlot(); }).observe(separationCanvas.parentNode);
@@ -4718,8 +4692,8 @@
       hideInspectPreview();
       var wasTap = dragIsTouch ? !dragPastSlop : dragDistance < CLICK_DRAG_THRESHOLD;
       if (wasTap) {
-        // A plain click locks a point; with Line/Grid armed it only reminds (a real drag is
-        // needed). A click on Topography's pinned line releases it instead.
+        // A plain click locks a point (not in a Lyapunov frame, lines only); with Line/Grid armed it only
+        // reminds (a real drag is needed). A click on Topography's pinned line releases it instead.
         if (featurePinned && featurePinnedHit(clientX, clientY)) {
           if (statsPanel) statsPanel.unpin(); else setPinnedOverlay(null);
         }
@@ -4727,8 +4701,9 @@
         else if (inspectArmMode === "grid") showInspectToast("Drag to inspect a grid");
         // Neither arms without the Inspect card open, so a collapsed card is checked explicitly here.
         else if (inspectMenu.isOpen()) {
-          // A finger's tap only locks a point once Inspect (Point) is armed; unarmed it does nothing, silently.
-          if (inspectArmMode === "point" || !dragIsTouch) lockPointAt(current);
+          // Elsewhere a finger's tap only locks a point once Inspect (Point) is armed; unarmed it does nothing.
+          if (lyapunovMode) showInspectToast("Press Inspect (Line), then drag across the map");
+          else if (inspectArmMode === "point" || !dragIsTouch) lockPointAt(current);
         }
       } else if (inspectArmMode === "line") {
         lockLineOfPoints(inspectDragStartWorld, current);
