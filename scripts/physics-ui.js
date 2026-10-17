@@ -128,7 +128,7 @@
   var scene = {
     // On: no "down"; every body attracts every other (PhysicsEngine.computeAccelerations).
     mutualGravity: false,
-    // Off: no pair contact at all. Toggling Mutual Gravity resets this to a default.
+    // Off: no pair contact at all. Toggling Planet Mode resets this to a default.
     collisionsEnabled: true,
     simulationSteps: DEFAULT_SIMULATION_STEPS,
     bodies: [],
@@ -202,6 +202,68 @@
       ctx.moveTo(0, Math.round(y) + 0.5); ctx.lineTo(w, Math.round(y) + 0.5);
     }
     ctx.stroke();
+  }
+
+  // Planet Mode's sky. Stars are hashed per cell counted from the frame center, so a resize
+  // uncovers more sky without moving any star.
+  var STAR_CELL = 64;
+  var STAR_TINTS = ["255,255,255", "207,220,255", "255,240,214"];
+  var STAR_TWINKLE_MS = 2600;
+  var starTwinkleStart = -Infinity, starTwinkleFrame = 0;
+  function starRandom(cx, cy, salt) {
+    var h = Math.imul(cx, 374761393) ^ Math.imul(cy, 668265263) ^ Math.imul(salt, 1442695041);
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  }
+  function drawStars(w, h) {
+    var originX = w / 2, originY = h / 2;
+    var t = (performance.now() - starTwinkleStart) / STAR_TWINKLE_MS;
+    var twinkling = t < 1;
+    var fade = (1 - t) * (1 - t);
+    ctx.save();
+    for (var cy = Math.floor(-originY / STAR_CELL); cy * STAR_CELL < h - originY; cy++) {
+      for (var cx = Math.floor(-originX / STAR_CELL); cx * STAR_CELL < w - originX; cx++) {
+        var count = Math.floor(starRandom(cx, cy, 0) * 3);
+        for (var k = 0; k < count; k++) {
+          var s = 6 * k;
+          var x = originX + (cx + starRandom(cx, cy, s + 1)) * STAR_CELL;
+          var y = originY + (cy + starRandom(cx, cy, s + 2)) * STAR_CELL;
+          var m = starRandom(cx, cy, s + 3);
+          var alpha = 0.25 + 0.65 * m * m * m;
+          var radius = 0.5 + 0.8 * m * m;
+          if (twinkling) {
+            // Each star fades in at its own moment, flickers, and settles on its static brightness at t = 1.
+            var phase = starRandom(cx, cy, s + 4);
+            var hz = 3 + 4 * starRandom(cx, cy, s + 5);
+            var flicker = 0.5 + 0.5 * Math.sin(2 * Math.PI * (hz * t * STAR_TWINKLE_MS / 1000 + phase));
+            alpha *= Math.min(1, Math.max(0, (t - 0.45 * phase) / 0.15)) * (1 - 0.85 * fade * flicker);
+          }
+          if (alpha <= 0) continue;
+          var tint = STAR_TINTS[Math.floor(starRandom(cx, cy, s + 6) * STAR_TINTS.length)];
+          ctx.globalAlpha = alpha;
+          if (m > 0.9) {
+            var glow = ctx.createRadialGradient(x, y, 0, x, y, radius * 5);
+            glow.addColorStop(0, "rgba(" + tint + ",0.35)");
+            glow.addColorStop(1, "rgba(" + tint + ",0)");
+            ctx.fillStyle = glow;
+            ctx.beginPath(); ctx.arc(x, y, radius * 5, 0, 2 * Math.PI); ctx.fill();
+          }
+          ctx.fillStyle = "rgb(" + tint + ")";
+          ctx.beginPath(); ctx.arc(x, y, radius, 0, 2 * Math.PI); ctx.fill();
+        }
+      }
+    }
+    ctx.restore();
+  }
+  function twinkleStars() {
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    starTwinkleStart = performance.now();
+    cancelAnimationFrame(starTwinkleFrame);
+    starTwinkleFrame = requestAnimationFrame(function frame() {
+      var done = performance.now() - starTwinkleStart >= STAR_TWINKLE_MS || !scene.mutualGravity;
+      render();
+      if (!done) starTwinkleFrame = requestAnimationFrame(frame);
+    });
   }
 
   // Playback-only display floor; physics keeps the real radius (the grid preview does the same).
@@ -1177,6 +1239,7 @@
     var renderScale = displayScale * dpr;
     ctx.setTransform(renderScale, 0, 0, renderScale, 0, 0);
     ctx.clearRect(0, 0, w, h);
+    if (scene.mutualGravity) drawStars(w, h);
     drawGrid(w, h);
     drawOutputKeyBorder(w, h);
     drawOutputKeyRing();
@@ -1919,7 +1982,7 @@
 
   // ---- Gravity ----
 
-  // The one place that changes edge mode (Edge Handling dropdown and Mutual Gravity's nudge).
+  // The one place that changes edge mode (Edge Handling dropdown and Planet Mode's nudge).
   function applyEdgeMode(mode) {
     // Scene Lifespan only means anything under Sticky Edges.
     var leavingSticky = mode !== "sticky";
@@ -1934,10 +1997,11 @@
 
   mutualGravityCheckbox.addEventListener("change", function () {
     scene.mutualGravity = mutualGravityCheckbox.checked;
-    // One-time nudges, not a lock: mutual gravity behaves with Collisions off and Infinite Space; off restores the defaults.
+    // One-time nudges, not a lock: Planet Mode behaves with Collisions off and Infinite Space; off restores the defaults.
     scene.collisionsEnabled = !scene.mutualGravity;
     collisionsCheckbox.checked = scene.collisionsEnabled;
     applyEdgeMode(scene.mutualGravity ? "infinite" : "wrap");
+    if (scene.mutualGravity) twinkleStars();
   });
 
   collisionsCheckbox.addEventListener("change", function () {
