@@ -35,8 +35,8 @@
   // One Settings body (#shared-settings-body) is MOVED between the builder's panel
   // and the map's card (placeSettings). Until the map starts, the controls hold the state.
   var PERF_PRESETS = {
-    low: { endStride: 2, antialias: false, reuse: true, maxDpr: 2, frameMs: 50, drawMs: 20, playbackMB: 96, gestureFirst: true, noTransitions: true, precision: "f32", gravitySubsteps: false },
-    high: { endStride: 1, antialias: true, reuse: true, maxDpr: 0, frameMs: 0, drawMs: 5, playbackMB: 256, gestureFirst: false, noTransitions: false, precision: "auto", gravitySubsteps: true },
+    low: { endStride: 2, antialias: false, reuse: true, maxDpr: 2, frameMs: 50, drawMs: 20, playbackMB: 96, gestureFirst: true, noTransitions: true, precision: "f32", gravitySubsteps: false, dropShadow: false },
+    high: { endStride: 1, antialias: true, reuse: true, maxDpr: 0, frameMs: 0, drawMs: 5, playbackMB: 256, gestureFirst: false, noTransitions: false, precision: "auto", gravitySubsteps: true, dropShadow: true },
   };
   var perfDefaultPreset = global.LayoutMode && global.LayoutMode.isConstrained() ? "low" : "high";
   // Each control at the Low preset or wherever it already sits below it. 0 for maxDpr and frameMs means uncapped.
@@ -53,6 +53,7 @@
       gestureFirst: cur.gestureFirst || low.gestureFirst,
       noTransitions: cur.noTransitions || low.noTransitions,
       gravitySubsteps: cur.gravitySubsteps && low.gravitySubsteps,
+      dropShadow: cur.dropShadow && low.dropShadow,
       precision: cur.precision, // left alone after a crash: the record has to say what was being compiled
     };
   }
@@ -61,6 +62,8 @@
   }
   // Written by the context-loss handler for the reload that follows it; read once, at load.
   var PERF_LOWERED_KEY = "fractalGridPerfLowered";
+  // Settings > Performance > Drop shadow: the blur behind floating panels, redone every frame the map changes.
+  function applyDropShadow(on) { document.documentElement.classList.toggle("drop-shadow-off", !on); }
   var PERF_LOWERED_MAX_STEPS = 300;
 
   var sharedSettings = (function () {
@@ -72,6 +75,7 @@
       resFill: $("resolution-range-fill"), resReadout: $("resolution-bounds-readout"),
       antialias: $("antialias-checkbox"), reuse: $("reuse-picture-checkbox"), gesture: $("perf-gesture-checkbox"),
       transitions: $("perf-transitions-checkbox"), gravitySubsteps: $("gravity-substeps-checkbox"),
+      dropShadow: $("perf-drop-shadow-checkbox"),
       dpr: $("perf-dpr-select"), frame: $("perf-frame-select"), draw: $("perf-draw-select"), memory: $("perf-playback-memory-select"),
       lineCount: $("inspect-line-sample-count-slider"), lineCountReadout: $("inspect-line-sample-count-readout"),
       gridSize: $("inspect-grid-size-slider"), gridSizeReadout: $("inspect-grid-size-readout"),
@@ -89,6 +93,7 @@
         antialias: el.antialias.checked, maxDpr: Number(el.dpr.value), frameMs: Number(el.frame.value),
         drawMs: Number(el.draw.value), playbackMB: Number(el.memory.value), gestureFirst: el.gesture.checked,
         noTransitions: el.transitions.checked, gravitySubsteps: el.gravitySubsteps.checked,
+        dropShadow: el.dropShadow.checked,
       };
     }
     function readPrecision(ladder) {
@@ -110,6 +115,8 @@
       el.memory.value = String(p.playbackMB);
       el.gravitySubsteps.checked = p.gravitySubsteps;
       PhysicsEngine.setGravitySubsteps(p.gravitySubsteps);
+      el.dropShadow.checked = p.dropShadow;
+      applyDropShadow(p.dropShadow);
     }
     function presetNow() {
       var names = ["low", "high"];
@@ -119,7 +126,7 @@
             el.reuse.checked === p.reuse && el.gesture.checked === p.gestureFirst &&
             el.transitions.checked === p.noTransitions && Number(el.dpr.value) === p.maxDpr &&
             Number(el.frame.value) === p.frameMs && Number(el.memory.value) === p.playbackMB &&
-            el.gravitySubsteps.checked === p.gravitySubsteps &&
+            el.gravitySubsteps.checked === p.gravitySubsteps && el.dropShadow.checked === p.dropShadow &&
             (el.draw.disabled || Number(el.draw.value) === p.drawMs)) return names[i];
       }
       return "custom";
@@ -165,6 +172,7 @@
     }));
     body.addEventListener("change", early(function (e) { if (e.target !== el.preset) syncPreset(); }));
     el.gravitySubsteps.addEventListener("change", early(function () { PhysicsEngine.setGravitySubsteps(el.gravitySubsteps.checked); }));
+    el.dropShadow.addEventListener("change", early(function () { applyDropShadow(el.dropShadow.checked); }));
 
     function volumeIcon(volume) {
       var muted = volume <= 0;
@@ -2789,16 +2797,22 @@
   }
 
   // World point -> CSS pixels relative to #canvas-area. gl_FragCoord is bottom-left, the DOM top-left: hence fy.
-  function worldToCanvasAreaPixel(worldX, worldY, worldXLo, worldYLo) {
+  // A caller placing many elements reads this once and passes it in: a read after each write forces a layout.
+  function canvasAreaFrame() {
+    var canvasRect = canvas.getBoundingClientRect();
+    var areaRect = canvasArea.getBoundingClientRect();
+    return { canvasRect: canvasRect, areaRect: areaRect };
+  }
+  function worldToCanvasAreaPixel(worldX, worldY, worldXLo, worldYLo, frame) {
     var uv = worldPointToUV({ x: worldX, y: worldY, xLo: worldXLo, yLo: worldYLo });
     var fx = uv[0] * canvas.height + 0.5 * canvas.width;
     var fy = 0.5 * canvas.height - uv[1] * canvas.height;
-    var canvasRect = canvas.getBoundingClientRect();
-    var areaRect = canvasArea.getBoundingClientRect();
+    var f = frame || canvasAreaFrame(), canvasRect = f.canvasRect, areaRect = f.areaRect;
     var cssX = fx * (canvasRect.width / canvas.width) + (canvasRect.left - areaRect.left);
     var cssY = fy * (canvasRect.height / canvas.height) + (canvasRect.top - areaRect.top);
     return { x: cssX, y: cssY };
   }
+  function worldPointToCanvasArea(p, frame) { return worldToCanvasAreaPixel(p.x, p.y, p.xLo, p.yLo, frame); }
 
   // Pooled .inspect-marker per point/line point; grids only reposition their mesh lines. Clicking removes the
   // WHOLE group; inspectMarkerGroupIndex is read fresh per click since slots change as points come and go.
@@ -2832,8 +2846,9 @@
     while (inspectMarkerEls.length > flatPoints.length) {
       inspectMarkerEls.pop().remove();
     }
+    var frame = canvasAreaFrame();
     flatPoints.forEach(function (entry, i) {
-      var p = worldToCanvasAreaPixel(entry.worldPoint.x, entry.worldPoint.y, entry.worldPoint.xLo, entry.worldPoint.yLo);
+      var p = worldPointToCanvasArea(entry.worldPoint, frame);
       var el = inspectMarkerEls[i];
       el.style.left = p.x + "px";
       el.style.top = p.y + "px";
@@ -2845,8 +2860,8 @@
     inspectedGroups.forEach(function (group) {
       if (group.type !== "grid") return;
       group.segments.forEach(function (pair, i) {
-        var a = worldToCanvasAreaPixel(group.points[pair[0]].worldPoint.x, group.points[pair[0]].worldPoint.y, group.points[pair[0]].worldPoint.xLo, group.points[pair[0]].worldPoint.yLo);
-        var b = worldToCanvasAreaPixel(group.points[pair[1]].worldPoint.x, group.points[pair[1]].worldPoint.y, group.points[pair[1]].worldPoint.xLo, group.points[pair[1]].worldPoint.yLo);
+        var a = worldPointToCanvasArea(group.points[pair[0]].worldPoint, frame);
+        var b = worldPointToCanvasArea(group.points[pair[1]].worldPoint, frame);
         var lineEl = group.meshLineEls[i];
         lineEl.setAttribute("x1", a.x); lineEl.setAttribute("y1", a.y);
         lineEl.setAttribute("x2", b.x); lineEl.setAttribute("y2", b.y);
@@ -2876,15 +2891,16 @@
   }
 
   function updateInspectLinePreview(startWorld, endWorld) {
-    var startPx = worldToCanvasAreaPixel(startWorld.x, startWorld.y, startWorld.xLo, startWorld.yLo);
-    var endPx = worldToCanvasAreaPixel(endWorld.x, endWorld.y, endWorld.xLo, endWorld.yLo);
+    var frame = canvasAreaFrame();
+    var startPx = worldPointToCanvasArea(startWorld, frame);
+    var endPx = worldPointToCanvasArea(endWorld, frame);
     inspectLinePreviewLine.setAttribute("x1", startPx.x);
     inspectLinePreviewLine.setAttribute("y1", startPx.y);
     inspectLinePreviewLine.setAttribute("x2", endPx.x);
     inspectLinePreviewLine.setAttribute("y2", endPx.y);
     var points = evenlySpacedPoints(startWorld, endWorld, inspectLineSampleCount);
     points.forEach(function (worldPoint, i) {
-      var px = worldToCanvasAreaPixel(worldPoint.x, worldPoint.y, worldPoint.xLo, worldPoint.yLo);
+      var px = worldPointToCanvasArea(worldPoint, frame);
       inspectLinePreviewDots[i].setAttribute("cx", px.x);
       inspectLinePreviewDots[i].setAttribute("cy", px.y);
       inspectLinePreviewDots[i].setAttribute("fill", inspectLinePointColor(i).fill);
@@ -3244,15 +3260,24 @@
   global.addEventListener("pageshow", updateMovieInspectButton);
 
   // runHoverAt's GPU replay + wrap-stop work, run once and cached. Null on failure; the caller decides the batch.
-  function computeTrajectoryEntry(worldPoint) {
-    var compiled, trajectory;
-    var steps = hoverStepCount();
+  function computeTrajectoryEntry(worldPoint) { return computeTrajectoryEntries([worldPoint])[0]; }
+  // One GPU run for all the points (one each at float32, see compileHoverTrajectoryGLSL); null for a point whose run failed.
+  function computeTrajectoryEntries(worldPoints) {
+    var steps = hoverStepCount(), precision = effectivePrecision(), trajectories;
+    if (worldPoints.length > 1 && !PhysicsDF.isExtended(precision)) return worldPoints.map(computeTrajectoryEntry);
     try {
-      compiled = PhysicsGridCodegen.compileHoverTrajectoryGLSL(scene, worldPoint.x, worldPoint.y, steps, effectivePrecision(), worldPoint.xLo, worldPoint.yLo);
-      trajectory = PhysicsGPU.runCompiledTrajectoryOnGPU(compiled, steps);
+      var p = worldPoints[0];
+      var compiled = worldPoints.length > 1 ? PhysicsGridCodegen.compileHoverBatchGLSL(scene, worldPoints, steps, precision)
+        : PhysicsGridCodegen.compileHoverTrajectoryGLSL(scene, p.x, p.y, steps, precision, p.xLo, p.yLo);
+      trajectories = PhysicsGPU.runCompiledTrajectoriesOnGPU(compiled, steps);
     } catch (err) {
-      return null;
+      // A batch fails as a whole: one at a time, so one bad point doesn't take the rest with it.
+      if (worldPoints.length > 1) return worldPoints.map(computeTrajectoryEntry);
+      return [null];
     }
+    return worldPoints.map(function (p, i) { return trajectoryEntry(p, trajectories[i]); });
+  }
+  function trajectoryEntry(worldPoint, trajectory) {
     var isLifespan = scene.output.property === "lifespan";
     var effectiveMaxStep = trajectory.length, wrapOverride = null, lifespanValue = simulationSteps;
     if (scene.edgeMode === "sticky") {
@@ -3296,14 +3321,13 @@
     var available = MAX_INSPECT_POINTS - totalInspectedPointCount();
     if (available <= 0) return; // stays armed: Clear All (or removing a point) might free up room to retry
     var worldPoints = evenlySpacedPoints(startWorld, endWorld, sampleCount);
-    var count = Math.min(worldPoints.length, available);
+    var entries = computeTrajectoryEntries(worldPoints.slice(0, Math.min(worldPoints.length, available)));
     var points = [];
-    for (var i = 0; i < count; i++) {
-      var entry = computeTrajectoryEntry(worldPoints[i]);
-      if (!entry) continue; // don't let one bad point abort the rest of the line
+    entries.forEach(function (entry, i) {
+      if (!entry) return; // don't let one bad point abort the rest of the line
       entry.color = inspectLinePointColor(i, sampleCount);
       points.push(entry);
-    }
+    });
     disarmInspect();
     if (points.length > 0) {
       inspectedGroups.push({
@@ -3322,13 +3346,9 @@
     var worldPoints = evenlySpacedGrid(startWorld, endWorld, layout.size, layout.size)
       .filter(function (p) { return isAxisIn(layout.axes, p.row) || isAxisIn(layout.axes, p.col); });
     if (MAX_INSPECT_POINTS - totalInspectedPointCount() < worldPoints.length) return;
-    var points = [];
-    for (var i = 0; i < worldPoints.length; i++) {
-      var entry = computeTrajectoryEntry(worldPoints[i]);
-      if (!entry) return;
-      entry.color = inspectGridPointColor(worldPoints[i].col, worldPoints[i].row, layout.size);
-      points.push(entry);
-    }
+    var points = computeTrajectoryEntries(worldPoints);
+    if (points.indexOf(null) !== -1) return;
+    points.forEach(function (entry, i) { entry.color = inspectGridPointColor(worldPoints[i].col, worldPoints[i].row, layout.size); });
     var segments = buildGridMeshSegments(worldPoints, layout.axes, layout.size);
     var meshLineEls = segments.map(function (pair) {
       var lineEl = document.createElementNS(SVG_NS, "line");
@@ -3515,10 +3535,11 @@
     gl.beginQuery(gpuTimer.ext.TIME_ELAPSED_EXT, gpuTimer.active);
   }
   // `spent` of budget `b`'s units were dispatched inside the span.
-  function gpuTimerEnd(b, spent) {
+  // slice: the frame's sliced draws, { precision, steps, maxK, draws }, for noteSliceGpuTime.
+  function gpuTimerEnd(b, spent, slice) {
     if (!gpuTimer.active) return;
     gl.endQuery(gpuTimer.ext.TIME_ELAPSED_EXT);
-    gpuTimer.pending.push({ query: gpuTimer.active, b: b, spent: spent, budget: b.budget });
+    gpuTimer.pending.push({ query: gpuTimer.active, b: b, spent: spent, budget: b.budget, slice: slice || null });
     gpuTimer.active = null;
   }
   function gpuTimerPoll(now) {
@@ -3529,6 +3550,7 @@
       var ms = gl.getQueryParameter(rec.query, gl.QUERY_RESULT) / 1e6;
       gl.deleteQuery(rec.query);
       if (ok) noteGpuTime(rec.b, rec.spent, rec.budget, ms, now);
+      if (ok && rec.slice) noteSliceGpuTime(rec.slice, ms / rec.slice.draws);
     }
   }
   function noteGpuTime(b, spent, budgetThen, ms, now) {
@@ -3986,12 +4008,10 @@
     if (reuseEnabled) { reuseNoteImage(); reusePlanRun(); }
     if (isViewScaledOutput()) requestBounceMax();
     progressive.stride = startStride();
-    // See SLICE_FIRST_LEVEL_SAMPLES: under slicing the coarsest levels cost as much as a useful one.
-    if (slicedProgramsForGrid()) {
-      while (progressive.stride > endStride() &&
-             levelWidth(progressive.stride) * levelHeight(progressive.stride) < SLICE_FIRST_LEVEL_SAMPLES) {
-        progressive.stride /= 2;
-      }
+    // See FIRST_LEVEL_SAMPLES: the coarsest levels cost as much as a useful one.
+    while (progressive.stride > endStride() &&
+           levelWidth(progressive.stride) * levelHeight(progressive.stride) < FIRST_LEVEL_SAMPLES) {
+      progressive.stride /= 2;
     }
     progressive.sublattice = 0;   // 0 = the base level, drawn straight into the accumulator
     progressive.band = 0;
@@ -4383,13 +4403,15 @@
     gpuTimerPoll(now);
     adaptSliceSteps(noteFrameTiming(ladderBudget, now));
     sliceFrameMs = 0;
+    sliceFrameDraws = null;
     perfStats.drawsThisFrame = 0;
     var pixelBudget = ladderBudget.budget;
     gpuTimerBegin();
     try {
       stepProgressiveWork(pixelBudget);
     } finally {
-      gpuTimerEnd(ladderBudget, ladderBudget.lastSpent);
+      if (sliceFrameDraws) sliceFrameDraws.draws = perfStats.drawsThisFrame;
+      gpuTimerEnd(ladderBudget, ladderBudget.lastSpent, sliceFrameDraws && sliceFrameDraws.draws > 0 ? sliceFrameDraws : null);
       noteFrameIssued(now);
       perfStats.drawsLastFrame = perfStats.drawsThisFrame;
       notePerfRunProgress(now);
@@ -4870,9 +4892,12 @@
   var recomputingInspect = false;
   function recomputeLockedTrajectories() {
     var job = ++recomputeJob;
+    // A group per GPU run where runs batch, else a point per run; yielding between runs.
+    var batched = PhysicsDF.isExtended(effectivePrecision());
     var queue = [];
     inspectedGroups.forEach(function (group) {
-      group.points.forEach(function (point, i) { queue.push({ group: group, i: i }); });
+      if (batched) queue.push({ group: group, from: 0, to: group.points.length });
+      else group.points.forEach(function (point, i) { queue.push({ group: group, from: i, to: i + 1 }); });
     });
     recomputingInspect = true;
     updateMovieInspectButton();
@@ -4884,16 +4909,18 @@
         updateInspectUI();
         return;
       }
-      var g = inspectedGroups.indexOf(item.group);
-      if (g >= 0) {
-        var old = item.group.points[item.i];
-        var entry = computeTrajectoryEntry(old.worldPoint);
-        if (entry) {
-          entry.color = old.color;
-          item.group.points[item.i] = entry;
-        } else if (item.group.type === "point") {
-          inspectedGroups.splice(g, 1);
-        }
+      var group = item.group;
+      if (inspectedGroups.indexOf(group) >= 0) {
+        var entries = computeTrajectoryEntries(group.points.slice(item.from, item.to).map(function (p) { return p.worldPoint; }));
+        entries.forEach(function (entry, k) {
+          var i = item.from + k;
+          if (entry) {
+            entry.color = group.points[i].color;
+            group.points[i] = entry;
+          } else if (group.type === "point") {
+            inspectedGroups.splice(inspectedGroups.indexOf(group), 1);
+          }
+        });
       }
       setTimeout(next, 0);
     }
@@ -4963,6 +4990,9 @@
     row.dataset.mode = mode.value;
 
     var img = document.createElement("img");
+    // Lazy: the Display card starts closed, and an image under display:none waits until it opens.
+    img.loading = "lazy";
+    img.decoding = "async";
     img.src = "assets/" + mode.value + ".jpg";
     img.width = 400;
     img.height = 364;
@@ -6600,8 +6630,9 @@
     } else if (featurePinned) {
       var world = featurePinned.world;
       css = new Float64Array(world.length / 2);
+      var frame = canvasAreaFrame();
       for (var m = 0, n = 0; m < world.length; m += 4, n += 2) {
-        var pt = worldToCanvasAreaPixel(world[m], world[m + 1], world[m + 2], world[m + 3]);
+        var pt = worldToCanvasAreaPixel(world[m], world[m + 1], world[m + 2], world[m + 3], frame);
         css[n] = pt.x; css[n + 1] = pt.y;
       }
       featurePinnedCss = css;
@@ -7035,10 +7066,27 @@
     return { program: prog, posLoc: gl.getAttribLocation(prog, "a_position"), uniforms: uniforms };
   }
 
+  // Bodies whose angle nothing reads: circles on no hinge or spring, unless the Output is their angle.
+  // Left out of the carried state; three free circles at df then fit one group of draws instead of two.
+  function angleFreeBodies(s) {
+    var outBodies = PhysicsEngine.outputBodyIndices(s.output);
+    var outReadsAngle = s.output.property === "angle" || s.output.property === "totalRotation";
+    var linked = {};
+    (s.hinges || []).concat(PhysicsEngine.sceneSprings(s)).forEach(function (link) {
+      if (link.bodyA !== null) linked[link.bodyA] = true;
+      linked[link.bodyB] = true;
+    });
+    var free = [];
+    s.bodies.forEach(function (b, i) {
+      if (b.type === "circle" && !linked[i] && !(outReadsAngle && outBodies.indexOf(i) !== -1)) free.push(i);
+    });
+    return free;
+  }
+
   // Both playback programs for one precision as a build in flight (startProgramBuild); df compiles too slowly to block.
   function startPlaybackBuild(precision) {
     var pieces = compileScenePieces(scene, precision);
-    var vars = PhysicsGridCodegen.playbackStateVariables(pieces.initial, pieces.outputBodyIndices)
+    var vars = PhysicsGridCodegen.playbackStateVariables(pieces.initial, pieces.outputBodyIndices, angleFreeBodies(scene))
       .concat(pieces.loopStateVariables);
     var layers = PhysicsGridCodegen.playbackStateLayerCount(vars);
     return {
@@ -7139,18 +7187,114 @@
   function sliceStepsMax() { return Math.round(SLICE_STEPS_BASE_MAX * sliceTargetMs() / SLICE_TARGET_BASE_MS); }
   // A precision whose SINGLE step takes longer than this can't be drawn at all: off the ladder.
   function sliceSingleStepLimitMs() { return 3 * sliceTargetMs(); }
-  // Calibration stops doubling once a slice takes this long: clear of the ~1ms round-trip cost.
+  // Calibration stops doubling once a slice runs this long: clear of the ~1ms round-trip cost.
   var SLICE_CALIBRATION_STOP_MS = 3;
+  // A readback also waits for whatever else the GPU process is busy with (builds, other tabs), so a
+  // calibration only trusts a reading taken while a bare readback was this quick.
+  var CALIBRATION_IDLE_MS = 2;
+  // No timed draw goes past this, however slow the readback.
+  var CALIBRATION_MAX_MS = 8;
+  // An untrusted reading is used conservatively and taken again this much later, then 4x as long each time.
+  var CALIBRATION_RETRY_MS = 400;
+  var CALIBRATION_RETRIES = 2;
+  var calibrationRetries = {};
+  var f32SliceStepMs = null;
+
+  // Times run(k) (a draw of k steps plus a readback) for k = 1, 2, 4... up to kMax, judging each by its time
+  // above a bare readback; each timed draw is at most double one seen to be short. Times are per draw.
+  function calibrateRun(run, readOnly, kMax, draws) {
+    run(1);
+    run(1);
+    var idleRaw = Math.min(readOnly(), readOnly(), readOnly());
+    var idle = idleRaw / draws;
+    function timed(k) {
+      var t = Math.min(run(k), run(k));
+      // The reading that ends the doubling decides the result: three more, keeping the quickest.
+      if (t / draws - idle >= SLICE_CALIBRATION_STOP_MS) t = Math.min(t, run(k), run(k), run(k));
+      return t / draws;
+    }
+    var k = 1, took = timed(1), lastK = 0, before = 0;
+    while (k < kMax && took - idle < SLICE_CALIBRATION_STOP_MS && took < CALIBRATION_MAX_MS) {
+      lastK = k;
+      before = took;
+      k = Math.min(k * 2, kMax);
+      took = timed(k);
+    }
+    var ranMs = Math.max(0, took - idle);
+    // The step's cost is the slope between the last two timings; the fixed part (round trip, load/store) isn't per step.
+    // Doubled all the way to kMax, the whole run was timed: never less than that.
+    var perStep = lastK > 0 ? Math.max((took - before) / (k - lastK), ranMs / k / (k >= kMax ? 1 : 8)) : ranMs / k;
+    // One step past the stop says nothing of how the time scales with steps: the GPU may be busy elsewhere.
+    var trusted = Math.max(idleRaw, Math.min(readOnly(), readOnly())) <= CALIBRATION_IDLE_MS && lastK > 0 &&
+      (ranMs >= SLICE_CALIBRATION_STOP_MS / 2 || k >= kMax);
+    // Untrusted: all the draw took, round trip included, counts as steps.
+    if (!trusted) perStep = Math.max(perStep, took / k);
+    return { perStep: Math.max(perStep, 1e-6), took: took, k: k, ranMs: ranMs, trusted: trusted };
+  }
+  function noteCalibration(key, trusted) {
+    var retry = calibrationRetries[key];
+    if (trusted || (retry && retry.left <= 0)) { delete calibrationRetries[key]; return; }
+    calibrationRetries[key] = {
+      at: performance.now(),
+      left: retry ? retry.left - 1 : CALIBRATION_RETRIES,
+      wait: retry ? retry.wait * 4 : CALIBRATION_RETRY_MS,
+    };
+  }
+  // Called between frames: a changed float32 decision restarts the run, a new slice length needn't.
+  function retryCalibrations(now) {
+    // A trusted timing of float32's sliced programs that says a whole run fits one draw outranks the reading that sent it there.
+    if (f32SliceStepMs !== null) {
+      var variant = wantedVariant();
+      if (effectivePrecision() === "f32" && f32NeedsSlicing() && f32SliceStepMs * simulationSteps < f32SingleDrawLimitMs() / 2) {
+        f32StepMs[variant] = f32SliceStepMs;
+        delete calibrationRetries["f32:" + variant];
+        if (!progressive.complete) markDirty();
+      }
+      f32SliceStepMs = null;
+    }
+    Object.keys(calibrationRetries).forEach(function (key) {
+      var retry = calibrationRetries[key];
+      if (now - retry.at < retry.wait) return;
+      var parts = key.split(":");
+      if (parts[0] === "f32") {
+        if (parts[1] !== wantedVariant() || effectivePrecision() !== "f32") { delete calibrationRetries[key]; return; }
+        var slicedBefore = f32NeedsSlicing();
+        f32StepMs[parts[1]] = measureF32StepMs(key);
+        if (f32NeedsSlicing() !== slicedBefore && !progressive.complete) markDirty();
+        return;
+      }
+      var entry = playbackGpu.programs[parts[1]];
+      if (!entry || entry.status !== "ready") { delete calibrationRetries[key]; return; }
+      calibrateSliceSteps(parts[1], entry.programs);
+      if (sliceTooHeavy[parts[1]]) { updatePrecisionReadout(); markDirty(); }
+    });
+  }
   // A slice costs at least what its steps cost ONE pixel, so small tiles leave the GPU idle.
   // Tiles are at least this big where the level has that much left (steps per slice brought down to fit)...
   var SLICE_SATURATE_TEXELS = 32768;
-  // ...the ladder starts no coarser than this many samples: every level is at least one full pass of slices...
-  var SLICE_FIRST_LEVEL_SAMPLES = 4096;
+  // ...the ladder starts no coarser than this many samples, sliced or not: a draw costs at least one pixel's
+  // whole run, and the first frame would otherwise draw a dozen tiny levels only the last of which is shown...
+  var FIRST_LEVEL_SAMPLES = 4096;
   // ...and a frame stops issuing slices once their runs add up to this share of
   // its target length: the pixel budget thinks a tiny tile's slice is free; the GPU doesn't.
   var SLICE_FRAME_SHARE = 0.75;
   var sliceFrameMs = 0;
+  var sliceFrameDraws = null;
   function sliceFrameCapMs() { return frameTargetMs(performance.now()) * SLICE_FRAME_SHARE; }
+  // Raises steps per slice once frames of full-length slices show the GPU timing them well short of the
+  // target: a calibration taken while the GPU was busy elsewhere would otherwise hold for the scene.
+  var SLICE_RAISE_SHARE = 0.4;
+  var SLICE_RAISE_FRAMES = 3;
+  var sliceRoomyFrames = 0;
+  function noteSliceGpuTime(slice, drawMs) {
+    var precision = slice.precision;
+    var roomy = sliceSteps[precision] === slice.steps && slice.maxK >= slice.steps && !sliceTooHeavy[precision] &&
+      slice.steps < sliceStepsMax() && drawMs < SLICE_RAISE_SHARE * sliceTargetMs();
+    if (!roomy) { sliceRoomyFrames = 0; return; }
+    if (++sliceRoomyFrames < SLICE_RAISE_FRAMES) return;
+    sliceRoomyFrames = 0;
+    sliceSteps[precision] = Math.min(sliceStepsMax(), slice.steps * 2);
+  }
   var SLICE_MIN_PIXEL_BUDGET = 16;
 
   // ---- Float32, when its whole run is too long for one draw ----
@@ -7159,44 +7303,35 @@
   // and display mode; a run that won't fit comfortably in one draw is sliced as well.
   function f32SingleDrawLimitMs() { return 2.4 * sliceTargetMs(); }
   var f32StepMs = {};   // by variant; emptied with the scene (releaseAllSliceStates)
-  function measureF32StepMs() {
+  function measureF32StepMs(retryKey) {
+    var measureStartedAt = performance.now();
     var target = makeTarget(8, 8);
     var stride = Math.max(1, Math.floor(Math.min(canvas.width, canvas.height) / 8));
     var texel = new Uint8Array(4);
-    function timedRun(k) {
+    function read(k) {
       var startedAt = performance.now();
       gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
       gl.viewport(0, 0, 8, 8);
       gl.disable(gl.SCISSOR_TEST);
       gl.disable(gl.BLEND);
-      drawSublattice(stride, 0, 0, k);
+      if (k > 0) drawSublattice(stride, 0, 0, k);
       gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, texel);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       return performance.now() - startedAt;
     }
-    function timed(k) { return Math.min(timedRun(k), timedRun(k)); }
-    timedRun(1);
-    timedRun(1);
-    var k = 1, took = timed(1), before = took, perStep = took;
-    while (took < SLICE_CALIBRATION_STOP_MS && k < simulationSteps) {
-      var next = Math.min(k * 2, simulationSteps);
-      before = took;
-      took = timed(next);
-      perStep = Math.max((took - before) / (next - k), took / next / 8);
-      k = next;
-    }
+    var reading = calibrateRun(read, function () { return read(0); }, Math.max(1, simulationSteps), 1);
     freeTarget(target);
     gl.viewport(0, 0, canvas.width, canvas.height);
-    return perStep;
+    noteCalibration(retryKey, reading.trusted);
+    perfStats.calibrationMs += performance.now() - measureStartedAt;
+    return reading.perStep;
   }
   function f32NeedsSlicing() {
     if (!hasFloatColorBuffer || !accum || !accum[0]) return false;
     var variant = wantedVariant();
     if (f32StepMs[variant] === undefined) {
       if (!requestPass("f32", variant, true)) return false;
-      var measureStartedAt = performance.now();
-      f32StepMs[variant] = measureF32StepMs();
-      perfStats.calibrationMs += performance.now() - measureStartedAt;
+      f32StepMs[variant] = measureF32StepMs("f32:" + variant);
     }
     return f32StepMs[variant] * simulationSteps > f32SingleDrawLimitMs();
   }
@@ -7227,6 +7362,7 @@
     sliceCalibrated = {};
     sliceTooHeavy = {};
     f32StepMs = {};
+    calibrationRetries = {};
   }
 
   // Grow-only: reallocating two float array textures per size change costs more than the tile.
@@ -7363,38 +7499,32 @@
       resW: canvas.width, resH: canvas.height, totalSteps: 1 << 20,
     });
     var texel = new Float32Array(4);
-    function timedSlice(k) {
+    function read(k) {
       var startedAt = performance.now();
       noteGpuActivity("calibrate " + precision + " " + k + " steps (blocking readback)");
-      advanceSliceJob(job, k);
+      if (k > 0) advanceSliceJob(job, k);
       gl.bindFramebuffer(gl.FRAMEBUFFER, job.state.fbo);
       gl.readBuffer(gl.COLOR_ATTACHMENT0);
       gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, texel);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       return performance.now() - startedAt;
     }
-    // Best of two: the driver is still settling after a build, and one bad reading
-    // used to leave a session at one step per slice. Per DRAW: a multi-group state is one draw per group.
-    function timed(k) { return Math.min(timedSlice(k), timedSlice(k)) / programs.groups; }
-    timedSlice(1);
-    timedSlice(1);
-    var k = 1, took = timed(1), before = took;
     var calibrationStartedAt = performance.now();
-    if (took > sliceSingleStepLimitMs()) {
+    var stepsMax = sliceStepsMax(), targetMs = sliceTargetMs();
+    // Per draw: a multi-group state is one draw per group.
+    var reading = calibrateRun(read, function () { return read(0); }, stepsMax, programs.groups);
+    var retryKey = "slice:" + precision;
+    var lastTry = !!calibrationRetries[retryKey] && calibrationRetries[retryKey].left <= 0;
+    if (reading.k === 1 && reading.ranMs > sliceSingleStepLimitMs() && (reading.trusted || lastTry)) {
       sliceTooHeavy[precision] = true;
       sliceSteps[precision] = SLICE_STEPS_MIN;
+      delete calibrationRetries[retryKey];
     } else {
-      var stepsMax = sliceStepsMax(), targetMs = sliceTargetMs();
-      while (took < SLICE_CALIBRATION_STOP_MS && k < stepsMax) {
-        k *= 2;
-        before = took;
-        took = timed(k);
-      }
-      // The step's cost is the SLOPE between the last two timings; the fixed part (round trip, load/store) isn't per step.
-      var perStep = k > 1 ? Math.max((took - before) / (k / 2), took / k / 8) : took;
-      var fixed = Math.max(0, took - perStep * k);
+      var perStep = reading.perStep, fixed = Math.max(0, reading.took - perStep * reading.k);
       sliceSteps[precision] = clamp(Math.floor((targetMs - Math.min(fixed, targetMs / 2)) / perStep), SLICE_STEPS_MIN, stepsMax);
       perfStats.sliceStepMs = perStep;
+      noteCalibration(retryKey, reading.trusted);
+      if (precision === "f32" && reading.trusted) f32SliceStepMs = perStep;
     }
     perfStats.calibrationMs += performance.now() - calibrationStartedAt;
     sliceCalibrated[precision] = sliceSteps[precision];
@@ -7473,6 +7603,9 @@
     var room = Math.max(1, Math.floor((sliceFrameCapMs() - sliceFrameMs) / drawMs));
     var ran = advanceSliceJob(job, sliceK, room);
     sliceFrameMs += drawMs * job.drawsIssued;
+    var drawnK = job.nextGroup > 0 ? job.sliceSteps : ran;
+    sliceFrameDraws = { precision: effectivePrecision(), steps: perDraw,
+      maxK: Math.max(sliceFrameDraws ? sliceFrameDraws.maxK : 0, drawnK), draws: 0 };
     if (job.nextGroup > 0) { sliceFrameMs = Infinity; return REUSE_FREE_COST; }
     var area = job.spec.cols * job.spec.rows;
     var cost = total > 0 ? area * ran / total : area;
@@ -8117,6 +8250,7 @@
     pollBounceMax();
     refreshBuildStatus();
     pumpPendingInspect();
+    retryCalibrations(now);
     if (dirty) { resetProgressive(); dirty = false; }
     releasePlaybackIfViewMoved();
     if (!presentGestureFrame(now) && !stepPlayback(now)) stepProgressive(now);
@@ -9483,6 +9617,7 @@
   var perfGestureCheckbox = document.getElementById("perf-gesture-checkbox");
   var perfTransitionsCheckbox = document.getElementById("perf-transitions-checkbox");
   var gravitySubstepsCheckbox = document.getElementById("gravity-substeps-checkbox");
+  var perfDropShadowCheckbox = document.getElementById("perf-drop-shadow-checkbox");
   var perfReadoutCheckbox = document.getElementById("perf-readout-checkbox");
   var perfReadoutEl = document.getElementById("perf-readout");
   var PERF_PRESET_STOPS = { low: 0, custom: 1, high: 2 };
@@ -9504,6 +9639,7 @@
       gestureFirst: perf.gestureFirst,
       noTransitions: perf.noTransitions,
       gravitySubsteps: perf.gravitySubsteps,
+      dropShadow: perf.dropShadow,
     };
   }
   function perfPresetNow() {
@@ -9514,7 +9650,7 @@
       if (now.startAtCoarsest && now.endStride === p.endStride &&
           now.antialias === p.antialias && now.reuse === p.reuse && now.maxDpr === p.maxDpr &&
           now.frameMs === p.frameMs && now.playbackMB === p.playbackMB && now.gestureFirst === p.gestureFirst &&
-          now.noTransitions === p.noTransitions && now.gravitySubsteps === p.gravitySubsteps &&
+          now.noTransitions === p.noTransitions && now.gravitySubsteps === p.gravitySubsteps && now.dropShadow === p.dropShadow &&
           // A control this GPU can't use (drawLengthLocked) can't keep the slider off a preset.
           (drawLengthLocked || now.drawMs === p.drawMs)) return names[i];
     }
@@ -9531,6 +9667,7 @@
     perfGestureCheckbox.checked = perf.gestureFirst;
     perfTransitionsCheckbox.checked = perf.noTransitions;
     gravitySubstepsCheckbox.checked = perf.gravitySubsteps;
+    perfDropShadowCheckbox.checked = perf.dropShadow;
     var devDpr = window.devicePixelRatio || 1, dpr = gridDpr();
     perfDprReadout.textContent = (Math.round(dpr * 100) / 100) + "×" + (dpr < devDpr ? " of " + (Math.round(devDpr * 100) / 100) + "×" : "");
     var preset = perfPresetNow();
@@ -9609,6 +9746,8 @@
     perf.gestureFirst = !!p.gestureFirst; // read fresh every frame; nothing to set in motion
     perf.noTransitions = !!p.noTransitions;
     setGravitySubsteps(p.gravitySubsteps);
+    perf.dropShadow = !!p.dropShadow;
+    applyDropShadow(perf.dropShadow);
     setPrecisionMode(p.precision);
     markDirty();
     updateResolutionBoundsUI();
@@ -9647,6 +9786,11 @@
   perfGestureCheckbox.addEventListener("change", function () { perf.gestureFirst = perfGestureCheckbox.checked; syncPerfPresetUI(); });
   perfTransitionsCheckbox.addEventListener("change", function () { perf.noTransitions = perfTransitionsCheckbox.checked; syncPerfPresetUI(); });
   gravitySubstepsCheckbox.addEventListener("change", function () { setGravitySubsteps(gravitySubstepsCheckbox.checked); syncPerfPresetUI(); });
+  perfDropShadowCheckbox.addEventListener("change", function () {
+    perf.dropShadow = perfDropShadowCheckbox.checked;
+    applyDropShadow(perf.dropShadow);
+    syncPerfPresetUI();
+  });
   // Held at its first stop on an Apple GPU (sliceTargetMs): shown, not offered.
   if (drawLengthLocked) perfDrawSelect.disabled = true;
 

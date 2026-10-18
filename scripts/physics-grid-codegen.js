@@ -374,9 +374,22 @@
   }
 
   // Hover replay: the grid's code with trajectory logging on for the point under the
-  // cursor. The point is a uniform, so one compile serves every hovered point.
+  // cursor. The point is a uniform or a texel, so one compile serves every hovered point.
   // `precision` must match the grid's; worldXLo/worldYLo are double-double lows.
+  // float32 keeps the point in uniforms, one point per run: the batched program's float32 code rounds
+  // differently, and its chaotic replays agree with the map's own pixels less often.
   function compileHoverTrajectoryGLSL(scene, worldX, worldY, maxSteps, precision, worldXLo, worldYLo) {
+    var point = { x: worldX, y: worldY, xLo: worldXLo, yLo: worldYLo };
+    return compileHoverGLSL(scene, [point], maxSteps, precision, !global.PhysicsDF.isExtended(precision));
+  }
+
+  // Replays of several start points { x, y, xLo?, yLo? } in one run (PhysicsGPU.runCompiledTrajectoriesOnGPU).
+  // The source is the same for any points and any count, so one compile serves hover and Inspect alike.
+  function compileHoverBatchGLSL(scene, points, maxSteps, precision) {
+    return compileHoverGLSL(scene, points, maxSteps, precision, false);
+  }
+
+  function compileHoverGLSL(scene, points, maxSteps, precision, uniformPoint) {
     var df = global.PhysicsDF.isExtended(precision);
     var initial = generateGridInitialStateGLSL(scene, precision);
     // undefined in Infinite Space: the step loop emits no wrap.
@@ -385,8 +398,10 @@
     var lines = [];
     lines.push("#version 300 es");
     lines.push("precision highp float;");
-    // One uniform per word (wordUniformDecls): a float32-rounded point would replay a different one at deep zoom.
-    global.PhysicsDF.wordUniformDecls("u_hoverWorld").forEach(function (l) { lines.push(l); });
+    // Every word of the point: a float32-rounded point would replay a different one at deep zoom.
+    // Batched, texel (p, 0) holds point p's x words and (p, 1) its y words.
+    if (uniformPoint) global.PhysicsDF.wordUniformDecls("u_hoverWorld").forEach(function (l) { lines.push(l); });
+    else lines.push("uniform highp sampler2D u_hoverPoints;");
     // The chunked LOG / ADVANCE scheme: see PhysicsGPU.generateTrajectoryMainGLSL.
     var chunk = PhysicsGPU.trajectoryChunkInfo(initial.n, initial.consts, initial.hingeAnchors, precision);
     lines.push(PhysicsGPU.generateTrajectoryHeaderGLSL(chunk));
@@ -398,22 +413,44 @@
     lines.push("");
     // Locals, declared first: a global's initializer must be constant, a uniform is not.
     var B = backendFor(precision);
-    var worldDecl = B.scalar + " worldX = " + global.PhysicsDF.wordUniformValue("u_hoverWorld", "x", precision) + ";\n" +
-      B.scalar + " worldY = " + global.PhysicsDF.wordUniformValue("u_hoverWorld", "y", precision) + ";";
+    var n = global.PhysicsDF.wordsFor(precision);
+    function wordsValue(texel) {
+      return n <= 1 ? texel + ".x" : "MF(" + ["x", "y", "z", "w"].slice(0, n).map(function (c) { return texel + "." + c; }).join(", ") + ")";
+    }
+    var worldDecl = uniformPoint
+      ? B.scalar + " worldX = " + global.PhysicsDF.wordUniformValue("u_hoverWorld", "x", precision) + ";\n" +
+        B.scalar + " worldY = " + global.PhysicsDF.wordUniformValue("u_hoverWorld", "y", precision) + ";"
+      : "vec4 hoverWordsX = texelFetch(u_hoverPoints, ivec2(trajPoint, 0), 0);\n" +
+        "vec4 hoverWordsY = texelFetch(u_hoverPoints, ivec2(trajPoint, 1), 0);\n" +
+        B.scalar + " worldX = " + wordsValue("hoverWordsX") + ";\n" +
+        B.scalar + " worldY = " + wordsValue("hoverWordsY") + ";";
     var bodyDecl = worldDecl + "\n" + initial.declarationLines.join("\n") + "\n" + generateCanonicalBodyDeclarationsGLSL(initial) +
       "\n" + PhysicsGPU.generateHingeAnchorLocalsGLSL(initial.hingeAnchors, precision);
-    lines.push(PhysicsGPU.generateTrajectoryMainGLSL(initial.n, bodyDecl, initial.hingeAnchors, precision, chunk, initial.springs));
+    lines.push(PhysicsGPU.generateTrajectoryMainGLSL(initial.n, bodyDecl, initial.hingeAnchors, precision, chunk, initial.springs, !uniformPoint));
 
-    var words = global.PhysicsDF.wordUniformValues(worldX, worldXLo, worldY, worldYLo);
-    var uniforms = {};
-    global.PhysicsDF.WORD_SUFFIXES.forEach(function (sfx, k) { uniforms["u_hoverWorld" + sfx] = [words[0][k], words[1][k]]; });
-    return {
+    var compiled = {
       fragmentSource: PhysicsGPU.pruneUnusedGLSL(lines.join("\n")),
       numBodies: initial.n,
       precision: df ? precision : "f32",
-      uniforms: uniforms,
       chunk: chunk,
     };
+    if (uniformPoint) {
+      var p = points[0], words = global.PhysicsDF.wordUniformValues(p.x, p.xLo, p.y, p.yLo);
+      compiled.uniforms = {};
+      global.PhysicsDF.WORD_SUFFIXES.forEach(function (sfx, k) { compiled.uniforms["u_hoverWorld" + sfx] = [words[0][k], words[1][k]]; });
+      return compiled;
+    }
+    var data = new Float32Array(points.length * 8);
+    points.forEach(function (pt, i) {
+      var w = global.PhysicsDF.wordUniformValues(pt.x, pt.xLo, pt.y, pt.yLo);
+      for (var k = 0; k < 4; k++) {
+        data[i * 4 + k] = w[0][k];
+        data[(points.length + i) * 4 + k] = w[1][k];
+      }
+    });
+    compiled.pointCount = points.length;
+    compiled.points = data;
+    return compiled;
   }
 
   // Numeric mirror of resolveOffsetTargets' add(), kept side by side; the lockstep test compares them.
@@ -470,6 +507,7 @@
     generateGridInitialStateGLSL: generateGridInitialStateGLSL,
     generateCanonicalBodyDeclarationsGLSL: generateCanonicalBodyDeclarationsGLSL,
     compileHoverTrajectoryGLSL: compileHoverTrajectoryGLSL,
+    compileHoverBatchGLSL: compileHoverBatchGLSL,
     computeOffsetSceneNumeric: computeOffsetSceneNumeric,
     playbackStateVariables: PhysicsGPU.playbackStateVariables,
     withWords: PhysicsGPU.withWords,

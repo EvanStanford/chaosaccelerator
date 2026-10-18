@@ -2048,15 +2048,20 @@
     return lines.join(" ");
   }
 
-  function generateTrajectoryMainGLSL(n, bodyDeclarationsGLSL, hingeAnchors, precision, chunk, springs) {
+  // batched: several runs side by side, run trajPoint in columns [trajPoint * (n + 1), ...) of the log and
+  // [trajPoint * (layers + 1), ...) of the state strip; bodyDeclarationsGLSL may read trajPoint.
+  function generateTrajectoryMainGLSL(n, bodyDeclarationsGLSL, hingeAnchors, precision, chunk, springs, batched) {
     var df = global.PhysicsDF.isExtended(precision);
     function readField(i, field) { return df ? "dfToFloat(dbody" + i + "." + field + ")" : "body" + i + "." + field; }
     var stepCall = "stepOnce(" + stepOnceCallArgs(n, hingeAnchors, precision, springs) + ");";
+    var logStride = n + 1, stripStride = chunk.layers + 1;
     var lines = [];
     lines.push("void main() {");
+    if (batched) lines.push("  int trajPoint = int(gl_FragCoord.x) / (u_trajAdvance > 0 ? " + stripStride + " : " + logStride + ");");
     lines.push("  " + bodyDeclarationsGLSL.split("\n").join("\n  "));
     lines.push("  if (!u_trajInit) {");
-    generatePlaybackStateLoadGLSL(chunk.vars, "u_trajState", null, true).forEach(function (l) { lines.push("    " + l); });
+    generatePlaybackStateLoadGLSL(chunk.vars, "u_trajState", null, true, batched ? "trajPoint * " + stripStride : null)
+      .forEach(function (l) { lines.push("    " + l); });
     lines.push("  }");
     // Row 0 is the state after 1 step, so trajectory[maxSteps-1] is after exactly maxSteps.
     // One loop serves both draw kinds: stepOnce() is inlined, and a second call site doubles the program.
@@ -2068,10 +2073,11 @@
     lines.push("  if (u_trajAdvance > 0) {");
     // The texel past the last layer is the sentinel: the step count the state stands at.
     lines.push("    pbOut0 = vec4(float(u_trajBase + u_trajAdvance), TRAJECTORY_SENTINEL, 0.0, 0.0);");
-    generateStateStripStoreGLSL(chunk.vars, "int(gl_FragCoord.x)", "pbOut0").forEach(function (l) { lines.push("    " + l); });
+    generateStateStripStoreGLSL(chunk.vars, batched ? "int(gl_FragCoord.x) - trajPoint * " + stripStride : "int(gl_FragCoord.x)", "pbOut0")
+      .forEach(function (l) { lines.push("    " + l); });
     lines.push("    return;");
     lines.push("  }");
-    lines.push("  int bodyIdx = int(gl_FragCoord.x);");
+    lines.push(batched ? "  int bodyIdx = int(gl_FragCoord.x) - trajPoint * " + logStride + ";" : "  int bodyIdx = int(gl_FragCoord.x);");
     lines.push("  vec3 outVal = vec3(0.0);");
     // Alpha carries BODYn_HALF: the grid's hover replay needs a resize-linked body's per-point size.
     lines.push("  float outHalf = 0.0;");
@@ -2162,6 +2168,8 @@
     }
     if (type === "Body") return [".x", ".y", ".angle", ".vx", ".vy", ".w"];
     if (type === "DBody") return each([".x", ".y", ".angle", ".vx", ".vy", ".w"]);
+    if (type === "BodyNoAngle") return [".x", ".y", ".vx", ".vy", ".w"];
+    if (type === "DBodyNoAngle") return each([".x", ".y", ".vx", ".vy", ".w"]);
     if (type === "df") return each([""]);
     if (type === "DVec2") return each([".x", ".y"]);
     if (type === "vec2") return [".x", ".y"];
@@ -2169,19 +2177,24 @@
     return null;
   }
   // The GLSL type a local of each kind is declared with.
-  var STATE_TYPE_GLSL = { Body: "Body", DBody: "DBody", float: "float", df: "MF", vec2: "vec2", DVec2: "DVec2", bool: "bool", int: "int" };
+  var STATE_TYPE_GLSL = {
+    Body: "Body", DBody: "DBody", BodyNoAngle: "Body", DBodyNoAngle: "DBody",
+    float: "float", df: "MF", vec2: "vec2", DVec2: "DVec2", bool: "bool", int: "int",
+  };
   // Four floats per texel, so one texture layer per four state floats.
   var STATE_FLOATS_PER_LAYER = 4;
 
   // Anchored bodies are left out (stepOnce() never writes one) unless named in
   // extraBodies (a reader with no starting state, like the playback color pass).
-  function playbackStateVariables(result, extraBodies) {
+  // Bodies in angleFree carry no angle: nothing but their own spin reads it.
+  function playbackStateVariables(result, extraBodies, angleFree) {
     var df = global.PhysicsDF.isExtended(result.precision);
     var extra = extraBodies || [];
     var vars = [];
     for (var i = 0; i < result.n; i++) {
       if (result.consts[i].isAnchored && extra.indexOf(i) === -1) continue;
-      vars.push({ name: (df ? "dbody" : "body") + i, type: df ? "DBody" : "Body" });
+      var noAngle = !!angleFree && angleFree.indexOf(i) !== -1;
+      vars.push({ name: (df ? "dbody" : "body") + i, type: (df ? "DBody" : "Body") + (noAngle ? "NoAngle" : "") });
     }
     result.hingeAnchors.forEach(function (hg, h) {
       if (hg.aIsWorld) vars.push({ name: "hingeAnchor" + h, type: df ? "DVec2" : "vec2" });
@@ -2214,16 +2227,22 @@
 
   // Uninitialized declarations for a program with no step loop of its own (the playback color pass).
   function generatePlaybackStateDeclarationsGLSL(vars) {
-    return vars.map(function (v) { return STATE_TYPE_GLSL[v.type] + " " + v.name + ";"; });
+    return vars.map(function (v) {
+      var decl = STATE_TYPE_GLSL[v.type] + " " + v.name + ";";
+      if (v.type === "BodyNoAngle") return decl + " " + v.name + ".angle = 0.0;";
+      if (v.type === "DBodyNoAngle") return decl + " " + v.name + ".angle = MF(0.0);";
+      return decl;
+    });
   }
 
-  // Reads state from a sampler2DArray at a texel, or with `strip` from a sampler2D of texel (l, 0) = layer l.
-  function generatePlaybackStateLoadGLSL(vars, samplerName, texelExpr, strip) {
+  // Reads state from a sampler2DArray at a texel, or with `strip` from a sampler2D of texel (l, 0) = layer l,
+  // shifted along the strip by stripStart when given.
+  function generatePlaybackStateLoadGLSL(vars, samplerName, texelExpr, strip, stripStart) {
     var floats = stateFloats(vars);
     var lines = [];
     var layers = playbackStateLayerCount(vars);
     for (var l = 0; l < layers; l++) {
-      var texel = strip ? "ivec2(" + l + ", 0)" : "ivec3(" + texelExpr + ", " + l + ")";
+      var texel = strip ? "ivec2(" + (stripStart ? stripStart + " + " : "") + l + ", 0)" : "ivec3(" + texelExpr + ", " + l + ")";
       lines.push("vec4 pbState" + l + " = texelFetch(" + samplerName + ", " + texel + ", 0);");
     }
     floats.forEach(function (f, i) {
@@ -2434,11 +2453,49 @@
     return entry;
   }
 
+  // Most log texels one batched run holds (each texture: the log and its lower-word twins).
+  var TRAJECTORY_BATCH_TEXELS = 2097152;
+  var TRAJECTORY_BATCH_MAX = 128;
+
   // Runs a compiled { fragmentSource, numBodies, chunk, uniforms? } and reads back
   // the trajectory. `uniforms` is { name: [floats] } (the hover replay's world point).
   function runCompiledTrajectoryOnGPU(compiled, maxSteps) {
+    return runCompiledTrajectoriesOnGPU(compiled, maxSteps)[0];
+  }
+
+  // As above, one trajectory per start point when compiled is batched ({ pointCount, points }: a P x 2
+  // RGBA32F texture of x words then y words, see compileHoverBatchGLSL). Runs side by side cost about
+  // one: a run is a sequence of steps, so a few columns leave the GPU idle. Too many for one texture split up.
+  function runCompiledTrajectoriesOnGPU(compiled, maxSteps) {
     var numBodies = compiled.numBodies;
-    if (numBodies === 0) return [];
+    var count = compiled.pointCount || 1;
+    if (numBodies === 0) return new Array(count).fill([]);
+    var runner = getTrajectoryRunner();
+    var gl = runner.gl;
+    var maxTexture = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+    var textures = 1 + (compiled.chunk.loOutputs || 0);
+    var perBatch = Math.max(1, Math.min(TRAJECTORY_BATCH_MAX,
+      Math.floor(maxTexture / (numBodies + 1)), Math.floor(maxTexture / (compiled.chunk.layers + 1)),
+      Math.floor(TRAJECTORY_BATCH_TEXELS / textures / ((numBodies + 1) * maxSteps))));
+    if (!compiled.pointCount || count <= perBatch) return runTrajectoryBatch(compiled, maxSteps, count);
+    var out = [];
+    for (var first = 0; first < count; first += perBatch) {
+      var n = Math.min(perBatch, count - first);
+      var part = Object.assign({}, compiled, { pointCount: n, points: pointsSlice(compiled.points, count, first, n) });
+      out = out.concat(runTrajectoryBatch(part, maxSteps, n));
+    }
+    return out;
+  }
+  // Points first..first+n of a P x 2 points texture's data.
+  function pointsSlice(points, count, first, n) {
+    var out = new Float32Array(n * 8);
+    out.set(points.subarray(first * 4, (first + n) * 4), 0);
+    out.set(points.subarray((count + first) * 4, (count + first + n) * 4), n * 4);
+    return out;
+  }
+
+  function runTrajectoryBatch(compiled, maxSteps, count) {
+    var numBodies = compiled.numBodies;
     var chunk = compiled.chunk;
 
     var runner = getTrajectoryRunner();
@@ -2460,32 +2517,42 @@
       init: gl.getUniformLocation(prog, "u_trajInit"),
       base: gl.getUniformLocation(prog, "u_trajBase"),
       advance: gl.getUniformLocation(prog, "u_trajAdvance"),
+      points: gl.getUniformLocation(prog, "u_hoverPoints"),
     };
 
     gl.bindBuffer(gl.ARRAY_BUFFER, runner.quadBuffer);
     gl.enableVertexAttribArray(entry.posLoc);
     gl.vertexAttribPointer(entry.posLoc, 2, gl.FLOAT, false, 0, 0);
 
-    function floatTexture(w, h) {
+    function floatTexture(w, h, data) {
       var t = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, t);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, w, h, 0, gl.RGBA, gl.FLOAT, null);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, w, h, 0, gl.RGBA, gl.FLOAT, data || null);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       return t;
     }
-    // The log: a column wider than the bodies for each row's sentinel...
-    var logWidth = numBodies + 1;
+    var pointsTexture = null;
+    if (compiled.pointCount) {
+      gl.activeTexture(gl.TEXTURE1);
+      pointsTexture = floatTexture(count, 2, compiled.points);
+      gl.uniform1i(u.points, 1);
+      gl.activeTexture(gl.TEXTURE0);
+    }
+    // The log: a column wider than the bodies for each row's sentinel, per run...
+    var runWidth = numBodies + 1;
+    var logWidth = runWidth * count;
     var texture = floatTexture(logWidth, maxSteps);
     var loTextures = [];
     for (var lo = 0; lo < (chunk.loOutputs || 0); lo++) loTextures.push(floatTexture(logWidth, maxSteps));
-    // ...and two state strips, swapped each chunk, a texel longer for the same reason.
-    var stripWidth = chunk.layers + 1;
+    // ...and two state strips, swapped each chunk, a texel longer per run for the same reason.
+    var runStrip = chunk.layers + 1;
+    var stripWidth = runStrip * count;
     var states = [floatTexture(stripWidth, 1), floatTexture(stripWidth, 1)];
     var logFbo = runner.fbo, stateFbo = gl.createFramebuffer();
-    var sentinel = new Float32Array(4);
+    var sentinels = new Float32Array(stripWidth * 4);
     var failure = null;
 
     var drawBuffers = [gl.COLOR_ATTACHMENT0];
@@ -2502,6 +2569,7 @@
       gl.deleteTexture(states[1]);
       gl.deleteTexture(texture);
       loTextures.forEach(function (t) { gl.deleteTexture(t); });
+      if (pointsTexture) gl.deleteTexture(pointsTexture);
     }
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, logFbo);
@@ -2529,13 +2597,14 @@
     // The first draw is where the driver really builds the program: spend it untimed.
     if (!entry.warmed) {
       drawLog(0, 1, 0);
-      gl.readPixels(numBodies, 0, 1, 1, gl.RGBA, gl.FLOAT, sentinel);
+      gl.readPixels(numBodies, 0, 1, 1, gl.RGBA, gl.FLOAT, sentinels);
       entry.warmed = true;
     }
 
     // Each chunk is timed and the next sized from it (TRAJECTORY_TARGET_MS); the time
-    // includes the readback, erring safe. Growth caps at doubling; the size is kept with the program.
-    var steps = entry.chunkSteps || 1;
+    // includes the readback, erring safe. Growth caps at doubling; the size is kept with the program,
+    // scaled down for a batch wider than the one it was measured on.
+    var steps = Math.max(1, Math.floor((entry.chunkSteps || 1) * Math.min(1, (entry.chunkRuns || 1) / count)));
     var current = 0;
     for (var base = 0; base < maxSteps && !failure;) {
       var rows = Math.min(steps, chunk.maxSteps, maxSteps - base);
@@ -2548,9 +2617,12 @@
         gl.viewport(0, 0, stripWidth, 1);
         gl.uniform1i(u.advance, rows);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
-        gl.readPixels(chunk.layers, 0, 1, 1, gl.RGBA, gl.FLOAT, sentinel);
-        if (sentinel[0] !== base + rows || sentinel[1] !== TRAJECTORY_SENTINEL) {
-          failure = "the state after step " + (base + rows) + " was never written";
+        gl.readPixels(0, 0, stripWidth, 1, gl.RGBA, gl.FLOAT, sentinels);
+        for (var r = 0; r < count && !failure; r++) {
+          var s = (r * runStrip + chunk.layers) * 4;
+          if (sentinels[s] !== base + rows || sentinels[s + 1] !== TRAJECTORY_SENTINEL) {
+            failure = "the state after step " + (base + rows) + " was never written";
+          }
         }
         var perStep = (performance.now() - startedAt) / (2 * rows);
         steps = Math.max(1, Math.min(Math.floor(TRAJECTORY_TARGET_MS / perStep), rows * 2, chunk.maxSteps));
@@ -2559,6 +2631,7 @@
       base += rows;
     }
     entry.chunkSteps = steps;
+    entry.chunkRuns = count;
 
     var pixels = new Float32Array(logWidth * maxSteps * 4);
     var loPixels = loTextures.map(function () { return new Float32Array(logWidth * maxSteps * 4); });
@@ -2574,39 +2647,44 @@
     // The readback already waited for the GPU, so the error flag is free.
     var glError = gl.getError();
 
-    var trajectory = new Array(maxSteps);
-    for (var step = 0; step < maxSteps && !failure; step++) {
-      var row = new Array(numBodies);
-      var mark = (step * logWidth + numBodies) * 4, wrapBits = pixels[mark + 2] | 0, pairBits = pixels[mark + 3] | 0;
-      for (var b = 0; b < numBodies; b++) {
-        var idx = (step * logWidth + b) * 4;
-        row[b] = {
-          x: pixels[idx], y: pixels[idx + 1], angle: pixels[idx + 2], half: pixels[idx + 3],
-          wrapX: !!(wrapBits & (1 << (2 * b))), wrapY: !!(wrapBits & (2 << (2 * b))),
-          warped: !!(wrapBits & (1 << (TRAJECTORY_WARP_SHIFT + b))), contacts: 0,
-        };
-        if (loPixels.length) {
-          // xLo/yLo: the position's lower words (loWordsGLSL's packing), so x + sum(xLo) is the full value.
-          var xLo = [], yLo = [];
-          for (var w = 1; w < chunk.words; w++) {
-            var at = idx + ((w - 1) % 2) * 2, buf = loPixels[(w - 1) >> 1];
-            xLo.push(buf[at]);
-            yLo.push(buf[at + 1]);
+    var trajectories = [];
+    for (var run = 0; run < count && !failure; run++) {
+      var first = run * runWidth;
+      var trajectory = new Array(maxSteps);
+      for (var step = 0; step < maxSteps && !failure; step++) {
+        var row = new Array(numBodies);
+        var mark = (step * logWidth + first + numBodies) * 4, wrapBits = pixels[mark + 2] | 0, pairBits = pixels[mark + 3] | 0;
+        for (var b = 0; b < numBodies; b++) {
+          var idx = (step * logWidth + first + b) * 4;
+          row[b] = {
+            x: pixels[idx], y: pixels[idx + 1], angle: pixels[idx + 2], half: pixels[idx + 3],
+            wrapX: !!(wrapBits & (1 << (2 * b))), wrapY: !!(wrapBits & (2 << (2 * b))),
+            warped: !!(wrapBits & (1 << (TRAJECTORY_WARP_SHIFT + b))), contacts: 0,
+          };
+          if (loPixels.length) {
+            // xLo/yLo: the position's lower words (loWordsGLSL's packing), so x + sum(xLo) is the full value.
+            var xLo = [], yLo = [];
+            for (var w = 1; w < chunk.words; w++) {
+              var at = idx + ((w - 1) % 2) * 2, buf = loPixels[(w - 1) >> 1];
+              xLo.push(buf[at]);
+              yLo.push(buf[at + 1]);
+            }
+            row[b].xLo = xLo;
+            row[b].yLo = yLo;
           }
-          row[b].xLo = xLo;
-          row[b].yLo = yLo;
         }
-      }
-      // contacts: bit j set when the body touched body j in this step.
-      for (var ci = 0; pairBits && ci < numBodies; ci++) {
-        for (var cj = ci + 1; cj < numBodies; cj++) {
-          if (!(pairBits & (1 << pairContactBit(ci, cj, numBodies)))) continue;
-          row[ci].contacts |= 1 << cj;
-          row[cj].contacts |= 1 << ci;
+        // contacts: bit j set when the body touched body j in this step.
+        for (var ci = 0; pairBits && ci < numBodies; ci++) {
+          for (var cj = ci + 1; cj < numBodies; cj++) {
+            if (!(pairBits & (1 << pairContactBit(ci, cj, numBodies)))) continue;
+            row[ci].contacts |= 1 << cj;
+            row[cj].contacts |= 1 << ci;
+          }
         }
+        trajectory[step] = row;
+        if (pixels[mark] !== step + 1 || pixels[mark + 1] !== TRAJECTORY_SENTINEL) failure = "step " + (step + 1) + " was never written";
       }
-      trajectory[step] = row;
-      if (pixels[mark] !== step + 1 || pixels[mark + 1] !== TRAJECTORY_SENTINEL) failure = "step " + (step + 1) + " was never written";
+      trajectories.push(trajectory);
     }
 
     release();
@@ -2616,7 +2694,7 @@
       entry.chunkSteps = 1;
       throw new Error("The GPU dropped a physics draw (" + failure + "): the scene is too heavy for it at this precision.");
     }
-    return trajectory;
+    return trajectories;
   }
 
   function runSceneOnGPU(scene, maxSteps, precision) {
@@ -2627,6 +2705,7 @@
     MAX_BODIES: MAX_BODIES,
     runSceneOnGPU: runSceneOnGPU,
     runCompiledTrajectoryOnGPU: runCompiledTrajectoryOnGPU,
+    runCompiledTrajectoriesOnGPU: runCompiledTrajectoriesOnGPU,
     generateTrajectoryMainGLSL: generateTrajectoryMainGLSL,
     generateTrajectoryHeaderGLSL: generateTrajectoryHeaderGLSL,
     trajectoryChunkInfo: trajectoryChunkInfo,

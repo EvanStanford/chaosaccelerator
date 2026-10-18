@@ -366,3 +366,13 @@
 .app-dialog-actions button {
   min-width: 72px;
 }
+
+/* ---- Drop shadow off (Settings > Performance): no blur behind floating panels, a more solid fill instead ---- */
+html.drop-shadow-off {
+  --bg-panel-float: rgba(27, 30, 39, 0.95);
+}
+html.drop-shadow-off :is(.floating-settings-btn, .floating-home-btn, .settings-panel, .speed-popup,
+  .menu-back, .menu-toggle, .menu-card, .stats-status, #playback-toolbar) {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}

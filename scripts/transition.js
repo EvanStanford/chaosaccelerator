@@ -197,6 +197,11 @@
     }
     return { w: w, h: h, dpr: dpr };
   }
+  // A full-window backing store, idle between runs: shrunk once a run ends, regrown by the next.
+  function releaseTransitionCanvas() {
+    canvas.width = 1;
+    canvas.height = 1;
+  }
 
   // ---- Where the zoom starts ---- the editor canvas's rect, read fresh each run. Its center is
   // world (0, 0) and walks linearly to gridCenter. startPx is the WIDTH: stampTiles derives ch from cw.
@@ -239,6 +244,7 @@
     active = null;
     if (a.raf) cancelAnimationFrame(a.raf);
     layer.hidden = true;
+    releaseTransitionCanvas();
     if (jumpToEnd) a.finish();
   }
 
@@ -265,6 +271,7 @@
 
     function finish() {
       layer.hidden = true;
+      releaseTransitionCanvas();
       skipBtn.hidden = true;
       global.FractalGrid.resetView();
       global.FractalGrid.renderNow();
