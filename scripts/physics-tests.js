@@ -218,6 +218,185 @@
     }
   );
 
+  // ---- 2b. Line-line contacts are swept: no sinking in, no passing through ----
+  // A row's position at the run's own precision: a df row carries its lower word.
+  function rowY(r) { return r.y + (r.yLo ? r.yLo[0] : 0); }
+  function rowX(r) { return r.x + (r.xLo ? r.xLo[0] : 0); }
+  // Signed distance of a body's center past a line body's center line (positive on the side its normal
+  // points to), and how far along it.
+  function lineSide(line, x, y) {
+    var c = Math.cos(line.angle), s = Math.sin(line.angle), dx = x - line.x, dy = y - line.y;
+    return { n: -s * dx + c * dy, t: c * dx + s * dy };
+  }
+
+  addTest(
+    "A rod dropped onto a floor bounces back to the same height every time, as a ball does (JS, float32, double-float)",
+    "line-line contact was only tested at each step's start, so a falling rod was caught already sunk into the floor and the position solve pushed it out higher: its apex climbed 149.8, 153.5, 163.9 ... 330.6px over 20 bounces in JS and on the GPU alike. The contact is now swept to the first touch within the step, as the ball's is",
+    function () {
+      function scene() {
+        return { bodies: [PhysicsEngine.createLine(500, 600, 150, 0, false), PhysicsEngine.createLine(500, 750, 980, 0, true), PhysicsEngine.createCircle(150, 600, 30, false)], hinges: [], edgeMode: "infinite" };
+      }
+      // Heights of the local tops of body b's path above where it touches the floor.
+      function apexes(rows, b, touchY) {
+        var out = [];
+        for (var i = 1; i + 1 < rows.length && out.length < 20; i++) {
+          var y = rowY(rows[i][b]);
+          if (y < rowY(rows[i - 1][b]) && y <= rowY(rows[i + 1][b])) out.push(touchY - y);
+        }
+        return out;
+      }
+      var STEPS = 1500, runs = { js: PhysicsEngine.runTrajectory(scene(), STEPS, DT), f32: PhysicsGPU.runSceneOnGPU(scene(), STEPS, "f32"), df: PhysicsGPU.runSceneOnGPU(scene(), STEPS, "df") };
+      var detail = [], pass = true, js = null;
+      Object.keys(runs).forEach(function (k) {
+        var rod = apexes(runs[k], 0, 730), ball = apexes(runs[k], 2, 710);
+        var lo = Math.min.apply(null, rod), hi = Math.max.apply(null, rod);
+        var ok = rod.length === 20 && lo > 130 * 0.97 && hi < 130 * 1.03;
+        if (k === "js") js = rod;
+        else if (k === "df") ok = ok && rod.every(function (a, i) { return Math.abs(a - js[i]) < 1e-6; });
+        pass = pass && ok;
+        detail.push(k + ": 20 rod apexes " + lo.toFixed(2) + ".." + hi.toFixed(2) + "px (ball " + Math.min.apply(null, ball).toFixed(2) + ".." + Math.max.apply(null, ball).toFixed(2) + ")");
+      });
+      return { pass: pass, detail: "dropped 130px above the touch, want every apex within 3%; double-float within 1e-6px of JS. " + detail.join("; ") };
+    }
+  );
+
+  addTest(
+    "A rod at the speed cap, or spinning, never passes through a line (JS, float32, double-float)",
+    "a capsule only overlaps another inside 20px, so a rod closing faster than 20px a step skipped the contact, and one that did touch at an end spun its other end past the floor's center line in the same step: the next step's closest points then pushed it out the far side (365 of 545 cap-speed drops went through). Now the first touch is swept with the rod's turn as a chord, a second touch while touching is solved with the first, and lines found crossed are pushed out the shorter way",
+    function () {
+      function pair(tilt, y, vy, w, len, planet) {
+        var rod = PhysicsEngine.createLine(400, y, len || 140, tilt, false);
+        rod.vy = vy; rod.w = w;
+        return { bodies: [PhysicsEngine.createLine(400, 600, 600, 0, true), rod], hinges: [], edgeMode: "infinite", mutualGravity: !!planet };
+      }
+      // Deepest the rod's center gets past the floor's center line while over it (negative: never).
+      function deepest(scene, rows) {
+        var floor = scene.bodies[0], worst = -Infinity;
+        rows.forEach(function (row) {
+          var sd = lineSide(floor, rowX(row[1]), rowY(row[1]));
+          if (Math.abs(sd.t) < floor.length / 2) worst = Math.max(worst, sd.n);
+        });
+        return worst;
+      }
+      // JS: many starts, tilts and floor angles at the cap and with a fast spin.
+      var seed = 12345;
+      function rnd() { seed = (seed * 16807) % 2147483647; return seed / 2147483647; }
+      function drop(minSpeed, maxSpeed, planet) {
+        var floorTilt = (rnd() - 0.5) * 1.2, len = 20 + rnd() * 300, speed = minSpeed + rnd() * (maxSpeed - minSpeed);
+        var floor = PhysicsEngine.createLine(0, 0, 200 + rnd() * 600, floorTilt, true);
+        var nx = -Math.sin(floorTilt), ny = Math.cos(floorTilt), along = (rnd() - 0.5) * floor.length * 0.8, off = 60 + len / 2 + rnd() * 100;
+        var rod = PhysicsEngine.createLine(Math.cos(floorTilt) * along - nx * off, Math.sin(floorTilt) * along - ny * off, len, rnd() * Math.PI, false);
+        rod.vx = nx * speed; rod.vy = ny * speed; rod.w = (rnd() - 0.5) * 60;
+        var sc = { bodies: [floor, rod], hinges: [], edgeMode: "infinite", mutualGravity: planet };
+        return deepest(sc, PhysicsEngine.runTrajectory(sc, 90, DT));
+      }
+      var through = 0, TRIALS = 300;
+      for (var i = 0; i < TRIALS; i++) if (drop(200, 2000, false) > 0) through++;
+      // Planet Mode's cap is 2.5 times higher: a short rod's first hit can spin it past 3 rad a step and
+      // carry its far end over in the same step, so a few of these may end more than a thickness past.
+      seed = 777;
+      var planetThrough = 0, PLANET_TRIALS = 200;
+      for (i = 0; i < PLANET_TRIALS; i++) if (drop(2000, PhysicsEngine.MUTUAL_GRAVITY_MAX_SPEED, true) > 20) planetThrough++;
+      // The GPU runs the hard cases: a rod at the cap landing on one end, one spinning at 30 rad/s, and
+      // two at Planet Mode's cap.
+      var cases = [pair(0.1, 300, PhysicsEngine.MAX_SPEED, 0), pair(0.4, 420, 600, 30), pair(0.4, 300, PhysicsEngine.MUTUAL_GRAVITY_MAX_SPEED, 30, 140, true), pair(0.05, 300, PhysicsEngine.MUTUAL_GRAVITY_MAX_SPEED, 0, 300, true)];
+      var names = ["at the cap", "spinning", "at Planet Mode's cap, spinning", "at Planet Mode's cap, 300px"], detail = [], pass = through === 0 && planetThrough <= 2;
+      cases.forEach(function (sc, ci) {
+        var js = PhysicsEngine.runTrajectory(sc, 120, DT), f32 = PhysicsGPU.runSceneOnGPU(sc, 120, "f32"), df = PhysicsGPU.runSceneOnGPU(sc, 120, "df");
+        var gap = 0;
+        for (var s = 0; s < 120; s++) gap = Math.max(gap, Math.abs(rowX(df[s][1]) - js[s][1].x), Math.abs(rowY(df[s][1]) - js[s][1].y));
+        var d = [deepest(sc, js), deepest(sc, f32), deepest(sc, df)];
+        pass = pass && d.every(function (v) { return v < 0; }) && gap < 1e-6;
+        detail.push(names[ci] + ": deepest past the line JS " + d[0].toFixed(1) + ", f32 " + d[1].toFixed(1) + ", df " + d[2].toFixed(1) + "px; df within " + gap.toExponential(1) + "px of JS");
+      });
+      return {
+        pass: pass,
+        detail: through + " of " + TRIALS + " random fast rods went through in JS; under Planet Mode at 2000-5000px/s " + planetThrough + " of " + PLANET_TRIALS +
+          " ended more than 20px past (want at most 2); " + detail.join("; "),
+      };
+    }
+  );
+
+  addTest(
+    "Two lines found crossed are pushed apart the shorter way, toward where each one mostly lies (JS, float32, double-float)",
+    "crossed segments have no closest-point direction: the contact fell back to (0, 1), which pushed a rod whose end had dipped past a floor's center line on through it whenever the floor came first in the scene",
+    function () {
+      // The rod's lower end is 15px past the floor's center line; the rest of it is above.
+      function scene(rodFirst) {
+        var floor = PhysicsEngine.createLine(400, 600, 600, 0, true), rod = PhysicsEngine.createLine(400, 615 - 70 * Math.sin(0.5), 140, 0.5, false);
+        return { bodies: rodFirst ? [rod, floor] : [floor, rod], hinges: [], edgeMode: "infinite" };
+      }
+      var results = [false, true].map(function (rodFirst) {
+        var sc = scene(rodFirst), c = PhysicsEngine.collidePair(sc.bodies[0], sc.bodies[1], DT)[0];
+        var up = rodFirst ? c.normal.y > 0.99 : c.normal.y < -0.99;
+        return { up: up, pen: c.penetration, end: PhysicsEngine.runTrajectory(scene(rodFirst), 30, DT)[29][rodFirst ? 0 : 1].y };
+      });
+      var gpu = ["f32", "df"].map(function (precision) { return rowY(PhysicsGPU.runSceneOnGPU(scene(false), 30, precision)[29][1]); });
+      var pass = results.every(function (r) { return r.up && Math.abs(r.pen - 35) < 1e-9 && r.end < 600; }) && gpu.every(function (y) { return y < 600; }) && Math.abs(gpu[1] - results[0].end) < 1e-6;
+      return {
+        pass: pass,
+        detail: "floor first / rod first: pushed up " + results[0].up + " / " + results[1].up + " by " + results[0].pen.toFixed(2) + "px (want 15 + 20); rod center 30 steps later at y=" +
+          results[0].end.toFixed(2) + " / " + results[1].end.toFixed(2) + " (the floor's line is 600); on the GPU f32 " + gpu[0].toFixed(2) + ", df " + gpu[1].toFixed(2),
+      };
+    }
+  );
+
+  addTest(
+    "A rod near a long floor is never pushed through it, tilted or flat (JS, float32, double-float)",
+    "near-parallel lines measured their gap at the second line's far end, so a rod tilted a few hundredths of a radian over a 2000px floor was found touching while 15px clear of it, with the normal pointing up, and the solver pushed it down through the floor",
+    function () {
+      var floor = PhysicsEngine.createLine(500, 750, 2000, 0, true);
+      // Low ends 35px above the floor's center line (15px clear) and 13.9px above it (touching).
+      var clear = PhysicsEngine.createLine(900, 712, 140, -0.04, false), touch = PhysicsEngine.createLine(900, 734, 140, -0.03, false);
+      var cleared = !PhysicsEngine.collidePair(clear, floor, DT) && !PhysicsEngine.collidePair(floor, clear, DT);
+      var cs = PhysicsEngine.collidePair(touch, floor, DT) || [];
+      var touched = cs.length === 2 && cs.every(function (c) { return c.normal.y > 0.99 && Math.abs(c.penetration - 6.1) < 0.05; });
+      // A tilted, turning rod dropped onto a 2090px floor, the case that fell through.
+      function scene() {
+        var rod = PhysicsEngine.createLine(829.566, 476.095, 279.897, -0.7725, false);
+        rod.w = 1.5618;
+        return { bodies: [rod, PhysicsEngine.createLine(500, 750, 2090.51, 0, true)], hinges: [], edgeMode: "infinite" };
+      }
+      // Deepest body 0 gets past floor body 1's center line while over it (negative: never).
+      function deepest(rows, fl) {
+        var worst = -Infinity;
+        rows.forEach(function (row) {
+          var sd = lineSide(fl, rowX(row[0]), rowY(row[0]));
+          if (Math.abs(sd.t) < fl.length / 2) worst = Math.max(worst, sd.n);
+        });
+        return worst;
+      }
+      var fl = scene().bodies[1], STEPS = 600;
+      var js = PhysicsEngine.runTrajectory(scene(), STEPS, DT), f32 = PhysicsGPU.runSceneOnGPU(scene(), STEPS, "f32"), df = PhysicsGPU.runSceneOnGPU(scene(), STEPS, "df");
+      var gap = 0;
+      for (var s = 0; s < 300; s++) gap = Math.max(gap, Math.abs(rowX(df[s][0]) - js[s][0].x), Math.abs(rowY(df[s][0]) - js[s][0].y));
+      var d = [deepest(js, fl), deepest(f32, fl), deepest(df, fl)];
+      // Random rods dropped onto 600-2400px floors, flat and tilted, for 20s in JS and 10s in float32.
+      var seed = 777;
+      function rnd() { seed = (seed * 16807) % 2147483647; return seed / 2147483647; }
+      function randomDrop() {
+        var len = 600 + rnd() * 1800, tilt = (rnd() - 0.5) * 0.6, rodLen = 60 + rnd() * 240, h = 80 + rnd() * 300;
+        var f = PhysicsEngine.createLine(500, 750, len, tilt, true);
+        var rod = PhysicsEngine.createLine(500 + (rnd() - 0.5) * len * 0.5, 750 - h - rodLen / 2 - len / 4 * Math.abs(Math.sin(tilt)), rodLen, (rnd() - 0.5) * 3, false);
+        rod.w = (rnd() - 0.5) * 8;
+        return { bodies: [rod, f], hinges: [], edgeMode: "infinite" };
+      }
+      var jsThrough = 0, gpuThrough = 0, TRIALS = 150, GPU_TRIALS = 6;
+      for (var i = 0; i < TRIALS; i++) {
+        var sc = randomDrop();
+        if (deepest(PhysicsEngine.runTrajectory(sc, 1200, DT), sc.bodies[1]) > 0) jsThrough++;
+        if (i < GPU_TRIALS && deepest(PhysicsGPU.runSceneOnGPU(sc, 600, "f32"), sc.bodies[1]) > 0) gpuThrough++;
+      }
+      var pass = cleared && touched && d.every(function (v) { return v < 0; }) && gap < 1e-6 && jsThrough === 0 && gpuThrough === 0;
+      return {
+        pass: pass,
+        detail: "15px clear: no contact " + cleared + "; touching: " + cs.length + " contacts, normal into the floor and 6.1px deep " + touched +
+          "; the tilted drop over " + STEPS + " steps, deepest past the floor JS " + d[0].toFixed(1) + ", f32 " + d[1].toFixed(1) + ", df " + d[2].toFixed(1) +
+          "px, df within " + gap.toExponential(1) + "px of JS over 300 steps; random drops through long floors: JS " + jsThrough + " of " + TRIALS + ", float32 " + gpuThrough + " of " + GPU_TRIALS,
+      };
+    }
+  );
+
   // ---- 3. Hinge exclusion: double pendulum swings freely, joints don't drift (JS and GPU) ----
   function buildDoublePendulum() {
     return {
@@ -263,6 +442,50 @@
       var moved = dist(early.x, early.y, late.x, late.y);
       var detail = "joint gaps=" + gap0.toFixed(4) + "px/" + gap1.toFixed(4) + "px, body1 moved " + moved.toFixed(1) + "px between step 100 and 1200";
       return { pass: gap0 < 1 && gap1 < 1 && moved > 15, detail: detail };
+    }
+  );
+
+  addTest(
+    "A fully fixed hinge listed first leaves the next hinge's GPU solve on its own anchors (float32 and double-float)",
+    "generateStepOnceGLSL skips hinges whose two sides are both fixed and named the rest's HINGEn parameters by their place in what was left, so anchoring a pendulum's upper rod hung the lower rod from the world pin's numbers",
+    function () {
+      // The upper rod is anchored, so its world pin comes first with nothing left to move.
+      function anchoredTop() {
+        return {
+          bodies: [PhysicsEngine.createLine(475, 300, 150, 0, true), PhysicsEngine.createLine(625, 300, 150, 0, false)],
+          hinges: [
+            { bodyA: null, bodyB: 0, localAnchorA: { x: 400, y: 300 }, localAnchorB: { x: -75, y: 0 } },
+            { bodyA: 0, bodyB: 1, localAnchorA: { x: 75, y: 0 }, localAnchorB: { x: -75, y: 0 } },
+          ],
+          springs: [], frameWidth: 1200, frameHeight: 800, edgeMode: "infinite",
+        };
+      }
+      function anchoredChain() {
+        var s = anchoredTop();
+        s.bodies.push(PhysicsEngine.createLine(775, 300, 150, 0, false));
+        s.hinges.push({ bodyA: 1, bodyB: 2, localAnchorA: { x: 75, y: 0 }, localAnchorB: { x: -75, y: 0 } });
+        s.edgeMode = "wrap";
+        return s;
+      }
+      var js = PhysicsEngine.runTrajectory(anchoredTop(), 300, DT), chainJs = PhysicsEngine.runTrajectory(anchoredChain(), 60, DT);
+      var swing = 0;
+      js.forEach(function (row) { swing = Math.max(swing, dist(625, 300, row[1].x, row[1].y)); });
+      var f32 = worstTrajectoryGap(js, PhysicsGPU.runSceneOnGPU(anchoredTop(), 60), 60, 2);
+      var df = worstTrajectoryGap(js, PhysicsGPU.runSceneOnGPU(anchoredTop(), 300, "df"), 300, 2);
+      var chain = worstTrajectoryGap(chainJs, PhysicsGPU.runSceneOnGPU(anchoredChain(), 60), 60, 3);
+      // The Inspect tab's own program, at an offset point.
+      var hover = anchoredTop();
+      hover.xInput = { body: 0, property: "angle" };
+      hover.yInput = { body: 1, property: "angle" };
+      hover.output = { body: 1, property: "angle" };
+      var hoverJs = PhysicsEngine.runTrajectory(PhysicsGridCodegen.computeOffsetSceneNumeric(hover, 0.3, -0.2), 60, DT);
+      var inspect = worstTrajectoryGap(hoverJs, PhysicsGPU.runCompiledTrajectoryOnGPU(PhysicsGridCodegen.compileHoverTrajectoryGLSL(hover, 0.3, -0.2, 60), 60), 60, 2);
+      return {
+        pass: swing > 50 && f32 < 0.01 && df < 0.001 && chain < 0.01 && inspect < 0.01,
+        detail: "lower rod swings up to " + swing.toFixed(1) + "px; worst gap from the JS engine: float32 " + f32.toExponential(2) +
+          "px over 60 steps, double-float " + df.toExponential(2) + "px over 300, three-rod chain float32 " + chain.toExponential(2) +
+          "px over 60, Inspect point float32 " + inspect.toExponential(2) + "px over 60",
+      };
     }
   );
 
@@ -1519,7 +1742,7 @@
     );
 
   // Asymmetry: applyBodyEditPreservingHinge only cascades when the edited body
-  // has a world hinge; translateBodyPreservingHinges cascades unconditionally.
+  // has its own hinge; translateBodyPreservingHinges always moves the whole assembly.
   addTest(
       "Resize vs. direct-move cascade asymmetry on a non-world-hinged parent",
       "applyBodyEditPreservingHinge vs. translateBodyPreservingHinges",
@@ -1554,6 +1777,149 @@
         return { pass: noCascade && cascadeOk, detail: detail };
       }
     );
+
+  // ---- Dragging a hinged body moves its whole assembly (translateBodyPreservingHinges) ----
+  // Closed joints: a world-pinned vertical rod (pin at its top) and a horizontal rod off its bottom.
+  function buildClosedDoublePendulum(dx, dy) {
+    return {
+      bodies: [
+        PhysicsEngine.createLine(500 + dx, 370 + dy, 140, Math.PI / 2, false),
+        PhysicsEngine.createLine(570 + dx, 440 + dy, 140, 0, false),
+      ],
+      hinges: [
+        { bodyA: null, bodyB: 0, localAnchorA: { x: 500 + dx, y: 300 + dy }, localAnchorB: { x: -70, y: 0 } },
+        { bodyA: 0, bodyB: 1, localAnchorA: { x: 70, y: 0 }, localAnchorB: { x: -70, y: 0 } },
+      ],
+      frameWidth: 1200, frameHeight: 900,
+    };
+  }
+
+  // Two world-pinned rails; the rung is hinged to both (bodyB of two hinges).
+  function buildLadder(dx, dy) {
+    return {
+      bodies: [
+        PhysicsEngine.createLine(400 + dx, 400 + dy, 200, Math.PI / 2, false),
+        PhysicsEngine.createLine(600 + dx, 400 + dy, 200, Math.PI / 2, false),
+        PhysicsEngine.createLine(500 + dx, 500 + dy, 200, 0, false),
+      ],
+      hinges: [
+        { bodyA: null, bodyB: 0, localAnchorA: { x: 400 + dx, y: 300 + dy }, localAnchorB: { x: -100, y: 0 } },
+        { bodyA: null, bodyB: 1, localAnchorA: { x: 600 + dx, y: 300 + dy }, localAnchorB: { x: -100, y: 0 } },
+        { bodyA: 0, bodyB: 2, localAnchorA: { x: 100, y: 0 }, localAnchorB: { x: -100, y: 0 } },
+        { bodyA: 1, bodyB: 2, localAnchorA: { x: 100, y: 0 }, localAnchorB: { x: 100, y: 0 } },
+      ],
+      frameWidth: 1000, frameHeight: 800,
+    };
+  }
+
+  // Largest body or world-pin distance between two scenes of the same shape.
+  function sceneDistance(a, b) {
+    var worst = 0;
+    a.bodies.forEach(function (body, i) { worst = Math.max(worst, dist(body.x, body.y, b.bodies[i].x, b.bodies[i].y)); });
+    a.hinges.forEach(function (h, i) {
+      if (h.bodyA === null) worst = Math.max(worst, dist(h.localAnchorA.x, h.localAnchorA.y, b.hinges[i].localAnchorA.x, b.hinges[i].localAnchorA.y));
+    });
+    return worst;
+  }
+
+  function worstJointGap(scene) {
+    return scene.hinges.reduce(function (worst, h) { return Math.max(worst, jointGap(h, scene.bodies)); }, 0);
+  }
+
+  // How far any body moves in the first step from rest: a torn joint snaps shut here.
+  function firstStepJump(scene) {
+    var s = PhysicsEngine.cloneScene(scene);
+    s.bodies.forEach(PhysicsEngine.computeMass);
+    var before = s.bodies.map(function (b) { return { x: b.x, y: b.y }; });
+    PhysicsEngine.step(s, DT);
+    return s.bodies.reduce(function (worst, b, i) { return Math.max(worst, dist(before[i].x, before[i].y, b.x, b.y)); }, 0);
+  }
+
+  addTest(
+    "Dragging a double pendulum's lower rod moves the whole pendulum, so Play starts without a snap",
+    "translateBodyPreservingHinges moved the dragged body and its descendants only: dragging the lower rod opened its joint to the upper one and Play snapped it shut",
+    function () {
+      var dragged = buildClosedDoublePendulum(0, 0);
+      PhysicsHingeGeometry.translateBodyPreservingHinges(dragged, 1, 60, -40);
+      var drawnThere = buildClosedDoublePendulum(60, -40);
+      var gap = worstJointGap(dragged);
+      var offFromDrawn = sceneDistance(dragged, drawnThere);
+      var jump = firstStepJump(dragged);
+      var a = runJS(PhysicsEngine.cloneScene(dragged), 60), b = runJS(PhysicsEngine.cloneScene(drawnThere), 60);
+      var afterPlay = sceneDistance(a, b);
+      // Dragged past the right edge: the editor's wrap moves the pendulum as one too.
+      var wrapped = buildClosedDoublePendulum(0, 0);
+      PhysicsHingeGeometry.translateBodyPreservingHinges(wrapped, 1, 750, 0);
+      PhysicsHingeGeometry.normalizeAllBodiesIntoFrame(wrapped);
+      var wrapGap = worstJointGap(wrapped), wrapOff = sceneDistance(wrapped, buildClosedDoublePendulum(750 - 1200, 0));
+      // Springs stay elastic: a background end stays put, one between the rods rides along.
+      var sprung = buildClosedDoublePendulum(0, 0);
+      sprung.springs = [
+        { bodyA: null, bodyB: 1, localAnchorA: { x: 800, y: 440 }, localAnchorB: { x: 0, y: 0 }, stiffness: 20000, restLength: 230 },
+        { bodyA: 0, bodyB: 1, localAnchorA: { x: 0, y: 0 }, localAnchorB: { x: 70, y: 0 }, stiffness: 20000, restLength: 160 },
+      ];
+      PhysicsHingeGeometry.translateBodyPreservingHinges(sprung, 1, 60, -40);
+      var springsOk = sprung.springs[0].localAnchorA.x === 800 && sprung.springs[0].localAnchorA.y === 440 &&
+        sprung.springs[1].localAnchorA.x === 0 && sprung.springs[1].localAnchorB.x === 70;
+      var detail = "after the drag: worst joint gap=" + gap.toExponential(2) + "px, distance from the same pendulum drawn there=" +
+        offFromDrawn.toExponential(2) + "px; first step from rest moves a body " + jump.toFixed(3) + "px; after 60 steps the two differ by " +
+        afterPlay.toExponential(2) + "px; dragged past the edge and wrapped: gap=" + wrapGap.toExponential(2) + "px, off by " + wrapOff.toExponential(2) +
+        "px; springs' background end kept and body ends unchanged=" + springsOk;
+      return { pass: gap < 1e-9 && offFromDrawn < 1e-9 && jump < 0.5 && afterPlay < 1e-9 && wrapGap < 1e-9 && wrapOff < 1e-9 && springsOk, detail: detail };
+    }
+  );
+
+  addTest(
+    "Dragging either rod of a chain moves a child's own background pin too",
+    "translateBodyPreservingHinges shifted only the dragged body's own world pin: a child pinned to the background as well kept its pin behind and Play yanked the chain back",
+    function () {
+      // The lower rod hangs off the upper one and is also pinned to the background at its right end.
+      function build() {
+        var s = buildClosedDoublePendulum(0, 0);
+        s.hinges.push({ bodyA: null, bodyB: 1, localAnchorA: { x: 640, y: 440 }, localAnchorB: { x: 70, y: 0 } });
+        return s;
+      }
+      var parts = [], pass = true;
+      [[0, 30, 20], [1, -50, 10]].forEach(function (drag) {
+        var s = build();
+        PhysicsHingeGeometry.translateBodyPreservingHinges(s, drag[0], drag[1], drag[2]);
+        var want = build();
+        want.bodies.forEach(function (b) { b.x += drag[1]; b.y += drag[2]; });
+        want.hinges.forEach(function (h) { if (h.bodyA === null) h.localAnchorA = { x: h.localAnchorA.x + drag[1], y: h.localAnchorA.y + drag[2] }; });
+        var gap = worstJointGap(s), off = sceneDistance(s, want), jump = firstStepJump(s);
+        if (!(gap < 1e-9 && off < 1e-9 && jump < 0.5)) pass = false;
+        parts.push("rod " + drag[0] + " dragged by (" + drag[1] + "," + drag[2] + "): gap=" + gap.toExponential(2) + "px, child's pin at (" +
+          s.hinges[2].localAnchorA.x + "," + s.hinges[2].localAnchorA.y + "), off by " + off.toExponential(2) + "px, first step " + jump.toFixed(3) + "px");
+      });
+      return { pass: pass, detail: parts.join("; ") };
+    }
+  );
+
+  addTest(
+    "A rung hinged to two rails stays closed whichever body is dragged, and wraps with them as one",
+    "a body hinged to two parents tore: a drag moved the rung alone or one rail with it, and each rail's own wrap moved the rung again",
+    function () {
+      var parts = [], pass = true;
+      [0, 1, 2].forEach(function (index) {
+        var s = buildLadder(0, 0);
+        PhysicsHingeGeometry.translateBodyPreservingHinges(s, index, 35, -25);
+        var gap = worstJointGap(s), off = sceneDistance(s, buildLadder(35, -25)), jump = firstStepJump(s);
+        if (!(gap < 1e-9 && off < 1e-9 && jump < 0.5)) pass = false;
+        parts.push("body " + index + ": gap=" + gap.toExponential(2) + "px, off " + off.toExponential(2) + "px, first step " + jump.toFixed(3) + "px");
+      });
+      // Both rails past the right edge: one wrap for the whole ladder, and a second settle changes nothing.
+      var w = buildLadder(0, 0);
+      PhysicsHingeGeometry.translateBodyPreservingHinges(w, 2, 650, 0);
+      PhysicsHingeGeometry.normalizeAllBodiesIntoFrame(w);
+      var once = sceneDistance(w, buildLadder(650 - 1000, 0)), wrapGap = worstJointGap(w);
+      var again = PhysicsEngine.cloneScene(w);
+      PhysicsHingeGeometry.normalizeAllBodiesIntoFrame(again);
+      var settled = sceneDistance(again, w);
+      if (!(once < 1e-9 && wrapGap < 1e-9 && settled === 0)) pass = false;
+      parts.push("wrapped past the edge: off " + once.toExponential(2) + "px, gap " + wrapGap.toExponential(2) + "px, second settle moved it " + settled + "px");
+      return { pass: pass, detail: parts.join("; ") };
+    }
+  );
 
   // ---- Double-float (df) precision path ----
   // Extended-precision failure is SILENT: a reassociating driver zeroes every
@@ -1675,6 +2041,70 @@
     for (var k = 0; k < count; k++) rows.push({ dx: px[k * 4], dy: px[k * 4 + 1], da: px[k * 4 + 2] });
     return rows;
   }
+
+  // gridResidualAtPoint for every body at once: texel i is body i's position residual against refs[i].
+  function gridResidualsAtPoint(scene, steps, worldX, worldY, precision, refs) {
+    var B = PhysicsGridCodegen.backendFor(precision);
+    var df = PhysicsDF.isExtended(precision);
+    var initial = PhysicsGridCodegen.generateGridInitialStateGLSL(scene, precision);
+    var frame = PhysicsEngine.wrapsAtEdges(scene) ? { width: scene.frameWidth, height: scene.frameHeight } : undefined;
+    function residual(i, axis, value) {
+      var v = (df ? "dbody" : "body") + i + "." + axis;
+      return df ? "dfToFloat(dfSub(" + v + ", " + PhysicsDF.num(value) + "))" : "(" + v + " - " + PhysicsGPU.fnum(Math.fround(value)) + ")";
+    }
+    var src = [
+      "#version 300 es", "precision highp float;", "out vec4 fragColor;", "",
+      PhysicsGPU.libraryGLSL(precision, PhysicsEngine.speedCapFor(scene), PhysicsEngine.frictionRate(scene)), "",
+      "const " + B.scalar + " worldX = " + B.lit(worldX) + ";",
+      "const " + B.scalar + " worldY = " + B.lit(worldY) + ";", "",
+      PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), initial.springs), "",
+      "void main() {",
+      "  " + initial.declarationLines.join("\n  "),
+      "  " + PhysicsGridCodegen.generateCanonicalBodyDeclarationsGLSL(initial).split("\n").join("\n  "),
+      "  " + PhysicsGPU.generateHingeAnchorLocalsGLSL(initial.hingeAnchors, precision).split("\n").join("\n  "),
+      "  for (int i = 0; i < " + steps + "; i++) { stepOnce(" +
+        PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, precision, initial.springs) + "); }",
+      "  int idx = int(gl_FragCoord.x);",
+      "  fragColor = vec4(0.0);",
+      refs.map(function (ref, i) {
+        return "  " + (i ? "else " : "") + "if (idx == " + i + ") fragColor = vec4(" + residual(i, "x", ref.x) + ", " + residual(i, "y", ref.y) + ", 0.0, 1.0);";
+      }).join("\n"),
+      "}",
+    ].join("\n");
+    var px = runFloatShader(src, refs.length);
+    return refs.map(function (ref, i) { return Math.hypot(px[i * 4], px[i * 4 + 1]); });
+  }
+
+  addTest(
+    "A map X/Y Input on a hinged body starts its whole assembly shifted, on the GPU (f32 and df) as in JS",
+    "the codegen's Translate block moved the linked body, its descendants and its own pin: a position link on a pendulum's lower rod started every pixel with that joint open, and a ladder's rung was left behind",
+    function () {
+      var pendulum = buildClosedDoublePendulum(0, 0);
+      pendulum.xInput = { body: 1, property: "x" };
+      pendulum.yInput = { body: 1, property: "y" };
+      var ladder = buildLadder(0, 0);
+      ladder.xInput = { body: 2, property: "x" };
+      ladder.yInput = null;
+      var STEPS = 30, pass = true, parts = [];
+      // World Y is up: worldY 40 moves the rod 40px up the screen. The ladder's 1030 settles back to +30.
+      [["pendulum", pendulum, 60, 40, buildClosedDoublePendulum(60, -40)], ["ladder", ladder, 1030, 0, buildLadder(30, 0)]].forEach(function (c) {
+        var start = PhysicsGridCodegen.computeOffsetSceneNumeric(c[1], c[2], c[3]);
+        var startOff = sceneDistance(start, c[4]), gap = worstJointGap(start), jump = firstStepJump(start);
+        var stepped = runJS(PhysicsEngine.cloneScene(start), STEPS);
+        if (!(startOff < 1e-9 && gap < 1e-9 && jump < 0.5)) pass = false;
+        var line = c[0] + ": js start off " + startOff.toExponential(1) + "px, gap " + gap.toExponential(1) + "px, first step " + jump.toFixed(3) + "px";
+        ["f32", "df"].forEach(function (precision) {
+          var at0 = Math.max.apply(null, gridResidualsAtPoint(c[1], 0, c[2], c[3], precision, start.bodies));
+          var atN = Math.max.apply(null, gridResidualsAtPoint(c[1], STEPS, c[2], c[3], precision, stepped.bodies));
+          var tol = precision === "df" ? [1e-6, 1e-5] : [1e-3, 2e-2];
+          if (!(at0 < tol[0] && atN < tol[1])) pass = false;
+          line += "; " + precision + " vs js: step 0 " + at0.toExponential(1) + "px, step " + STEPS + " " + atN.toExponential(1) + "px";
+        });
+        parts.push(line);
+      });
+      return { pass: pass, detail: parts.join(" | ") };
+    }
+  );
 
   // Relative error of df's response to a starting nudge `dx` vs the float64
   // engine's: ~0 resolved it, ~1 never saw it (a float32 stage in the chain).
@@ -2804,6 +3234,65 @@
     }
   );
 
+  addTest(
+    "With Planet Mode and Collisions on, bounce sounds follow the real contacts",
+    "bounceEventsFromTrajectory read every Planet Mode scene by bounding-circle overlap at the step's end: a swept bounce has the bodies apart again by then, so the Binary Star sample's hits were silent, and a line counted as a circle clicked on a pass that never touched",
+    function () {
+      function landing(collisions) {
+        return {
+          bodies: [PhysicsEngine.createCircle(600, 250, 15, false), PhysicsEngine.createCircle(600, 400, 40, true)],
+          hinges: [], springs: [], frameWidth: 1200, frameHeight: 800, edgeMode: "infinite", mutualGravity: true, collisionsEnabled: collisions,
+        };
+      }
+      // Passes 87.6px clear of the line, inside the line's half-length circle.
+      function flyby() {
+        var ball = PhysicsEngine.createCircle(100, 150, 10, false);
+        ball.vx = 4000;
+        return {
+          bodies: [PhysicsEngine.createLine(400, 300, 400, 0, true), ball],
+          hinges: [], springs: [], frameWidth: 1200, frameHeight: 800, edgeMode: "infinite", mutualGravity: true, collisionsEnabled: true,
+        };
+      }
+      // Steps where some pair's contact bit turns on.
+      function contactStarts(rows) {
+        var events = [], was = {};
+        rows.forEach(function (row, i) {
+          var now = {}, fresh = false;
+          for (var a = 0; a < row.length; a++) {
+            for (var b = a + 1; b < row.length; b++) {
+              if (!(row[a].contacts & (1 << b))) continue;
+              now[a + "," + b] = true;
+              if (!was[a + "," + b]) fresh = true;
+            }
+          }
+          if (fresh) events.push(i);
+          was = now;
+        });
+        return events;
+      }
+      var hitRows = PhysicsEngine.runTrajectory(landing(true), 200, DT), gpuRows = PhysicsGPU.runSceneOnGPU(landing(true), 200);
+      var hits = PhysicsEngine.bounceEventsFromTrajectory(landing(true), hitRows);
+      var gpuHits = PhysicsEngine.bounceEventsFromTrajectory(landing(true), gpuRows);
+      var passRows = PhysicsEngine.runTrajectory(flyby(), 30, DT);
+      var passEvents = PhysicsEngine.bounceEventsFromTrajectory(flyby(), passRows);
+      // Collisions off: no contacts, so overlap of the logged positions still sounds.
+      var ghostRows = PhysicsEngine.runTrajectory(landing(false), 200, DT);
+      var ghost = PhysicsEngine.bounceEventsFromTrajectory(landing(false), ghostRows);
+      function apart(i) { return i < 0 ? 150 : dist(ghostRows[i][0].x, ghostRows[i][0].y, ghostRows[i][1].x, ghostRows[i][1].y); }
+      var ghostOnOverlap = ghost.every(function (e) { return apart(e) <= 55 && apart(e - 1) > 55; });
+      var pass = hits.length > 0 && hits.join() === contactStarts(hitRows).join() &&
+        gpuHits.length > 0 && gpuHits.join() === contactStarts(gpuRows).join() &&
+        passEvents.length === 0 && contactStarts(passRows).length === 0 &&
+        ghost.length > 0 && ghostOnOverlap && contactStarts(ghostRows).length === 0;
+      return {
+        pass: pass,
+        detail: "landing, collisions on: " + hits.length + " sounds (first " + hits.slice(0, 4).join(",") + "), contacts start at " + contactStarts(hitRows).slice(0, 4).join(",") +
+          "; GPU rows " + gpuHits.length + " sounds vs " + contactStarts(gpuRows).length + " contact starts; flyby past a line: " + passEvents.length +
+          " sounds (want 0); collisions off: " + ghost.length + " sounds, all on overlap starts: " + ghostOnOverlap,
+      };
+    }
+  );
+
   // ---- df.8 The honest version of "does df buy resolution" ----
   addTest(
     "Where float32 renders one flat color, df still tracks the float64 engine",
@@ -3269,6 +3758,89 @@
         detail: "ball bounced off the back=" + bounced + "; float32 trajectory within " + worst.toFixed(5) + "px of JS over " + STEPS +
           " steps; the grid shader's end state: df off by " + dfErr.toExponential(2) + "px, float32 by " + f32Err.toExponential(2) + "px",
       };
+    }
+  );
+
+  addTest(
+    "A fast or spinning rod never passes a lone port hole, front or back (JS, float32, double-float)",
+    "port hole-line contact was a start-of-step test like line-line: a fast rod sank in and its turn carried it through. It is now swept in the port hole's frame onto each of the oval's four circles (with two Newton steps for the big arcs, whose far centers make a turning chord's shortening show), crossed lines are pushed out the shorter way, and the start check also looks where the line crosses from one circle's part to another's",
+    function () {
+      function ph() { return PhysicsEngine.createPorthole(400, 400, 200, 0, "orange", true); }
+      function scene() {
+        var a = PhysicsEngine.createLine(400, 150, 120, 0.3, false), b = PhysicsEngine.createLine(400, 650, 120, -0.2, false);
+        a.vy = PhysicsEngine.MAX_SPEED; a.w = 25; b.vy = -PhysicsEngine.MAX_SPEED;
+        return { bodies: [ph(), a, b], hinges: [], edgeMode: "infinite" };
+      }
+      // Deepest past the center line, toward the far face, while over the port hole: the front rod (1)
+      // came from above, the back rod (2) from below.
+      function deepest(rows) {
+        var p = ph(), worst = -Infinity;
+        rows.forEach(function (row) {
+          [[1, 1], [2, -1]].forEach(function (rs) {
+            var sd = lineSide(p, rowX(row[rs[0]]), rowY(row[rs[0]]));
+            if (Math.abs(sd.t) < 100) worst = Math.max(worst, sd.n * rs[1]);
+          });
+        });
+        return worst;
+      }
+      var seed = 4242;
+      function rnd() { seed = (seed * 16807) % 2147483647; return seed / 2147483647; }
+      var through = 0, TRIALS = 200;
+      for (var i = 0; i < TRIALS; i++) {
+        var tilt = (rnd() - 0.5) * 6, len = 20 + rnd() * 300, speed = 200 + rnd() * 1800, hole = PhysicsEngine.createPorthole(0, 0, 150 + rnd() * 300, tilt, "orange", true);
+        var nx = -Math.sin(tilt), ny = Math.cos(tilt), along = (rnd() - 0.5) * hole.length * 0.8, off = 60 + len / 2 + rnd() * 100, from = rnd() < 0.5 ? 1 : -1;
+        var rod = PhysicsEngine.createLine(Math.cos(tilt) * along - nx * off * from, Math.sin(tilt) * along - ny * off * from, len, rnd() * Math.PI, false);
+        rod.vx = nx * speed * from; rod.vy = ny * speed * from; rod.w = (rnd() - 0.5) * 20;
+        var rows = PhysicsEngine.runTrajectory({ bodies: [hole, rod], hinges: [], edgeMode: "infinite" }, 90, DT), past = false;
+        rows.forEach(function (row) { var sd = lineSide(hole, row[1].x, row[1].y); if (Math.abs(sd.t) < hole.length / 2 - 5 && sd.n * from > 0) past = true; });
+        if (past) through++;
+      }
+      var js = PhysicsEngine.runTrajectory(scene(), 150, DT), f32 = PhysicsGPU.runSceneOnGPU(scene(), 150, "f32"), df = PhysicsGPU.runSceneOnGPU(scene(), 150, "df");
+      var gap = 0;
+      for (var s = 0; s < 150; s++) for (var b = 1; b < 3; b++) gap = Math.max(gap, Math.abs(rowX(df[s][b]) - js[s][b].x), Math.abs(rowY(df[s][b]) - js[s][b].y));
+      var d = [deepest(js), deepest(f32), deepest(df)];
+      // A line lying across the right tip, 15px into the oval.
+      var tip = PhysicsEngine.collidePair(ph(), PhysicsEngine.createLine(502, 401, 90, 1.4, false), DT);
+      // A line mostly behind it with its upper end 12px past the center line goes back out the back.
+      var crossed = PhysicsEngine.collidePair(ph(), PhysicsEngine.createLine(380, 388 + 70 * Math.sin(1.0), 140, 1.0, false), DT);
+      var pass = through <= 2 && d.every(function (v) { return v < 0; }) && gap < 1e-6 && !!tip && Math.abs(tip[0].penetration - 15.297) < 0.01 && !!crossed && crossed[0].normal.y > 0.99;
+      return {
+        pass: pass,
+        detail: through + " of " + TRIALS + " random fast rods ended past the far face in JS (want at most 2: a rod spun past 1 rad a step at a tip can be carried round it); front and back at the cap, spinning: deepest past the center JS " +
+          d[0].toFixed(1) + ", f32 " + d[1].toFixed(1) + ", df " + d[2].toFixed(1) + "px, df within " + gap.toExponential(1) + "px of JS; across the tip: " + (tip ? tip[0].penetration.toFixed(2) + "px in" : "missed") +
+          "; crossed from the back: normal y " + (crossed ? crossed[0].normal.y.toFixed(3) : "none"),
+      };
+    }
+  );
+
+  addTest(
+    "A line going through a port hole pair keeps its offset and comes out the other one (JS, float32, double-float)",
+    "lines found crossing a port hole's center line were pushed out along whichever normal was shorter, and that contact sat on the center line, so a leader partway through was not let through: a 140px rod 60px off center was shoved 50px sideways before the warp, others never warped, and an upright rod went whichever way rounding said",
+    function () {
+      function scene(len, tilt, off) {
+        var o = PhysicsEngine.createPorthole(400, 400, 200, 0, "orange", true), g = PhysicsEngine.createPorthole(1200, 300, 200, Math.PI, "green", true);
+        var rod = PhysicsEngine.createLine(400 + off, 360 - len / 2 * Math.cos(tilt), len, Math.PI / 2 + tilt, false);
+        rod.vy = 600;
+        return { bodies: [o, g, rod], hinges: [], edgeMode: "infinite" };
+      }
+      // Length, tilt from upright and offset along the port hole; each lands on the front.
+      var cases = [[140, 0.1, 60], [200, -0.25, -30], [300, 0.3, 40], [300, 0, 0]], detail = [], pass = true;
+      cases.forEach(function (c) {
+        var runs = { js: PhysicsEngine.runTrajectory(scene(c[0], c[1], c[2]), 40, DT), f32: PhysicsGPU.runSceneOnGPU(scene(c[0], c[1], c[2]), 40, "f32"), df: PhysicsGPU.runSceneOnGPU(scene(c[0], c[1], c[2]), 40, "df") };
+        var out = Object.keys(runs).map(function (k) {
+          var rows = runs[k], w = -1;
+          for (var i = 0; i < rows.length && w < 0; i++) if (rows[i][2].warped) w = i;
+          // Sideways drift before the warp, and the offset from the green one's center it comes out at.
+          return w < 1 ? null : { step: w, shove: rowX(rows[w - 1][2]) - (400 + c[2]), out: rowX(rows[w][2]) - 1200 };
+        });
+        var gap = 0;
+        for (var s = 0; s < 40; s++) gap = Math.max(gap, Math.abs(rowX(runs.df[s][2]) - runs.js[s][2].x), Math.abs(rowY(runs.df[s][2]) - runs.js[s][2].y));
+        var ok = out.every(function (r) { return r && r.step === out[0].step && Math.abs(r.shove) < 1 && Math.abs(r.out - c[2]) < 1; }) && gap < 1e-6;
+        pass = pass && ok;
+        detail.push(c[0] + "px at " + c[1] + " rad, " + c[2] + "px off: " + (out[0] ? "warped at step " + out.map(function (r) { return r ? r.step : "-"; }).join("/") + ", drift " +
+          out.map(function (r) { return r ? r.shove.toFixed(2) : "-"; }).join("/") + "px, out " + out.map(function (r) { return r ? r.out.toFixed(2) : "-"; }).join("/") + "px" : "no warp in JS") + ", df within " + gap.toExponential(1) + "px");
+      });
+      return { pass: pass, detail: "JS/f32/df, want the same warp step, under 1px of drift and the offset kept: " + detail.join("; ") };
     }
   );
 
@@ -5208,13 +5780,52 @@
         back.inspect.length === view.inspect.length && view.inspect.every(sameGroup);
       var untouched = ShareUrl.encode({
         page: "map", scene: scene,
-        view: { center: { x: 0, xLo: 0, y: 0, yLo: 0 }, scale: 200 / 0.17, zoom: 1, display: "standard", lowSaturation: false, precision: "f32", speed: 1, volume: 1, inspect: [] },
+        view: { center: { x: 0, xLo: 0, y: 0, yLo: 0 }, scale: 200 / 0.17, zoom: 1, display: "standard", lowSaturation: false, precision: "auto", speed: 1, volume: 0, inspect: [] },
       });
       var bare = untouched === "map/" + ShareUrl.encodeScene(scene).join(",");
       return {
         pass: viewOk && bare,
         detail: "view round trip " + (viewOk ? "exact" : "DIFFERS: " + canonicalJSON(back)) + "; untouched view adds nothing=" + bare +
           "; view fields: " + fragment.slice(fragment.indexOf("frmh:") + 9),
+      };
+    }
+  );
+
+  addTest(
+    "A link without a precision or sound opens the way the app starts: Auto precision, muted",
+    "share-url.js's prec and snd wire defaults are the app's own starting state, so a hand-trimmed or gallery link doesn't force float32 or turn the sound up to full; Force float32 and any volume above 0 are written out, and an unknown precision code reads as Auto",
+    function () {
+      var scene = everythingScene();
+      var bare = "map/" + ShareUrl.encodeScene(scene).join(",");
+      var quiet = ShareUrl.encode({ page: "map", scene: scene, view: { precision: "auto", volume: 0 } }) === bare;
+      var loud = ShareUrl.encode({ page: "map", scene: scene, view: { precision: "f32", volume: 0.5 } });
+      var back = ShareUrl.decode(loud).view;
+      var roundTrip = /,prec:f32,snd:\.5$/.test(loud) && back.precision === "f32" && back.volume === 0.5;
+      var none = ShareUrl.decode("#" + bare).view;
+      var defaults = none.precision === "auto" && none.volume === 0;
+      var odd = ShareUrl.decode("#" + bare + ",prec:zz").view.precision === "auto";
+      return {
+        pass: quiet && roundTrip && defaults && odd,
+        detail: "Auto and muted add nothing=" + quiet + "; " + loud.slice(loud.lastIndexOf("frmh:")) + " reads back " + back.precision + "/" + back.volume +
+          "; no fields read as " + none.precision + "/" + none.volume + "; an unknown precision reads as Auto=" + odd,
+      };
+    }
+  );
+
+  addTest(
+    "A link's Inspect points or keyframes that can't be read are reported, not just dropped",
+    "share-url.js's decodeView falls back to a field's default when it can't be read, and lists the field in view.unread, which is how the map knows to say that a link's Inspect points or movie keyframes were lost (one bad entry drops its whole list) and the player to say why it has no movie",
+    function () {
+      var scene = everythingScene();
+      var base = "#map/" + ShareUrl.encodeScene(scene).join(",");
+      var bad = ShareUrl.decode(base + ",zoom:3,insp:p:.1:.1;p:abc:0,kfrm:0:0:1:1000;0:0:1").view;
+      var badOk = bad.inspect.length === 0 && bad.movie.keyframes.length === 0 && bad.zoom === 3 &&
+        bad.unread.indexOf("insp") !== -1 && bad.unread.indexOf("kfrm") !== -1 && bad.unread.length === 2;
+      var good = ShareUrl.decode(base + ",zoom:3,insp:p:.1:.1;p:.2:.2,kfrm:0:0:1:1000;0:0:2:500").view;
+      var goodOk = good.inspect.length === 2 && good.movie.keyframes.length === 2 && good.unread.length === 0;
+      return {
+        pass: badOk && goodOk,
+        detail: "bad lists dropped and listed=" + badOk + " (unread " + JSON.stringify(bad.unread) + "); good lists kept with nothing unread=" + goodOk,
       };
     }
   );
@@ -6097,6 +6708,99 @@
       }
       var pass = shape && fullGap < 1e-7 && hiGap > 1e-6;
       return { pass: pass, detail: "df rows carry one lower word each and f32 rows none: " + shape + "; gap to the float64 engine over " + STEPS + " steps: hi word alone " + hiGap.toExponential(2) + ", hi + lo " + fullGap.toExponential(2) };
+    }
+  );
+
+  // ---- Trajectory runs spread over tasks ----
+  function samplePendulum() {
+    return {
+      bodies: [
+        PhysicsEngine.createLine(409, 288, 140, -1.5708, false),
+        PhysicsEngine.createLine(480, 217, 140, 0, false),
+      ],
+      hinges: [
+        { bodyA: null, bodyB: 0, localAnchorA: { x: 408, y: 358 }, localAnchorB: { x: -70, y: -1 } },
+        { bodyA: 0, bodyB: 1, localAnchorA: { x: 70, y: 0 }, localAnchorB: { x: -71, y: -1 } },
+      ],
+      xInput: { body: 0, property: "angle" },
+      yInput: { body: 1, property: "angle" },
+      output: { body: 1, property: "angle" },
+      frameWidth: 1192, frameHeight: 819,
+    };
+  }
+  // Every field of every row, lower words included; the first difference, or null.
+  function trajectoryDifference(a, b) {
+    if (a.length !== b.length) return "run count " + a.length + " vs " + b.length;
+    for (var r = 0; r < a.length; r++) {
+      if (a[r].length !== b[r].length) return "run " + r + " length " + a[r].length + " vs " + b[r].length;
+      for (var s = 0; s < a[r].length; s++) {
+        for (var i = 0; i < a[r][s].length; i++) {
+          var p = a[r][s][i], q = b[r][s][i];
+          var words = JSON.stringify([p.xLo, p.yLo]) === JSON.stringify([q.xLo, q.yLo]);
+          if (p.x !== q.x || p.y !== q.y || p.angle !== q.angle || p.half !== q.half || p.contacts !== q.contacts ||
+              p.wrapX !== q.wrapX || p.wrapY !== q.wrapY || p.warped !== q.warped || !words) {
+            return "run " + r + " step " + s + " body " + i;
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  addTest(
+    "A trajectory run taken a chunk at a time matches one call, with another run and evictions in between",
+    "Inspect (Grid) and (Line) locks ran every point in one task and froze the page for up to 45 s; split into slices, runs take turns on one context",
+    function () {
+      var scene = samplePendulum(), STEPS = 400;
+      var f32 = PhysicsGridCodegen.compileHoverTrajectoryGLSL(scene, 0.7, -0.3, STEPS, "f32");
+      var df = PhysicsGridCodegen.compileHoverBatchGLSL(scene, [{ x: 0.7, y: -0.3 }, { x: 0.71, y: -0.29 }, { x: -0.4, y: 0.2 }], STEPS, "df");
+      var refF32 = PhysicsGPU.runCompiledTrajectoriesOnGPU(f32, STEPS), refDf = PhysicsGPU.runCompiledTrajectoriesOnGPU(df, STEPS);
+      // A zero budget: one chunk, one readback or one run's rows a call, the two jobs taking turns.
+      var a = PhysicsGPU.startTrajectoryRun(f32, STEPS), b = PhysicsGPU.startTrajectoryRun(df, STEPS);
+      a.step(0);
+      b.step(0);
+      // Enough other programs to push both out of the runner's cache while they are still running.
+      var lone = { bodies: [PhysicsEngine.createCircle(500, 300, 20, false)], hinges: [], xInput: { body: 0, property: "x" },
+        yInput: { body: 0, property: "y" }, output: { body: 0, property: "x" }, frameWidth: 1000, frameHeight: 600 };
+      var other = PhysicsGridCodegen.compileHoverTrajectoryGLSL(lone, 0, 0, 10, "f32");
+      for (var k = 0; k < 7; k++) {
+        PhysicsGPU.runCompiledTrajectoriesOnGPU(Object.assign({}, other, { fragmentSource: other.fragmentSource + "\n// " + k }), 10);
+      }
+      var calls = 2, aDone = false, bDone = false;
+      while ((!aDone || !bDone) && calls < 20000) {
+        if (!aDone) aDone = a.step(0);
+        if (!bDone) bDone = b.step(0);
+        calls++;
+      }
+      var diffA = aDone ? trajectoryDifference(a.trajectories, refF32) : "unfinished";
+      var diffB = bDone ? trajectoryDifference(b.trajectories, refDf) : "unfinished";
+      return {
+        // Over 256 steps (the longest chunk) a run takes at least two chunks, a readback and its rows.
+        pass: !diffA && !diffB && calls >= 4,
+        detail: calls + " turns; float32 run: " + (diffA || "identical") + "; df batch of 3: " + (diffB || "identical"),
+      };
+    }
+  );
+
+  addTest(
+    "A trajectory program built in the background runs the same as one built on the spot",
+    "the first Double/Triple precision replay compiled its program synchronously and froze the page for 2 to 43 s",
+    function () {
+      var scene = samplePendulum(), STEPS = 300;
+      var compiled = PhysicsGridCodegen.compileHoverBatchGLSL(scene, [{ x: 0.2, y: 0.1 }, { x: -0.3, y: 0.25 }], STEPS, "df");
+      // The same program as new source text, so it can't be found cached.
+      var twin = Object.assign({}, compiled, { fragmentSource: compiled.fragmentSource + "\n// built in the background" });
+      var pendingFirst = PhysicsGPU.trajectoryProgramPending(twin);
+      var ref = PhysicsGPU.runCompiledTrajectoriesOnGPU(compiled, STEPS);
+      // A run that needs a program still building finishes it on the spot, warm draws and all.
+      var viaBuild = PhysicsGPU.runCompiledTrajectoriesOnGPU(twin, STEPS);
+      var pendingAfter = PhysicsGPU.trajectoryProgramPending(twin);
+      var diff = trajectoryDifference(viaBuild, ref);
+      return {
+        pass: !diff && pendingAfter === false,
+        detail: (pendingFirst ? "built in the background" : "no KHR_parallel_shader_compile: built on the spot") +
+          "; rows " + (diff || "identical") + "; pending once run: " + pendingAfter,
+      };
     }
   );
 

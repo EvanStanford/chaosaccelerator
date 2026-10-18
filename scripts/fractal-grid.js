@@ -62,6 +62,7 @@
   }
   // Written by the context-loss handler for the reload that follows it; read once, at load.
   var PERF_LOWERED_KEY = "fractalGridPerfLowered";
+  var CONTEXT_LOSS_KEY = "fractalGridContextLoss";
   // Settings > Performance > Drop shadow: the blur behind floating panels, redone every frame the map changes.
   function applyDropShadow(on) { document.documentElement.classList.toggle("drop-shadow-off", !on); }
   var PERF_LOWERED_MAX_STEPS = 300;
@@ -190,21 +191,28 @@
       el.resetTips.textContent = "Tips reset";
       setTimeout(function () { el.resetTips.textContent = original; }, 1500);
     });
-    // Reset all: state lives in localStorage, not cookies; wipe it, then hard reload.
     el.resetAll.addEventListener("click", function () {
-      global.AppMessage.prompt("Reset all saved data for this page? This clears your saved scene, dismissed tips, and intro animation state, then reloads.",
+      global.AppMessage.prompt("Reset all settings? This resets Settings, dismissed tips and the intro animation, then reloads. Your scene and challenge progress are kept.",
         ["No", "Yes"], "Yes", function (answer) { if (answer === "Yes") resetAll(); });
     });
+    // Settings are page state, so a reload in place resets them; a map address also carries precision and sound.
     function resetAll() {
-      try { localStorage.clear(); } catch (err) { /* nothing to clear */ }
+      try { localStorage.removeItem("physicsAppDismissedTips"); } catch (err) { /* nothing to clear */ }
+      if (global.AppShell) global.AppShell.replayIntro();
       try {
-        document.cookie.split(";").forEach(function (pair) {
-          var name = pair.split("=")[0].trim();
-          if (name) document.cookie = name + "=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/";
-        });
+        global.sessionStorage.removeItem(PERF_LOWERED_KEY);
+        global.sessionStorage.removeItem(CONTEXT_LOSS_KEY);
       } catch (err) { /* same */ }
-      // Clear the address first or the reload loads the scene straight back.
-      try { global.history.replaceState(null, "", global.location.pathname + global.location.search); } catch (err) { /* reloads where it is */ }
+      try {
+        if (global.AppShell) global.AppShell.syncAddress();
+        var state = global.ShareUrl.decode(global.location.hash);
+        if (state && state.page === global.ShareUrl.PAGE_MAP) {
+          // A challenge keeps the precision its start link pins.
+          if (!(global.LayoutMode && global.LayoutMode.challengeKind())) state.view.precision = PERF_PRESETS[perfDefaultPreset].precision;
+          state.view.volume = 0;
+          global.history.replaceState(global.history.state, "", "#" + global.ShareUrl.encode(state));
+        }
+      } catch (err) { /* reloads the address as it is */ }
       global.location.reload();
     }
 
@@ -220,8 +228,11 @@
     if (lowered && lowered.perf) {
       writePreset(lowered.perf);
       if (lowered.readout) $("perf-readout-checkbox").checked = true;
-      // Deferred until transition.js has picked the view the toast shows in.
-      if (lowered.toast) setTimeout(function () { global.AppMessage.toast("Performance settings lowered to avoid crashing"); }, 0);
+      // Deferred until transition.js, the last script, has picked the view the toast shows in.
+      var shortenedText = "Simulation Duration shortened to " + PERF_LOWERED_MAX_STEPS + " steps to avoid crashing";
+      var loweredText = !lowered.settings ? shortenedText
+        : lowered.steps ? "Performance settings lowered and " + shortenedText : "Performance settings lowered to avoid crashing";
+      if (lowered.settings || lowered.steps) document.addEventListener("DOMContentLoaded", function () { global.AppMessage.toast(loweredText); });
     }
     syncReadouts();
     syncPreset();
@@ -420,7 +431,6 @@
     });
   });
 
-  var CONTEXT_LOSS_KEY = "fractalGridContextLoss";
   // Losses closer together than this are the same trouble, not a new one.
   var CONTEXT_LOSS_WINDOW_MS = 90 * 1000;
   var CONTEXT_LOSS_MAX_AUTO_RELOADS = 2;
@@ -2455,6 +2465,10 @@
   }
 
   function runSuperlative(kind) {
+    if (MAX_INSPECT_POINTS - totalInspectedPointCount() < (kind === "edge" ? 2 : 1)) {
+      global.AppMessage.toast(INSPECT_FULL_MESSAGE);
+      return;
+    }
     var aspect = canvasArea.clientHeight > 0 ? canvasArea.clientWidth / canvasArea.clientHeight : 1;
     var w = aspect >= 1 ? SUPERLATIVE_SAMPLE_LONG_SIDE : Math.max(1, Math.round(SUPERLATIVE_SAMPLE_LONG_SIDE * aspect));
     var h = aspect >= 1 ? Math.max(1, Math.round(SUPERLATIVE_SAMPLE_LONG_SIDE / aspect)) : SUPERLATIVE_SAMPLE_LONG_SIDE;
@@ -2471,8 +2485,7 @@
       lockPointAt(sampleCoordToWorld(grid, rarest.col, rarest.row));
     } else if (kind === "edge") {
       var pair = findSharpestEdge(grid, precomputeInitialStates(grid));
-      lockPointAt(sampleCoordToWorld(grid, pair[0].col, pair[0].row));
-      lockPointAt(sampleCoordToWorld(grid, pair[1].col, pair[1].row));
+      lockPoints([sampleCoordToWorld(grid, pair[0].col, pair[0].row), sampleCoordToWorld(grid, pair[1].col, pair[1].row)]);
     }
   }
 
@@ -2491,22 +2504,104 @@
   var COLOR_SPREAD_CHECK_DELAY_MS = 500; // debounced off markDirty, only check once the view settles, not on every drag tick
   var colorSpreadCheckTimer = null;
 
-  function checkColorSpreadAndMaybeSuggestColorZoom() {
-    if (colorZoomEnabled) return;
+  function colorZoomTipApplies() {
+    if (colorZoomEnabled || isTipDismissed("color-zoom") || activeTipId === "color-zoom") return false;
     // Trick Shot and Lyapunov frames hide the Display card.
     var challenge = global.LayoutMode && global.LayoutMode.challengeKind();
-    if (challenge === "trick" || challenge === "lyap") return;
+    return challenge !== "trick" && challenge !== "lyap";
+  }
+
+  function checkColorSpreadAndMaybeSuggestColorZoom() {
+    if (!colorZoomTipApplies()) return;
     // Only about the finished picture: partway along the timeline a narrow spread is often just early.
     if (timeline.playing || renderedSteps() < simulationSteps) return;
-    var grid = sampleValueGrid(SAMPLE_SIZE, SAMPLE_SIZE);
-    if (!grid) return;
+    startColorSpreadProbe();
+  }
+
+  function suggestColorZoomFrom(sample) {
+    if (!colorZoomTipApplies()) return;
     var values = [];
-    for (var i = 0; i < grid.values.length; i += 4) values.push(grid.values[i]);
-    if (isTipDismissed("color-zoom")) return;
+    for (var i = 0; i < sample.length; i += 4) values.push(sample[i]);
     if (circularSpread(values) <= COLOR_SPREAD_SUGGEST_THRESHOLD) {
       displayMenu.set(true);
       showTip("color-zoom", colorZoomCheckbox, "Try Color Zoom to highlight subtle color differences");
     }
+  }
+
+  // The tip's sample, one slice draw a frame and read back behind a fence: at a deep zoom the whole sample is
+  // seconds of GPU work. A view change drops it; the settled view asks again.
+  var colorSpreadProbe = null;
+  function colorSpreadKey() { return bounceMaxViewKey() + " " + renderedSteps() + " " + bounceMaxValue + " " + sceneGeneration; }
+
+  function startColorSpreadProbe() {
+    dropColorSpreadProbe();
+    if (!canSampleField()) return;
+    var n = SAMPLE_SIZE;
+    var probe = { key: colorSpreadKey(), target: createSampleTarget(n, n), job: null, entry: null, sync: null, pbo: null,
+      values: new Float32Array(n * n * 4) };
+    colorSpreadProbe = probe;
+    var programs = slicedProgramsForGrid();
+    if (programs) {
+      probe.entry = playbackGpu.programs[effectivePrecision()];
+      // Its own state pair: "sampler" starts and finishes in one call.
+      probe.job = beginSliceJob("tip", programs, { cols: n, rows: n, stencil: 1, tileX: 0, tileY: 0,
+        stride: 1, originX: 0, originY: 0, resW: n, resH: n, totalSteps: renderedSteps() });
+    } else if (drawSampleBand(probe.target, n, n, 0, n) > 0) {
+      readColorSpreadLater(probe);
+    } else {
+      dropColorSpreadProbe();
+    }
+  }
+
+  function readColorSpreadLater(probe) {
+    probe.pbo = gl.createBuffer();
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, probe.pbo);
+    gl.bufferData(gl.PIXEL_PACK_BUFFER, probe.values.byteLength, gl.STREAM_READ);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, probe.target.fbo);
+    gl.readPixels(0, 0, probe.target.width, probe.target.height, gl.RGBA, gl.FLOAT, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+    probe.sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    gl.flush();
+  }
+
+  function dropColorSpreadProbe() {
+    var probe = colorSpreadProbe;
+    if (!probe) return;
+    colorSpreadProbe = null;
+    if (probe.sync) gl.deleteSync(probe.sync);
+    if (probe.pbo) gl.deleteBuffer(probe.pbo);
+    freeSampleTarget(probe.target);
+  }
+
+  // Every frame, from the render loop.
+  function pumpColorSpreadProbe() {
+    var probe = colorSpreadProbe;
+    if (!probe) return;
+    // A moved view, or programs rebuilt under it, makes it worthless.
+    if (probe.key !== colorSpreadKey() || (probe.entry && playbackGpu.programs[effectivePrecision()] !== probe.entry)) {
+      dropColorSpreadProbe();
+      return;
+    }
+    if (probe.sync) {
+      if (gl.getSyncParameter(probe.sync, gl.SYNC_STATUS) !== gl.SIGNALED) return;
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, probe.pbo);
+      gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, probe.values);
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+      var values = probe.values;
+      dropColorSpreadProbe();
+      suggestColorZoomFrom(values);
+      return;
+    }
+    var prevViewport = gl.getParameter(gl.VIEWPORT);
+    var job = probe.job;
+    advanceSliceJob(job, sliceSteps[effectivePrecision()] || SLICE_STEPS_MIN);
+    if (job.done >= job.spec.totalSteps) {
+      resolveSliceJob(job, probe.target.fbo, 0, 0, { sample: true, bounceMax: bounceMaxValue });
+      readColorSpreadLater(probe);
+    }
+    gl.viewport(prevViewport[0], prevViewport[1], prevViewport[2], prevViewport[3]);
+    useCurrentPass();
   }
 
   // One popover, so tips run in priority order: the speed cap explains a collapsed spread; Color Zoom does not.
@@ -2829,6 +2924,14 @@
         inspectMarkerGroupIndex.push(groupIndex);
       });
     });
+    // The lock in progress: -1, so a click cancels it.
+    if (lockJob && lockJob.type !== "grid") {
+      lockJob.entries.forEach(function (entry) {
+        if (!entry) return;
+        flatPoints.push(entry);
+        inspectMarkerGroupIndex.push(-1);
+      });
+    }
     while (inspectMarkerEls.length < flatPoints.length) {
       var el = document.createElement("div");
       el.className = "inspect-marker";
@@ -2836,7 +2939,8 @@
       el.addEventListener("click", function () {
         var slot = inspectMarkerEls.indexOf(el);
         if (slot === -1) return;
-        removeInspectedGroup(inspectMarkerGroupIndex[slot]);
+        if (inspectMarkerGroupIndex[slot] === -1) cancelLockJob();
+        else removeInspectedGroup(inspectMarkerGroupIndex[slot]);
       });
       // The dot sits over the canvas, so it must zoom too or it blocks the wheel.
       el.addEventListener("wheel", onWheelZoom, { passive: false });
@@ -2857,12 +2961,14 @@
       el.hidden = !visible;
     });
 
-    inspectedGroups.forEach(function (group) {
-      if (group.type !== "grid") return;
+    var grids = inspectedGroups.filter(function (group) { return group.type === "grid"; });
+    if (lockJob && lockJob.type === "grid") grids.push({ points: lockJob.entries, segments: lockJob.segments, meshLineEls: lockJob.meshLineEls });
+    grids.forEach(function (group) {
       group.segments.forEach(function (pair, i) {
-        var a = worldPointToCanvasArea(group.points[pair[0]].worldPoint, frame);
-        var b = worldPointToCanvasArea(group.points[pair[1]].worldPoint, frame);
-        var lineEl = group.meshLineEls[i];
+        var lineEl = group.meshLineEls[i], ends = [group.points[pair[0]], group.points[pair[1]]];
+        if (!ends[0] || !ends[1]) { lineEl.setAttribute("hidden", ""); return; }
+        var a = worldPointToCanvasArea(ends[0].worldPoint, frame);
+        var b = worldPointToCanvasArea(ends[1].worldPoint, frame);
         lineEl.setAttribute("x1", a.x); lineEl.setAttribute("y1", a.y);
         lineEl.setAttribute("x2", b.x); lineEl.setAttribute("y2", b.y);
         if (visible) lineEl.removeAttribute("hidden");
@@ -2965,40 +3071,51 @@
     return [ShareUrl.fixedDD(p.x, p.xLo || 0, shown), ShareUrl.fixedDD(p.y, p.yLo || 0, shown)];
   }
 
+  // dotColor: a point row's fill; corners: the point(s), or a line's or grid's two ends.
+  function inspectRow(type, dotColor, corners, places, onRemove) {
+    var li = document.createElement("li");
+    li.className = "inspect-row";
+    var removeBtn = document.createElement("button");
+    removeBtn.className = "inspect-row-remove";
+    removeBtn.textContent = "×";
+    removeBtn.title = "Remove this " + type;
+    removeBtn.addEventListener("click", onRemove);
+
+    var icon = document.createElement("span");
+    if (type === "point") {
+      icon.className = "inspect-dot";
+      icon.style.background = dotColor;
+    } else {
+      icon.className = "inspect-row-icon";
+      icon.setAttribute("aria-hidden", "true");
+      icon.textContent = INSPECT_ROW_GROUP_GLYPH[type];
+    }
+    var coords = document.createElement("div");
+    coords.className = "inspect-coords-group";
+    corners.forEach(function (p) {
+      var line = document.createElement("div");
+      var text = coordTexts(p, places);
+      line.textContent = text[0] + ", " + text[1];
+      coords.appendChild(line);
+    });
+    li.appendChild(icon);
+    li.appendChild(coords);
+    li.appendChild(removeBtn);
+    return li;
+  }
+
   function updateInspectList() {
     inspectListEl.innerHTML = "";
     inspectedGroups.forEach(function (group, i) {
-      var li = document.createElement("li");
-      li.className = "inspect-row";
-      var removeBtn = document.createElement("button");
-      removeBtn.className = "inspect-row-remove";
-      removeBtn.textContent = "×";
-      removeBtn.title = "Remove this " + group.type;
-      removeBtn.addEventListener("click", function () { removeInspectedGroup(i); });
-
-      var icon = document.createElement("span");
-      if (group.type === "point") {
-        icon.className = "inspect-dot";
-        icon.style.background = group.points[0].color.fill;
-      } else {
-        icon.className = "inspect-row-icon";
-        icon.setAttribute("aria-hidden", "true");
-        icon.textContent = INSPECT_ROW_GROUP_GLYPH[group.type];
-      }
-      var coords = document.createElement("div");
-      coords.className = "inspect-coords-group";
       var corners = group.type === "point" ? [group.points[0].worldPoint] : [group.startWorld, group.endWorld];
-      corners.forEach(function (p) {
-        var line = document.createElement("div");
-        var text = coordTexts(p, group.places);
-        line.textContent = text[0] + ", " + text[1];
-        coords.appendChild(line);
-      });
-      li.appendChild(icon);
-      li.appendChild(coords);
-      li.appendChild(removeBtn);
-      inspectListEl.appendChild(li);
+      inspectListEl.appendChild(inspectRow(group.type, group.type === "point" ? group.points[0].color.fill : null,
+        corners, group.places, function () { removeInspectedGroup(i); }));
     });
+    if (lockJob) {
+      var job = lockJob, d = job.describe[0];
+      inspectListEl.appendChild(inspectRow(job.type, job.colorOf(0).fill, job.type === "point" ? job.worldPoints : [d.a, d.b],
+        d.places, function () { cancelLockJob(); }));
+    }
   }
 
   // ---- Separation plot: how spread out every inspected run is, frame by frame ----
@@ -3248,34 +3365,154 @@
     btnInspectPoint.disabled = full;
     btnInspectLine.disabled = full;
     btnInspectGrid.disabled = full;
-    btnInspectClearAll.hidden = inspectedGroups.length === 0;
+    btnInspectClearAll.hidden = inspectedGroups.length === 0 && !lockJob;
     updateMovieInspectButton();
     restartCurrentPreview();
   }
   // Not while a link's points are still being rebuilt: the movie would miss the rest.
   function updateMovieInspectButton() {
-    btnMovieInspect.disabled = inspectedGroups.length === 0 || !!pendingInspect || recomputingInspect;
+    btnMovieInspect.disabled = inspectedGroups.length === 0 || !!pendingInspect || !!lockJob || recomputingInspect;
   }
   // Back from the player can bring this page back as it was left, button disabled.
   global.addEventListener("pageshow", updateMovieInspectButton);
 
-  // runHoverAt's GPU replay + wrap-stop work, run once and cached. Null on failure; the caller decides the batch.
-  function computeTrajectoryEntry(worldPoint) { return computeTrajectoryEntries([worldPoint])[0]; }
-  // One GPU run for all the points (one each at float32, see compileHoverTrajectoryGLSL); null for a point whose run failed.
-  function computeTrajectoryEntries(worldPoints) {
-    var steps = hoverStepCount(), precision = effectivePrecision(), trajectories;
-    if (worldPoints.length > 1 && !PhysicsDF.isExtended(precision)) return worldPoints.map(computeTrajectoryEntry);
-    try {
-      var p = worldPoints[0];
-      var compiled = worldPoints.length > 1 ? PhysicsGridCodegen.compileHoverBatchGLSL(scene, worldPoints, steps, precision)
-        : PhysicsGridCodegen.compileHoverTrajectoryGLSL(scene, p.x, p.y, steps, precision, p.xLo, p.yLo);
-      trajectories = PhysicsGPU.runCompiledTrajectoriesOnGPU(compiled, steps);
-    } catch (err) {
-      // A batch fails as a whole: one at a time, so one bad point doesn't take the rest with it.
-      if (worldPoints.length > 1) return worldPoints.map(computeTrajectoryEntry);
-      return [null];
+  // ---- Inspect runs between tasks, so the page keeps responding ----
+  var INSPECT_TASK_MS = 12;
+  // How often a run waiting on its program's background build looks again.
+  var PROGRAM_POLL_MS = 50;
+  function preparingText(precision) { return "Preparing " + PRECISION_TITLES[precision].toLowerCase() + "\u2026"; }
+  // Runs the next slice as soon as pending input and frames have had their turn.
+  var sliceChannel = new MessageChannel(), sliceQueue = [];
+  sliceChannel.port1.onmessage = function () { sliceQueue.shift()(); };
+  function nextSlice(fn) {
+    sliceQueue.push(fn);
+    sliceChannel.port2.postMessage(null);
+  }
+
+  // One GPU run of `compiled`, a slice per task, once its program has built (onWaiting is called meanwhile).
+  // done(err, trajectories) is called once, never before this returns; cancel() stops it.
+  function runInSteps(compiled, steps, done, onWaiting) {
+    var handle = { job: null, timer: null, progress: 0, cancelled: false, waiting: false };
+    function pump() {
+      handle.timer = null;
+      if (handle.cancelled) return;
+      var finished;
+      try {
+        if (!handle.job) {
+          if (PhysicsGPU.trajectoryProgramPending(compiled)) {
+            handle.waiting = true;
+            if (onWaiting) onWaiting();
+            handle.timer = setTimeout(pump, PROGRAM_POLL_MS);
+            return;
+          }
+          handle.waiting = false;
+          handle.job = PhysicsGPU.startTrajectoryRun(compiled, steps);
+        }
+        finished = handle.job.step(INSPECT_TASK_MS);
+        handle.progress = handle.job.progress;
+      } catch (err) {
+        handle.job = null;
+        done(err, null);
+        return;
+      }
+      if (!finished) {
+        nextSlice(pump);
+        return;
+      }
+      var trajectories = handle.job.trajectories;
+      handle.job = null;
+      done(null, trajectories);
     }
-    return worldPoints.map(function (p, i) { return trajectoryEntry(p, trajectories[i]); });
+    handle.cancel = function () {
+      handle.cancelled = true;
+      if (handle.timer) clearTimeout(handle.timer);
+      handle.timer = null;
+      if (handle.job) handle.job.cancel();
+      handle.job = null;
+    };
+    nextSlice(pump);
+    return handle;
+  }
+
+  // runHoverAt's replay plus its wrap-stop work for each point, at the precision and duration of now: onEntry(i, entry)
+  // in order (null for a point whose run failed), then onDone(). Above float32 the points share one run (split up
+  // by the runner); float32 keeps one run per point, see compileHoverTrajectoryGLSL. As many runs a task as fit.
+  function computeEntriesInSteps(worldPoints, onEntry, onDone, onWaiting) {
+    var precision = effectivePrecision(), steps = hoverStepCount();
+    var batched = PhysicsDF.isExtended(precision);
+    var queue = batched ? [worldPoints.map(function (p, i) { return i; })] : worldPoints.map(function (p, i) { return [i]; });
+    var handle = { timer: null, precision: precision, waiting: false, done: 0, cancelled: false };
+    // The run in hand: its points, program, job, and once read back its trajectories, the next to make an entry of.
+    var indices = null, compiled = null, job = null, trajectories = null, k = 0;
+    handle.progress = function () {
+      return (handle.done + (job ? job.progress * indices.length : 0)) / Math.max(1, worldPoints.length);
+    };
+    function pump() {
+      handle.timer = null;
+      if (handle.cancelled) return;
+      var until = performance.now() + INSPECT_TASK_MS;
+      do {
+        if (!indices) {
+          indices = queue.shift();
+          if (!indices) { onDone(); return; }
+          compiled = null;
+          trajectories = null;
+          k = 0;
+        }
+        if (trajectories) {
+          var i = indices[k], entry = null;
+          try { entry = trajectoryEntry(worldPoints[i], trajectories[k]); } catch (err) { /* as a failed run */ }
+          handle.done += 1;
+          k += 1;
+          if (k === indices.length) indices = null;
+          onEntry(i, entry);
+          continue;
+        }
+        try {
+          if (!job) {
+            if (!compiled) {
+              var points = indices.map(function (n) { return worldPoints[n]; }), p = points[0];
+              compiled = batched ? PhysicsGridCodegen.compileHoverBatchGLSL(scene, points, steps, precision)
+                : PhysicsGridCodegen.compileHoverTrajectoryGLSL(scene, p.x, p.y, steps, precision, p.xLo, p.yLo);
+            }
+            if (PhysicsGPU.trajectoryProgramPending(compiled)) {
+              handle.waiting = true;
+              if (onWaiting) onWaiting();
+              handle.timer = setTimeout(pump, PROGRAM_POLL_MS);
+              return;
+            }
+            handle.waiting = false;
+            job = PhysicsGPU.startTrajectoryRun(compiled, steps);
+          }
+          if (job.step(Math.max(0, until - performance.now()))) {
+            trajectories = job.trajectories;
+            job = null;
+          }
+        } catch (err) {
+          job = null;
+          // A batch fails as a whole: then one at a time, so one bad point doesn't take the rest with it.
+          if (indices.length > 1) {
+            queue = indices.map(function (n) { return [n]; }).concat(queue);
+            indices = null;
+          } else {
+            var failed = indices[0];
+            indices = null;
+            handle.done += 1;
+            onEntry(failed, null);
+          }
+        }
+      } while (performance.now() < until);
+      nextSlice(pump);
+    }
+    handle.cancel = function () {
+      handle.cancelled = true;
+      if (handle.timer) clearTimeout(handle.timer);
+      handle.timer = null;
+      if (job) job.cancel();
+      job = null;
+    };
+    nextSlice(pump);
+    return handle;
   }
   function trajectoryEntry(worldPoint, trajectory) {
     var isLifespan = scene.output.property === "lifespan";
@@ -3303,77 +3540,189 @@
     };
   }
 
-  // places: ShareUrl.centerDecimals at the zoom the group was picked at; the view's when left out.
-  function lockPointAt(worldPoint, places) {
-    if (totalInspectedPointCount() >= MAX_INSPECT_POINTS) return;
-    var entry = computeTrajectoryEntry(worldPoint);
-    if (!entry) return; // leave whatever was inspected before (if anything) alone
-    entry.color = lockedPointColor(nextColorIndex);
-    nextColorIndex++;
-    inspectedGroups.push({ type: "point", points: [entry], places: places === undefined ? viewPlaces() : places });
+  // ---- The lock in progress ----
+  // Its points arrive a run at a time: a row in the list, its finished dots, a progress line under the preview. A new
+  // lock, Clear All, its row's remove button, a new scene or leaving the map cancels it, and nothing of it is kept.
+  var lockJob = null;
+  var INSPECT_FULL_MESSAGE = "Inspect holds up to " + MAX_INSPECT_POINTS + " points";
+
+  // job: { type, worldPoints, describe (its share-link groups), colorOf(i), finish(entries) (true if it added a
+  // group), relock(), linkItem (a link's pending group), meshLineEls and segments for a grid }.
+  function startLockJob(job) {
+    cancelLockJob(true);
+    lockJob = job;
+    job.entries = [];
+    job.filled = 0;
+    job.steps = hoverStepCount();
+    job.generation = sceneGeneration;
+    job.armMode = inspectArmMode;
     disarmInspect();
-    updateInspectUI();
+    job.handle = computeEntriesInSteps(job.worldPoints, function (i, entry) {
+      if (entry) entry.color = job.colorOf(i);
+      job.entries[i] = entry;
+    }, function () {
+      if (lockJob !== job) return;
+      lockJob = null;
+      // The duration or the physics changed meanwhile: again, with the new runs.
+      if (job.steps !== hoverStepCount() || job.generation !== sceneGeneration) {
+        if (job.meshLineEls) job.meshLineEls.forEach(function (el) { el.remove(); });
+        job.relock();
+        return;
+      }
+      // A grid or point that failed stays armed for a retry.
+      if (!job.finish(job.entries) && job.armMode && job.type !== "line" && !inspectArmMode) armInspect(job.armMode);
+      updateInspectUI();
+    });
+    updateInspectMarkers();
+    updateInspectList();
+    btnInspectClearAll.hidden = false;
+    updateMovieInspectButton();
+  }
+
+  // requeue: a link's group gives way to the user's own lock and is rebuilt after it.
+  function cancelLockJob(requeue) {
+    if (!lockJob) return;
+    var job = lockJob;
+    lockJob = null;
+    job.handle.cancel();
+    if (job.meshLineEls) job.meshLineEls.forEach(function (el) { el.remove(); });
+    if (requeue && job.linkItem) pendingInspect = [job.linkItem].concat(pendingInspect || []);
+    updateInspectMarkers();
+    updateInspectList();
+    btnInspectClearAll.hidden = inspectedGroups.length === 0;
+    updateMovieInspectButton();
+  }
+
+  function lockJobStatus(job) {
+    if (job.handle.waiting && PhysicsDF.isExtended(job.handle.precision)) return preparingText(job.handle.precision);
+    var n = job.worldPoints.length;
+    return "Adding " + n + " point" + (n === 1 ? "" : "s") + ": " + Math.floor(100 * job.handle.progress()) + "%";
+  }
+
+  // Every frame: the lock's new dots and its line under the preview (empty, so hidden, when none runs).
+  var inspectProgressEl = document.getElementById("inspect-progress");
+  function showLockProgress() {
+    var job = lockJob, text = job ? lockJobStatus(job) : "";
+    if (inspectProgressEl.textContent !== text) inspectProgressEl.textContent = text;
+    if (job && job.handle.done !== job.filled) {
+      job.filled = job.handle.done;
+      updateInspectMarkers();
+    }
+  }
+
+  // places: ShareUrl.centerDecimals at the zoom the group was picked at; the view's when left out.
+  function lockPointAt(worldPoint, places, linkItem) {
+    lockPoints([worldPoint], places, linkItem);
+  }
+
+  // A point group per point, all of them or none when they don't fit.
+  function lockPoints(worldPoints, places, linkItem) {
+    if (MAX_INSPECT_POINTS - totalInspectedPointCount() < worldPoints.length) {
+      global.AppMessage.toast(INSPECT_FULL_MESSAGE);
+      return;
+    }
+    if (places === undefined) places = viewPlaces();
+    var firstColor = nextColorIndex;
+    startLockJob({
+      type: "point", worldPoints: worldPoints, linkItem: linkItem,
+      describe: worldPoints.map(function (p) { return { type: "point", a: p, places: places }; }),
+      colorOf: function (i) { return lockedPointColor(firstColor + i); },
+      relock: function () { lockPoints(worldPoints, places, linkItem); },
+      finish: function (entries) {
+        var added = false;
+        entries.forEach(function (entry) {
+          if (!entry) return; // leave whatever was inspected before (if anything) alone
+          entry.color = lockedPointColor(nextColorIndex);
+          nextColorIndex++;
+          inspectedGroups.push({ type: "point", points: [entry], places: places });
+          added = true;
+        });
+        return added;
+      },
+    });
   }
 
   // Inspect (Line) drag. Past MAX_INSPECT_POINTS only the first `available` points are added.
-  function lockLineOfPoints(startWorld, endWorld, sampleCount, places) {
+  // relocked: the same line again at a new duration, already toasted if it was cut.
+  function lockLineOfPoints(startWorld, endWorld, sampleCount, places, linkItem, relocked) {
     sampleCount = sampleCount || inspectLineSampleCount;
     var available = MAX_INSPECT_POINTS - totalInspectedPointCount();
-    if (available <= 0) return; // stays armed: Clear All (or removing a point) might free up room to retry
-    var worldPoints = evenlySpacedPoints(startWorld, endWorld, sampleCount);
-    var entries = computeTrajectoryEntries(worldPoints.slice(0, Math.min(worldPoints.length, available)));
-    var points = [];
-    entries.forEach(function (entry, i) {
-      if (!entry) return; // don't let one bad point abort the rest of the line
-      entry.color = inspectLinePointColor(i, sampleCount);
-      points.push(entry);
-    });
-    disarmInspect();
-    if (points.length > 0) {
-      inspectedGroups.push({
-        type: "line", points: points, startWorld: startWorld, endWorld: endWorld, sampleCount: sampleCount,
-        places: places === undefined ? viewPlaces() : places,
-      });
+    if (available <= 0) {
+      // Stays armed: Clear All (or removing a point) might free up room to retry.
+      global.AppMessage.toast(INSPECT_FULL_MESSAGE);
+      return;
     }
-    updateInspectUI();
+    var worldPoints = evenlySpacedPoints(startWorld, endWorld, sampleCount);
+    if (worldPoints.length > available && !relocked) global.AppMessage.toast(INSPECT_FULL_MESSAGE + ", so this line was cut short");
+    if (places === undefined) places = viewPlaces();
+    startLockJob({
+      type: "line", worldPoints: worldPoints.slice(0, available), linkItem: linkItem,
+      describe: [{ type: "line", a: startWorld, b: endWorld, count: sampleCount, places: places }],
+      colorOf: function (i) { return inspectLinePointColor(i, sampleCount); },
+      relock: function () { lockLineOfPoints(startWorld, endWorld, sampleCount, places, linkItem, true); },
+      finish: function (entries) {
+        // One bad point doesn't abort the rest of the line.
+        var points = entries.filter(Boolean);
+        if (points.length === 0) return false;
+        inspectedGroups.push({
+          type: "line", points: points, startWorld: startWorld, endWorld: endWorld, sampleCount: sampleCount, places: places,
+        });
+        return true;
+      },
+    });
   }
 
   // Inspect (Grid) drag. All-or-nothing (a partial grid reads as broken), staying armed on failure. The layout is
   // resolved from Grid Settings once, here: a later settings change only affects the NEXT drag.
-  function lockGridOfPoints(startWorld, endWorld, gridSize, twoPart, places) {
+  function lockGridOfPoints(startWorld, endWorld, gridSize, twoPart, places, linkItem) {
     if (gridSize === undefined) { gridSize = inspectGridSize; twoPart = inspectGridTwoPart; }
     var layout = computeGridLayout(gridSize, twoPart);
     var worldPoints = evenlySpacedGrid(startWorld, endWorld, layout.size, layout.size)
       .filter(function (p) { return isAxisIn(layout.axes, p.row) || isAxisIn(layout.axes, p.col); });
-    if (MAX_INSPECT_POINTS - totalInspectedPointCount() < worldPoints.length) return;
-    var points = computeTrajectoryEntries(worldPoints);
-    if (points.indexOf(null) !== -1) return;
-    points.forEach(function (entry, i) { entry.color = inspectGridPointColor(worldPoints[i].col, worldPoints[i].row, layout.size); });
+    if (MAX_INSPECT_POINTS - totalInspectedPointCount() < worldPoints.length) {
+      global.AppMessage.toast(INSPECT_FULL_MESSAGE);
+      return;
+    }
+    if (places === undefined) places = viewPlaces();
+    function colorOf(i) { return inspectGridPointColor(worldPoints[i].col, worldPoints[i].row, layout.size); }
     var segments = buildGridMeshSegments(worldPoints, layout.axes, layout.size);
+    // Shown segment by segment as both ends arrive.
     var meshLineEls = segments.map(function (pair) {
       var lineEl = document.createElementNS(SVG_NS, "line");
       lineEl.setAttribute("stroke-width", "2");
-      lineEl.setAttribute("stroke", averageRgbFill(points[pair[0]].color, points[pair[1]].color));
+      lineEl.setAttribute("stroke", averageRgbFill(colorOf(pair[0]), colorOf(pair[1])));
+      lineEl.setAttribute("hidden", "");
       inspectPreviewSvg.appendChild(lineEl);
       return lineEl;
     });
-    inspectedGroups.push({
-      type: "grid",
-      points: points,
-      cols: layout.size,
-      rows: layout.size,
-      segments: segments,
-      meshLineEls: meshLineEls,
-      outputBodyIndex: inspectGridOutputBodyIndex(),
-      startWorld: startWorld,
-      endWorld: endWorld,
-      // What it was made with (the resolved layout can't be read back), for share links.
-      gridSize: gridSize,
-      twoPart: !!twoPart,
-      places: places === undefined ? viewPlaces() : places,
+    startLockJob({
+      type: "grid", worldPoints: worldPoints, linkItem: linkItem, segments: segments, meshLineEls: meshLineEls,
+      describe: [{ type: "grid", a: startWorld, b: endWorld, size: gridSize, twoPart: !!twoPart, places: places }],
+      colorOf: colorOf,
+      relock: function () { lockGridOfPoints(startWorld, endWorld, gridSize, twoPart, places, linkItem); },
+      finish: function (points) {
+        if (points.indexOf(null) !== -1) {
+          meshLineEls.forEach(function (el) { el.remove(); });
+          return false;
+        }
+        inspectedGroups.push({
+          type: "grid",
+          points: points,
+          cols: layout.size,
+          rows: layout.size,
+          segments: segments,
+          meshLineEls: meshLineEls,
+          outputBodyIndex: inspectGridOutputBodyIndex(),
+          startWorld: startWorld,
+          endWorld: endWorld,
+          // What it was made with (the resolved layout can't be read back), for share links.
+          gridSize: gridSize,
+          twoPart: !!twoPart,
+          places: places,
+        });
+        return true;
+      },
     });
-    disarmInspect();
-    updateInspectUI();
   }
 
   function removeInspectedGroup(index) {
@@ -3388,6 +3737,8 @@
   }
 
   function clearInspected() {
+    cancelLockJob();
+    cancelRecompute();
     inspectedGroups.forEach(function (group) {
       if (group.type === "grid") group.meshLineEls.forEach(function (el) { el.remove(); });
     });
@@ -3554,7 +3905,8 @@
     }
   }
   function noteGpuTime(b, spent, budgetThen, ms, now) {
-    var share = userIsInteracting(now) ? GPU_SHARE_INTERACTING : GPU_SHARE_IDLE;
+    // An Inspect run in flight shares the GPU the same way: its chunks wait behind the map's.
+    var share = userIsInteracting(now) || inspectRunning() ? GPU_SHARE_INTERACTING : GPU_SHARE_IDLE;
     var targetMs = frameBaseMs() * share;
     perfStats.gpuMs = ms;
     // Only a frame that spent most of its budget measures its cost (a short one is overhead); a LONG one always does.
@@ -4710,7 +5062,7 @@
   function endDrag(clientX, clientY) {
     if (dragging) {
       var current = snappedWorldPointFromEvent({ clientX: clientX, clientY: clientY });
-      // Hidden BEFORE locking: each lock runs a GPU trajectory per point synchronously; a preview left up looks frozen.
+      // The lock's own dots and row take over from the drag preview.
       hideInspectPreview();
       var wasTap = dragIsTouch ? !dragPastSlop : dragDistance < CLICK_DRAG_THRESHOLD;
       if (wasTap) {
@@ -4887,44 +5239,40 @@
   }
   // Locked points cached OLD-length trajectories: recompute in place, keeping colors. A failed point
   // group is removed; a line/grid point keeps its stale trajectory so the group's shape survives.
-  // One point per task, so the page stays usable and a newer duration cancels the rest.
-  var recomputeJob = 0;
+  // A group at a time through computeEntriesInSteps, so the page stays usable and a newer duration cancels the rest.
+  var recomputeHandle = null;
   var recomputingInspect = false;
+  function cancelRecompute() {
+    if (recomputeHandle) recomputeHandle.cancel();
+    recomputeHandle = null;
+    recomputingInspect = false;
+  }
   function recomputeLockedTrajectories() {
-    var job = ++recomputeJob;
-    // A group per GPU run where runs batch, else a point per run; yielding between runs.
-    var batched = PhysicsDF.isExtended(effectivePrecision());
-    var queue = [];
-    inspectedGroups.forEach(function (group) {
-      if (batched) queue.push({ group: group, from: 0, to: group.points.length });
-      else group.points.forEach(function (point, i) { queue.push({ group: group, from: i, to: i + 1 }); });
-    });
+    cancelRecompute();
+    var groups = inspectedGroups.slice();
     recomputingInspect = true;
     updateMovieInspectButton();
-    function next() {
-      if (job !== recomputeJob) return;
-      var item = queue.shift();
-      if (!item) {
+    function nextGroup() {
+      var group = groups.shift();
+      while (group && inspectedGroups.indexOf(group) < 0) group = groups.shift();
+      if (!group) {
+        recomputeHandle = null;
         recomputingInspect = false;
         updateInspectUI();
         return;
       }
-      var group = item.group;
-      if (inspectedGroups.indexOf(group) >= 0) {
-        var entries = computeTrajectoryEntries(group.points.slice(item.from, item.to).map(function (p) { return p.worldPoint; }));
-        entries.forEach(function (entry, k) {
-          var i = item.from + k;
-          if (entry) {
-            entry.color = group.points[i].color;
-            group.points[i] = entry;
-          } else if (group.type === "point") {
-            inspectedGroups.splice(inspectedGroups.indexOf(group), 1);
-          }
-        });
-      }
-      setTimeout(next, 0);
+      recomputeHandle = computeEntriesInSteps(group.points.map(function (p) { return p.worldPoint; }), function (i, entry) {
+        var at = inspectedGroups.indexOf(group);
+        if (at < 0) return;
+        if (entry) {
+          entry.color = group.points[i].color;
+          group.points[i] = entry;
+        } else if (group.type === "point") {
+          inspectedGroups.splice(at, 1);
+        }
+      }, nextGroup);
     }
-    setTimeout(next, 0);
+    nextGroup();
   }
   syncStepsUI();
   stepsSlider.addEventListener("input", function () { updateStepsUI(stepsFromSlider()); });
@@ -5357,6 +5705,7 @@
   }
 
   function showHoverEmpty(message) {
+    cancelHoverRun();
     stopHoverReplay();
     releaseMapFollow();
     if (hoverUpgradeTimer) { clearTimeout(hoverUpgradeTimer); hoverUpgradeTimer = null; }
@@ -5748,6 +6097,7 @@
   }
 
   function showHoverInstant(worldPoint) {
+    cancelHoverRun();
     var offsetScene;
     try {
       offsetScene = PhysicsGridCodegen.computeOffsetSceneNumeric(scene, worldPoint.x, worldPoint.y);
@@ -5977,6 +6327,7 @@
   // The one entry point for showing something new: starts at 0 so a newly added point is in sync, and
   // stops whatever was animating so a slow compile can't draw over a later session.
   function beginPlaybackSession(replay, autoplay) {
+    cancelHoverRun();
     if (autoplay === undefined) autoplay = true;
     if (userPaused) autoplay = false;
     stopHoverReplay();
@@ -6077,7 +6428,9 @@
   function replayAt(worldPoint, precision) {
     var steps = hoverStepCount();
     var compiled = PhysicsGridCodegen.compileHoverTrajectoryGLSL(scene, worldPoint.x, worldPoint.y, steps, precision, worldPoint.xLo, worldPoint.yLo);
-    var trajectory = PhysicsGPU.runCompiledTrajectoryOnGPU(compiled, steps);
+    return replayFromTrajectory(worldPoint, PhysicsGPU.runCompiledTrajectoryOnGPU(compiled, steps));
+  }
+  function replayFromTrajectory(worldPoint, trajectory) {
     if (trajectory.length === 0) return { trajectory: trajectory };
     var isLifespan = scene.output.property === "lifespan";
     var stopStep = null, wrapOverride = null, lifespanValue = simulationSteps;
@@ -6113,19 +6466,49 @@
     };
   }
 
+  // The hover replay in flight (runInSteps); whatever the panel shows next cancels it.
+  var hoverRun = null;
+  // A run waiting on its program's build uses no GPU yet.
+  function inspectRunning() {
+    return [hoverRun, lockJob && lockJob.handle, recomputeHandle].some(function (h) { return h && !h.waiting; });
+  }
+  function cancelHoverRun() {
+    if (hoverRun) hoverRun.cancel();
+    hoverRun = null;
+  }
   function runHoverAt(worldPoint) {
-    var replay;
-    try {
-      // At the grid's current precision, so the replay is of the pixel under the cursor, not a float32 approximation.
-      replay = replayAt(worldPoint, effectivePrecision());
-    } catch (err) {
+    cancelHoverRun();
+    // At the grid's current precision, so the replay is of the pixel under the cursor, not a float32 approximation.
+    var precision = effectivePrecision(), steps = hoverStepCount(), compiled;
+    function failed(err) {
       global.AppMessage.toast("Couldn't replay this point: " + (err.message || err));
       showHoverEmpty();
+    }
+    try {
+      compiled = PhysicsGridCodegen.compileHoverTrajectoryGLSL(scene, worldPoint.x, worldPoint.y, steps, precision, worldPoint.xLo, worldPoint.yLo);
+    } catch (err) {
+      failed(err);
       return;
     }
-    if (replay.trajectory.length === 0) { global.AppMessage.toast("This scene has no bodies to replay."); showHoverEmpty(); return; }
-    // Following the map, a run is user-started: land on the first frame and wait.
-    beginPlaybackSession(replay, /* autoplay */ !mapFollowsInspect());
+    var run = hoverRun = runInSteps(compiled, steps, function (err, trajectories) {
+      if (hoverRun !== run) return;
+      hoverRun = null;
+      var replay;
+      try {
+        if (err) throw err;
+        replay = replayFromTrajectory(worldPoint, trajectories[0]);
+      } catch (e) {
+        failed(e);
+        return;
+      }
+      if (replay.trajectory.length === 0) { global.AppMessage.toast("This scene has no bodies to replay."); showHoverEmpty(); return; }
+      // Following the map, a run is user-started: land on the first frame and wait.
+      beginPlaybackSession(replay, /* autoplay */ !mapFollowsInspect());
+    }, function () {
+      if (hoverRun !== run || !PhysicsDF.isExtended(precision)) return;
+      var hovered = coordTexts(worldPoint, viewPlaces());
+      hoverReadout.textContent = "X: " + hovered[0] + ", Y: " + hovered[1] + " - " + preparingText(precision).toLowerCase();
+    });
   }
 
   // Cursor off the grid with points inspected: keep playing them together instead of the empty state.
@@ -6145,13 +6528,15 @@
     if (key === hoverKey) return; // already showing (or about to show) this exact cell
     hoverKey = key;
     hoverWorldPoint = world;
-    // Updated above regardless, so removing the last inspected point can fall back to this cell; with any point locked the panel is theirs.
-    if (inspectedGroups.length > 0 || hoverPreviewSuppressed()) return;
+    // Updated above regardless, so removing the last inspected point can fall back to this cell; with any point locked
+    // (or being locked) the panel is theirs.
+    if (inspectedGroups.length > 0 || lockJob || hoverPreviewSuppressed()) return;
     stopHoverReplay(); // a previous cell's replay may still be animating: don't let it keep drawing over the new cell's preview
     if (hoverUpgradeTimer) clearTimeout(hoverUpgradeTimer);
     showHoverInstant(world);
     hoverUpgradeTimer = setTimeout(function () {
       if (key !== hoverKey) return; // cursor moved on before the dwell delay elapsed: superseded
+      if (inspectedGroups.length > 0) return; // a lock finished meanwhile and its group has the panel
       runHoverAt(world);
     }, HOVER_UPGRADE_DELAY_MS);
   });
@@ -8248,8 +8633,10 @@
     pumpPlaybackBuilds();
     prewarmPasses();
     pollBounceMax();
+    pumpColorSpreadProbe();
     refreshBuildStatus();
     pumpPendingInspect();
+    showLockProgress();
     retryCalibrations(now);
     if (dirty) { resetProgressive(); dirty = false; }
     releasePlaybackIfViewMoved();
@@ -8278,6 +8665,8 @@
   };
   // Leaving the grid for the editor (transition.js): hiding #grid-view stops neither the preview loop, its sounds, nor the timeline.
   global.FractalGrid.pausePlayback = function () {
+    cancelLockJob();
+    cancelHoverRun();
     pausePlayback();
     endExport(null);
     releaseAllPlayback();
@@ -9396,7 +9785,7 @@
   // until then). draw() paints step `step` as the preview does, scaled up from its size, lines and all. look:
   // { background: "plain" (the preview's), "grid" (the editor's over that) or "black", filled: outlined bodies solid }.
   global.FractalGrid.inspectTab = function (snapshot, look) {
-    if (!snapshot && pendingInspect) return null;
+    if (!snapshot && (pendingInspect || lockJob)) return null;
     var groups = snapshot ? unpackInspectGroups(snapshot.groups) : inspectedGroups;
     var background = look && look.background, filled = !!(look && look.filled);
     var fill = background === "black" ? "#000" : global.getComputedStyle(hoverCanvas.parentNode).backgroundColor;
@@ -9493,19 +9882,19 @@
     return { type: "grid", a: group.startWorld, b: group.endWorld, size: group.gridSize, twoPart: group.twoPart, places: group.places };
   }
 
-  // One group a frame, none until the map has drawn a couple of frames (each
-  // point is a shader compiled on the spot), and none until the view's precision
-  // is built: the float32 stand-in can't tell a deep zoom's points apart.
+  // One group at a time (each a lock job), none until the map has drawn a couple
+  // of frames, and none until the view's precision is built: the float32
+  // stand-in can't tell a deep zoom's points apart.
   function pumpPendingInspect() {
-    if (!pendingInspect) return;
+    if (!pendingInspect || lockJob) return;
     if (++pendingInspectFrames < 3) return;
     var wanted = pickPrecision();
     if (effectivePrecision() !== wanted && precisionPending(wanted)) return;
     var next = pendingInspect.shift();
     if (!pendingInspect.length) pendingInspect = null;
-    if (next.type === "point") lockPointAt(next.a, next.places);
-    else if (next.type === "line") lockLineOfPoints(next.a, next.b, next.count, next.places);
-    else lockGridOfPoints(next.a, next.b, next.size, next.twoPart, next.places);
+    if (next.type === "point") lockPointAt(next.a, next.places, next);
+    else if (next.type === "line") lockLineOfPoints(next.a, next.b, next.count, next.places, next);
+    else lockGridOfPoints(next.a, next.b, next.size, next.twoPart, next.places, next);
     // A last group that failed to lock leaves the button as it was.
     if (!pendingInspect) updateMovieInspectButton();
   }
@@ -9515,7 +9904,7 @@
     var shared = {};
     Object.keys(scene).forEach(function (k) { shared[k] = scene[k]; });
     shared.simulationSteps = simulationSteps;
-    var inspect = inspectedGroups.map(describeInspectGroup).concat(pendingInspect || []);
+    var inspect = inspectedGroups.map(describeInspectGroup).concat(lockJob ? lockJob.describe : [], pendingInspect || []);
     return {
       scene: shared,
       view: {
@@ -10048,16 +10437,18 @@
     global.location.reload();
   }
   function reloadIntoMap(sceneForMap) {
+    var fragment = null;
     try {
-      var fragment = global.ShareUrl.encode({
+      fragment = global.ShareUrl.encode({
         page: global.ShareUrl.PAGE_MAP,
         scene: global.PhysicsCoords.toAuthoredJSON(sceneForMap),
+        view: { precision: precisionMode, volume: PhysicsSound.getVolume() },
       });
-      global.history.replaceState(null, "", "#" + fragment);
     } catch (err) {
       // Reloads where it is, then: the editor, with the scene it auto-saved.
     }
-    global.location.reload();
+    if (fragment && global.AppShell) global.AppShell.reloadTo(fragment);
+    else global.location.reload();
   }
 
   var contextRecoveryTimer = null;
@@ -10076,13 +10467,15 @@
     cur.precision = precisionMode;
     var lowered = lowerPerfValues(cur);
     if (drawLengthLocked) lowered.drawMs = cur.drawMs; // held at its first stop: not a change
-    var changed = !samePerfValues(cur, lowered) || simulationSteps > PERF_LOWERED_MAX_STEPS;
+    var shortened = simulationSteps > PERF_LOWERED_MAX_STEPS;
+    var settingsLowered = !samePerfValues(cur, lowered);
+    var changed = settingsLowered || shortened;
     precisionMode = lowered.precision;
-    if (simulationSteps > PERF_LOWERED_MAX_STEPS) {
+    if (shortened) {
       simulationSteps = scene.simulationSteps = PERF_LOWERED_MAX_STEPS;
       if (global.PhysicsUI && global.PhysicsUI.setSimulationSteps) global.PhysicsUI.setSimulationSteps(PERF_LOWERED_MAX_STEPS);
     }
-    try { global.sessionStorage.setItem(PERF_LOWERED_KEY, JSON.stringify({ perf: lowered, toast: changed, readout: perfReadoutShown })); } catch (err) { /* see above */ }
+    try { global.sessionStorage.setItem(PERF_LOWERED_KEY, JSON.stringify({ perf: lowered, settings: settingsLowered, steps: shortened, readout: perfReadoutShown })); } catch (err) { /* see above */ }
     return changed;
   }
 

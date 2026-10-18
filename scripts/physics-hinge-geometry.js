@@ -5,13 +5,6 @@
 (function (global) {
   "use strict";
 
-  function findWorldHinge(scene, bodyIndex) {
-    for (var i = 0; i < scene.hinges.length; i++) {
-      if (scene.hinges[i].bodyA === null && scene.hinges[i].bodyB === bodyIndex) return scene.hinges[i];
-    }
-    return null;
-  }
-
   // The incoming hinge pinning bodyIndex to the world or a parent body; at most one per body.
   function findOwnHinge(scene, bodyIndex) {
     for (var i = 0; i < scene.hinges.length; i++) {
@@ -67,14 +60,25 @@
     });
   }
 
-  // A world hinge's pin is not derived from any body: shift it too, or Play snaps the body back.
+  // Every body joined to bodyIndex through body-to-body hinges, either direction; bodyIndex first.
+  function hingeAssembly(scene, bodyIndex) {
+    var members = [bodyIndex], seen = {};
+    seen[bodyIndex] = true;
+    for (var k = 0; k < members.length; k++) {
+      for (var i = 0; i < scene.hinges.length; i++) {
+        var h = scene.hinges[i];
+        if (h.bodyA === null) continue;
+        var other = h.bodyA === members[k] ? h.bodyB : h.bodyB === members[k] ? h.bodyA : -1;
+        if (other !== -1 && !seen[other]) { seen[other] = true; members.push(other); }
+      }
+    }
+    return members;
+  }
+
+  // Moves the body's whole hinge assembly rigidly with its background pins, so every joint stays closed.
   function translateBodyPreservingHinges(scene, bodyIndex, dx, dy) {
     if (dx === 0 && dy === 0) return;
-    var worldHinge = findWorldHinge(scene, bodyIndex);
-    if (worldHinge) {
-      worldHinge.localAnchorA = { x: worldHinge.localAnchorA.x + dx, y: worldHinge.localAnchorA.y + dy };
-    }
-    translateBodyAndDescendants(scene, bodyIndex, dx, dy, {});
+    global.PhysicsEngine.translateSpringGroup(scene, { members: hingeAssembly(scene, bodyIndex) }, dx, dy);
   }
 
   // Runs `mutate` on bodyIndex; if hinged (world or parent), keeps that pin fixed and drags descendants along.
@@ -145,7 +149,7 @@
     return { dx: dx, dy: dy };
   }
 
-  // Hinged TO another body: never wrapped on its own (its root's cascade carries it) or the joint tears.
+  // Hinged to another body: the bodyB of a body-to-body hinge.
   function isHingeChild(scene, bodyIndex) {
     for (var i = 0; i < scene.hinges.length; i++) {
       if (scene.hinges[i].bodyB === bodyIndex && scene.hinges[i].bodyA !== null) return true;
@@ -153,20 +157,26 @@
     return false;
   }
 
+  // The member whose position decides when a hinge assembly wraps: its lowest root, else its lowest index.
+  function hingeAssemblyLeader(scene, bodyIndex) {
+    var members = hingeAssembly(scene, bodyIndex).sort(function (a, b) { return a - b; });
+    for (var k = 0; k < members.length; k++) if (!isHingeChild(scene, members[k])) return members[k];
+    return members[0];
+  }
+
   function normalizeBodyIntoFrame(scene, bodyIndex) {
     var delta = frameWrapDelta(scene.bodies[bodyIndex], scene.frameWidth, scene.frameHeight);
     if (delta.dx !== 0 || delta.dy !== 0) translateBodyPreservingHinges(scene, bodyIndex, delta.dx, delta.dy);
   }
 
-  // Wraps only root bodies; each root's cascade fixes its subtree in one pass. bySpringGroup settles
-  // sprung bodies as the engine wraps them (tethered: not at all; else as one, by its leader).
+  // Wraps each hinge assembly once, by its leader. bySpringGroup settles sprung bodies as the
+  // engine wraps them (tethered: not at all; else as one, by its leader).
   function normalizeAllBodiesIntoFrame(scene, bySpringGroup) {
     if (!scene.frameWidth || !scene.frameHeight) return;
     var groups = bySpringGroup ? global.PhysicsEngine.springGroups(scene) : null;
     for (var i = 0; i < scene.bodies.length; i++) {
-      if (isHingeChild(scene, i)) continue;
       var group = groups ? groups.groupOf[i] : null;
-      if (!group) { normalizeBodyIntoFrame(scene, i); continue; }
+      if (!group) { if (hingeAssemblyLeader(scene, i) === i) normalizeBodyIntoFrame(scene, i); continue; }
       if (group.tethered || group.leader !== i) continue;
       var delta = frameWrapDelta(scene.bodies[i], scene.frameWidth, scene.frameHeight);
       if (delta.dx !== 0 || delta.dy !== 0) global.PhysicsEngine.translateSpringGroup(scene, group, delta.dx, delta.dy);
@@ -276,6 +286,8 @@
     offscreenPointer: offscreenPointer,
     findOwnHinge: findOwnHinge,
     hingeWorldPointA: hingeWorldPointA,
+    hingeAssembly: hingeAssembly,
+    hingeAssemblyLeader: hingeAssemblyLeader,
     translateBodyPreservingHinges: translateBodyPreservingHinges,
     applyBodyEditPreservingHinge: applyBodyEditPreservingHinge,
     frameHalfExtent: frameHalfExtent,

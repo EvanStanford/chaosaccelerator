@@ -3,19 +3,19 @@
     {
       "id": "fast-forward",
       "title": "Fast Forward",
-      "scene": "body:ci:-68.2617:371.9414:0:30;ln:-155:160:-.7854:350!;ln:155:160:-.7854:350!;ln:155:-87.5:-2.3562:350!;ln:-155:-87.5:-2.3562:350!,xinp:0.vx,yinp:0.vy,outp:0.y,edge:wrap,step:80,frmw:1192,frmh:862,ctry:430",
+      "scene": "body:ci:-68.2617:371.9414:0:30;ln:-155:160:-.7854:350!;ln:155:160:-.7854:350!;ln:155:-87.5:-2.3562:350!;ln:-155:-87.5:-2.3562:350!,xinp:0.vx,yinp:0.vy,outp:0.y,edge:wrap,step:80,frmw:1192,frmh:862,ctry:430,prec:f32",
       "goal": [
         1,
         2,
         3,
         4
       ],
-      "video": "media/fast-forward.mp4?v=m133"
+      "video": "media/fast-forward.mp4?v=m135"
     },
     {
       "id": "fast-forward-2",
       "title": "Fast Forward, Level 2",
-      "scene": "body:ci:-68.2617:371.9414:0:30;ln:-155:160:-.7854:350!;ln:155:160:-.7854:350!;ln:155:-87.5:-2.3562:350!;ln:-155:-87.5:-2.3562:350!,xinp:0.vx,yinp:0.vy,outp:0.y,edge:wrap,step:142,frmw:1192,frmh:862,ctry:600",
+      "scene": "body:ci:-68.2617:371.9414:0:30;ln:-155:160:-.7854:350!;ln:155:160:-.7854:350!;ln:155:-87.5:-2.3562:350!;ln:-155:-87.5:-2.3562:350!,xinp:0.vx,yinp:0.vy,outp:0.y,edge:wrap,step:142,frmw:1192,frmh:862,ctry:600,prec:f32",
       "goal": [
         1,
         2,
@@ -26,7 +26,7 @@
         3,
         4
       ],
-      "video": "media/fast-forward-2.mp4?v=m133"
+      "video": "media/fast-forward-2.mp4?v=m135"
     },
     {
       "id": "triple-rally",
@@ -40,7 +40,7 @@
         3,
         2
       ],
-      "video": "media/triple-rally.mp4?v=m133"
+      "video": "media/triple-rally.mp4?v=m135"
     },
     {
       "id": "double-dribble",
@@ -56,7 +56,7 @@
         1,
         1
       ],
-      "video": "media/double-dribble.mp4?v=m133"
+      "video": "media/double-dribble.mp4?v=m135"
     },
     {
       "id": "downhill-dribble",
@@ -71,19 +71,19 @@
         3,
         3
       ],
-      "image": "media/downhill-dribble.png?v=m133"
+      "image": "media/downhill-dribble.png?v=m135"
     },
     {
       "id": "frequent-flyer",
       "title": "Frequent Flyer",
-      "scene": "body:ci:-59.1484:244.0703:0:30;po:-258.7266:-33.2336:-.5392:200!;pg:143.6172:-33.1492:-5.6352:66.6667!,xinp:0.vx,yinp:0.vy,outp:0.x,edge:wrap,step:300,frmw:1192,frmh:862,zoom:.25",
+      "scene": "body:ci:-59.1484:244.0703:0:30;po:-258.7266:-33.2336:-.5392:200!;pg:143.6172:-33.1492:-5.6352:66.6667!,xinp:0.vx,yinp:0.vy,outp:0.x,edge:wrap,step:300,frmw:1192,frmh:862,zoom:.25,prec:f32",
       "goal": [
         "w2",
         "w2",
         "w2",
         "w2"
       ],
-      "image": "media/frequent-flyer.png?v=m133"
+      "image": "media/frequent-flyer.png?v=m135"
     }
   ]
 }

@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#1b1e27">
 <title>Physics Fractal: Movie</title>
-<link rel="stylesheet" href="scripts/chaosplayback.css?v=m133">
+<link rel="stylesheet" href="scripts/chaosplayback.css?v=m135">
 </head>
 <body>
 
@@ -15,7 +15,7 @@
      starts. It sits UNDER #screen, not hidden: a frame that is not painted gets no animation frames. -->
 
 <header id="player-bar">
-  <a id="back-to-map" class="bar-link" href="chaos.html">&larr; Back to map</a>
+  <a id="back-to-map" class="bar-link" href="chaos.html" data-back>&larr; Back to map</a>
   <span id="movie-facts"></span>
   <label id="inspect-field" class="bar-select" hidden title="Show the simulation at the center of the most zoomed-in keyframe, in step with the movie.">
     <span>Inspect point</span>
@@ -101,11 +101,12 @@
   </button>
 </footer>
 
-<script src="scripts/share-url.js?v=m133"></script>
-<script src="scripts/movie-path.js?v=m133"></script>
-<script src="scripts/movie-store.js?v=m133"></script>
-<script src="scripts/mp4-muxer.js?v=m133"></script>
-<script src="scripts/physics-sound.js?v=m133"></script>
-<script src="scripts/chaosplayback.js?v=m133"></script>
+<script src="scripts/share-url.js?v=m135"></script>
+<script src="scripts/movie-path.js?v=m135"></script>
+<script src="scripts/movie-store.js?v=m135"></script>
+<script src="scripts/mp4-muxer.js?v=m135"></script>
+<script src="scripts/physics-sound.js?v=m135"></script>
+<script src="scripts/back-link.js?v=m135"></script>
+<script src="scripts/chaosplayback.js?v=m135"></script>
 </body>
 </html>

@@ -482,9 +482,9 @@
     }
     if (view.display && view.display !== "standard") fields.push("disp:" + DISPLAY_CODES[view.display]);
     if (view.lowSaturation === true) fields.push("lsat:t");
-    if (view.precision && view.precision !== "f32") fields.push("prec:" + view.precision);
+    if (view.precision && view.precision !== "auto") fields.push("prec:" + view.precision);
     if (view.speed !== undefined && num(view.speed) !== "1") fields.push("sped:" + num(view.speed));
-    if (view.volume !== undefined && num(view.volume) !== "1") fields.push("snd:" + num(view.volume));
+    if (view.volume !== undefined && num(view.volume) !== "0") fields.push("snd:" + num(view.volume));
     if (view.inspect && view.inspect.length) {
       var frame = inspectFrame(center, readZoom);
       fields.push("insp:" + view.inspect.map(function (group) { return encodeInspect(group, frame); }).join(";"));
@@ -507,9 +507,10 @@
   }
 
   function decodeView(fields) {
+    var unread = [];
     function attempt(key, read, fallback) {
       if (fields[key] === undefined) return fallback;
-      try { return read(fields[key]); } catch (err) { return fallback; }
+      try { return read(fields[key]); } catch (err) { unread.push(key); return fallback; }
     }
     var cx = attempt("ctrx", function (t) { return parseDD(t, "ctrx"); }, [0, 0]);
     var cy = attempt("ctry", function (t) { return parseDD(t, "ctry"); }, [0, 0]);
@@ -521,9 +522,9 @@
       zoom: zoom,
       display: attempt("disp", function (t) { return DISPLAYS_BY_CODE[t] || "standard"; }, "standard"),
       lowSaturation: attempt("lsat", function (t) { return parseBool(t, "lsat"); }, false),
-      precision: attempt("prec", function (t) { return PRECISIONS.indexOf(t) === -1 ? "f32" : t; }, "f32"),
+      precision: attempt("prec", function (t) { return PRECISIONS.indexOf(t) === -1 ? "auto" : t; }, "auto"),
       speed: attempt("sped", function (t) { return parseNum(t, "sped"); }, 1),
-      volume: attempt("snd", function (t) { return Math.min(1, Math.max(0, parseNum(t, "snd"))); }, 1),
+      volume: attempt("snd", function (t) { return Math.min(1, Math.max(0, parseNum(t, "snd"))); }, 0),
       inspect: attempt("insp", function (t) { return splitList(t).map(function (entry) { return decodeInspect(entry, frame); }); }, []),
       movie: {
         keyframes: attempt("kfrm", function (t) { return splitList(t).map(decodeKeyframe); }, []),
@@ -535,6 +536,7 @@
         filled: attempt("fill", function (t) { return parseBool(t, "fill"); }, false),
         pace: attempt("pace", function (t) { var v = parseNum(t, "pace"); return v === 0.5 || v === 0.25 ? v : 1; }, 1),
       },
+      unread: unread, // keys of fields that were there but couldn't be read, so are at their defaults
     };
   }
 

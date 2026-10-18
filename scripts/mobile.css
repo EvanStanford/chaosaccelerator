@@ -541,6 +541,7 @@ html.layout-mobile-landscape #grid-dock-sheet {
 #grid-dock-sheet #hover-preview { order: 2; }
 #grid-dock-sheet #hover-playback-controls { order: 3; margin-top: 0; }
 #grid-dock-sheet #hover-readout { order: 4; margin: 0; }
+#grid-dock-sheet #inspect-progress { order: 4; margin: 0; }
 #grid-dock-sheet #grid-inspect-panel .section-label { order: 5; margin: 4px 0 0 0; }
 #grid-dock-sheet #grid-inspect-panel .tool-grid { order: 6; }
 #grid-dock-sheet #btn-inspect-clear-all { order: 7; margin-top: 0; }

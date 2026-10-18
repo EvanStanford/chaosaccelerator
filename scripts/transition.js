@@ -328,25 +328,34 @@
       active.raf = requestAnimationFrame(frame);
     }
 
-    active = { finish: finish, raf: 0, renderAt: renderAt, durationMs: durationMs };
+    active = { finish: finish, raf: 0, renderAt: renderAt, durationMs: durationMs, fragment: opts.fragment || null };
     active.raf = requestAnimationFrame(frame);
   }
 
   function transitionTo(which, scene) {
-    // A navigation: the page being left writes itself down, then gets a new history entry.
-    syncAddress();
-    pushPending = true;
+    // A run still going ends first, or its own address write would use up this navigation's push.
+    stopActive(true);
+    if (which === "grid") {
+      syncAddress();
+      pushNext("grid", { fromEditor: PAGE_LOAD });
+    } else {
+      leaveMap();
+    }
     var instant = prefersReducedMotion() || transitionsDisabled();
     var direction = which === "grid" ? "forward" : "reverse";
     var full = !introSeen(direction);
+    var fragment = null;
     if (which === "grid") {
       global.FractalGrid.start(scene);
+      if (reloading) return;
+      fragment = startedMapFragment(scene);
       global.FractalGrid.setScale(global.FractalGrid.defaultScale() / Math.max(2, layer.clientHeight));
     } else {
       // Retrace from world (0, 0), not from wherever the user panned: renderAt only sets scale.
       global.FractalGrid.resetView();
       // The Inspect preview's playback (and sound) would otherwise run on a hidden page.
       global.FractalGrid.pausePlayback();
+      fragment = builderFragment();
     }
     if (instant) {
       if (which === "grid") global.FractalGrid.resetView();
@@ -358,8 +367,30 @@
       durationMs: full ? FULL_MS : QUICK_MS,
       tiled: full,
       scene: scene || (global.PhysicsUI && global.PhysicsUI.currentScene()),
+      fragment: fragment,
       onDone: full ? function () { markIntroSeen(direction); } : null,
     });
+    // The new view's address is written from the start, so Back during the animation returns to the view it left.
+    syncAddress();
+  }
+
+  function startedMapFragment(scene) {
+    var state = global.FractalGrid.shareState();
+    var P = global.PhysicsCoords;
+    if (!state || !sameScene(P.toAuthoredJSON(state.scene), P.toAuthoredJSON(scene))) return null;
+    return mapFragment(state);
+  }
+
+  function leaveMap() {
+    if (returning) return;
+    syncAddress();
+    var state = global.history.state;
+    if (current === "grid" && state && state.fromEditor === PAGE_LOAD) {
+      returning = true;
+      global.history.back();
+    } else {
+      pushNext("editor", null);
+    }
   }
 
   global.AppShell = {
@@ -367,6 +398,9 @@
     syncAddress: function () { syncAddress(); },
     goToGrid: function (scene) { transitionTo("grid", scene); },
     goToEditor: function () { transitionTo("editor", null); },
+    // Set by the page around a frame, which keeps the frame's history; told "grid" or "editor" as the frame moves.
+    onNavigate: null,
+    reloadTo: function (fragment) { reloadTo(fragment); },
     replayIntro: forgetIntro,
     debugRenderAt: function (elapsedMs) {
       if (!active) return null;
@@ -393,9 +427,9 @@
   if (emptyStateLink) {
     emptyStateLink.addEventListener("click", function (e) {
       e.preventDefault();
+      stopActive(true);
       global.FractalGrid.pausePlayback();
-      syncAddress();
-      pushPending = true; // a navigation, like transitionTo's
+      leaveMap(); // a navigation, like transitionTo's
       showOnly("editor");
     });
   }
@@ -412,36 +446,70 @@
   // timer (replaceState never fires hashchange, and stays under Safari's rate limit).
   var ADDRESS_SYNC_MS = 500;
   var lastFragment = null;
-  // A navigation is pending: the next address write is a NEW history entry.
+  // A navigation is pending: the next address write is a new history entry, with this state.
   var pushPending = false;
+  var pushTag = null;
+  // Marks the map entries this page load pushed from the editor (history.state.fromEditor).
+  var PAGE_LOAD = Date.now() + ":" + Math.random();
+  // Going back to the editor's entry: nothing is written until the browser gets there.
+  var returning = false;
+  var reloading = false;
+  var inFrame = global.top !== global;
 
-  function currentFragment() {
-    if (active) return null;
-    if (current === "grid") {
-      var state = global.FractalGrid.shareState();
-      if (!state) return null;
-      return global.ShareUrl.encode({
-        page: global.ShareUrl.PAGE_MAP,
-        scene: global.PhysicsCoords.toAuthoredJSON(state.scene),
-        view: state.view,
-      });
+  function pushNext(which, tag) {
+    if (inFrame) {
+      if (global.AppShell.onNavigate) global.AppShell.onNavigate(which);
+      return;
     }
+    pushPending = true;
+    pushTag = tag;
+  }
+
+  function mapFragment(state) {
+    return global.ShareUrl.encode({
+      page: global.ShareUrl.PAGE_MAP,
+      scene: global.PhysicsCoords.toAuthoredJSON(state.scene),
+      view: state.view,
+    });
+  }
+
+  function builderFragment() {
     var scene = global.PhysicsUI.shareScene();
     return scene ? global.ShareUrl.encode({ page: global.ShareUrl.PAGE_BUILDER, scene: scene }) : null;
   }
 
+  function currentFragment() {
+    if (active) return active.fragment;
+    if (current === "grid") {
+      var state = global.FractalGrid.shareState();
+      return state ? mapFragment(state) : null;
+    }
+    return builderFragment();
+  }
+
   function syncAddress() {
+    if (returning || reloading) return;
     var fragment = currentFragment();
     if (fragment === null) return;
     if (fragment === lastFragment) { pushPending = false; return; }
     try {
-      if (pushPending) global.history.pushState(null, "", "#" + fragment);
-      else global.history.replaceState(null, "", "#" + fragment);
+      if (pushPending) global.history.pushState(pushTag, "", "#" + fragment);
+      else global.history.replaceState(global.history.state, "", "#" + fragment);
       pushPending = false;
       lastFragment = fragment;
     } catch (err) {
       // Refused (rate limit, sandboxed frame): stale until the next tick.
     }
+  }
+
+  // A reload into another address (a context loss in the editor): a pending navigation still gets its own entry.
+  function reloadTo(fragment) {
+    try {
+      if (pushPending) global.history.pushState(pushTag, "", "#" + fragment);
+      else global.history.replaceState(global.history.state, "", "#" + fragment);
+    } catch (err) { /* reloads the address as it is */ }
+    reloading = true;
+    global.location.reload();
   }
 
   function sameScene(a, b) {
@@ -453,16 +521,22 @@
     }
   }
 
-  // A link that can't be opened: say why, then start the builder over on its default scene.
+  // A link that can't be opened: say why, then show the editor with the scene it already holds (never saved over).
   function linkProblem(message) {
     global.AppMessage.alert(message, function () {
-      global.PhysicsUI.loadDefaultScene();
       if (current !== "editor") {
         global.FractalGrid.pausePlayback();
         showOnly("editor");
       }
       syncAddress();
     });
+  }
+
+  function noteUnreadLists(view) {
+    var lost = [];
+    if (view.unread.indexOf("insp") !== -1) lost.push("Inspect points");
+    if (view.unread.indexOf("kfrm") !== -1) lost.push("movie keyframes");
+    if (lost.length) global.AppMessage.toast("Couldn't read this link's " + lost.join(" or ") + ".");
   }
 
   function openAddress(onLoad) {
@@ -477,6 +551,8 @@
     }
     if (!link || !link.scene) return;
     if (link.page === global.ShareUrl.PAGE_MOVIE) {
+      // The player's back link must not take chaos.html, its referrer, for the page before it.
+      try { global.sessionStorage.setItem("backLinkForwarded", "1"); } catch (err) { /* blocked storage marks nothing anyway */ }
       global.location.replace("chaosplayback.html" + global.location.hash);
       return;
     }
@@ -495,6 +571,7 @@
       if (gridState && sameScene(global.PhysicsCoords.toAuthoredJSON(gridState.scene), link.scene)) {
         global.FractalGrid.applyShareView(link.view);
         showOnly("grid");
+        noteUnreadLists(link.view);
         return;
       }
       var gridScene = null;
@@ -508,6 +585,7 @@
         global.FractalGrid.start(gridScene);
         global.FractalGrid.applyShareView(link.view);
         showOnly("grid");
+        noteUnreadLists(link.view);
         return;
       }
     }
@@ -522,6 +600,13 @@
   document.documentElement.classList.remove("opening-map");
   syncAddress();
   setInterval(syncAddress, ADDRESS_SYNC_MS);
+  // leaveMap's history.back() has landed: the editor is already on its way, so the hashchange after this is skipped.
+  global.addEventListener("popstate", function () {
+    if (!returning) return;
+    returning = false;
+    lastFragment = global.ShareUrl.cleanFragment(global.location.hash);
+    syncAddress();
+  });
   global.addEventListener("hashchange", function () {
     if (global.ShareUrl.cleanFragment(global.location.hash) === lastFragment) return;
     openAddress(false);

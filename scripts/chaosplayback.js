@@ -50,7 +50,9 @@
   // A movie of the map's Inspect tab plays its locked points once instead of flying through keyframes.
   var ofInspect = movie.subject === "inspect";
   if (ofInspect ? !link.view.inspect.length : !movie.keyframes.length) {
-    fail(ofInspect ? "This link has no locked Inspect points to film." : "There's no movie in this address. Movies are made on the map, in the Movie card.");
+    var unread = link.view.unread.indexOf(ofInspect ? "insp" : "kfrm") !== -1;
+    fail(ofInspect ? (unread ? "This link's Inspect points couldn't be read." : "This link has no locked Inspect points to film.")
+      : unread ? "This link's movie keyframes couldn't be read." : "There's no movie in this address. Movies are made on the map, in the Movie card.");
     return;
   }
   // Each keyframe's friction as a fraction; a keyframe without one has the scene's.
@@ -71,6 +73,7 @@
   });
   // A different movie pasted over the address: start over.
   window.addEventListener("hashchange", function () { location.reload(); });
+  var factsNote = !ofInspect && link.view.unread.indexOf("insp") !== -1 ? "Couldn't read this link's Inspect points  \u00b7  " : "";
 
   // ---- The screen ---- one canvas, stage-sized in device px; whatever is shown is drawn to fit inside it whole.
   var shown = null, shownFrame = 0; // the last thing drawn and its frame, for redrawing after a resize
@@ -336,7 +339,7 @@
       return { precision: precision.name, slowdown: precision.slowdown, steps: Math.max(1, f.step) };
     });
     blobPromises = new Array(frames.length);
-    movieFacts.textContent = frames.length.toLocaleString() + " frames  \u00b7  " + (frames.length / FPS).toFixed(1) + " s";
+    movieFacts.textContent = factsNote + frames.length.toLocaleString() + " frames  \u00b7  " + (frames.length / FPS).toFixed(1) + " s";
     openJob().then(function (from) {
       resumedFrom = from;
       renderStartedAt = performance.now();
@@ -483,7 +486,7 @@
   }
 
   // The look (background, filled bodies, pace) is chosen here, so a snapshot is this link's whatever its look. A
-  // new look goes in the address, and the page films again (hashchange reloads it).
+  // new look replaces the address, landing mark kept, and the page films again.
   var backgroundField = $("background-field"), backgroundChoice = $("background-choice");
   var bodiesField = $("bodies-field"), bodiesChoice = $("bodies-choice");
   var paceField = $("pace-field"), paceChoice = $("pace-choice");
@@ -496,7 +499,8 @@
     if (backgroundChoice.value !== "plain") fragment += ",bkgd:" + backgroundChoice.value;
     if (bodiesChoice.value === "filled") fragment += ",fill:t";
     if (paceChoice.value !== "1") fragment += ",pace:" + paceChoice.value.replace(/^0/, "");
-    location.hash = fragment;
+    history.replaceState(history.state, "", "#" + fragment);
+    location.reload();
   }
   backgroundChoice.addEventListener("change", changeLook);
   bodiesChoice.addEventListener("change", changeLook);
@@ -832,7 +836,7 @@
   function beginPlayback() {
     renderPanel.hidden = true;
     maxDecoded = Math.min(90, Math.max(8, Math.floor(DECODED_BUDGET_BYTES / (frameWidth * frameHeight * 4))));
-    movieFacts.textContent = frames.length.toLocaleString() + " frames  \u00b7  " + (frames.length / FPS).toFixed(1) + " s  \u00b7  " +
+    movieFacts.textContent = factsNote + frames.length.toLocaleString() + " frames  \u00b7  " + (frames.length / FPS).toFixed(1) + " s  \u00b7  " +
       frameWidth + " \u00d7 " + frameHeight + "  \u00b7  " +
       formatBytes(blobs.reduce(function (sum, blob) { return sum + blob.size; }, 0)) + "  \u00b7  rendered in " + formatDuration((priorMs + performance.now() - renderStartedAt) / 1000) +
       (endedEarly ? "  \u00b7  ended early" : "");

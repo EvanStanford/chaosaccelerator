@@ -157,7 +157,7 @@
       };
     }
 
-    // ---- Translate (x/y): translateBodyPreservingHinges; cascades, drags own world pin ----
+    // A body and its descendants, for resize/rotate's children (translateBodyAndDescendants).
     function translateAndCascade(bodyIndex, dxExpr, dyExpr, visited) {
       if (visited[bodyIndex]) return;
       visited[bodyIndex] = true;
@@ -168,15 +168,17 @@
       });
     }
 
+    // ---- Translate (x/y): translateBodyPreservingHinges; the whole hinge assembly and its world pins ----
     function applyTranslateTarget(bodyIndex, dxExpr, dyExpr) {
-      var worldHingeIdx = findWorldHingeIndex(scene, bodyIndex);
-      if (worldHingeIdx !== -1) {
-        anchorA[worldHingeIdx] = {
-          x: num(B.add(anchorA[worldHingeIdx].x, dxExpr)),
-          y: num(B.add(anchorA[worldHingeIdx].y, dyExpr)),
-        };
-      }
-      translateAndCascade(bodyIndex, dxExpr, dyExpr, {});
+      var isMember = {};
+      PhysicsHingeGeometry.hingeAssembly(scene, bodyIndex).forEach(function (m) {
+        isMember[m] = true;
+        state[m].x = num(B.add(state[m].x, dxExpr));
+        state[m].y = num(B.add(state[m].y, dyExpr));
+      });
+      scene.hinges.forEach(function (h, hi) {
+        if (h.bodyA === null && isMember[h.bodyB]) anchorA[hi] = { x: num(B.add(anchorA[hi].x, dxExpr)), y: num(B.add(anchorA[hi].y, dyExpr)) };
+      });
     }
 
     // ---- Velocity (vx/vy): additive on one body, no cascade; the hinge solver reconciles ----
@@ -283,9 +285,8 @@
     });
     velocityTargets.forEach(function (t) { applyVelocityTarget(t.body, t.property, t.expr); });
 
-    // ---- Settle each ROOT body into the frame with mod() (normalizeAllBodiesIntoFrame):
-    // moving bodies always, anchored ones only when entirely past an edge; hinge children
-    // follow their root. Skipped under Infinite Space: no frame, no seam ----
+    // ---- Settle each hinge assembly into the frame by its leader with mod() (normalizeAllBodiesIntoFrame):
+    // moving bodies always, anchored ones only when entirely past an edge. Skipped under Infinite Space ----
     if (PhysicsEngine.wrapsAtEdges(scene)) {
       // mod() takes a plain float modulus (an integer frame size); overhang tests use the pass's precision.
       var frameW = fnum(scene.frameWidth), frameH = fnum(scene.frameHeight);
@@ -293,10 +294,8 @@
       // Spring groups settle as one (PhysicsEngine.springGroups); a tethered group stays put.
       var springGroups = PhysicsEngine.springGroups(scene);
       for (var wi = 0; wi < n; wi++) {
-        var isHingeChild = scene.hinges.some(function (h) { return h.bodyB === wi && h.bodyA !== null; });
-        if (isHingeChild) continue;
         var springGroup = springGroups ? springGroups.groupOf[wi] : null;
-        if (springGroup && (springGroup.tethered || springGroup.leader !== wi)) continue;
+        if (springGroup ? springGroup.tethered || springGroup.leader !== wi : PhysicsHingeGeometry.hingeAssemblyLeader(scene, wi) !== wi) continue;
         var bx = state[wi].x, by = state[wi].y;
         var dxExpr, dyExpr;
         if (consts[wi].isAnchored) {

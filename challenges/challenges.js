@@ -41,6 +41,11 @@
   var challenges = [];
   var current = -1;
   var watch = null;
+  // History entries {challenge, link, depth, view} for the frame's builder/map moves; frameStops: the frame's address at each depth.
+  var frameDepth = 0;
+  var frameStops = [];
+  // Runs on the next popstate in place of the usual handling, after a step back this page took itself.
+  var afterBack = null;
   var wonThisPlay = false;
   // A best loaded without a picture of its scene gets one from the frame's first result.
   var pictureWanted = false;
@@ -390,11 +395,29 @@
 
   // link: a kept best's map link, opened in the challenge frame.
   function play(index, link) {
+    if (!playPage.hidden && frameDepth > 0) {
+      var back = frameDepth;
+      frameDepth = 0;
+      afterBack = function () { play(index, link); };
+      history.go(-back);
+      return;
+    }
+    var state = { challenge: challenges[index].id, link: link || null };
+    try {
+      if (playPage.hidden) history.pushState(state, "");
+      else history.replaceState(state, "");
+    } catch (err) { /* no entry: All challenges then calls leave() */ }
+    show(index, link);
+  }
+
+  function show(index, link) {
     current = index;
-    // A loaded best reporting its own exponent again is no new win.
-    wonThisPlay = !!link;
-    pictureWanted = !!link;
+    frameDepth = (history.state && history.state.depth) || 0;
+    frameStops = [];
     var c = challenges[index];
+    // A loaded best reporting its own exponent again is no new win, unless it never won.
+    wonThisPlay = !!link && !!readStore(SOLVED_KEY)[c.id];
+    pictureWanted = !!link;
     playTitle.textContent = c.title;
     winPanel.hidden = true;
     toast.hidden = true;
@@ -425,14 +448,50 @@
     listPage.hidden = true;
     playPage.hidden = false;
     document.title = c.title + ": Chaos Accelerator";
-    engine.src = frameAddress(c, link ? link.slice(link.indexOf("#")) : null);
+    // replace(): a frame load must not add a history entry of its own.
+    engine.contentWindow.location.replace(frameAddress(c, link ? link.slice(link.indexOf("#")) : null));
+  }
+
+  function backToList() {
+    var state = history.state;
+    if (state && state.challenge) history.go(-frameDepth - 1);
+    else leave();
+  }
+
+  // A frame move: Back to scene editor after a Fractal-ize steps back, any other move adds an entry.
+  function onFrameNavigate(which) {
+    var state = history.state;
+    if (playPage.hidden || !state || !state.challenge) return;
+    try { frameStops[frameDepth] = engine.contentWindow.location.hash; } catch (err) { /* stays unknown */ }
+    if (which === "editor" && state.view === "grid") {
+      frameDepth--;
+      afterBack = function () {};
+      history.back();
+      return;
+    }
+    frameStops.length = frameDepth + 1;
+    try {
+      history.pushState({ challenge: state.challenge, link: state.link, depth: frameDepth + 1, view: which }, "");
+      frameDepth++;
+    } catch (err) { /* no entry for this step */ }
+  }
+
+  // Back or Forward to another entry of this play: the frame follows through its own address, as chaos.html does.
+  function steerFrame(depth) {
+    var w = engine.contentWindow, from = frameDepth;
+    frameDepth = depth;
+    try {
+      w.AppShell.syncAddress();
+      frameStops[from] = w.location.hash;
+      if (frameStops[depth] !== frameStops[from]) w.location.replace(w.location.pathname + w.location.search + frameStops[depth]);
+    } catch (err) { /* the frame isn't up */ }
   }
 
   function leave() {
     stopWatch();
     playPage.hidden = true;
     listPage.hidden = false;
-    engine.src = "about:blank";
+    engine.contentWindow.location.replace("about:blank");
     targetVideo.removeAttribute("src");
     document.title = "Challenges: Chaos Accelerator";
     renderLists();
@@ -476,7 +535,7 @@
     var best = bestOf(challenges[current].id);
     if (best) play(current, best.link);
   });
-  $("btn-back").addEventListener("click", leave);
+  $("btn-back").addEventListener("click", backToList);
   btnResetAll.addEventListener("click", function () {
     askConfirm("Reset all challenges?", "Every best attempt and Solved mark will be cleared.", "Reset all", function () {
       writeStore(BEST_KEY, {});
@@ -502,7 +561,7 @@
     confirmDialog.close();
     if (yes) yes();
   });
-  $("win-list").addEventListener("click", leave);
+  $("win-list").addEventListener("click", backToList);
   $("win-close").addEventListener("click", function () { winPanel.hidden = true; });
   $("win-next").addEventListener("click", function () {
     var next = (current + 1) % challenges.length;
@@ -739,10 +798,38 @@
     var c = challenges[current];
     var doc = engine.contentDocument;
     if (!c || !doc || !doc.getElementById) return;
+    if (engine.contentWindow.AppShell) engine.contentWindow.AppShell.onNavigate = onFrameNavigate;
     if (c.kind === "trick") bindTrickShot(doc);
     else if (c.kind === "rose") bindRose(engine.contentWindow);
     else bindLyap(engine.contentWindow);
   });
+
+  window.addEventListener("popstate", function (e) {
+    if (afterBack) {
+      var then = afterBack;
+      afterBack = null;
+      then();
+      return;
+    }
+    var index = playIndex(e.state), depth = (e.state && e.state.depth) || 0;
+    var thisPlay = index !== -1 && index === current && !playPage.hidden;
+    if (index === -1) {
+      if (!playPage.hidden) leave();
+    } else if (thisPlay && frameStops[depth]) {
+      steerFrame(depth);
+    } else if (thisPlay && depth < frameDepth) {
+      // An entry from before the frame last loaded (a reload): Back goes on to the list.
+      history.go(-depth - 1);
+    } else {
+      show(index, e.state.link);
+    }
+  });
+  function playIndex(state) {
+    for (var i = 0; state && state.challenge && i < challenges.length; i++) {
+      if (challenges[i].id === state.challenge) return isLocked(challenges[i]) ? -1 : i;
+    }
+    return -1;
+  }
 
   // ---- Start ----
 
@@ -755,6 +842,9 @@
   Promise.all([fetchJSON("trick-shot.json"), fetchJSON("analysis-maxing.json"), fetchJSON("lyapunov.json")]).then(function (data) {
     challenges = ofKind(data[0], "trick").concat(ofKind(data[1], "rose"), ofKind(data[2], "lyap"));
     renderLists();
+    // A reload on a challenge's entry opens it again.
+    var index = playIndex(history.state);
+    if (index !== -1) show(index, history.state.link);
   }).catch(function () {
     listEl.textContent = "The challenge list couldn't be loaded.";
   });

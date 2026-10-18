@@ -53,7 +53,7 @@
   var simulationStepsReadout = document.getElementById("simulation-steps-readout");
   var frictionSlider = document.getElementById("friction-slider");
   var frictionReadout = document.getElementById("friction-readout");
-  var editorView = document.getElementById("editor-view"); // undo/redo only fire while this is the view up
+  var editorView = document.getElementById("editor-view"); // builder keys only fire while this is the view up
   var btnSampleDoublePendulum = document.getElementById("btn-sample-double-pendulum");
   var btnSamplePinball = document.getElementById("btn-sample-pinball");
   var btnSampleBinaryStar = document.getElementById("btn-sample-binary-star");
@@ -152,6 +152,7 @@
   var stepCount = 0;
   var dragging = false;
   var dragOffset = { x: 0, y: 0 };
+  var dragStart = { x: 0, y: 0 }; // the dragged body's position at pointerdown
   var deleteZoneArmed = false;
   // A drag on a hinge dot moves nothing; it only carries the hinge to the delete zone.
   var hingeDrag = null; // { hingeIndex, current: {x,y} }
@@ -1392,7 +1393,7 @@
   });
 
   window.addEventListener("keydown", function (e) {
-    if (e.key !== "Escape") return;
+    if (e.key !== "Escape" || builderKeysOff()) return;
     if (drawingShape) { drawingShape = null; render(); } // cancel the in-progress drag instead of still placing it on the eventual mouseup
     if (velocityDrag) { velocityDrag = null; render(); } // same, for a velocity aim in progress: leave the body's existing velocity alone
     if (hingeDrag) { hingeDrag = null; deleteZoneArmed = false; canvas.classList.remove("dragging"); render(); } // same, for a hinge on its way to the delete zone: it stays
@@ -1623,8 +1624,13 @@
     render();
   }
 
+  // Also off mid-transition, when both views are unhidden.
+  function builderKeysOff() {
+    return editorView.hidden || editorView.classList.contains("is-transitioning");
+  }
+
   window.addEventListener("keydown", function (e) {
-    if (isPlaying) return;
+    if (builderKeysOff() || isPlaying) return;
     if (e.key !== "Delete" && e.key !== "Backspace") return;
     // A focused text field owns these keys; a focused slider (a touched Spring slider) does not.
     var focused = document.activeElement;
@@ -1691,6 +1697,7 @@
       if (hit >= 0) {
         dragging = true;
         dragOffset = { x: p.x - scene.bodies[hit].x, y: p.y - scene.bodies[hit].y };
+        dragStart = { x: scene.bodies[hit].x, y: scene.bodies[hit].y };
         canvas.classList.add("dragging");
       }
     } else if (activeTool === "circle") {
@@ -1895,6 +1902,9 @@
     var droppedOnDeleteZone = deleteZoneArmed;
     deleteZoneArmed = false;
     if (droppedOnDeleteZone) {
+      // The rest of its hinge assembly goes back to where the drag found it.
+      var droppedBody = scene.bodies[selectedIndex];
+      translateBodyPreservingHinges(scene, selectedIndex, dragStart.x - droppedBody.x, dragStart.y - droppedBody.y);
       deleteSelectedBody();
     } else {
       render(); // otherwise the delete zone drawn on the last mousemove would linger on screen
@@ -1970,7 +1980,7 @@
     var isRedo = (key === "z" && e.shiftKey) || (!IS_APPLE && key === "y");
     if (!isUndo && !isRedo) return;
     // Builder only, not during playback.
-    if (editorView.hidden || isPlaying) return;
+    if (builderKeysOff() || isPlaying) return;
     // A focused text field owns its own undo, unless it was hidden while focused.
     var focused = document.activeElement;
     if (focused && focused.offsetParent === null) focused = null;
@@ -2347,8 +2357,7 @@
     };
   }
 
-  // Moves the whole scene rigidly, world-anchored hinge/spring ends included. NOT
-  // translateBodyPreservingHinges, whose job is moving one body without its neighbors.
+  // Moves the whole scene rigidly, world-anchored hinge/spring ends included (translateBodyPreservingHinges moves one assembly).
   function translateWholeScene(dx, dy) {
     if (!dx && !dy) return;
     scene.bodies.forEach(function (b) { b.x += dx; b.y += dy; });
@@ -2632,9 +2641,9 @@
 
   // Restores the last edited scene; any error falls back to the seed scene so a bad save can't break loading.
   function loadPersistedScene() {
-    var raw = localStorage.getItem(EDITOR_STORAGE_KEY);
-    if (!raw) return false;
     try {
+      var raw = localStorage.getItem(EDITOR_STORAGE_KEY);
+      if (!raw) return false;
       applySceneData(parseSceneData(PhysicsCoords.toEngineJSON(JSON.parse(raw), liveFrame())));
       return true;
     } catch (err) {
@@ -3172,13 +3181,13 @@
 
   // Only reached from Editing or right after Reset; returns false, leaving everything as it was, if the simulation fails.
   function startPlaybackFromScratch() {
-    initialScene = PhysicsEngine.cloneScene(scene);
     try {
       trajectory = PhysicsGPU.runSceneOnGPU(scene, scene.simulationSteps);
     } catch (err) {
       AppMessage.toast(err.message || "GPU simulation failed");
       return false;
     }
+    initialScene = PhysicsEngine.cloneScene(scene);
     effectiveMaxSteps = scene.simulationSteps;
     wrapStopOverride = null;
     lifespanValue = scene.simulationSteps;
@@ -3255,11 +3264,11 @@
     isPlaying = false;
     statusEl.textContent = "Editing";
     statusEl.className = "status-ok";
-    setEditingEnabled(true);
     if (initialScene) {
       scene = PhysicsEngine.cloneScene(initialScene);
       initialScene = null;
     }
+    setEditingEnabled(true);
     stepCount = 0;
     playbackClockSteps = 0;
     stepReadout.textContent = "";
@@ -3279,19 +3288,6 @@
     scene.bodies.push(PhysicsEngine.createLine(w / 2, h - 40, Math.max(200, w - 160), 0, true));
     scene.bodies.push(PhysicsEngine.createCircle(w / 2 - 130, h * 0.25, 30, false));
     scene.bodies.push(PhysicsEngine.createLine(w / 2 + 130, h * 0.25, 140, 0.3, false));
-  }
-
-  // The scene and settings a first visit starts with.
-  function loadDefaultScene() {
-    resetToInitialScene();
-    applySceneData({
-      bodies: [], hinges: [], springs: [], xInput: null, yInput: null, output: null,
-      edgeMode: PhysicsEngine.DEFAULT_EDGE_MODE, friction: 0,
-      mutualGravity: false, collisionsEnabled: true, simulationSteps: DEFAULT_SIMULATION_STEPS,
-    });
-    seedDefaultScene();
-    sharedSceneIdentity = null;
-    finishSceneReplace();
   }
 
   // Order matters: the frame must be known before the scene is restored or seeded, and the scene must be
@@ -3417,7 +3413,6 @@
       data.frameHeight = frame.frameHeight;
       return serializeSceneOf(data);
     },
-    loadDefaultScene: loadDefaultScene,
     // ---- The one setting that exists on both pages ----
     // The grid's own Simulation Duration slider calls this so the value survives the round trip.
     // Snapped to the slider's notches and clamped: a setter reachable from another module.

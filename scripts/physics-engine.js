@@ -658,8 +658,42 @@
   // Near-parallel lines get contact at BOTH ends of their overlap, or a flat rod spins away.
   var LINE_PARALLEL_EPS = 0.05; // ~3 degrees
 
-  function collideLineLine(lineA, lineB) {
+  // Crossed segments, or null: out the shorter way, toward the side each center was on before b's move
+  // against a (back); depth is that way's. With liftAlongA the point sits on b's side of a.
+  function crossedSegments(a0, a1, b0, b1, liftAlongA, back) {
+    var ux = a1.x - a0.x, uy = a1.y - a0.y, ul = Math.sqrt(ux * ux + uy * uy) || 1;
+    var vx = b1.x - b0.x, vy = b1.y - b0.y, vl = Math.sqrt(vx * vx + vy * vy) || 1;
+    ux /= ul; uy /= ul; vx /= vl; vy /= vl;
+    var sa0 = vx * (a0.y - b0.y) - vy * (a0.x - b0.x), sa1 = vx * (a1.y - b0.y) - vy * (a1.x - b0.x);
+    var sb0 = ux * (b0.y - a0.y) - uy * (b0.x - a0.x), sb1 = ux * (b1.y - a0.y) - uy * (b1.x - a0.x);
+    if (!(sa0 * sa1 < 0 && sb0 * sb1 < 0)) return null;
+    var upA = (sb0 + sb1) / 2 - (ux * back.y - uy * back.x) > 0, upB = (sa0 + sa1) / 2 + (vx * back.y - vy * back.x) > 0;
+    var depthA = upA ? -Math.min(sb0, sb1) : Math.max(sb0, sb1), depthB = upB ? -Math.min(sa0, sa1) : Math.max(sa0, sa1);
+    var sideA = upA ? { x: -uy, y: ux } : { x: uy, y: -ux };
+    var n = depthA <= depthB ? sideA : (upB ? { x: vy, y: -vx } : { x: -vy, y: vx });
+    var k = sa0 / (sa0 - sa1), lift = liftAlongA ? sideA : n;
+    return {
+      normal: n,
+      point: { x: a0.x + (a1.x - a0.x) * k + lift.x * LINE_THICKNESS / 2, y: a0.y + (a1.y - a0.y) * k + lift.y * LINE_THICKNESS / 2 },
+      depth: Math.min(depthA, depthB),
+    };
+  }
+
+  // Touching at the step's start: the overlap as it stands, tHit 0.
+  function lineLineContacts(lineA, lineB, dt) {
     var eA = getLineEndpoints(lineA), eB = getLineEndpoints(lineB);
+    var crossed = crossedSegments(eA[0], eA[1], eB[0], eB[1], false, { x: (lineB.vx - lineA.vx) * dt, y: (lineB.vy - lineA.vy) * dt });
+    if (crossed) {
+      var cp0 = crossed.point;
+      return [{
+        normal: crossed.normal,
+        point: cp0,
+        rA: { x: cp0.x - lineA.x, y: cp0.y - lineA.y },
+        rB: { x: cp0.x - lineB.x, y: cp0.y - lineB.y },
+        penetration: crossed.depth + LINE_THICKNESS,
+        tHit: 0,
+      }];
+    }
     var dirA = { x: eA[1].x - eA[0].x, y: eA[1].y - eA[0].y };
     var lenA = Math.sqrt(dot(dirA, dirA)) || 1;
     dirA.x /= lenA; dirA.y /= lenA;
@@ -667,41 +701,40 @@
     var lenB = Math.sqrt(dot(dirB, dirB)) || 1;
     var cross = dirA.x * (dirB.y / lenB) - dirA.y * (dirB.x / lenB);
 
-    if (Math.abs(cross) < LINE_PARALLEL_EPS) {
-      var perp = { x: -dirA.y, y: dirA.x };
-      var offset = dot({ x: eB[0].x - eA[0].x, y: eB[0].y - eA[0].y }, perp);
-      var dist = Math.abs(offset);
-      if (dist < LINE_THICKNESS) {
-        var b0 = dot({ x: eB[0].x - eA[0].x, y: eB[0].y - eA[0].y }, dirA);
-        var b1 = dot({ x: eB[1].x - eA[0].x, y: eB[1].y - eA[0].y }, dirA);
-        var lo = Math.max(0, Math.min(b0, b1));
-        var hi = Math.min(lenA, Math.max(b0, b1));
-        if (hi > lo) {
-          var sign = offset >= 0 ? 1 : -1;
-          var normal = { x: perp.x * sign, y: perp.y * sign };
-          var penetration = LINE_THICKNESS - dist;
-          var ts = hi - lo > 1e-6 ? [lo, hi] : [lo];
-          return ts.map(function (t) {
-            var pOnA = { x: eA[0].x + dirA.x * t, y: eA[0].y + dirA.y * t };
-            var px = pOnA.x + perp.x * offset / 2, py = pOnA.y + perp.y * offset / 2;
-            return {
-              normal: normal,
-              point: { x: px, y: py },
-              rA: { x: px - lineA.x, y: py - lineA.y },
-              rB: { x: px - lineB.x, y: py - lineB.y },
-              penetration: penetration,
-              tHit: 0,
-            };
-          });
-        }
-      }
-    }
-
     var cp = closestPointsSegmentSegment(eA[0], eA[1], eB[0], eB[1]);
     var dx = cp.c2.x - cp.c1.x, dy = cp.c2.y - cp.c1.y;
     var dist2 = Math.sqrt(dx * dx + dy * dy);
     var rsum = LINE_THICKNESS;
     if (dist2 >= rsum) return null;
+
+    if (Math.abs(cross) < LINE_PARALLEL_EPS) {
+      var b0 = dot({ x: eB[0].x - eA[0].x, y: eB[0].y - eA[0].y }, dirA);
+      var b1 = dot({ x: eB[1].x - eA[0].x, y: eB[1].y - eA[0].y }, dirA);
+      var lo = Math.max(0, Math.min(b0, b1));
+      var hi = Math.min(lenA, Math.max(b0, b1));
+      if (hi > lo) {
+        var perp = { x: -dirA.y, y: dirA.x };
+        // Their gap along A's normal where they are closest.
+        var offset = dx * perp.x + dy * perp.y;
+        var sign = offset >= 0 ? 1 : -1;
+        var normal = { x: perp.x * sign, y: perp.y * sign };
+        var penetration = LINE_THICKNESS - Math.abs(offset);
+        var ts = hi - lo > 1e-6 ? [lo, hi] : [lo];
+        return ts.map(function (t) {
+          var pOnA = { x: eA[0].x + dirA.x * t, y: eA[0].y + dirA.y * t };
+          var px = pOnA.x + perp.x * offset / 2, py = pOnA.y + perp.y * offset / 2;
+          return {
+            normal: normal,
+            point: { x: px, y: py },
+            rA: { x: px - lineA.x, y: py - lineA.y },
+            rB: { x: px - lineB.x, y: py - lineB.y },
+            penetration: penetration,
+            tHit: 0,
+          };
+        });
+      }
+    }
+
     var nx = dist2 > 1e-9 ? dx / dist2 : 0;
     var ny = dist2 > 1e-9 ? dy / dist2 : 1;
     var px2 = (cp.c1.x + cp.c2.x) / 2, py2 = (cp.c1.y + cp.c2.y) / 2;
@@ -713,6 +746,177 @@
       penetration: rsum - dist2,
       tHit: 0,
     }];
+  }
+
+  // Do two bounding circles, reach apart when touching, meet while one moves by (mx, my) against the other?
+  function sweptReachMeets(dx, dy, mx, my, reach) {
+    var r2 = reach * reach;
+    if (dx * dx + dy * dy <= r2) return true;
+    var dm = dx * mx + dy * my;
+    if (dm >= 0) return false;
+    var mm = mx * mx + my * my;
+    if (-dm >= mm) { var ex = dx + mx, ey = dy + my; return ex * ex + ey * ey <= r2; }
+    var cr = dx * my - dy * mx;
+    return cr * cr <= r2 * mm;
+  }
+
+  // Can capsules a and b touch within the step: their start distance against travel, the farthest any
+  // point moves, plus twice the thickness for a turning chord's slack.
+  function linesMayTouch(a0, a1, b0, b1, travel) {
+    var cp = closestPointsSegmentSegment(a0, a1, b0, b1);
+    var dx = cp.c2.x - cp.c1.x, dy = cp.c2.y - cp.c1.y, room = 2 * LINE_THICKNESS + travel;
+    return dx * dx + dy * dy <= room * room;
+  }
+
+  // Smallest root in [0, 1] of a f^2 + b f + c with c > 0, or -1.
+  function firstRoot(a, b, c) {
+    var f;
+    if (a === 0) {
+      if (b >= 0) return -1;
+      f = -c / b;
+    } else {
+      var disc = b * b - 4 * a * c;
+      if (disc < 0) return -1;
+      var q = -0.5 * (b < 0 ? b - Math.sqrt(disc) : b + Math.sqrt(disc));
+      if (q === 0) return -1;
+      var r1 = q / a, r2 = c / q;
+      f = Math.min(r1, r2);
+      if (f < 0) f = Math.max(r1, r2);
+    }
+    return f >= 0 && f <= 1 ? f : -1;
+  }
+
+  // Fraction of the step at which point p (moving by dp) comes within R of the flat side of segment
+  // q0-q1 of length len (ends moving by dq0, dq1), or -1; starting inside is the caps' case.
+  function sweepPointMovingSlab(p, dp, q0, dq0, q1, dq1, len, R) {
+    var Dx = q1.x - q0.x, Dy = q1.y - q0.y, mDx = dq1.x - dq0.x, mDy = dq1.y - dq0.y;
+    var Px = p.x - q0.x, Py = p.y - q0.y, mPx = dp.x - dq0.x, mPy = dp.y - dq0.y;
+    var c0 = Dx * Py - Dy * Px;
+    var side = c0 < 0 ? -1 : 1;
+    var c = side * c0 - R * len;
+    if (c <= 0) return -1;
+    var f = firstRoot(side * (mDx * mPy - mDy * mPx), side * (Dx * mPy - Dy * mPx + mDx * Py - mDy * Px), c);
+    if (f < 0) return -1;
+    var dx = Dx + mDx * f, dy = Dy + mDy * f;
+    var s = (Px + mPx * f) * dx + (Py + mPy * f) * dy;
+    return s >= 0 && s <= dx * dx + dy * dy ? f : -1;
+  }
+
+  // sweepPointMovingSlab for a port hole arc's far center c, then two Newton steps on the exact distance.
+  function sweepFarPointSlab(c, q0, dq0, q1, dq1, len, R) {
+    var f = sweepPointMovingSlab(c, { x: 0, y: 0 }, q0, dq0, q1, dq1, len, R);
+    if (f < 0) return -1;
+    var Dx = q1.x - q0.x, Dy = q1.y - q0.y, mDx = dq1.x - dq0.x, mDy = dq1.y - dq0.y, Px = c.x - q0.x, Py = c.y - q0.y;
+    var side = Dx * Py - Dy * Px < 0 ? -1 : 1;
+    for (var k = 0; k < 2; k++) {
+      var dx = Dx + mDx * f, dy = Dy + mDy * f, px = Px - dq0.x * f, py = Py - dq0.y * f, dl = Math.sqrt(dx * dx + dy * dy);
+      var F = side * (dx * py - dy * px) - R * dl;
+      var dF = side * (mDx * py - mDy * px - dx * dq0.y + dy * dq0.x) - R * (dx * mDx + dy * mDy) / dl;
+      if (dF < 0) f -= F / dF;
+    }
+    if (!(f >= 0 && f <= 1)) return -1;
+    var ex = Dx + mDx * f, ey = Dy + mDy * f, s = (Px - dq0.x * f) * ex + (Py - dq0.y * f) * ey;
+    return s >= 0 && s <= ex * ex + ey * ey ? f : -1;
+  }
+
+  // A line's ends at the step's start and how far each moves over the step: the center at its
+  // velocity, the turn at its spin, each end along its chord.
+  function lineSweep(line, dt) {
+    var h = line.length / 2, hx = Math.cos(line.angle) * h, hy = Math.sin(line.angle) * h;
+    var mx = line.vx * dt, my = line.vy * dt, sx = 0, sy = 0;
+    if (line.w !== 0) {
+      var a = line.angle + line.w * dt;
+      sx = Math.cos(a) * h - hx; sy = Math.sin(a) * h - hy;
+    }
+    return {
+      e0: { x: line.x - hx, y: line.y - hy }, e1: { x: line.x + hx, y: line.y + hy },
+      d0: { x: mx - sx, y: my - sy }, d1: { x: mx + sx, y: my + sy },
+    };
+  }
+
+  function sweptPoint(p, d, f) { return { x: p.x + d.x * f, y: p.y + d.y * f }; }
+
+  // First touch of two swept capsules within the step (an end onto the other's flat side, or two ends
+  // meeting; ones touching at the start left out): the fraction f, normal (a -> b) and midpoint, or null.
+  function lineLineFirstTouch(sA, lenA, sB, lenB) {
+    var R = LINE_THICKNESS, best = null;
+    // A touch at f from point p toward the other surface along (ux, uy); own is 1 for A's point, -1 for B's.
+    function keep(f, p, ux, uy, own) { best = { f: f, p: p, ux: ux, uy: uy, own: own }; }
+    function slab(p, dp, s, len, own) {
+      var f = sweepPointMovingSlab(p, dp, s.e0, s.d0, s.e1, s.d1, len, R);
+      if (f <= 0 || (best && f >= best.f)) return;
+      var q0 = sweptPoint(s.e0, s.d0, f), q1 = sweptPoint(s.e1, s.d1, f), pf = sweptPoint(p, dp, f);
+      var Dx = q1.x - q0.x, Dy = q1.y - q0.y;
+      var k = Dx * (pf.y - q0.y) - Dy * (pf.x - q0.x) < 0 ? 1 : -1;
+      keep(f, pf, -Dy * k, Dx * k, own);
+    }
+    function cap(a, da, b, db) {
+      var f = sweepPointSphere(a.x, a.y, da.x - db.x, da.y - db.y, b.x, b.y, R, 1);
+      if (f <= 0 || (best && f >= best.f)) return;
+      var af = sweptPoint(a, da, f), bf = sweptPoint(b, db, f);
+      keep(f, af, bf.x - af.x, bf.y - af.y, 1);
+    }
+    slab(sA.e0, sA.d0, sB, lenB, 1);
+    slab(sA.e1, sA.d1, sB, lenB, 1);
+    slab(sB.e0, sB.d0, sA, lenA, -1);
+    slab(sB.e1, sB.d1, sA, lenA, -1);
+    cap(sA.e0, sA.d0, sB.e0, sB.d0);
+    cap(sA.e0, sA.d0, sB.e1, sB.d1);
+    cap(sA.e1, sA.d1, sB.e0, sB.d0);
+    cap(sA.e1, sA.d1, sB.e1, sB.d1);
+    if (!best) return null;
+    var ul = Math.sqrt(best.ux * best.ux + best.uy * best.uy) || 1, nx = best.ux / ul, ny = best.uy / ul;
+    return { f: best.f, normal: { x: nx * best.own, y: ny * best.own }, point: { x: best.p.x + nx * R / 2, y: best.p.y + ny * R / 2 } };
+  }
+
+  // The contacts of that first touch: its own point, or (unless single) both ends of the overlap when
+  // the two are near-parallel then, on the touch's side. Touching, so no penetration.
+  function lineLineSweptContacts(lineA, sA, lineB, sB, hit, dt, single) {
+    var tHit = hit.f * dt;
+    var cA = { x: lineA.x + lineA.vx * tHit, y: lineA.y + lineA.vy * tHit };
+    var cB = { x: lineB.x + lineB.vx * tHit, y: lineB.y + lineB.vy * tHit };
+    function contact(p, normal) {
+      return { normal: normal, point: p, rA: { x: p.x - cA.x, y: p.y - cA.y }, rB: { x: p.x - cB.x, y: p.y - cB.y }, penetration: 0, tHit: tHit };
+    }
+    if (!single) {
+      var a0 = sweptPoint(sA.e0, sA.d0, hit.f), a1 = sweptPoint(sA.e1, sA.d1, hit.f);
+      var b0 = sweptPoint(sB.e0, sB.d0, hit.f), b1 = sweptPoint(sB.e1, sB.d1, hit.f);
+      var dirA = { x: a1.x - a0.x, y: a1.y - a0.y }, lenA = Math.sqrt(dot(dirA, dirA)) || 1;
+      dirA.x /= lenA; dirA.y /= lenA;
+      var dirB = { x: b1.x - b0.x, y: b1.y - b0.y }, lenB = Math.sqrt(dot(dirB, dirB)) || 1;
+      if (Math.abs(dirA.x * (dirB.y / lenB) - dirA.y * (dirB.x / lenB)) < LINE_PARALLEL_EPS) {
+        var t0 = dot({ x: b0.x - a0.x, y: b0.y - a0.y }, dirA), t1 = dot({ x: b1.x - a0.x, y: b1.y - a0.y }, dirA);
+        var lo = Math.max(0, Math.min(t0, t1)), hi = Math.min(lenA, Math.max(t0, t1));
+        if (hi > lo) {
+          var side = dirA.x * hit.normal.y - dirA.y * hit.normal.x < 0 ? -1 : 1;
+          var normal = { x: -dirA.y * side, y: dirA.x * side }, half = LINE_THICKNESS / 2;
+          var ts = hi - lo > 1e-6 ? [lo, hi] : [lo];
+          return ts.map(function (t) {
+            return contact({ x: a0.x + dirA.x * t + normal.x * half, y: a0.y + dirA.y * t + normal.y * half }, normal);
+          });
+        }
+      }
+    }
+    return [contact(hit.point, hit.normal)];
+  }
+
+  // Two capsules moving and turning over the step: the overlap at the start and the first touch within
+  // the step anywhere else, at most two contacts. Bounding circles that never meet skip all of it.
+  function collideLineLine(lineA, lineB, dt) {
+    var reach = (lineA.length + lineB.length) / 2 + LINE_THICKNESS;
+    var mx = (lineB.vx - lineA.vx) * dt, my = (lineB.vy - lineA.vy) * dt;
+    if (!sweptReachMeets(lineB.x - lineA.x, lineB.y - lineA.y, mx, my, reach)) return null;
+    var eA = getLineEndpoints(lineA), eB = getLineEndpoints(lineB);
+    var travel = Math.sqrt(mx * mx + my * my) + (Math.abs(lineA.w) * lineA.length + Math.abs(lineB.w) * lineB.length) / 2 * dt;
+    if (!linesMayTouch(eA[0], eA[1], eB[0], eB[1], travel)) return null;
+    var touching = lineLineContacts(lineA, lineB, dt);
+    // Two already, or crossed: nothing further this step.
+    if (touching && (touching.length > 1 || touching[0].penetration > LINE_THICKNESS)) return touching;
+    var sA = lineSweep(lineA, dt), sB = lineSweep(lineB, dt);
+    var hit = lineLineFirstTouch(sA, lineA.length, sB, lineB.length);
+    if (!hit) return touching;
+    var swept = lineLineSweptContacts(lineA, sA, lineB, sB, hit, dt, !!touching);
+    return touching ? touching.concat(swept) : swept;
   }
 
   // ---- Port hole outline: two big arcs and two tip circles, tangent where they meet. a is a tip's
@@ -745,9 +949,10 @@
   }
 
   // The port hole's frame: x along it, y toward its back.
-  function portholeFrame(ph) {
-    var cs = Math.cos(ph.angle), sn = Math.sin(ph.angle);
+  function portholeFrame(ph) { return turnFrame(Math.cos(ph.angle), Math.sin(ph.angle)); }
+  function turnFrame(cs, sn) {
     return {
+      cs: cs, sn: sn,
       toLocal: function (wx, wy) { return { x: wx * cs + wy * sn, y: wy * cs - wx * sn }; },
       toWorld: function (lx, ly) { return { x: lx * cs - ly * sn, y: lx * sn + ly * cs }; },
     };
@@ -785,14 +990,20 @@
     }];
   }
 
-  // Port hole = A (its oval), line = B (its capsule). The segment's nearest point to the oval is an
-  // endpoint or the foot of a feature circle's center, when that feature owns the foot. One contact.
-  function collidePortholeLine(ph, line) {
-    var o = portholeOval(ph.length), fr = portholeFrame(ph);
-    var ends = getLineEndpoints(line);
-    var e0 = fr.toLocal(ends[0].x - ph.x, ends[0].y - ph.y), e1 = fr.toLocal(ends[1].x - ph.x, ends[1].y - ph.y);
-    var bestQ = null, bestF = null;
-    function consider(q, f) { if (!bestF || f.d < bestF.d) { bestQ = q; bestF = f; } }
+  // Where segment e0-e1 crosses the line through p and q, or null.
+  function segmentCrossing(e0, e1, p, q) {
+    var dx = q.x - p.x, dy = q.y - p.y;
+    var s0 = dx * (e0.y - p.y) - dy * (e0.x - p.x), s1 = dx * (e1.y - p.y) - dy * (e1.x - p.x);
+    if (s0 * s1 > 0 || s0 === s1) return null;
+    var k = s0 / (s0 - s1);
+    return { x: e0.x + (e1.x - e0.x) * k, y: e0.y + (e1.y - e0.y) * k };
+  }
+
+  // Segment e0-e1's nearest point to the oval, in its frame: an end, a feature center's owned foot, or
+  // where it crosses the junction rays or the center line.
+  function portholeLineNearest(o, e0, e1) {
+    var best = null;
+    function consider(q, f) { if (!best || f.d < best.f.d) best = { q: q, f: f }; }
     consider(e0, portholeFeature(o, e0.x, e0.y));
     consider(e1, portholeFeature(o, e1.x, e1.y));
     for (var kind = 0; kind < 4; kind++) {
@@ -801,21 +1012,98 @@
       var f = portholeFeature(o, q.x, q.y);
       if (f.kind === kind) consider(q, f);
     }
-    var half = LINE_THICKNESS / 2;
-    if (bestF.d >= half) return null;
-    var nx = bestF.dist > 1e-9 ? (bestQ.x - bestF.cx) / bestF.dist : 0, ny = bestF.dist > 1e-9 ? (bestQ.y - bestF.cy) / bestF.dist : 1;
-    // Midway between the two surfaces, as collideLineLine puts it.
-    var m = fr.toWorld((bestF.cx + nx * bestF.radius + bestQ.x - nx * half) / 2, (bestF.cy + ny * bestF.radius + bestQ.y - ny * half) / 2);
+    var tipL = { x: -o.ax, y: 0 }, tipR = { x: o.ax, y: 0 };
+    [[{ x: 0, y: -o.cy }, tipL], [{ x: 0, y: -o.cy }, tipR], [{ x: 0, y: o.cy }, tipL], [{ x: 0, y: o.cy }, tipR], [tipL, tipR]].forEach(function (ray) {
+      var c = segmentCrossing(e0, e1, ray[0], ray[1]);
+      if (c) consider(c, portholeFeature(o, c.x, c.y));
+    });
+    return best;
+  }
+
+  // The contact at that point, with the port hole's center c and frame fr and the line's center lc at tHit.
+  function portholeLineContact(near, fr, c, lc, tHit) {
+    var half = LINE_THICKNESS / 2, q = near.q, f = near.f;
+    var nx = f.dist > 1e-9 ? (q.x - f.cx) / f.dist : 0, ny = f.dist > 1e-9 ? (q.y - f.cy) / f.dist : 1;
+    // Midway between the two surfaces, as collideLineLine puts it, but never deeper than a quarter
+    // thickness inside the oval: a push out the front stays a front contact.
+    var lift = f.radius + Math.max(f.d - half, -half) / 2;
+    var m = fr.toWorld(f.cx + nx * lift, f.cy + ny * lift);
     var n = fr.toWorld(nx, ny);
-    var px = ph.x + m.x, py = ph.y + m.y;
+    var px = c.x + m.x, py = c.y + m.y;
     return [{
       normal: { x: n.x, y: n.y },
       point: { x: px, y: py },
       rA: { x: m.x, y: m.y },
-      rB: { x: px - line.x, y: py - line.y },
-      penetration: half - bestF.d,
-      tHit: 0,
+      rB: { x: px - lc.x, y: py - lc.y },
+      penetration: Math.max(half - f.d, 0),
+      tHit: tHit,
     }];
+  }
+
+  // Port hole = A (its oval), line = B (its capsule), either moving and turning: the overlap at the start
+  // and the first touch within the step, swept in the port hole's frame onto each owned feature circle.
+  function collidePortholeLine(ph, line, dt) {
+    var o = portholeOval(ph.length), half = LINE_THICKNESS / 2;
+    var dx = line.x - ph.x, dy = line.y - ph.y, mx = (line.vx - ph.vx) * dt, my = (line.vy - ph.vy) * dt;
+    if (!sweptReachMeets(dx, dy, mx, my, o.a + line.length / 2 + half)) return null;
+    // The oval lies inside its own segment's capsule; in its frame a turn carries the line round too.
+    var eP = getLineEndpoints(ph), eL = getLineEndpoints(line);
+    var travel = Math.sqrt(mx * mx + my * my) + (Math.abs(line.w) * line.length / 2 + Math.abs(ph.w) * (Math.sqrt(dx * dx + dy * dy) + line.length / 2)) * dt;
+    if (!linesMayTouch(eP[0], eP[1], eL[0], eL[1], travel)) return null;
+    var fr = portholeFrame(ph), sw = lineSweep(line, dt);
+    var l0 = fr.toLocal(sw.e0.x - ph.x, sw.e0.y - ph.y), l1 = fr.toLocal(sw.e1.x - ph.x, sw.e1.y - ph.y);
+    // Crossing its center line: out the shorter way, with the point on the side the line mostly lies so
+    // that a leader's front contact is still dropped; nothing further this step.
+    var crossed = crossedSegments({ x: -ph.length / 2, y: 0 }, { x: ph.length / 2, y: 0 }, l0, l1, true, { x: 0, y: 0 });
+    if (crossed) {
+      var cn = fr.toWorld(crossed.normal.x, crossed.normal.y), cm = fr.toWorld(crossed.point.x, crossed.point.y);
+      return [{
+        normal: cn,
+        point: { x: ph.x + cm.x, y: ph.y + cm.y },
+        rA: cm,
+        rB: { x: ph.x + cm.x - line.x, y: ph.y + cm.y - line.y },
+        penetration: crossed.depth + LINE_THICKNESS,
+        tHit: 0,
+      }];
+    }
+    var near = portholeLineNearest(o, l0, l1);
+    // Inside the oval, the arc on the side the line mostly lies (its farther end's) pushes it out.
+    if (near.f.d < 0 && near.f.kind < 2) {
+      var arc = portholeFeatureCircle(o, (Math.abs(l0.y) > Math.abs(l1.y) ? l0.y : l1.y) < 0 ? 1 : 0), qx = near.q.x - arc.cx, qy = near.q.y - arc.cy;
+      arc.dist = Math.sqrt(qx * qx + qy * qy);
+      arc.d = arc.dist - arc.radius;
+      near = { q: near.q, f: arc };
+    }
+    var touching = near.f.d < half ? portholeLineContact(near, fr, ph, line, 0) : null;
+    var endX = ph.x + ph.vx * dt, endY = ph.y + ph.vy * dt;
+    var frEnd = ph.w !== 0 ? portholeFrame({ angle: ph.angle + ph.w * dt }) : fr;
+    var m0 = frEnd.toLocal(sw.e0.x + sw.d0.x - endX, sw.e0.y + sw.d0.y - endY), m1 = frEnd.toLocal(sw.e1.x + sw.d1.x - endX, sw.e1.y + sw.d1.y - endY);
+    var d0 = { x: m0.x - l0.x, y: m0.y - l0.y }, d1 = { x: m1.x - l1.x, y: m1.y - l1.y };
+    // The segment's touching point (an end, or the foot of the feature's center), kept if owned.
+    var best = -1, bestQ = null;
+    function keep(f, q, kind) {
+      if (best >= 0 && f >= best) return;
+      if (portholeFeature(o, q.x, q.y).kind === kind) { best = f; bestQ = q; }
+    }
+    for (var kind = 0; kind < 4; kind++) {
+      var fc = portholeFeatureCircle(o, kind), c = { x: fc.cx, y: fc.cy }, R = fc.radius + half;
+      var f0 = sweepPointSphere(l0.x, l0.y, d0.x, d0.y, c.x, c.y, R, 1);
+      if (f0 > 0) keep(f0, sweptPoint(l0, d0, f0), kind);
+      var f1 = sweepPointSphere(l1.x, l1.y, d1.x, d1.y, c.x, c.y, R, 1);
+      if (f1 > 0) keep(f1, sweptPoint(l1, d1, f1), kind);
+      var fs = kind < 2 ? sweepFarPointSlab(c, l0, d0, l1, d1, line.length, R) : sweepPointMovingSlab(c, { x: 0, y: 0 }, l0, d0, l1, d1, line.length, R);
+      if (fs > 0) keep(fs, closestPointOnSegment(sweptPoint(l0, d0, fs), sweptPoint(l1, d1, fs), c), kind);
+    }
+    if (best < 0) return touching;
+    var tHit = best * dt, frHit = fr;
+    if (ph.w !== 0) {
+      // Its tangent at the hit, along the chord of the turn.
+      var tx = fr.cs + (frEnd.cs - fr.cs) * best, ty = fr.sn + (frEnd.sn - fr.sn) * best, tl = Math.sqrt(tx * tx + ty * ty);
+      frHit = turnFrame(tx / tl, ty / tl);
+    }
+    var nearHit = { q: bestQ, f: portholeFeature(o, bestQ.x, bestQ.y) };
+    var swept = portholeLineContact(nearHit, frHit, { x: ph.x + ph.vx * tHit, y: ph.y + ph.vy * tHit }, { x: line.x + line.vx * tHit, y: line.y + line.vy * tHit }, tHit);
+    return touching ? touching.concat(swept) : swept;
   }
 
   // Computed as (B, A): flip the normal and swap rA/rB back to the caller's order.
@@ -837,9 +1125,9 @@
     if (bPort && aRound) return flipContacts(collidePortholeCircle(B, A, dt));
     if (!aRound && bRound) return collideLineCircle(A, B, dt);
     if (aRound) return flipContacts(collideLineCircle(B, A, dt));
-    if (aPort && !bPort) return collidePortholeLine(A, B);
-    if (bPort && !aPort) return flipContacts(collidePortholeLine(B, A));
-    return collideLineLine(A, B);
+    if (aPort && !bPort) return collidePortholeLine(A, B, dt);
+    if (bPort && !aPort) return flipContacts(collidePortholeLine(B, A, dt));
+    return collideLineLine(A, B, dt);
   }
 
   // ---- Impulse solver ----
@@ -1317,9 +1605,12 @@
     if (gravityStart) substepGravity(scene, gravityStart, acc, u, vFull, dt, maxSpeed, friction);
     var shake = scene.hinges.length ? shakeHinges(scene, bodies, vFull, alpha, swing, dt) : null;
 
+    // Probes move and turn as leg 1 will: at vFull, and at the whole step's spin with any hinge impulse.
     var probes = new Array(bodies.length);
     for (i = 0; i < bodies.length; i++) {
-      probes[i] = bodies[i].isAnchored ? bodies[i] : Object.assign({}, bodies[i], { vx: vFull[i].x, vy: vFull[i].y });
+      if (bodies[i].isAnchored) { probes[i] = bodies[i]; continue; }
+      var spin = springSpin(bodies[i].w, alpha[i], swing[i], dt) + (shake && shake[i] ? shake[i].w : 0);
+      probes[i] = Object.assign({}, bodies[i], { vx: vFull[i].x, vy: vFull[i].y, w: spin });
     }
 
     // Port holes: with both placed, a chain leader's center may pass the front of one and leave
@@ -1652,11 +1943,11 @@
 
   // Steps at which some pair STARTS touching: the bounce sound's event source, read off a run's rows
   // (runTrajectory's or the GPU's) that start from `scene`. Per-PAIR state ("a,b", a < b). Mutual
-  // Gravity usually runs with collisions off, so there overlap is geometric (overlappingPairs);
+  // Gravity with collisions off has no contacts, so there overlap is geometric (overlappingPairs);
   // otherwise the rows' contacts. Hinged-line alignment also fires. One event a step.
   function bounceEventsFromTrajectory(scene, rows) {
     if (!hasBounceSounds(scene)) return [];
-    var geometric = !!scene.mutualGravity;
+    var geometric = !!scene.mutualGravity && !collisionsEnabled(scene);
     var linePairs = hingedLinePairs(scene);
     var wasTouchingPairs = {};
     // Seed with pairs already overlapping, so pre-placed contact isn't a fresh bounce on step 0.

@@ -68,7 +68,7 @@
     "const float DT = " + fnum(FIXED_DT) + ";",
     "const float GRAVITY = " + fnum(global.PhysicsEngine.GRAVITY) + ";",
     "",
-    // tHit 0.0 = touching at the step's start; only collideCircleCircle's swept branch sets another.
+    // tHit 0.0 = touching at the step's start; a swept test sets the instant of a later touch.
     "Contact noContact() {",
     "  Contact c;",
     "  c.hit = false; c.normal = vec2(0.0); c.point = vec2(0.0); c.rA = vec2(0.0); c.rB = vec2(0.0); c.penetration = 0.0; c.tHit = 0.0;",
@@ -165,6 +165,142 @@
     "  float s = dot(p + v * t - e0, dir);",
     "  if (s < 0.0 || s > len) return -1.0;",
     "  return t;",
+    "}",
+    "",
+    "// ---- Swept line contacts (PhysicsEngine's): f is the fraction of the step, a line's ends run their chords ----",
+    "bool sweptReachMeets(vec2 d, vec2 m, float reach) {",
+    "  float r2 = reach * reach;",
+    "  if (dot(d, d) <= r2) return true;",
+    "  float dm = dot(d, m);",
+    "  if (dm >= 0.0) return false;",
+    "  float mm = dot(m, m);",
+    "  if (-dm >= mm) { vec2 e = d + m; return dot(e, e) <= r2; }",
+    "  float cr = d.x * m.y - d.y * m.x;",
+    "  return cr * cr <= r2 * mm;",
+    "}",
+    "// PhysicsEngine.linesMayTouch.",
+    "bool linesMayTouch(vec2 a0, vec2 a1, vec2 b0, vec2 b1, float travel) {",
+    "  ClosestPair cp = closestPointsSegmentSegment(a0, a1, b0, b1);",
+    "  vec2 d = cp.c2 - cp.c1;",
+    "  float room = 2.0 * LINE_THICKNESS + travel;",
+    "  return dot(d, d) <= room * room;",
+    "}",
+    "// Smallest root in [0, 1] of a f^2 + b f + c with c > 0, or -1.",
+    "float firstRoot(float a, float b, float c) {",
+    "  float f;",
+    "  if (a == 0.0) {",
+    "    if (b >= 0.0) return -1.0;",
+    "    f = -c / b;",
+    "  } else {",
+    "    float disc = b * b - 4.0 * a * c;",
+    "    if (disc < 0.0) return -1.0;",
+    "    float q = -0.5 * (b < 0.0 ? b - sqrt(disc) : b + sqrt(disc));",
+    "    if (q == 0.0) return -1.0;",
+    "    float r1 = q / a, r2 = c / q;",
+    "    f = min(r1, r2);",
+    "    if (f < 0.0) f = max(r1, r2);",
+    "  }",
+    "  return f >= 0.0 && f <= 1.0 ? f : -1.0;",
+    "}",
+    "float sweepPointMovingSlab(vec2 p, vec2 dp, vec2 q0, vec2 dq0, vec2 q1, vec2 dq1, float len, float R) {",
+    "  vec2 D = q1 - q0, mD = dq1 - dq0, P = p - q0, mP = dp - dq0;",
+    "  float c0 = D.x * P.y - D.y * P.x;",
+    "  float side = c0 < 0.0 ? -1.0 : 1.0;",
+    "  float c = side * c0 - R * len;",
+    "  if (c <= 0.0) return -1.0;",
+    "  float f = firstRoot(side * (mD.x * mP.y - mD.y * mP.x), side * (D.x * mP.y - D.y * mP.x + mD.x * P.y - mD.y * P.x), c);",
+    "  if (f < 0.0) return -1.0;",
+    "  vec2 Df = D + mD * f;",
+    "  float s = dot(P + mP * f, Df);",
+    "  return s >= 0.0 && s <= dot(Df, Df) ? f : -1.0;",
+    "}",
+    "// PhysicsEngine.sweepFarPointSlab: a port hole's arc center onto the line's flat side, refined.",
+    "float farPointNewton(vec2 c, vec2 q0, vec2 dq0, vec2 q1, vec2 dq1, float R, float side, float f) {",
+    "  vec2 D = q1 - q0, mD = dq1 - dq0, P = c - q0;",
+    "  vec2 d = D + mD * f, p = P - dq0 * f;",
+    "  float dl = length(d);",
+    "  float F = side * (d.x * p.y - d.y * p.x) - R * dl;",
+    "  float dF = side * (mD.x * p.y - mD.y * p.x - d.x * dq0.y + d.y * dq0.x) - R * dot(d, mD) / dl;",
+    "  return dF < 0.0 ? f - F / dF : f;",
+    "}",
+    "float sweepFarPointSlab(vec2 c, vec2 q0, vec2 dq0, vec2 q1, vec2 dq1, float len, float R) {",
+    "  float f = sweepPointMovingSlab(c, vec2(0.0), q0, dq0, q1, dq1, len, R);",
+    "  if (f < 0.0) return -1.0;",
+    "  vec2 D = q1 - q0, mD = dq1 - dq0, P = c - q0;",
+    "  float side = D.x * P.y - D.y * P.x < 0.0 ? -1.0 : 1.0;",
+    "  f = farPointNewton(c, q0, dq0, q1, dq1, R, side, f);",
+    "  f = farPointNewton(c, q0, dq0, q1, dq1, R, side, f);",
+    "  if (!(f >= 0.0 && f <= 1.0)) return -1.0;",
+    "  vec2 e = D + mD * f;",
+    "  float s = dot(P - dq0 * f, e);",
+    "  return s >= 0.0 && s <= dot(e, e) ? f : -1.0;",
+    "}",
+    "// How far a line's half vector h turns over the step, at its spin.",
+    "vec2 lineTurn(Body line, float halfLen, vec2 h) {",
+    "  if (line.w == 0.0) return vec2(0.0);",
+    "  float a = line.angle + line.w * DT;",
+    "  return vec2(cos(a), sin(a)) * halfLen - h;",
+    "}",
+    "struct LineSweep { vec2 e0; vec2 d0; vec2 e1; vec2 d1; };",
+    "LineSweep lineSweep(vec2 c, vec2 h, vec2 m, vec2 t) {",
+    "  LineSweep s;",
+    "  s.e0 = c - h; s.e1 = c + h; s.d0 = m - t; s.d1 = m + t;",
+    "  return s;",
+    "}",
+    "// .f < 0.0: no touch. While searching, p and u are the touching point and the way to the other",
+    "// surface, own 1.0 for A's point and -1.0 for B's; then normal (A -> B) and point (midway).",
+    "struct SweptHit { float f; vec2 p; vec2 u; float own; vec2 normal; vec2 point; };",
+    "// An end p onto the other's flat side.",
+    "void sweptSlabHit(vec2 p, vec2 dp, LineSweep s, float len, float own, inout SweptHit best) {",
+    "  float f = sweepPointMovingSlab(p, dp, s.e0, s.d0, s.e1, s.d1, len, LINE_THICKNESS);",
+    "  if (f <= 0.0 || (best.f >= 0.0 && f >= best.f)) return;",
+    "  vec2 q0 = s.e0 + s.d0 * f, q1 = s.e1 + s.d1 * f, pf = p + dp * f, D = q1 - q0;",
+    "  float k = D.x * (pf.y - q0.y) - D.y * (pf.x - q0.x) < 0.0 ? 1.0 : -1.0;",
+    "  best.f = f; best.p = pf; best.u = vec2(-D.y, D.x) * k; best.own = own;",
+    "}",
+    "void sweptCapHit(vec2 a, vec2 da, vec2 b, vec2 db, inout SweptHit best) {",
+    "  float f = sweepPointSphere(a, da - db, b, LINE_THICKNESS, 1.0);",
+    "  if (f <= 0.0 || (best.f >= 0.0 && f >= best.f)) return;",
+    "  vec2 af = a + da * f;",
+    "  best.f = f; best.p = af; best.u = b + db * f - af; best.own = 1.0;",
+    "}",
+    "SweptHit lineLineFirstTouch(LineSweep a, float lenA, LineSweep b, float lenB) {",
+    "  SweptHit best;",
+    "  best.f = -1.0; best.p = vec2(0.0); best.u = vec2(0.0); best.own = 1.0; best.normal = vec2(0.0); best.point = vec2(0.0);",
+    "  sweptSlabHit(a.e0, a.d0, b, lenB, 1.0, best);",
+    "  sweptSlabHit(a.e1, a.d1, b, lenB, 1.0, best);",
+    "  sweptSlabHit(b.e0, b.d0, a, lenA, -1.0, best);",
+    "  sweptSlabHit(b.e1, b.d1, a, lenA, -1.0, best);",
+    "  sweptCapHit(a.e0, a.d0, b.e0, b.d0, best);",
+    "  sweptCapHit(a.e0, a.d0, b.e1, b.d1, best);",
+    "  sweptCapHit(a.e1, a.d1, b.e0, b.d0, best);",
+    "  sweptCapHit(a.e1, a.d1, b.e1, b.d1, best);",
+    "  float ul = length(best.u);",
+    "  vec2 n = best.u / (ul > 0.0 ? ul : 1.0);",
+    "  best.normal = n * best.own;",
+    "  best.point = best.p + n * (LINE_THICKNESS * 0.5);",
+    "  return best;",
+    "}",
+    "// PhysicsEngine.crossedSegments; .penetration is the depth alone, rA/rB are the caller's.",
+    "Contact crossedSegments(vec2 a0, vec2 a1, vec2 b0, vec2 b1, bool liftAlongA, vec2 back) {",
+    "  Contact c = noContact();",
+    "  vec2 u = a1 - a0, v = b1 - b0;",
+    "  float ul = length(u), vl = length(v);",
+    "  u /= ul > 0.0 ? ul : 1.0;",
+    "  v /= vl > 0.0 ? vl : 1.0;",
+    "  float sa0 = v.x * (a0.y - b0.y) - v.y * (a0.x - b0.x), sa1 = v.x * (a1.y - b0.y) - v.y * (a1.x - b0.x);",
+    "  float sb0 = u.x * (b0.y - a0.y) - u.y * (b0.x - a0.x), sb1 = u.x * (b1.y - a0.y) - u.y * (b1.x - a0.x);",
+    "  if (!(sa0 * sa1 < 0.0 && sb0 * sb1 < 0.0)) return c;",
+    "  bool upA = (sb0 + sb1) * 0.5 - (u.x * back.y - u.y * back.x) > 0.0;",
+    "  bool upB = (sa0 + sa1) * 0.5 + (v.x * back.y - v.y * back.x) > 0.0;",
+    "  float depthA = upA ? -min(sb0, sb1) : max(sb0, sb1), depthB = upB ? -min(sa0, sa1) : max(sa0, sa1);",
+    "  vec2 sideA = upA ? vec2(-u.y, u.x) : vec2(u.y, -u.x);",
+    "  vec2 n = depthA <= depthB ? sideA : (upB ? vec2(v.y, -v.x) : vec2(-v.y, v.x));",
+    "  c.hit = true;",
+    "  c.normal = n;",
+    "  c.point = a0 + (a1 - a0) * (sa0 / (sa0 - sa1)) + (liftAlongA ? sideA : n) * (LINE_THICKNESS * 0.5);",
+    "  c.penetration = min(depthA, depthB);",
+    "  return c;",
     "}",
     "",
     "// One leg of a step: gravity, friction and the speed clamp, continuous in dt (dt=0 is the identity).",
@@ -293,18 +429,20 @@
     "  return sweptCapsuleCircleContact(e0, e1, vec2(line.vx, line.vy), vec2(line.x, line.y), circle, radius, LINE_THICKNESS * 0.5);",
     "}",
     "",
-    "// Two contacts (both ends of the overlap) when near-parallel and",
-    "// overlapping: a single point can't stop a rod from spinning around it -",
-    "// otherwise falls back to a single closest-point contact.",
-    "ContactPair collideLineLine(Body lineA, float halfLenA, Body lineB, float halfLenB) {",
-    "  vec2 eA0 = lineEndpoint0(lineA, halfLenA);",
-    "  vec2 eA1 = lineEndpoint1(lineA, halfLenA);",
-    "  vec2 eB0 = lineEndpoint0(lineB, halfLenB);",
-    "  vec2 eB1 = lineEndpoint1(lineB, halfLenB);",
-    "",
+    "// Touching at the step's start (tHit 0): crossed, or both ends of the overlap when near-parallel (one",
+    "// point can't stop a rod spinning about it), else the closest points.",
+    "ContactPair lineLineContacts(Body lineA, vec2 eA0, vec2 eA1, Body lineB, vec2 eB0, vec2 eB1) {",
     "  ContactPair result;",
     "  result.c0 = noContact();",
     "  result.c1 = noContact();",
+    "  Contact cr = crossedSegments(eA0, eA1, eB0, eB1, false, (vec2(lineB.vx, lineB.vy) - vec2(lineA.vx, lineA.vy)) * DT);",
+    "  if (cr.hit) {",
+    "    result.c0 = cr;",
+    "    result.c0.rA = cr.point - vec2(lineA.x, lineA.y);",
+    "    result.c0.rB = cr.point - vec2(lineB.x, lineB.y);",
+    "    result.c0.penetration = cr.penetration + LINE_THICKNESS;",
+    "    return result;",
+    "  }",
     "",
     "  vec2 dirA = eA1 - eA0;",
     "  float lenA = length(dirA);",
@@ -316,48 +454,47 @@
     "  vec2 dirBn = dirBraw / lenB;",
     "  float crossVal = dirA.x * dirBn.y - dirA.y * dirBn.x;",
     "",
-    "  if (abs(crossVal) < LINE_PARALLEL_EPS) {",
-    "    vec2 perp = vec2(-dirA.y, dirA.x);",
-    "    float offset = dot(eB0 - eA0, perp);",
-    "    float distP = abs(offset);",
-    "    if (distP < LINE_THICKNESS) {",
-    "      float b0 = dot(eB0 - eA0, dirA);",
-    "      float b1 = dot(eB1 - eA0, dirA);",
-    "      float lo = max(0.0, min(b0, b1));",
-    "      float hi = min(lenA, max(b0, b1));",
-    "      if (hi > lo) {",
-    "        float sgn = offset >= 0.0 ? 1.0 : -1.0;",
-    "        vec2 normal = perp * sgn;",
-    "        float penetration = LINE_THICKNESS - distP;",
-    "        vec2 pOnA0 = eA0 + dirA * lo;",
-    "        vec2 pOnA1 = eA0 + dirA * hi;",
-    "        vec2 pt0 = pOnA0 + perp * offset * 0.5;",
-    "        result.c0.hit = true;",
-    "        result.c0.normal = normal;",
-    "        result.c0.point = pt0;",
-    "        result.c0.rA = pt0 - vec2(lineA.x, lineA.y);",
-    "        result.c0.rB = pt0 - vec2(lineB.x, lineB.y);",
-    "        result.c0.penetration = penetration;",
-    "        result.c0.tHit = 0.0;",
-    "        if (hi - lo > 1e-6) {",
-    "          vec2 pt1 = pOnA1 + perp * offset * 0.5;",
-    "          result.c1.hit = true;",
-    "          result.c1.normal = normal;",
-    "          result.c1.point = pt1;",
-    "          result.c1.rA = pt1 - vec2(lineA.x, lineA.y);",
-    "          result.c1.rB = pt1 - vec2(lineB.x, lineB.y);",
-    "          result.c1.penetration = penetration;",
-    "          result.c1.tHit = 0.0;",
-    "        }",
-    "        return result;",
-    "      }",
-    "    }",
-    "  }",
-    "",
     "  ClosestPair cp = closestPointsSegmentSegment(eA0, eA1, eB0, eB1);",
     "  vec2 d2 = cp.c2 - cp.c1;",
     "  float dist2 = length(d2);",
     "  if (dist2 >= LINE_THICKNESS) return result;",
+    "",
+    "  if (abs(crossVal) < LINE_PARALLEL_EPS) {",
+    "    float b0 = dot(eB0 - eA0, dirA);",
+    "    float b1 = dot(eB1 - eA0, dirA);",
+    "    float lo = max(0.0, min(b0, b1));",
+    "    float hi = min(lenA, max(b0, b1));",
+    "    if (hi > lo) {",
+    "      vec2 perp = vec2(-dirA.y, dirA.x);",
+    "      // Their gap along A's normal where they are closest.",
+    "      float offset = dot(d2, perp);",
+    "      float sgn = offset >= 0.0 ? 1.0 : -1.0;",
+    "      vec2 normal = perp * sgn;",
+    "      float penetration = LINE_THICKNESS - abs(offset);",
+    "      vec2 pOnA0 = eA0 + dirA * lo;",
+    "      vec2 pOnA1 = eA0 + dirA * hi;",
+    "      vec2 pt0 = pOnA0 + perp * offset * 0.5;",
+    "      result.c0.hit = true;",
+    "      result.c0.normal = normal;",
+    "      result.c0.point = pt0;",
+    "      result.c0.rA = pt0 - vec2(lineA.x, lineA.y);",
+    "      result.c0.rB = pt0 - vec2(lineB.x, lineB.y);",
+    "      result.c0.penetration = penetration;",
+    "      result.c0.tHit = 0.0;",
+    "      if (hi - lo > 1e-6) {",
+    "        vec2 pt1 = pOnA1 + perp * offset * 0.5;",
+    "        result.c1.hit = true;",
+    "        result.c1.normal = normal;",
+    "        result.c1.point = pt1;",
+    "        result.c1.rA = pt1 - vec2(lineA.x, lineA.y);",
+    "        result.c1.rB = pt1 - vec2(lineB.x, lineB.y);",
+    "        result.c1.penetration = penetration;",
+    "        result.c1.tHit = 0.0;",
+    "      }",
+    "      return result;",
+    "    }",
+    "  }",
+    "",
     "  vec2 n2 = dist2 > 1e-9 ? d2 / dist2 : vec2(0.0, 1.0);",
     "  vec2 pt2 = (cp.c1 + cp.c2) * 0.5;",
     "  result.c0.hit = true;",
@@ -367,6 +504,52 @@
     "  result.c0.rB = pt2 - vec2(lineB.x, lineB.y);",
     "  result.c0.penetration = LINE_THICKNESS - dist2;",
     "  result.c0.tHit = 0.0;",
+    "  return result;",
+    "}",
+    "",
+    "// PhysicsEngine.collideLineLine: the overlap at the start and the first touch within the step",
+    "// anywhere else, at most two contacts. Bounding circles that never meet skip all of it.",
+    "ContactPair collideLineLine(Body lineA, float halfLenA, Body lineB, float halfLenB) {",
+    "  ContactPair result;",
+    "  result.c0 = noContact();",
+    "  result.c1 = noContact();",
+    "  vec2 cA = vec2(lineA.x, lineA.y), cB = vec2(lineB.x, lineB.y), vA = vec2(lineA.vx, lineA.vy), vB = vec2(lineB.vx, lineB.vy);",
+    "  vec2 mRel = (vB - vA) * DT;",
+    "  if (!sweptReachMeets(cB - cA, mRel, halfLenA + halfLenB + LINE_THICKNESS)) return result;",
+    "  vec2 hA = vec2(cos(lineA.angle), sin(lineA.angle)) * halfLenA, hB = vec2(cos(lineB.angle), sin(lineB.angle)) * halfLenB;",
+    "  float travel = length(mRel) + (abs(lineA.w) * halfLenA + abs(lineB.w) * halfLenB) * DT;",
+    "  if (!linesMayTouch(cA - hA, cA + hA, cB - hB, cB + hB, travel)) return result;",
+    "  result = lineLineContacts(lineA, cA - hA, cA + hA, lineB, cB - hB, cB + hB);",
+    "  if (result.c1.hit || result.c0.penetration > LINE_THICKNESS) return result;",
+    "  LineSweep sA = lineSweep(cA, hA, vA * DT, lineTurn(lineA, halfLenA, hA));",
+    "  LineSweep sB = lineSweep(cB, hB, vB * DT, lineTurn(lineB, halfLenB, hB));",
+    "  SweptHit hit = lineLineFirstTouch(sA, 2.0 * halfLenA, sB, 2.0 * halfLenB);",
+    "  if (hit.f < 0.0) return result;",
+    "  float tHit = hit.f * DT;",
+    "  vec2 pA = cA + vA * tHit, pB = cB + vB * tHit;",
+    "  Contact c = noContact();",
+    "  c.hit = true; c.normal = hit.normal; c.point = hit.point; c.rA = hit.point - pA; c.rB = hit.point - pB; c.tHit = tHit;",
+    "  if (result.c0.hit) { result.c1 = c; return result; }",
+    "  result.c0 = c;",
+    "  // Near-parallel then: both ends of the overlap, on the touch's side.",
+    "  vec2 a0 = sA.e0 + sA.d0 * hit.f, a1 = sA.e1 + sA.d1 * hit.f, b0 = sB.e0 + sB.d0 * hit.f, b1 = sB.e1 + sB.d1 * hit.f;",
+    "  vec2 dirA = a1 - a0, dirB = b1 - b0;",
+    "  float lenA = length(dirA), lenB = length(dirB);",
+    "  if (lenA == 0.0) lenA = 1.0;",
+    "  if (lenB == 0.0) lenB = 1.0;",
+    "  dirA /= lenA;",
+    "  dirB /= lenB;",
+    "  if (abs(dirA.x * dirB.y - dirA.y * dirB.x) >= LINE_PARALLEL_EPS) return result;",
+    "  float t0 = dot(b0 - a0, dirA), t1 = dot(b1 - a0, dirA);",
+    "  float lo = max(0.0, min(t0, t1)), hi = min(lenA, max(t0, t1));",
+    "  if (hi <= lo) return result;",
+    "  vec2 normal = vec2(-dirA.y, dirA.x) * (dirA.x * hit.normal.y - dirA.y * hit.normal.x < 0.0 ? -1.0 : 1.0);",
+    "  vec2 p0 = a0 + dirA * lo + normal * (LINE_THICKNESS * 0.5);",
+    "  result.c0.normal = normal; result.c0.point = p0; result.c0.rA = p0 - pA; result.c0.rB = p0 - pB;",
+    "  if (hi - lo > 1e-6) {",
+    "    vec2 p1 = a0 + dirA * hi + normal * (LINE_THICKNESS * 0.5);",
+    "    result.c1 = result.c0; result.c1.point = p1; result.c1.rA = p1 - pA; result.c1.rB = p1 - pB;",
+    "  }",
     "  return result;",
     "}",
     "",
@@ -448,39 +631,248 @@
     "  Feature f = portholeFeature(o, q);",
     "  if (f.kind == kind && f.d < bestF.d) { bestQ = q; bestF = f; }",
     "}",
-    "// Port hole = A (its oval), line = B (its capsule): the segment's nearest point to the oval is",
-    "// an endpoint or the foot of a feature circle's center, when that feature owns the foot. One contact.",
-    "ContactPair collidePortholeLine(Body ph, float halfLen, Body line, float halfLenB) {",
-    "  Oval o = portholeOval(halfLen);",
-    "  float cs = cos(ph.angle), sn = sin(ph.angle);",
-    "  vec2 phC = vec2(ph.x, ph.y);",
-    "  vec2 e0 = portholeToLocal(lineEndpoint0(line, halfLenB) - phC, sn, cs);",
-    "  vec2 e1 = portholeToLocal(lineEndpoint1(line, halfLenB) - phC, sn, cs);",
-    "  ContactPair result;",
-    "  result.c0 = noContact();",
-    "  result.c1 = noContact();",
-    "  vec2 bestQ = e0;",
-    "  Feature bestF = portholeFeature(o, e0);",
-    "  Feature f1 = portholeFeature(o, e1);",
-    "  if (f1.d < bestF.d) { bestQ = e1; bestF = f1; }",
+    "void portholeConsider(Oval o, vec2 q, inout vec2 bestQ, inout Feature bestF) {",
+    "  Feature f = portholeFeature(o, q);",
+    "  if (f.d < bestF.d) { bestQ = q; bestF = f; }",
+    "}",
+    "// Where segment e0-e1 crosses the line through p and q, if it does.",
+    "void portholeCrossing(Oval o, vec2 e0, vec2 e1, vec2 p, vec2 q, inout vec2 bestQ, inout Feature bestF) {",
+    "  vec2 d = q - p;",
+    "  float s0 = d.x * (e0.y - p.y) - d.y * (e0.x - p.x), s1 = d.x * (e1.y - p.y) - d.y * (e1.x - p.x);",
+    "  if (s0 * s1 > 0.0 || s0 == s1) return;",
+    "  portholeConsider(o, e0 + (e1 - e0) * (s0 / (s0 - s1)), bestQ, bestF);",
+    "}",
+    "// PhysicsEngine.portholeLineNearest: an endpoint, an owned foot, or a crossing between features.",
+    "void portholeLineNearest(Oval o, vec2 e0, vec2 e1, out vec2 bestQ, out Feature bestF) {",
+    "  bestQ = e0;",
+    "  bestF = portholeFeature(o, e0);",
+    "  portholeConsider(o, e1, bestQ, bestF);",
     "  portholeFoot(o, e0, e1, 0, bestQ, bestF);",
     "  portholeFoot(o, e0, e1, 1, bestQ, bestF);",
     "  portholeFoot(o, e0, e1, 2, bestQ, bestF);",
     "  portholeFoot(o, e0, e1, 3, bestQ, bestF);",
+    "  vec2 tipL = vec2(-o.ax, 0.0), tipR = vec2(o.ax, 0.0);",
+    "  portholeCrossing(o, e0, e1, vec2(0.0, -o.cy), tipL, bestQ, bestF);",
+    "  portholeCrossing(o, e0, e1, vec2(0.0, -o.cy), tipR, bestQ, bestF);",
+    "  portholeCrossing(o, e0, e1, vec2(0.0, o.cy), tipL, bestQ, bestF);",
+    "  portholeCrossing(o, e0, e1, vec2(0.0, o.cy), tipR, bestQ, bestF);",
+    "  portholeCrossing(o, e0, e1, tipL, tipR, bestQ, bestF);",
+    "}",
+    "// The contact at segment point q nearest feature f, with the port hole's center c and turn (sn, cs)",
+    "// and the line's center lc at tHit.",
+    "Contact portholeLineContact(vec2 q, Feature f, float sn, float cs, vec2 c, vec2 lc, float tHit) {",
     "  float halfT = LINE_THICKNESS * 0.5;",
-    "  if (bestF.d >= halfT) return result;",
-    "  vec2 nl = bestF.dist > 1e-9 ? (bestQ - bestF.c) / bestF.dist : vec2(0.0, 1.0);",
-    "  vec2 ml = (bestF.c + nl * bestF.radius + bestQ - nl * halfT) * 0.5;",
-    "  vec2 n = rotateBy(nl, sn, cs);",
-    "  vec2 m = rotateBy(ml, sn, cs);",
-    "  vec2 pt = phC + m;",
-    "  result.c0.hit = true;",
-    "  result.c0.normal = n;",
-    "  result.c0.point = pt;",
-    "  result.c0.rA = m;",
-    "  result.c0.rB = pt - vec2(line.x, line.y);",
-    "  result.c0.penetration = halfT - bestF.d;",
-    "  result.c0.tHit = 0.0;",
+    "  vec2 nl = f.dist > 1e-9 ? (q - f.c) / f.dist : vec2(0.0, 1.0);",
+    "  vec2 m = rotateBy(f.c + nl * (f.radius + max(f.d - halfT, -halfT) * 0.5), sn, cs);",
+    "  Contact r = noContact();",
+    "  r.hit = true;",
+    "  r.normal = rotateBy(nl, sn, cs);",
+    "  r.point = c + m;",
+    "  r.rA = m;",
+    "  r.rB = c + m - lc;",
+    "  r.penetration = max(halfT - f.d, 0.0);",
+    "  r.tHit = tHit;",
+    "  return r;",
+    "}",
+    "void portholeKeep(Oval o, float f, vec2 q, int kind, inout float best, inout vec2 bestQ) {",
+    "  if (best >= 0.0 && f >= best) return;",
+    "  if (portholeFeature(o, q).kind == kind) { best = f; bestQ = q; }",
+    "}",
+    "// The line's ends and the feature center's foot swept onto one feature circle, kept where owned.",
+    "void portholeSweepLine(Oval o, vec2 e0, vec2 d0, vec2 e1, vec2 d1, float len, int kind, inout float best, inout vec2 bestQ) {",
+    "  Feature fc = portholeFeatureCircle(o, kind);",
+    "  float R = fc.radius + LINE_THICKNESS * 0.5;",
+    "  float f0 = sweepPointSphere(e0, d0, fc.c, R, 1.0);",
+    "  if (f0 > 0.0) portholeKeep(o, f0, e0 + d0 * f0, kind, best, bestQ);",
+    "  float f1 = sweepPointSphere(e1, d1, fc.c, R, 1.0);",
+    "  if (f1 > 0.0) portholeKeep(o, f1, e1 + d1 * f1, kind, best, bestQ);",
+    "  float fs = kind < 2 ? sweepFarPointSlab(fc.c, e0, d0, e1, d1, len, R) : sweepPointMovingSlab(fc.c, vec2(0.0), e0, d0, e1, d1, len, R);",
+    "  if (fs > 0.0) portholeKeep(o, fs, closestPointOnSegment(e0 + d0 * fs, e1 + d1 * fs, fc.c), kind, best, bestQ);",
+    "}",
+    "// ---- Float32 ranking for physics-gpu-df.js's sweeps: touch fractions with near misses kept, or -1 ----",
+    "float rankSphere(vec2 p, vec2 v, vec2 c, float R) {",
+    "  vec2 d = p - c;",
+    "  float qa = dot(v, v), qb = 2.0 * dot(d, v), qc = dot(d, d) - R * R;",
+    "  if (qa <= 1e-9 || qb >= 0.0 || qc < -1e-3 * R * R) return -1.0;",
+    "  float disc = qb * qb - 4.0 * qa * qc;",
+    "  if (disc < -1e-4 * qb * qb) return -1.0;",
+    "  float f = (-qb - sqrt(max(disc, 0.0))) / (2.0 * qa);",
+    "  return f < 1.001 ? max(f, 0.0) : -1.0;",
+    "}",
+    "float rankSlab(vec2 p, vec2 dp, vec2 q0, vec2 dq0, vec2 q1, vec2 dq1, float len, float R) {",
+    "  vec2 D = q1 - q0, mD = dq1 - dq0, P = p - q0, mP = dp - dq0;",
+    "  float c0 = D.x * P.y - D.y * P.x;",
+    "  float side = c0 < 0.0 ? -1.0 : 1.0;",
+    "  float c = side * c0 - R * len;",
+    "  if (c < -1e-3 * R * len) return -1.0;",
+    "  float a = side * (mD.x * mP.y - mD.y * mP.x), b = side * (D.x * mP.y - D.y * mP.x + mD.x * P.y - mD.y * P.x);",
+    "  float f;",
+    "  if (abs(a) * 1e6 <= abs(b)) {",
+    "    if (b >= 0.0) return -1.0;",
+    "    f = -c / b;",
+    "  } else {",
+    "    float disc = b * b - 4.0 * a * c;",
+    "    if (disc < -1e-4 * b * b) return -1.0;",
+    "    float sq = sqrt(max(disc, 0.0));",
+    "    float q = -0.5 * (b < 0.0 ? b - sq : b + sq);",
+    "    if (q == 0.0) return -1.0;",
+    "    float r1 = q / a, r2 = c / q;",
+    "    f = min(r1, r2);",
+    "    if (f < -1e-3) f = max(r1, r2);",
+    "  }",
+    "  if (f < -1e-3 || f > 1.001) return -1.0;",
+    "  f = clamp(f, 0.0, 1.0);",
+    "  vec2 Df = D + mD * f;",
+    "  float s = dot(P + mP * f, Df), l2 = dot(Df, Df);",
+    "  return s >= -1e-3 * l2 && s <= 1.001 * l2 ? f : -1.0;",
+    "}",
+    "void rankKeep(float f, int code, inout float f1, inout int c1, inout float f2, inout int c2) {",
+    "  if (f < 0.0) return;",
+    "  if (c1 < 0 || f < f1) { f2 = f1; c2 = c1; f1 = f; c1 = code; }",
+    "  else if (c2 < 0 || f < f2) { f2 = f; c2 = code; }",
+    "}",
+    "// lineLineFirstTouch's candidates in its order: 0-1 A's ends onto B's flat side, 2-3 B's onto A's,",
+    "// 4-7 A's end i against B's end j (4 + 2i + j).",
+    "void rankLineLine(vec2 a0, vec2 da0, vec2 a1, vec2 da1, float lenA, vec2 b0, vec2 db0, vec2 b1, vec2 db1, float lenB, out int c1, out int c2) {",
+    "  float f1 = -1.0, f2 = -1.0, R = LINE_THICKNESS;",
+    "  c1 = -1; c2 = -1;",
+    "  rankKeep(rankSlab(a0, da0, b0, db0, b1, db1, lenB, R), 0, f1, c1, f2, c2);",
+    "  rankKeep(rankSlab(a1, da1, b0, db0, b1, db1, lenB, R), 1, f1, c1, f2, c2);",
+    "  rankKeep(rankSlab(b0, db0, a0, da0, a1, da1, lenA, R), 2, f1, c1, f2, c2);",
+    "  rankKeep(rankSlab(b1, db1, a0, da0, a1, da1, lenA, R), 3, f1, c1, f2, c2);",
+    "  rankKeep(rankSphere(a0, da0 - db0, b0, R), 4, f1, c1, f2, c2);",
+    "  rankKeep(rankSphere(a0, da0 - db1, b1, R), 5, f1, c1, f2, c2);",
+    "  rankKeep(rankSphere(a1, da1 - db0, b0, R), 6, f1, c1, f2, c2);",
+    "  rankKeep(rankSphere(a1, da1 - db1, b1, R), 7, f1, c1, f2, c2);",
+    "  if (c2 >= 0 && c2 < c1) { int t = c1; c1 = c2; c2 = t; }",
+    "}",
+    "// portholeLineNearest's candidates in its order: 0-1 the ends, 2-5 the feature centers' feet, 6-10 the",
+    "// crossings. false: that crossing misses the segment.",
+    "bool portholeNearPoint(Oval o, vec2 e0, vec2 e1, int code, out vec2 q) {",
+    "  q = code == 1 ? e1 : e0;",
+    "  if (code < 2) return true;",
+    "  if (code < 6) { q = closestPointOnSegment(e0, e1, portholeFeatureCircle(o, code - 2).c); return true; }",
+    "  vec2 tip = vec2(code == 6 || code == 8 || code == 10 ? -o.ax : o.ax, 0.0);",
+    "  vec2 p = code == 10 ? vec2(o.ax, 0.0) : vec2(0.0, code < 8 ? -o.cy : o.cy);",
+    "  vec2 d = tip - p;",
+    "  float s0 = d.x * (e0.y - p.y) - d.y * (e0.x - p.x), s1 = d.x * (e1.y - p.y) - d.y * (e1.x - p.x);",
+    "  if (s0 * s1 > 0.0 || s0 == s1) return false;",
+    "  q = e0 + (e1 - e0) * (s0 / (s0 - s1));",
+    "  return true;",
+    "}",
+    "void rankNear(Oval o, vec2 e0, vec2 e1, int code, inout float d1, inout int c1, inout float d2, inout int c2) {",
+    "  vec2 q;",
+    "  if (!portholeNearPoint(o, e0, e1, code, q)) return;",
+    "  Feature f = portholeFeature(o, q);",
+    "  if (code >= 2 && code < 6 && f.kind != code - 2) return;",
+    "  if (c1 < 0 || f.d < d1) { d2 = d1; c2 = c1; d1 = f.d; c1 = code; }",
+    "  else if (c2 < 0 || f.d < d2) { d2 = f.d; c2 = code; }",
+    "}",
+    "void rankPortholeNear(Oval o, vec2 e0, vec2 e1, out int c1, out int c2) {",
+    "  float d1 = 0.0, d2 = 0.0;",
+    "  c1 = -1; c2 = -1;",
+    "  rankNear(o, e0, e1, 0, d1, c1, d2, c2);",
+    "  rankNear(o, e0, e1, 1, d1, c1, d2, c2);",
+    "  rankNear(o, e0, e1, 2, d1, c1, d2, c2);",
+    "  rankNear(o, e0, e1, 3, d1, c1, d2, c2);",
+    "  rankNear(o, e0, e1, 4, d1, c1, d2, c2);",
+    "  rankNear(o, e0, e1, 5, d1, c1, d2, c2);",
+    "  rankNear(o, e0, e1, 6, d1, c1, d2, c2);",
+    "  rankNear(o, e0, e1, 7, d1, c1, d2, c2);",
+    "  rankNear(o, e0, e1, 8, d1, c1, d2, c2);",
+    "  rankNear(o, e0, e1, 9, d1, c1, d2, c2);",
+    "  rankNear(o, e0, e1, 10, d1, c1, d2, c2);",
+    "  if (c2 >= 0 && c2 < c1) { int t = c1; c1 = c2; c2 = t; }",
+    "}",
+    "// collidePortholeLine's candidates in its order, owned in float32: kind * 3 + (0 end 0, 1 end 1, 2 the",
+    "// feature center's foot).",
+    "void rankPortholeKind(Oval o, vec2 e0, vec2 d0, vec2 e1, vec2 d1, float len, int kind, inout float f1, inout int c1, inout float f2, inout int c2) {",
+    "  Feature fc = portholeFeatureCircle(o, kind);",
+    "  float R = fc.radius + LINE_THICKNESS * 0.5;",
+    "  float g = rankSphere(e0, d0, fc.c, R);",
+    "  if (g >= 0.0 && portholeFeature(o, e0 + d0 * g).kind == kind) rankKeep(g, kind * 3, f1, c1, f2, c2);",
+    "  g = rankSphere(e1, d1, fc.c, R);",
+    "  if (g >= 0.0 && portholeFeature(o, e1 + d1 * g).kind == kind) rankKeep(g, kind * 3 + 1, f1, c1, f2, c2);",
+    "  g = rankSlab(fc.c, vec2(0.0), e0, d0, e1, d1, len, R);",
+    "  if (g >= 0.0 && kind < 2) {",
+    "    vec2 D = e1 - e0, P = fc.c - e0;",
+    "    float side = D.x * P.y - D.y * P.x < 0.0 ? -1.0 : 1.0;",
+    "    g = clamp(farPointNewton(fc.c, e0, d0, e1, d1, R, side, farPointNewton(fc.c, e0, d0, e1, d1, R, side, g)), 0.0, 1.0);",
+    "  }",
+    "  if (g >= 0.0 && portholeFeature(o, closestPointOnSegment(e0 + d0 * g, e1 + d1 * g, fc.c)).kind == kind) rankKeep(g, kind * 3 + 2, f1, c1, f2, c2);",
+    "}",
+    "void rankPortholeLine(Oval o, vec2 e0, vec2 d0, vec2 e1, vec2 d1, float len, out int c1, out int c2) {",
+    "  float f1 = -1.0, f2 = -1.0;",
+    "  c1 = -1; c2 = -1;",
+    "  rankPortholeKind(o, e0, d0, e1, d1, len, 0, f1, c1, f2, c2);",
+    "  rankPortholeKind(o, e0, d0, e1, d1, len, 1, f1, c1, f2, c2);",
+    "  rankPortholeKind(o, e0, d0, e1, d1, len, 2, f1, c1, f2, c2);",
+    "  rankPortholeKind(o, e0, d0, e1, d1, len, 3, f1, c1, f2, c2);",
+    "  if (c2 >= 0 && c2 < c1) { int t = c1; c1 = c2; c2 = t; }",
+    "}",
+    "// Port hole = A (its oval), line = B (its capsule): PhysicsEngine.collidePortholeLine. The overlap",
+    "// at the start, and the first touch within the step swept in the port hole's frame.",
+    "ContactPair collidePortholeLine(Body ph, float halfLen, Body line, float halfLenB) {",
+    "  ContactPair result;",
+    "  result.c0 = noContact();",
+    "  result.c1 = noContact();",
+    "  Oval o = portholeOval(halfLen);",
+    "  float halfT = LINE_THICKNESS * 0.5;",
+    "  vec2 phC = vec2(ph.x, ph.y), phV = vec2(ph.vx, ph.vy), lc = vec2(line.x, line.y), lv = vec2(line.vx, line.vy);",
+    "  vec2 mRel = (lv - phV) * DT;",
+    "  if (!sweptReachMeets(lc - phC, mRel, o.a + halfLenB + halfT)) return result;",
+    "  float cs = cos(ph.angle), sn = sin(ph.angle);",
+    "  vec2 h = vec2(cos(line.angle), sin(line.angle)) * halfLenB, hP = vec2(cs, sn) * halfLen;",
+    "  float travel = length(mRel) + (abs(line.w) * halfLenB + abs(ph.w) * (length(lc - phC) + halfLenB)) * DT;",
+    "  if (!linesMayTouch(phC - hP, phC + hP, lc - h, lc + h, travel)) return result;",
+    "  vec2 w0 = lc - h, w1 = lc + h;",
+    "  vec2 e0 = portholeToLocal(w0 - phC, sn, cs), e1 = portholeToLocal(w1 - phC, sn, cs);",
+    "  // Crossing its center line: out the shorter way, the point on the line's side; nothing further.",
+    "  Contact cr = crossedSegments(vec2(-halfLen, 0.0), vec2(halfLen, 0.0), e0, e1, true, vec2(0.0));",
+    "  if (cr.hit) {",
+    "    vec2 m = rotateBy(cr.point, sn, cs);",
+    "    result.c0 = cr;",
+    "    result.c0.normal = rotateBy(cr.normal, sn, cs);",
+    "    result.c0.point = phC + m;",
+    "    result.c0.rA = m;",
+    "    result.c0.rB = phC + m - lc;",
+    "    result.c0.penetration = cr.penetration + LINE_THICKNESS;",
+    "    return result;",
+    "  }",
+    "  vec2 bestQ;",
+    "  Feature bestF;",
+    "  portholeLineNearest(o, e0, e1, bestQ, bestF);",
+    "  // Inside the oval, the arc on the side the line mostly lies (its farther end's) pushes it out.",
+    "  if (bestF.d < 0.0 && bestF.kind < 2) {",
+    "    bestF = portholeFeatureCircle(o, (abs(e0.y) > abs(e1.y) ? e0.y : e1.y) < 0.0 ? 1 : 0);",
+    "    bestF.dist = length(bestQ - bestF.c);",
+    "    bestF.d = bestF.dist - bestF.radius;",
+    "  }",
+    "  if (bestF.d < halfT) result.c0 = portholeLineContact(bestQ, bestF, sn, cs, phC, lc, 0.0);",
+    "  vec2 phEnd = phC + phV * DT;",
+    "  float cs1 = cs, sn1 = sn;",
+    "  if (ph.w != 0.0) { float a1 = ph.angle + ph.w * DT; cs1 = cos(a1); sn1 = sin(a1); }",
+    "  vec2 m = lv * DT, t = lineTurn(line, halfLenB, h);",
+    "  vec2 d0 = portholeToLocal(w0 + (m - t) - phEnd, sn1, cs1) - e0, d1 = portholeToLocal(w1 + (m + t) - phEnd, sn1, cs1) - e1;",
+    "  float best = -1.0;",
+    "  vec2 sQ = vec2(0.0);",
+    "  float len = 2.0 * halfLenB;",
+    "  portholeSweepLine(o, e0, d0, e1, d1, len, 0, best, sQ);",
+    "  portholeSweepLine(o, e0, d0, e1, d1, len, 1, best, sQ);",
+    "  portholeSweepLine(o, e0, d0, e1, d1, len, 2, best, sQ);",
+    "  portholeSweepLine(o, e0, d0, e1, d1, len, 3, best, sQ);",
+    "  if (best < 0.0) return result;",
+    "  float tHit = best * DT;",
+    "  float csH = cs, snH = sn;",
+    "  if (ph.w != 0.0) {",
+    "    // Its tangent at the hit, along the chord of the turn.",
+    "    vec2 tt = vec2(cs, sn) + (vec2(cs1, sn1) - vec2(cs, sn)) * best;",
+    "    tt /= length(tt);",
+    "    csH = tt.x; snH = tt.y;",
+    "  }",
+    "  Contact c = portholeLineContact(sQ, portholeFeature(o, sQ), snH, csH, phC + phV * tHit, lc + lv * tHit, tHit);",
+    "  if (result.c0.hit) result.c1 = c;",
+    "  else result.c0 = c;",
     "  return result;",
     "}",
     "",
@@ -1251,8 +1643,12 @@
 
     // ---- Hinge impulses for the start pose: PhysicsEngine.shakeHinges, unrolled ----
     // Hinges with a side that can move; the free bodies they move; each side as the engine sees it.
-    var shaken = hingeAnchors.filter(function (hg) {
-      return !((hg.aIsWorld || consts[hg.a].isAnchored) && consts[hg.b].isAnchored);
+    // shakenIndex keeps each one's place in hingeAnchors, which names its HINGEn parameters.
+    var shakenIndex = [];
+    var shaken = hingeAnchors.filter(function (hg, hi) {
+      var live = !((hg.aIsWorld || consts[hg.a].isAnchored) && consts[hg.b].isAnchored);
+      if (live) shakenIndex.push(hi);
+      return live;
     });
     var shakeBodies = [];
     shaken.forEach(function (hg) {
@@ -1267,7 +1663,8 @@
         if (consts[idx].isAnchored) return { fixed: "shF" + param, body: idx, param: param };
         return { body: idx, sign: sign, param: param, r0: "shR0" + param };
       }
-      return [side(hg.a, hg.aIsWorld, "HINGE" + h + "_A", -1), side(hg.b, false, "HINGE" + h + "_B", 1)];
+      var hi = shakenIndex[h];
+      return [side(hg.a, hg.aIsWorld, "HINGE" + hi + "_A", -1), side(hg.b, false, "HINGE" + hi + "_B", 1)];
     });
     var H = shaken.length, N = 2 * H, shakeIters = global.PhysicsEngine.hingeShakeIterations(H);
     function shJ(r, c) { return "shJ" + r + "_" + c; }
@@ -1376,10 +1773,20 @@
     }
     function isShaken(idx) { return shakeBodies.indexOf(idx) !== -1; }
 
-    // Probes: real position, velocity vFull, so swept tests match leg 1's motion.
+    // Probes: real position, velocity vFull, so swept tests match leg 1's motion. A line swept against
+    // another line or a port hole also turns at leg 1's spin.
+    var linePaired = {};
+    pairs.forEach(function (pair) {
+      if (consts[pair[0]].type !== "circle" && consts[pair[1]].type !== "circle") { linePaired[pair[0]] = true; linePaired[pair[1]] = true; }
+    });
     for (var p = 0; p < n; p++) {
       if (consts[p].isAnchored) continue;
-      lines.push("  " + E.bodyType + " probe" + p + " = " + B(p) + "; probe" + p + ".vx = vFull" + p + ".x; probe" + p + ".vy = vFull" + p + ".y;");
+      var probeDecl = "  " + E.bodyType + " probe" + p + " = " + B(p) + "; probe" + p + ".vx = vFull" + p + ".x; probe" + p + ".vy = vFull" + p + ".y;";
+      if (linePaired[p] && (turned[p] || isShaken(p))) {
+        var probeSpin = turned[p] ? spinExpr(p, E.DT) : B(p) + ".w";
+        probeDecl += " probe" + p + ".w = " + (isShaken(p) ? E.add(probeSpin, "shDw" + p) : probeSpin) + ";";
+      }
+      lines.push(probeDecl);
     }
     lines.push("");
 
@@ -1426,7 +1833,7 @@
     // A port hole meets a plain line as its oval (two port holes meet as capsules).
     function portholeLineCall(pi, li) {
       return df
-        ? E.collidePortholeLine + "(" + probeRef(pi) + ", " + segExpr(pi) + ", BODY" + pi + "_HALF, " + probeRef(li) + ", " + segExpr(li) + ")"
+        ? E.collidePortholeLine + "(" + probeRef(pi) + ", " + segExpr(pi) + ", BODY" + pi + "_HALF, " + probeRef(li) + ", " + segExpr(li) + ", BODY" + li + "_HALF)"
         : E.collidePortholeLine + "(" + probeRef(pi) + ", BODY" + pi + "_HALF, " + probeRef(li) + ", BODY" + li + "_HALF)";
     }
     // Only a line<->line pair can fill its second contact slot.
@@ -1456,12 +1863,17 @@
       } else if (tA === "porthole" && tB !== "porthole") {
         lines.push(detected(E.contactPairType, varName, portholeLineCall(i, j)));
       } else if (tB === "porthole" && tA !== "porthole") {
-        // collidePortholeLine takes (port hole, line): swap rA/rB back and flip the normal.
+        // collidePortholeLine takes (port hole, line): swap rA/rB back and flip the normal, in both slots.
         lines.push(detected(E.contactPairType, varName, portholeLineCall(j, i)));
-        lines.push("  " + varName + ".c0.normal = " + E.negVec(varName + ".c0.normal") + ";");
-        lines.push("  { " + E.vecType + " tmp_" + i + "_" + j + " = " + varName + ".c0.rA; " + varName + ".c0.rA = " + varName + ".c0.rB; " + varName + ".c0.rB = tmp_" + i + "_" + j + "; }");
+        ["c0", "c1"].forEach(function (slot) {
+          var c = varName + "." + slot;
+          lines.push("  " + c + ".normal = " + E.negVec(c + ".normal") + ";");
+          lines.push("  { " + E.vecType + " tmp_" + i + "_" + j + " = " + c + ".rA; " + c + ".rA = " + c + ".rB; " + c + ".rB = tmp_" + i + "_" + j + "; }");
+        });
       } else {
-        lines.push(detected(E.contactPairType, varName, E.collideLineLine + "(" + refI + ", " + lineArg(i) + ", " + refJ + ", " + lineArg(j) + ")"));
+        // df also takes the half-lengths, for the step's end pose.
+        var halves = df ? [", BODY" + i + "_HALF", ", BODY" + j + "_HALF"] : ["", ""];
+        lines.push(detected(E.contactPairType, varName, E.collideLineLine + "(" + refI + ", " + lineArg(i) + halves[0] + ", " + refJ + ", " + lineArg(j) + halves[1] + ")"));
       }
     });
     // A leader's contact on a port hole's front is no contact: its point (the port hole's lever arm)
@@ -2426,13 +2838,14 @@
       vs: compileShader(gl, gl.VERTEX_SHADER, VERTEX_SOURCE),
       quadBuffer: quadBuffer,
       programs: [], // { source, program, posLoc }, most recently used last
-      fbo: gl.createFramebuffer(),
+      parallel: gl.getExtension("KHR_parallel_shader_compile"),
+      builds: {}, // background builds by source (trajectoryProgramPending)
     };
     return trajectoryRunner;
   }
 
-  function trajectoryProgramFor(runner, fragmentSource) {
-    var gl = runner.gl, cache = runner.programs;
+  function cachedTrajectoryProgram(runner, fragmentSource) {
+    var cache = runner.programs;
     for (var i = 0; i < cache.length; i++) {
       if (cache[i].source === fragmentSource) {
         var hit = cache.splice(i, 1)[0];
@@ -2440,6 +2853,32 @@
         return hit;
       }
     }
+    return null;
+  }
+
+  function cacheTrajectoryProgram(runner, entry) {
+    var cache = runner.programs;
+    cache.push(entry);
+    while (cache.length > TRAJECTORY_PROGRAM_CACHE_SIZE) {
+      var old = cache.shift();
+      // A run still using it deletes it when it ends.
+      if (old.runs > 0) old.evicted = true;
+      else runner.gl.deleteProgram(old.program);
+    }
+  }
+
+  function trajectoryProgramFor(runner, fragmentSource) {
+    var hit = cachedTrajectoryProgram(runner, fragmentSource);
+    if (hit) return hit;
+    var build = runner.builds[fragmentSource];
+    if (build) {
+      if (pumpTrajectoryBuild(runner, build, true) === "failed") {
+        delete runner.builds[fragmentSource];
+        throw new Error(build.error);
+      }
+      return cachedTrajectoryProgram(runner, fragmentSource);
+    }
+    var gl = runner.gl;
     var fs = compileShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
     var program;
     try {
@@ -2448,9 +2887,116 @@
       gl.deleteShader(fs);
     }
     var entry = { source: fragmentSource, program: program, posLoc: gl.getAttribLocation(program, "a_position") };
-    cache.push(entry);
-    while (cache.length > TRAJECTORY_PROGRAM_CACHE_SIZE) gl.deleteProgram(cache.shift().program);
+    cacheTrajectoryProgram(runner, entry);
     return entry;
+  }
+
+  // Whether a run of `compiled` would build its program first: true while it links and warms in the background,
+  // starting that build if need be. Always false without KHR_parallel_shader_compile (the run builds it on the spot).
+  function trajectoryProgramPending(compiled) {
+    if (compiled.numBodies === 0) return false;
+    var runner = getTrajectoryRunner();
+    var source = compiled.fragmentSource;
+    if (!runner.parallel || cachedTrajectoryProgram(runner, source)) return false;
+    var build = runner.builds[source];
+    if (!build) {
+      dropStaleTrajectoryBuilds(runner);
+      var gl = runner.gl, shader = gl.createShader(gl.FRAGMENT_SHADER), program = gl.createProgram();
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      gl.attachShader(program, runner.vs);
+      gl.attachShader(program, shader);
+      gl.linkProgram(program);
+      build = runner.builds[source] = { source: source, shader: shader, program: program, outputs: 1 + (compiled.chunk.loOutputs || 0),
+        status: "linking", sync: null, entry: null, error: null };
+    }
+    return pumpTrajectoryBuild(runner, build, false) === "pending";
+  }
+
+  // linking -> warming -> cached, or "failed" with the error kept for the run to throw. `wait` finishes it now.
+  function pumpTrajectoryBuild(runner, build, wait) {
+    var gl = runner.gl;
+    build.polledAt = performance.now();
+    if (build.status === "linking") {
+      if (!wait && !gl.getProgramParameter(build.program, runner.parallel.COMPLETION_STATUS_KHR)) return "pending";
+      if (!gl.getProgramParameter(build.program, gl.LINK_STATUS)) {
+        build.error = gl.getShaderParameter(build.shader, gl.COMPILE_STATUS)
+          ? "Program link error:\n" + gl.getProgramInfoLog(build.program)
+          : "Fragment shader error:\n" + gl.getShaderInfoLog(build.shader);
+        gl.deleteShader(build.shader);
+        gl.deleteProgram(build.program);
+        build.status = "failed";
+        return build.status;
+      }
+      gl.deleteShader(build.shader);
+      build.entry = { source: build.source, program: build.program, posLoc: gl.getAttribLocation(build.program, "a_position") };
+      warmTrajectoryProgram(runner, build.entry, build.outputs);
+      build.sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+      gl.flush();
+      build.status = "warming";
+    }
+    if (build.status !== "warming") return build.status;
+    // A fence never signals within the task that made it.
+    if (!wait && gl.getSyncParameter(build.sync, gl.SYNC_STATUS) !== gl.SIGNALED) return "pending";
+    gl.deleteSync(build.sync);
+    build.entry.warmed = true;
+    delete runner.builds[build.source];
+    cacheTrajectoryProgram(runner, build.entry);
+    return "ready";
+  }
+
+  // Builds nobody asked after for a while (the scene or view moved on) are dropped when a new one starts.
+  var TRAJECTORY_BUILD_STALE_MS = 5000;
+  function dropStaleTrajectoryBuilds(runner) {
+    var gl = runner.gl, now = performance.now();
+    Object.keys(runner.builds).forEach(function (source) {
+      var build = runner.builds[source];
+      if (now - build.polledAt < TRAJECTORY_BUILD_STALE_MS) return;
+      if (build.status === "linking") gl.deleteShader(build.shader);
+      if (build.status !== "failed") gl.deleteProgram(build.program);
+      if (build.sync) gl.deleteSync(build.sync);
+      delete runner.builds[source];
+    });
+  }
+
+  // On ANGLE/Metal a program's first draw into a framebuffer shape builds its pipeline (seconds for df):
+  // a 1x1 draw into the shape a run uses, so the run finds it built.
+  function warmTrajectoryProgram(runner, entry, outputs) {
+    var gl = runner.gl;
+    gl.useProgram(entry.program);
+    gl.bindBuffer(gl.ARRAY_BUFFER, runner.quadBuffer);
+    gl.enableVertexAttribArray(entry.posLoc);
+    gl.vertexAttribPointer(entry.posLoc, 2, gl.FLOAT, false, 0, 0);
+    gl.uniform1i(gl.getUniformLocation(entry.program, "u_trajInit"), 1);
+    gl.uniform1i(gl.getUniformLocation(entry.program, "u_trajBase"), 0);
+    gl.uniform1i(gl.getUniformLocation(entry.program, "u_trajAdvance"), 0);
+    gl.viewport(0, 0, 1, 1);
+    gl.activeTexture(gl.TEXTURE0);
+    var fbo = gl.createFramebuffer(), textures = [], buffers = [];
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    for (var k = 0; k < outputs; k++) {
+      textures.push(floatTexture(gl, 1, 1));
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + k, gl.TEXTURE_2D, textures[k], 0);
+      buffers.push(gl.COLOR_ATTACHMENT0 + k);
+    }
+    // Left bound, a target would also be the sampled state: a feedback loop, and the draw is refused.
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.drawBuffers(buffers);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(fbo);
+    textures.forEach(function (t) { gl.deleteTexture(t); });
+  }
+
+  function floatTexture(gl, w, h, data) {
+    var t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, w, h, 0, gl.RGBA, gl.FLOAT, data || null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return t;
   }
 
   // Most log texels one batched run holds (each texture: the log and its lower-word twins).
@@ -2467,24 +3013,67 @@
   // RGBA32F texture of x words then y words, see compileHoverBatchGLSL). Runs side by side cost about
   // one: a run is a sequence of steps, so a few columns leave the GPU idle. Too many for one texture split up.
   function runCompiledTrajectoriesOnGPU(compiled, maxSteps) {
-    var numBodies = compiled.numBodies;
+    var job = startTrajectoryRun(compiled, maxSteps);
+    job.step(Infinity);
+    return job.trajectories;
+  }
+
+  // The same run as a job for callers that spread it over tasks: step(budgetMs) works until about budgetMs has
+  // passed and returns true once job.trajectories is set; it throws as the run would. progress is 0 to 1.
+  function startTrajectoryRun(compiled, maxSteps) {
     var count = compiled.pointCount || 1;
-    if (numBodies === 0) return new Array(count).fill([]);
-    var runner = getTrajectoryRunner();
-    var gl = runner.gl;
-    var maxTexture = gl.getParameter(gl.MAX_TEXTURE_SIZE);
-    var textures = 1 + (compiled.chunk.loOutputs || 0);
-    var perBatch = Math.max(1, Math.min(TRAJECTORY_BATCH_MAX,
-      Math.floor(maxTexture / (numBodies + 1)), Math.floor(maxTexture / (compiled.chunk.layers + 1)),
-      Math.floor(TRAJECTORY_BATCH_TEXELS / textures / ((numBodies + 1) * maxSteps))));
-    if (!compiled.pointCount || count <= perBatch) return runTrajectoryBatch(compiled, maxSteps, count);
-    var out = [];
-    for (var first = 0; first < count; first += perBatch) {
-      var n = Math.min(perBatch, count - first);
-      var part = Object.assign({}, compiled, { pointCount: n, points: pointsSlice(compiled.points, count, first, n) });
-      out = out.concat(runTrajectoryBatch(part, maxSteps, n));
+    var job = { trajectories: null, progress: 0, step: null, cancel: null };
+    var parts = [], out = [], batch = null, finished = 0;
+    if (compiled.numBodies === 0) {
+      out = new Array(count).fill([]);
+    } else {
+      var runner = getTrajectoryRunner();
+      var gl = runner.gl;
+      var maxTexture = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+      var textures = 1 + (compiled.chunk.loOutputs || 0);
+      var perBatch = Math.max(1, Math.min(TRAJECTORY_BATCH_MAX,
+        Math.floor(maxTexture / (compiled.numBodies + 1)), Math.floor(maxTexture / (compiled.chunk.layers + 1)),
+        Math.floor(TRAJECTORY_BATCH_TEXELS / textures / ((compiled.numBodies + 1) * maxSteps))));
+      if (!compiled.pointCount || count <= perBatch) {
+        parts.push({ compiled: compiled, n: count });
+      } else {
+        for (var first = 0; first < count; first += perBatch) {
+          var n = Math.min(perBatch, count - first);
+          parts.push({ compiled: Object.assign({}, compiled, { pointCount: n, points: pointsSlice(compiled.points, count, first, n) }), n: n });
+        }
+      }
     }
-    return out;
+    var total = parts.length;
+    job.step = function (budgetMs) {
+      var until = performance.now() + budgetMs;
+      try {
+        while (batch || parts.length) {
+          if (!batch) {
+            var part = parts.shift();
+            batch = startTrajectoryBatch(part.compiled, maxSteps, part.n);
+          }
+          var result = batch.advance(until);
+          job.progress = (finished + batch.progress()) / total;
+          if (!result) return false;
+          out = out.concat(result);
+          batch = null;
+          finished += 1;
+          if (parts.length && performance.now() >= until) return false;
+        }
+      } catch (err) {
+        job.cancel();
+        throw err;
+      }
+      job.trajectories = out;
+      job.progress = 1;
+      return true;
+    };
+    job.cancel = function () {
+      if (batch) batch.cancel();
+      batch = null;
+      parts = [];
+    };
+    return job;
   }
   // Points first..first+n of a P x 2 points texture's data.
   function pointsSlice(points, count, first, n) {
@@ -2494,7 +3083,9 @@
     return out;
   }
 
-  function runTrajectoryBatch(compiled, maxSteps, count) {
+  // One batch, resumable: advance(until) runs chunks, then the readback and the rows, until the clock passes
+  // `until`, and returns the trajectories when done (null before). Each batch owns its textures and framebuffers.
+  function startTrajectoryBatch(compiled, maxSteps, count) {
     var numBodies = compiled.numBodies;
     var chunk = compiled.chunk;
 
@@ -2502,16 +3093,7 @@
     var gl = runner.gl;
     var entry = trajectoryProgramFor(runner, compiled.fragmentSource);
     var prog = entry.program;
-    gl.useProgram(prog);
-    Object.keys(compiled.uniforms || {}).forEach(function (name) {
-      var loc = gl.getUniformLocation(prog, name);
-      var v = compiled.uniforms[name];
-      if (!loc) return;
-      if (v.length === 1) gl.uniform1f(loc, v[0]);
-      else if (v.length === 2) gl.uniform2f(loc, v[0], v[1]);
-      else if (v.length === 3) gl.uniform3f(loc, v[0], v[1], v[2]);
-      else gl.uniform4f(loc, v[0], v[1], v[2], v[3]);
-    });
+    entry.runs = (entry.runs || 0) + 1;
     var u = {
       state: gl.getUniformLocation(prog, "u_trajState"),
       init: gl.getUniformLocation(prog, "u_trajInit"),
@@ -2520,56 +3102,40 @@
       points: gl.getUniformLocation(prog, "u_hoverPoints"),
     };
 
-    gl.bindBuffer(gl.ARRAY_BUFFER, runner.quadBuffer);
-    gl.enableVertexAttribArray(entry.posLoc);
-    gl.vertexAttribPointer(entry.posLoc, 2, gl.FLOAT, false, 0, 0);
-
-    function floatTexture(w, h, data) {
-      var t = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D, t);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, w, h, 0, gl.RGBA, gl.FLOAT, data || null);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      return t;
-    }
-    var pointsTexture = null;
-    if (compiled.pointCount) {
-      gl.activeTexture(gl.TEXTURE1);
-      pointsTexture = floatTexture(count, 2, compiled.points);
-      gl.uniform1i(u.points, 1);
-      gl.activeTexture(gl.TEXTURE0);
-    }
+    var pointsTexture = compiled.pointCount ? floatTexture(gl, count, 2, compiled.points) : null;
     // The log: a column wider than the bodies for each row's sentinel, per run...
     var runWidth = numBodies + 1;
     var logWidth = runWidth * count;
-    var texture = floatTexture(logWidth, maxSteps);
+    var texture = floatTexture(gl, logWidth, maxSteps);
     var loTextures = [];
-    for (var lo = 0; lo < (chunk.loOutputs || 0); lo++) loTextures.push(floatTexture(logWidth, maxSteps));
+    for (var lo = 0; lo < (chunk.loOutputs || 0); lo++) loTextures.push(floatTexture(gl, logWidth, maxSteps));
     // ...and two state strips, swapped each chunk, a texel longer per run for the same reason.
     var runStrip = chunk.layers + 1;
     var stripWidth = runStrip * count;
-    var states = [floatTexture(stripWidth, 1), floatTexture(stripWidth, 1)];
-    var logFbo = runner.fbo, stateFbo = gl.createFramebuffer();
+    var states = [floatTexture(gl, stripWidth, 1), floatTexture(gl, stripWidth, 1)];
+    // The strip's framebuffer takes the log's shape, padded, so both draws share one pipeline: on ANGLE/Metal
+    // each shape's first draw builds its own, seconds at tf, and nothing on screen updates meanwhile.
+    var pads = loTextures.map(function () { return floatTexture(gl, stripWidth, 1); });
+    var logFbo = gl.createFramebuffer(), stateFbo = gl.createFramebuffer();
     var sentinels = new Float32Array(stripWidth * 4);
     var failure = null;
+    var released = false;
 
     var drawBuffers = [gl.COLOR_ATTACHMENT0];
     loTextures.forEach(function (_, k) { drawBuffers.push(gl.COLOR_ATTACHMENT0 + 1 + k); });
     function release() {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, logFbo);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, null, 0);
-      loTextures.forEach(function (t, k) { gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + 1 + k, gl.TEXTURE_2D, null, 0); });
-      gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
-      gl.readBuffer(gl.COLOR_ATTACHMENT0);
+      if (released) return;
+      released = true;
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.deleteFramebuffer(logFbo);
       gl.deleteFramebuffer(stateFbo);
       gl.deleteTexture(states[0]);
       gl.deleteTexture(states[1]);
       gl.deleteTexture(texture);
-      loTextures.forEach(function (t) { gl.deleteTexture(t); });
+      loTextures.concat(pads).forEach(function (t) { gl.deleteTexture(t); });
       if (pointsTexture) gl.deleteTexture(pointsTexture);
+      entry.runs -= 1;
+      if (entry.evicted && entry.runs === 0) gl.deleteProgram(prog);
     }
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, logFbo);
@@ -2581,8 +3147,33 @@
       throw new Error("GPU physics framebuffer incomplete (status " + status + ")");
     }
     gl.drawBuffers(drawBuffers);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.uniform1i(u.state, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, stateFbo);
+    pads.forEach(function (t, k) { gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + 1 + k, gl.TEXTURE_2D, t, 0); });
+    gl.drawBuffers(drawBuffers);
+
+    // Everything the draws rely on, set again on each resume: another run may have used the context since.
+    function bind() {
+      gl.useProgram(prog);
+      Object.keys(compiled.uniforms || {}).forEach(function (name) {
+        var loc = gl.getUniformLocation(prog, name);
+        var v = compiled.uniforms[name];
+        if (!loc) return;
+        if (v.length === 1) gl.uniform1f(loc, v[0]);
+        else if (v.length === 2) gl.uniform2f(loc, v[0], v[1]);
+        else if (v.length === 3) gl.uniform3f(loc, v[0], v[1], v[2]);
+        else gl.uniform4f(loc, v[0], v[1], v[2], v[3]);
+      });
+      gl.bindBuffer(gl.ARRAY_BUFFER, runner.quadBuffer);
+      gl.enableVertexAttribArray(entry.posLoc);
+      gl.vertexAttribPointer(entry.posLoc, 2, gl.FLOAT, false, 0, 0);
+      if (pointsTexture) {
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, pointsTexture);
+        gl.uniform1i(u.points, 1);
+      }
+      gl.activeTexture(gl.TEXTURE0);
+      gl.uniform1i(u.state, 0);
+    }
 
     function drawLog(base, rows, current) {
       gl.bindTexture(gl.TEXTURE_2D, states[current]);
@@ -2594,61 +3185,90 @@
       gl.drawArrays(gl.TRIANGLES, 0, 6);
     }
 
-    // The first draw is where the driver really builds the program: spend it untimed.
-    if (!entry.warmed) {
-      drawLog(0, 1, 0);
-      gl.readPixels(numBodies, 0, 1, 1, gl.RGBA, gl.FLOAT, sentinels);
-      entry.warmed = true;
-    }
-
     // Each chunk is timed and the next sized from it (TRAJECTORY_TARGET_MS); the time
     // includes the readback, erring safe. Growth caps at doubling; the size is kept with the program,
     // scaled down for a batch wider than the one it was measured on.
     var steps = Math.max(1, Math.floor((entry.chunkSteps || 1) * Math.min(1, (entry.chunkRuns || 1) / count)));
-    var current = 0;
-    for (var base = 0; base < maxSteps && !failure;) {
-      var rows = Math.min(steps, chunk.maxSteps, maxSteps - base);
-      var startedAt = performance.now();
-      drawLog(base, rows, current);
-      if (base + rows < maxSteps) {
-        // ADVANCE: carry the state to the start of the next chunk.
-        gl.bindFramebuffer(gl.FRAMEBUFFER, stateFbo);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, states[1 - current], 0);
-        gl.viewport(0, 0, stripWidth, 1);
-        gl.uniform1i(u.advance, rows);
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
-        gl.readPixels(0, 0, stripWidth, 1, gl.RGBA, gl.FLOAT, sentinels);
-        for (var r = 0; r < count && !failure; r++) {
-          var s = (r * runStrip + chunk.layers) * 4;
-          if (sentinels[s] !== base + rows || sentinels[s + 1] !== TRAJECTORY_SENTINEL) {
-            failure = "the state after step " + (base + rows) + " was never written";
-          }
-        }
-        var perStep = (performance.now() - startedAt) / (2 * rows);
-        steps = Math.max(1, Math.min(Math.floor(TRAJECTORY_TARGET_MS / perStep), rows * 2, chunk.maxSteps));
-        current = 1 - current;
-      }
-      base += rows;
-    }
-    entry.chunkSteps = steps;
-    entry.chunkRuns = count;
-
-    var pixels = new Float32Array(logWidth * maxSteps * 4);
-    var loPixels = loTextures.map(function () { return new Float32Array(logWidth * maxSteps * 4); });
-    if (!failure) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, logFbo);
-      gl.readPixels(0, 0, logWidth, maxSteps, gl.RGBA, gl.FLOAT, pixels);
-      loPixels.forEach(function (buf, k) {
-        gl.readBuffer(gl.COLOR_ATTACHMENT0 + 1 + k);
-        gl.readPixels(0, 0, logWidth, maxSteps, gl.RGBA, gl.FLOAT, buf);
-      });
-      gl.readBuffer(gl.COLOR_ATTACHMENT0);
-    }
-    // The readback already waited for the GPU, so the error flag is free.
-    var glError = gl.getError();
-
+    var current = 0, base = 0, run = 0;
+    var phase = "chunks";
+    var pixels = null, loPixels = null, glError = gl.NO_ERROR;
     var trajectories = [];
-    for (var run = 0; run < count && !failure; run++) {
+
+    function advance(until) {
+      bind();
+      // The first draw is where the driver really builds the program: spend it untimed.
+      if (!entry.warmed) {
+        drawLog(0, 1, 0);
+        gl.readPixels(numBodies, 0, 1, 1, gl.RGBA, gl.FLOAT, sentinels);
+        entry.warmed = true;
+      }
+      while (phase === "chunks") {
+        if (base >= maxSteps || failure) {
+          entry.chunkSteps = steps;
+          entry.chunkRuns = count;
+          phase = "read";
+          break;
+        }
+        var rows = Math.min(steps, chunk.maxSteps, maxSteps - base);
+        var startedAt = performance.now();
+        drawLog(base, rows, current);
+        if (base + rows < maxSteps) {
+          // ADVANCE: carry the state to the start of the next chunk.
+          gl.bindFramebuffer(gl.FRAMEBUFFER, stateFbo);
+          gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, states[1 - current], 0);
+          gl.viewport(0, 0, stripWidth, 1);
+          gl.uniform1i(u.advance, rows);
+          gl.drawArrays(gl.TRIANGLES, 0, 6);
+          gl.readPixels(0, 0, stripWidth, 1, gl.RGBA, gl.FLOAT, sentinels);
+          for (var r = 0; r < count && !failure; r++) {
+            var s = (r * runStrip + chunk.layers) * 4;
+            if (sentinels[s] !== base + rows || sentinels[s + 1] !== TRAJECTORY_SENTINEL) {
+              failure = "the state after step " + (base + rows) + " was never written";
+            }
+          }
+          var perStep = (performance.now() - startedAt) / (2 * rows);
+          steps = Math.max(1, Math.min(Math.floor(TRAJECTORY_TARGET_MS / perStep), rows * 2, chunk.maxSteps));
+          current = 1 - current;
+        }
+        base += rows;
+        if (performance.now() >= until) return null;
+      }
+
+      if (phase === "read") {
+        pixels = new Float32Array(logWidth * maxSteps * 4);
+        loPixels = loTextures.map(function () { return new Float32Array(logWidth * maxSteps * 4); });
+        if (!failure) {
+          gl.bindFramebuffer(gl.FRAMEBUFFER, logFbo);
+          gl.readBuffer(gl.COLOR_ATTACHMENT0);
+          gl.readPixels(0, 0, logWidth, maxSteps, gl.RGBA, gl.FLOAT, pixels);
+          loPixels.forEach(function (buf, k) {
+            gl.readBuffer(gl.COLOR_ATTACHMENT0 + 1 + k);
+            gl.readPixels(0, 0, logWidth, maxSteps, gl.RGBA, gl.FLOAT, buf);
+          });
+          gl.readBuffer(gl.COLOR_ATTACHMENT0);
+        }
+        // The readback already waited for the GPU, so the error flag is free.
+        glError = gl.getError();
+        phase = "rows";
+        if (performance.now() >= until) return null;
+      }
+
+      for (var firstRun = run; run < count && !failure; run++) {
+        if (run > firstRun && performance.now() >= until) return null;
+        trajectories.push(decodeRun(run));
+      }
+
+      release();
+      if (glError !== gl.NO_ERROR) throw new Error("GPU physics draw failed (GL error 0x" + glError.toString(16) + ")");
+      // A dropped draw reports no error: only the sentinel notices. Chunk size forgotten so the retry starts over.
+      if (failure) {
+        entry.chunkSteps = 1;
+        throw new Error("The GPU dropped a physics draw (" + failure + "): the scene is too heavy for it at this precision.");
+      }
+      return trajectories;
+    }
+
+    function decodeRun(run) {
       var first = run * runWidth;
       var trajectory = new Array(maxSteps);
       for (var step = 0; step < maxSteps && !failure; step++) {
@@ -2684,17 +3304,14 @@
         trajectory[step] = row;
         if (pixels[mark] !== step + 1 || pixels[mark + 1] !== TRAJECTORY_SENTINEL) failure = "step " + (step + 1) + " was never written";
       }
-      trajectories.push(trajectory);
+      return trajectory;
     }
 
-    release();
-    if (glError !== gl.NO_ERROR) throw new Error("GPU physics draw failed (GL error 0x" + glError.toString(16) + ")");
-    // A dropped draw reports no error: only the sentinel notices. Chunk size forgotten so the retry starts over.
-    if (failure) {
-      entry.chunkSteps = 1;
-      throw new Error("The GPU dropped a physics draw (" + failure + "): the scene is too heavy for it at this precision.");
-    }
-    return trajectories;
+    return {
+      advance: advance,
+      progress: function () { return phase === "chunks" ? 0.9 * base / maxSteps : 0.9 + 0.1 * run / count; },
+      cancel: release,
+    };
   }
 
   function runSceneOnGPU(scene, maxSteps, precision) {
@@ -2706,6 +3323,8 @@
     runSceneOnGPU: runSceneOnGPU,
     runCompiledTrajectoryOnGPU: runCompiledTrajectoryOnGPU,
     runCompiledTrajectoriesOnGPU: runCompiledTrajectoriesOnGPU,
+    startTrajectoryRun: startTrajectoryRun,
+    trajectoryProgramPending: trajectoryProgramPending,
     generateTrajectoryMainGLSL: generateTrajectoryMainGLSL,
     generateTrajectoryHeaderGLSL: generateTrajectoryHeaderGLSL,
     trajectoryChunkInfo: trajectoryChunkInfo,
