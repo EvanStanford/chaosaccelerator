@@ -1,12 +1,13 @@
 // CPAL-1.0 License. See chaosaccelerator.com/license.html
 
 // The whole app state as a URL fragment, and back: pure text, no DOM or storage.
-//   #bldr/body:ci:-132.1:321.4:.0021:30;ln:-334:-173.5:-.7679:479!,xinp:0.x,
+//   #bldr/v:1.0,body:ci:-132.1:321.4:.0021:30;ln:-334:-173.5:-.7679:479!,xinp:0.x,
 //         yinp:0.y,outp:0.y,edge:wrap,frmw:1192,frmh:809
-//   #map/<the same scene>,ctrx:-14.318359,ctry:57.44,zoom:3.2,disp:lapl,
+//   #map/v:1.0,<the same scene>,ctrx:-14.318359,ctry:57.44,zoom:3.2,disp:lapl,
 //         insp:p:.0115:.0075;l:-.2875:-.1018:.2973:.143:30
-//   chaosplayback.html#movi/<the same scene>,disp:lapl,
+//   chaosplayback.html#movi/v:1.0,<the same scene>,disp:lapl,
 //         kfrm:0:0:1:1000;-14.318359:57.44:3.2:500:4
+// v is the link format version, always the first field, and required in a link with a scene.
 // Page first, then comma-separated key:value fields; ":" splits the parts of one
 // thing, ";" items in a list; nothing is percent-encoded. WIRE DEFAULTS: a field
 // at its default is left out, and those defaults belong to THIS FORMAT, never to
@@ -19,6 +20,8 @@
   var PAGE_MAP = "map";
   var PAGE_MOVIE = "movi";
   var PAGES = [PAGE_BUILDER, PAGE_MAP, PAGE_MOVIE];
+  var VERSION = "1.0";
+  var NEWER_VERSION_MESSAGE = "Attempting to load a scene created with a newer version. Consider upgrading and then loading again.";
 
   var DEFAULT_STEPS = 1000;
   var DEFAULT_EDGE = "sticky";
@@ -548,7 +551,7 @@
   // ---- The fragment ----
 
   function encode(state) {
-    var fields = encodeScene(state.scene);
+    var fields = ["v:" + VERSION].concat(encodeScene(state.scene));
     if (state.page !== PAGE_BUILDER && state.view) fields = fields.concat(encodeView(state.view));
     return state.page + "/" + fields.join(",");
   }
@@ -570,16 +573,39 @@
     return text.replace(/[^A-Za-z0-9]+$/, "");
   }
 
+  // "1.0" or "2": compared part by part, so 1.10 is newer than 1.9.
+  function versionParts(text) {
+    if (!/^\d+(\.\d+)?$/.test(text)) throw new Error("v is not a version: \"" + text + "\"");
+    var parts = text.split(".");
+    return [Number(parts[0]), Number(parts[1] || 0)];
+  }
+  function isNewerVersion(text) {
+    var a = versionParts(text), b = versionParts(VERSION);
+    return a[0] > b[0] || (a[0] === b[0] && a[1] > b[1]);
+  }
+
   // null when not one of this app's links. THROWS, with a message fit to show, when the scene can't be read.
+  // A bare "#bldr/" carries no scene and needs no v.
   function decode(fragment) {
     var text = cleanFragment(fragment);
     var slash = text.indexOf("/");
     var page = slash === -1 ? text : text.slice(0, slash);
     if (PAGES.indexOf(page) === -1) return null;
     var fields = readFields(slash === -1 ? "" : text.slice(slash + 1));
+    if (fields.v === undefined && fields.body !== undefined) throw new Error("the link has no version");
+    var newer = fields.v !== undefined && isNewerVersion(fields.v);
+    var scene;
+    try {
+      scene = decodeScene(fields);
+    } catch (err) {
+      if (newer) err.message += ". " + NEWER_VERSION_MESSAGE;
+      throw err;
+    }
     return {
       page: page,
-      scene: decodeScene(fields),
+      version: fields.v,
+      newerVersion: newer,
+      scene: scene,
       view: page === PAGE_BUILDER ? null : decodeView(fields),
     };
   }
@@ -588,6 +614,8 @@
     PAGE_BUILDER: PAGE_BUILDER,
     PAGE_MAP: PAGE_MAP,
     PAGE_MOVIE: PAGE_MOVIE,
+    VERSION: VERSION,
+    NEWER_VERSION_MESSAGE: NEWER_VERSION_MESSAGE,
     encode: encode,
     decode: decode,
     encodeScene: encodeScene,

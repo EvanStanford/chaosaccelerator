@@ -19,6 +19,7 @@
   var renderSpinner = $("render-spinner");
   var progressEl = renderPanel.querySelector(".progress");
   var messageBox = $("player-message"), messageText = $("player-message-text");
+  var messageBuilder = $("player-message-builder"), messageOk = $("player-message-ok");
   var btnPlayPause = $("play-pause"), scrubber = $("scrubber"), timeReadout = $("time-readout");
   var btnSpeed = $("speed"), btnLoop = $("loop"), btnRestart = $("restart");
   var movieFacts = $("movie-facts"), btnDownload = $("download");
@@ -29,8 +30,18 @@
   function fail(message) {
     renderPanel.hidden = true;
     messageText.textContent = message;
+    messageBuilder.hidden = false;
+    messageOk.hidden = true;
     messageBox.hidden = false;
   }
+  // Over the render, which carries on; OK puts it away.
+  function warn(message) {
+    messageText.textContent = message;
+    messageBuilder.hidden = true;
+    messageOk.hidden = false;
+    messageBox.hidden = false;
+  }
+  messageOk.addEventListener("click", function () { messageBox.hidden = true; });
 
   // ---- 1. The movie, out of the address ----
 
@@ -45,6 +56,7 @@
     fail("There's no movie in this address. Movies are made on the map, in the Movie card.");
     return;
   }
+  if (link.newerVersion) warn(ShareUrl.NEWER_VERSION_MESSAGE);
   var movie = link.view.movie;
   var movieSize = movie.size, antialias = movie.antialias;
   // A movie of the map's Inspect tab plays its locked points once instead of flying through keyframes.

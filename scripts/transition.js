@@ -558,6 +558,7 @@
       global.location.replace("chaosplayback.html" + global.location.hash);
       return;
     }
+    if (link.newerVersion) global.AppMessage.alert(global.ShareUrl.NEWER_VERSION_MESSAGE);
     // Skipped when the editor already holds it: reloading would cost the selection.
     var editorHasIt = !onLoad && sameScene(global.PhysicsUI.shareScene(), link.scene);
     var problem = onLoad ? global.PhysicsUI.sharedSceneProblem(link.scene)

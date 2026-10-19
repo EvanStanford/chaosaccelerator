@@ -4158,7 +4158,7 @@
     function () {
       var drops = ["105:100", "97.2059:156.6176", "-108.6765:141.9118"], STEPS = 90, pass = true, detail = [];
       drops.forEach(function (at) {
-        var authored = ShareUrl.decode("#bldr/body:po:0:-150:0:200!;pg:350:250:3.1416:200!;ln:" + at + ":1.4:160,edge:infi,step:90,frmw:1080,frmh:913").scene;
+        var authored = ShareUrl.decode("#bldr/v:1.0,body:po:0:-150:0:200!;pg:350:250:3.1416:200!;ln:" + at + ":1.4:160,edge:infi,step:90,frmw:1080,frmh:913").scene;
         var scene = PhysicsCoords.toEngineJSON(authored, authored);
         var js = PhysicsEngine.runTrajectory(scene, STEPS, DT), f32 = PhysicsGPU.runSceneOnGPU(scene, STEPS, "f32"), df = PhysicsGPU.runSceneOnGPU(scene, STEPS, "df");
         var gap = { f32: 0, df: 0 }, warp = -1;
@@ -4459,7 +4459,7 @@
 
   // Reported from the map: two free port holes sprung together, spinning and accelerating, and a fast ball.
   function sprungPortholeScene(mutualGravity) {
-    var authored = ShareUrl.decode("#map/body:ci:-188.9961:222.414:0:30;po:-292.1328:-62.0696:-.028:131.4327;pg:187.1642:309.2142:-.0684:133.4833,sprg:1:2:66.2561:-.4076:-64.1772:.052:5300:140,xinp:0.vx,yinp:0.vy,outp:0.y,edge:infi,mgrv:t,coll:f,step:50,frmw:1003,frmh:1092").scene;
+    var authored = ShareUrl.decode("#map/v:1.0,body:ci:-188.9961:222.414:0:30;po:-292.1328:-62.0696:-.028:131.4327;pg:187.1642:309.2142:-.0684:133.4833,sprg:1:2:66.2561:-.4076:-64.1772:.052:5300:140,xinp:0.vx,yinp:0.vy,outp:0.y,edge:infi,mgrv:t,coll:f,step:50,frmw:1003,frmh:1092").scene;
     var scene = PhysicsCoords.toEngineJSON(authored, authored);
     scene.bodies.forEach(PhysicsEngine.computeMass);
     scene.mutualGravity = mutualGravity;
@@ -4607,11 +4607,11 @@
       var clean = !/FRICTION|frictionPhi/.test(zero32) && !/FRICTION|dfFriction/.test(zeroDf) &&
         PhysicsGPU.compileSceneToTrajectoryGLSL(bare, 10, "f32").fragmentSource === zero32 && PhysicsGPU.compileSceneToTrajectoryGLSL(bare, 10, "df").fragmentSource === zeroDf;
       var clone = PhysicsEngine.cloneScene(scene).friction === 0.25 && PhysicsGridCodegen.computeOffsetSceneNumeric(scene, 0, 0).friction === 0.25;
-      var link = ShareUrl.encodeScene(scene).join(","), back = ShareUrl.decode("#map/" + link).scene;
+      var link = ShareUrl.encodeScene(scene).join(","), back = ShareUrl.decode("#map/v:1.0," + link).scene;
       var linkOk = /(^|,)fric:\.25(,|$)/.test(link) && back.friction === 0.25 &&
-        ShareUrl.decode("#map/" + ShareUrl.encodeScene(bare).join(",")).scene.friction === 0 && ShareUrl.encodeScene(bare).join(",").indexOf("fric") === -1;
+        ShareUrl.decode("#map/v:1.0," + ShareUrl.encodeScene(bare).join(",")).scene.friction === 0 && ShareUrl.encodeScene(bare).join(",").indexOf("fric") === -1;
       var refused = false;
-      try { ShareUrl.decode("#map/" + link.replace("fric:.25", "fric:lots")); } catch (e) { refused = true; }
+      try { ShareUrl.decode("#map/v:1.0," + link.replace("fric:.25", "fric:lots")); } catch (e) { refused = true; }
       return {
         pass: reach && words && clean && clone && linkOk && refused,
         detail: "FRICTION in the Play, hover and grid preambles, f32 and df=" + reach + "; tf and qf whole-step factors sum to exp(-x)=" + words + "; friction 0 and no key compile to the same text with no friction in it=" + clean +
@@ -4892,7 +4892,7 @@
       var colors = ports.map(function (b) { return b.color; }).join(",");
       var sameShape = ports.every(function (b) { return b.length === 200 && b.isAnchored; });
       var refused = null;
-      try { ShareUrl.decode("#bldr/body:po:0:0:0:200!;po:0:300:3.1416:200!,frmw:900,frmh:600"); } catch (err) { refused = err.message; }
+      try { ShareUrl.decode("#bldr/v:1.0,body:po:0:0:0:200!;po:0:300:3.1416:200!,frmw:900,frmh:600"); } catch (err) { refused = err.message; }
       return {
         pass: colors === "orange,green" && sameShape && /second/.test(refused || ""),
         detail: "port holes came back as " + colors + " with their length and anchoring=" + sameShape + "; two orange ones: " + (refused ? "refused (" + refused + ")" : "ACCEPTED"),
@@ -6058,7 +6058,7 @@
     "An absent field means the FORMAT's default, not whatever the editor starts a scene with today",
     "share-url.js's wire defaults: a field at its default is left out of a link, so what 'left out' means is fixed by every link already shared. decode() fills each one in explicitly so that nothing downstream can substitute a newer default of its own",
     function () {
-      var decoded = ShareUrl.decode("#bldr/body:ci:0:0:0:30,frmw:900,frmh:600").scene;
+      var decoded = ShareUrl.decode("#bldr/v:1.0,body:ci:0:0:0:30,frmw:900,frmh:600").scene;
       var want = { mutualGravity: false, collisionsEnabled: true, simulationSteps: 1000, edgeMode: "sticky", friction: 0 };
       var wrong = Object.keys(want).filter(function (k) { return decoded[k] !== want[k]; });
       var body = decoded.bodies[0];
@@ -6157,7 +6157,7 @@
         view: { center: { x: 0, xLo: 0, y: 0, yLo: 0 }, scale: 200 / 0.17, zoom: 1, display: "standard", lowSaturation: false, precision: "auto", speed: 1, volume: 0, inspect: [] },
       });
       ShareUrl.setOmittedPrecision(null);
-      var bare = untouched === "map/" + ShareUrl.encodeScene(scene).join(",");
+      var bare = untouched === "map/v:" + ShareUrl.VERSION + "," + ShareUrl.encodeScene(scene).join(",");
       return {
         pass: viewOk && bare,
         detail: "view round trip " + (viewOk ? "exact" : "DIFFERS: " + canonicalJSON(back)) + "; untouched view adds nothing=" + bare +
@@ -6171,7 +6171,7 @@
     "share-url.js reads a missing prec, snd or sped (or an unknown precision code) as undefined, which applyShareView leaves alone, so a phone on float32 stays on float32; the encoder leaves out the device's own default precision, muted and 1x, and writes anything else",
     function () {
       var scene = everythingScene();
-      var bare = "map/" + ShareUrl.encodeScene(scene).join(",");
+      var bare = "map/v:" + ShareUrl.VERSION + "," + ShareUrl.encodeScene(scene).join(",");
       ShareUrl.setOmittedPrecision("auto");
       var quietDesktop = ShareUrl.encode({ page: "map", scene: scene, view: { precision: "auto", volume: 0, speed: 1 } }) === bare;
       var loud = ShareUrl.encode({ page: "map", scene: scene, view: { precision: "f32", volume: 0.5, speed: 2 } });
@@ -6194,11 +6194,39 @@
   );
 
   addTest(
+    "Every link starts with its format version, a scene link without one is refused, and a newer one is flagged",
+    "share-url.js writes v:1.0 (ShareUrl.VERSION) as the first field of every page's link. decode refuses a scene with no v (a bare #bldr/ needs none) or a v that isn't a version, and sets newerVersion past ShareUrl.VERSION; a newer link that can't be read says so in its error",
+    function () {
+      var scene = everythingScene(), head = "v:" + ShareUrl.VERSION + ",", tail = ",body:ci:0:0:0:30,frmw:900,frmh:600";
+      function refusal(link) { try { ShareUrl.decode(link); return ""; } catch (err) { return err.message; } }
+      var first = ["bldr", "map", "movi"].every(function (page) {
+        return ShareUrl.encode({ page: page, scene: scene, view: { precision: "f32" } }).indexOf(page + "/" + head) === 0;
+      });
+      var own = ShareUrl.decode("#" + ShareUrl.encode({ page: "map", scene: scene, view: {} }));
+      var read = own.version === ShareUrl.VERSION && own.newerVersion === false;
+      var missing = refusal("#map/body:ci:0:0:0:30,frmw:900,frmh:600");
+      var bare = ShareUrl.decode("#bldr/");
+      var bareOk = !!bare && bare.scene === null && refusal("#bldr/") === "";
+      var malformed = refusal("#map/v:one" + tail);
+      var newer = ["1.1", "1.10", "2", "2.0"].filter(function (v) { return !ShareUrl.decode("#map/v:" + v + tail).newerVersion; });
+      var notNewer = ["1.0", "1", "0.9"].filter(function (v) { return ShareUrl.decode("#map/v:" + v + tail).newerVersion; });
+      var unreadable = refusal("#map/v:2.0,body:zz:1:2:3:4,frmw:900,frmh:600");
+      var says = unreadable.indexOf(ShareUrl.NEWER_VERSION_MESSAGE) !== -1 && refusal("#map/v:1.0,body:zz:1:2:3:4").indexOf("newer") === -1;
+      return {
+        pass: first && read && missing !== "" && bareOk && malformed !== "" && !newer.length && !notNewer.length && says,
+        detail: "v first on every page=" + first + "; read back=" + read + "; no v refused: " + (missing || "NO") + "; bare #bldr/ ok=" + bareOk +
+          "; bad v refused: " + (malformed || "NO") + "; missed as newer: " + (newer.join(" ") || "none") + "; wrongly newer: " + (notNewer.join(" ") || "none") +
+          "; newer unreadable link says so=" + says,
+      };
+    }
+  );
+
+  addTest(
     "A link's Inspect points or keyframes that can't be read are reported, not just dropped",
     "share-url.js's decodeView falls back to a field's default when it can't be read, and lists the field in view.unread, which is how the map knows to say that a link's Inspect points or movie keyframes were lost (one bad entry drops its whole list) and the player to say why it has no movie",
     function () {
       var scene = everythingScene();
-      var base = "#map/" + ShareUrl.encodeScene(scene).join(",");
+      var base = "#map/v:1.0," + ShareUrl.encodeScene(scene).join(",");
       var bad = ShareUrl.decode(base + ",zoom:3,insp:p:.1:.1;p:abc:0,kfrm:0:0:1:1000;0:0:1").view;
       var badOk = bad.inspect.length === 0 && bad.movie.keyframes.length === 0 && bad.zoom === 3 &&
         bad.unread.indexOf("insp") !== -1 && bad.unread.indexOf("kfrm") !== -1 && bad.unread.length === 2;
@@ -6254,7 +6282,7 @@
         if (got.places !== places) wrongPlaces++;
         if (ShareUrl.encode(ShareUrl.decode(fragment)) !== fragment) unstable++;
       }
-      var old = ShareUrl.decode("#map/body:ci:0:0:0:30,ctrx:-14.318359,ctry:57.44,zoom:3.2,insp:p:.0115:.0075;l:-.2875:-.1018:.2973:.143:30;p:1e-7:-2.5e-8").view;
+      var old = ShareUrl.decode("#map/v:1.0,body:ci:0:0:0:30,ctrx:-14.318359,ctry:57.44,zoom:3.2,insp:p:.0115:.0075;l:-.2875:-.1018:.2973:.143:30;p:1e-7:-2.5e-8").view;
       var oldScale = (200 / 0.17) / 3.2;
       function oldAt(p, u, v) {
         return Math.abs((p.x + p.xLo) - (-14.318359 + u * oldScale)) < 1e-12 && Math.abs((p.y + p.yLo) - (57.44 + v * oldScale)) < 1e-12;
@@ -6283,12 +6311,12 @@
       var survives = [encodeURIComponent(fragment).replace(/%2F/g, "/"), fragment + ".", fragment + ").", fragment + ",futr:1:2:3"]
         .filter(function (mangled) { return canonicalJSON(ShareUrl.decode("#" + mangled)) !== want; });
       var ignored = ["", "#", "#editor", "#grid-view", "#maps/body:ci:0:0:0:30"].filter(function (other) { return ShareUrl.decode(other) !== null; });
-      var unreadable = ["#bldr/body:zz:1:2:3:4", "#bldr/body:ci:1:2:3", "#bldr/body:ci:1:2:3:0", "#bldr/body:ci:1:0x10:3:4",
-        "#bldr/body:ci:1:2:3:4,hnge:0:1:2", "#bldr/body:ci:1:2:3:4,outp:0.nope", "#bldr/body:ci:1:2:3:4,edge:nope", "#bldr/body:ci:1:2:3:4,coll:yes"];
+      var unreadable = ["#bldr/v:1.0,body:zz:1:2:3:4", "#bldr/v:1.0,body:ci:1:2:3", "#bldr/v:1.0,body:ci:1:2:3:0", "#bldr/v:1.0,body:ci:1:0x10:3:4",
+        "#bldr/v:1.0,body:ci:1:2:3:4,hnge:0:1:2", "#bldr/v:1.0,body:ci:1:2:3:4,outp:0.nope", "#bldr/v:1.0,body:ci:1:2:3:4,edge:nope", "#bldr/v:1.0,body:ci:1:2:3:4,coll:yes"];
       var accepted = unreadable.filter(function (bad) {
         try { ShareUrl.decode(bad); return true; } catch (err) { return !err.message; }
       });
-      var lenient = ShareUrl.decode("#map/body:ci:1:2:3:4,zoom:banana,ctrx:12.5,disp:nope,insp:q:1:2").view;
+      var lenient = ShareUrl.decode("#map/v:1.0,body:ci:1:2:3:4,zoom:banana,ctrx:12.5,disp:nope,insp:q:1:2").view;
       var lenientOk = lenient.zoom === 1 && lenient.center.x === 12.5 && lenient.display === "standard" && lenient.inspect.length === 0;
       return {
         pass: endsClean && survives.length === 0 && ignored.length === 0 && accepted.length === 0 && lenientOk,
@@ -6451,9 +6479,9 @@
       inspectView.movie.subject = undefined;
       var mapWithPoints = ShareUrl.encode({ page: "map", scene: scene, view: inspectView });
       var mapLookOk = /size:1000x1000/.test(mapWithPoints) && !/subj|bkgd|fill|pace/.test(mapWithPoints);
-      var defaults = ShareUrl.decode("#map/body:ci:0:0:0:30").view.movie;
-      var oddLook = ShareUrl.decode("#movi/body:ci:0:0:0:30,subj:zzz,bkgd:zzz").view.movie;
-      var badSize = ShareUrl.decode("#map/body:ci:0:0:0:30,size:20000x10").view.movie.size;
+      var defaults = ShareUrl.decode("#map/v:1.0,body:ci:0:0:0:30").view.movie;
+      var oddLook = ShareUrl.decode("#movi/v:1.0,body:ci:0:0:0:30,subj:zzz,bkgd:zzz").view.movie;
+      var badSize = ShareUrl.decode("#map/v:1.0,body:ci:0:0:0:30,size:20000x10").view.movie.size;
       return {
         pass: keyframesOk && settingsOk && noViewFields && mapKeeps && silent && inspectOk && mapLookOk && defaults.size.width === 1280 && defaults.size.height === 720 &&
           defaults.antialias === true && defaults.loop === true && defaults.keyframes.length === 0 && badSize.width === 1280 && badSize.height === 720 &&
@@ -6618,10 +6646,10 @@
       var countsOk = counts.join(",") === "6,6,5,4,6" && /::\.3$/.test(entries[0]);
       var pristine = link(keys("none")), nulls = link(keys("null"));
       var pristineOk = nulls === pristine && kfrmOf(pristine).split(";").every(function (e) { var n = e.split(":").length; return n === 4 || n === 5; });
-      var legacy = ShareUrl.decode("#movi/body:ci:0:0:0:30,kfrm:0:0:1:1000;-14.318359:57.44:3.2:500:4").view.movie.keyframes;
+      var legacy = ShareUrl.decode("#movi/v:1.0,body:ci:0:0:0:30,kfrm:0:0:1:1000;-14.318359:57.44:3.2:500:4").view.movie.keyframes;
       var legacyOk = legacy.length === 2 && legacy[0].friction === null && legacy[1].friction === null && legacy[0].seconds === null && legacy[1].seconds === 4;
       var dropped = ["0:0:1:1000:2:.2:9", "0:0:1:1000:0:lots"].every(function (bad) {
-        var view = ShareUrl.decode("#movi/body:ci:0:0:0:30,disp:lapl,kfrm:0:0:1:1000;" + bad + ",size:1000x1000").view;
+        var view = ShareUrl.decode("#movi/v:1.0,body:ci:0:0:0:30,disp:lapl,kfrm:0:0:1:1000;" + bad + ",size:1000x1000").view;
         return view.movie.keyframes.length === 0 && view.display === "laplacian" && view.movie.size.width === 1000;
       });
       return {
@@ -6971,7 +6999,7 @@
       var fragment = ShareUrl.encode({ page: "bldr", scene: authored });
       var linkOk = JSON.stringify(ShareUrl.decode(fragment).scene.springs) === JSON.stringify(authored.springs);
       var silent = ShareUrl.encode({ page: "bldr", scene: { bodies: authored.bodies, hinges: [], frameWidth: 1000, frameHeight: 600 } }).indexOf("sprg") === -1;
-      var oldLinkOk = ShareUrl.decode("#bldr/body:ci:0:0:0:30").scene.springs.length === 0;
+      var oldLinkOk = ShareUrl.decode("#bldr/v:1.0,body:ci:0:0:0:30").scene.springs.length === 0;
       return {
         pass: cloned && cutOk && shiftedOk && authoredOk && backOk && noSpringsUntouched && linkOk && silent && oldLinkOk,
         detail: "clone=" + cloned + "; delete removes/renumbers=" + cutOk + "/" + shiftedOk + "; authored space=" + authoredOk + " and back=" + backOk +

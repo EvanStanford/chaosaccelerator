@@ -3,7 +3,7 @@
     {
       "id": "rose-circle",
       "title": "The Circle",
-      "scene": "body:,frmw:979,frmh:934",
+      "scene": "v:1.0,body:,frmw:979,frmh:934",
       "target": [
         4.0,
         4.0,
@@ -46,7 +46,7 @@
     {
       "id": "rose-vertical",
       "title": "The Vertical Line",
-      "scene": "body:,frmw:979,frmh:934",
+      "scene": "v:1.0,body:,frmw:979,frmh:934",
       "target": [
         1,
         1,
@@ -89,7 +89,7 @@
     {
       "id": "rose-plus",
       "title": "The Plus",
-      "scene": "body:,frmw:979,frmh:934",
+      "scene": "v:1.0,body:,frmw:979,frmh:934",
       "target": [
         53,
         15,
@@ -132,7 +132,7 @@
     {
       "id": "rose-x",
       "title": "The X",
-      "scene": "body:,frmw:979,frmh:934",
+      "scene": "v:1.0,body:,frmw:979,frmh:934",
       "target": [
         1,
         1,
@@ -175,7 +175,7 @@
     {
       "id": "rose-bowtie",
       "title": "The Bow Tie",
-      "scene": "body:,frmw:979,frmh:934",
+      "scene": "v:1.0,body:,frmw:979,frmh:934",
       "target": [
         23,
         23,
@@ -218,7 +218,7 @@
     {
       "id": "rose-asterisk",
       "title": "The Asterisk",
-      "scene": "body:,frmw:979,frmh:934",
+      "scene": "v:1.0,body:,frmw:979,frmh:934",
       "target": [
         36,
         10,
@@ -261,7 +261,7 @@
     {
       "id": "rose-pozidriv",
       "title": "The Pozidriv",
-      "scene": "body:,frmw:979,frmh:934",
+      "scene": "v:1.0,body:,frmw:979,frmh:934",
       "target": [
         3.52,
         2.88,

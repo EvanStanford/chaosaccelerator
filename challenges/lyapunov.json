@@ -3,20 +3,20 @@
     {
       "id": "settle-down",
       "title": "Settle Down",
-      "scene": "body:,frmw:979,frmh:934"
+      "scene": "v:1.0,body:,frmw:979,frmh:934"
     },
     {
       "id": "settle-down-frictionless",
       "title": "Settle Down Without Friction",
       "lockedTitle": "Settle Down With Additional Constraints",
       "after": "settle-down",
-      "scene": "body:,frmw:979,frmh:934",
+      "scene": "v:1.0,body:,frmw:979,frmh:934",
       "noFriction": true
     },
     {
       "id": "settle-down-from-rest",
       "title": "Settle Down From Rest",
-      "scene": "body:,frmw:979,frmh:934",
+      "scene": "v:1.0,body:,frmw:979,frmh:934",
       "after": "settle-down-frictionless",
       "rules": {
         "velocityInputs": true
@@ -26,7 +26,7 @@
     {
       "id": "settle-down-alone",
       "title": "Settle Down Alone",
-      "scene": "body:,frmw:979,frmh:934",
+      "scene": "v:1.0,body:,frmw:979,frmh:934",
       "after": "settle-down-from-rest",
       "rules": {
         "velocityInputs": true,
@@ -37,7 +37,7 @@
     {
       "id": "perfectly-still",
       "title": "Perfectly Still",
-      "scene": "body:,frmw:979,frmh:934",
+      "scene": "v:1.0,body:,frmw:979,frmh:934",
       "after": "settle-down-alone",
       "noFriction": true,
       "rules": {
@@ -49,7 +49,7 @@
     {
       "id": "stir-it-up",
       "title": "Stir It Up",
-      "scene": "body:,frmw:979,frmh:934",
+      "scene": "v:1.0,body:,frmw:979,frmh:934",
       "after": "perfectly-still",
       "lockedTitle": "Ramp Up With Additional Constraints",
       "above": 12,
