@@ -136,32 +136,6 @@ html.layout-mobile #inspect-arm-row > button {
   max-width: 340px;
 }
 
-/* Editor counterpart of the grid's .inspect-toast (opacity, never [hidden]);
-   under the Play transport, since the Fractal-ize button owns the bottom. */
-.editor-hint-toast {
-  position: absolute;
-  left: 50%;
-  top: calc(var(--panel-inset) + var(--safe-top) + 64px);
-  transform: translateX(-50%);
-  z-index: 11;
-  width: max-content;
-  max-width: min(340px, calc(100% - 24px));
-  text-align: center;
-  background: rgba(12, 13, 17, 0.92);
-  border: 1px solid var(--accent);
-  border-radius: 8px;
-  padding: 9px 14px;
-  color: var(--text);
-  font-size: 13px;
-  line-height: 1.4;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-.editor-hint-toast.visible {
-  opacity: 1;
-}
-
 /* left:50% lays the box out in the right half, so it wrapped at half width. */
 .inspect-toast {
   width: max-content;
@@ -395,9 +369,6 @@ html.layout-mobile .settings-panel-body {
 }
 html.layout-mobile #fractalize-wrap {
   bottom: 16px;
-}
-html.layout-mobile .editor-hint-toast {
-  top: 12px;
 }
 html.layout-mobile .fractalize-btn {
   font-size: 16px;

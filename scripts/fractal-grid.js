@@ -3018,7 +3018,6 @@
     while (inspectMarkerEls.length < flatPoints.length) {
       var el = document.createElement("div");
       el.className = "inspect-marker";
-      el.title = "Click to remove";
       el.addEventListener("click", function () {
         var slot = inspectMarkerEls.indexOf(el);
         if (slot === -1) return;
@@ -3161,7 +3160,7 @@
     var removeBtn = document.createElement("button");
     removeBtn.className = "inspect-row-remove";
     removeBtn.textContent = "×";
-    removeBtn.title = "Remove this " + type;
+    removeBtn.setAttribute("aria-label", "Remove this " + type);
     removeBtn.addEventListener("click", onRemove);
 
     var icon = document.createElement("span");
@@ -5567,11 +5566,9 @@
   });
 
   // ---- Grid Settings (Grid Size, Two Part Line) ----
-  // Read on the NEXT drag; an existing grid is never touched. The Inspect (Grid) tooltip is kept in sync.
+  // Read on the NEXT drag; an existing grid is never touched.
   function updateInspectGridSettingsUI() {
-    var label = inspectGridSize + "×" + inspectGridSize;
-    inspectGridSizeReadout.textContent = label;
-    btnInspectGrid.title = "Drag the map to inspect a " + label + " grid of points";
+    inspectGridSizeReadout.textContent = inspectGridSize + "×" + inspectGridSize;
   }
   inspectGridSizeSlider.value = String(inspectGridSize);
   inspectGridTwoPartCheckbox.checked = inspectGridTwoPart;
@@ -5597,9 +5594,7 @@
     setVolumeIconState(hoverMuteBtn, volume);
     setVolumeIconState(gridSoundVolumeIcon, volume);
     gridSoundVolumeSlider.value = String(Math.round(volume * 100));
-    var label = volume <= 0 ? "Unmute" : "Mute";
-    hoverMuteBtn.title = label;
-    hoverMuteBtn.setAttribute("aria-label", label);
+    hoverMuteBtn.setAttribute("aria-label", volume <= 0 ? "Unmute" : "Mute");
   }
   hoverMuteBtn.addEventListener("click", function () { PhysicsSound.toggleMute(); });
   gridSoundVolumeSlider.addEventListener("input", function () {
@@ -5665,7 +5660,6 @@
 
   function updatePlayPauseButtonUI() {
     setPlayPauseIcon(hoverPlayPauseBtn, playbackPlaying);
-    hoverPlayPauseBtn.title = playbackPlaying ? "Pause" : "Play";
     hoverPlayPauseBtn.setAttribute("aria-label", playbackPlaying ? "Pause" : "Play");
   }
 
@@ -8719,7 +8713,7 @@
     setPlayPauseIcon(gridPlayPauseBtn, playing);
     gridPlayPauseBtn.title = !linked && !hasFloatColorBuffer
       ? "Playback needs floating-point render targets, which this browser doesn't provide"
-      : playing ? "Pause" : "Play";
+      : "";
     gridPlayPauseBtn.setAttribute("aria-label", playing ? "Pause" : "Play");
     gridPlayPauseBtn.disabled = !linked && !hasFloatColorBuffer;
     gridRestartBtn.disabled = false;
@@ -8991,13 +8985,12 @@
     markDirty();
   }
 
-  function movieButton(glyph, title, onClick) {
+  function movieButton(glyph, label, onClick) {
     var button = document.createElement("button");
     button.type = "button";
     button.className = "icon-button";
     button.textContent = glyph;
-    button.title = title;
-    button.setAttribute("aria-label", title);
+    button.setAttribute("aria-label", label);
     button.addEventListener("click", onClick);
     return button;
   }
@@ -9017,7 +9010,6 @@
   function movieField(caption, label, field) {
     var wrap = document.createElement("label");
     wrap.className = "movie-field";
-    if (field.title) wrap.title = field.title;
     var input = document.createElement("input");
     input.type = "text";
     input.inputMode = "decimal";
@@ -9056,8 +9048,7 @@
       button.type = "button";
       button.tabIndex = -1;
       button.textContent = a[0];
-      button.title = label + " " + a[1] + (field.stepHint ? " " + field.stepHint : "");
-      button.setAttribute("aria-label", button.title);
+      button.setAttribute("aria-label", label + " " + a[1] + (field.stepHint ? " " + field.stepHint : ""));
       // mousedown, not click: a click would first blur the input, whose commit rebuilds the row.
       button.addEventListener("mousedown", function (event) { event.preventDefault(); });
       button.addEventListener("click", function () { editing = false; commit(field.step(a[2])); });
@@ -9086,7 +9077,6 @@
       what.appendChild(index);
 
       what.appendChild(movieField("zoom", "Zoom of keyframe " + (i + 1), {
-        title: "The zoom at this keyframe. Type any notation, 1.4e+25, 1.4\u00d710^25, or step it a power of ten with the arrows.",
         stepHint: "a power of ten",
         show: function () { return formatZoom(DEFAULT_SCALE / k.scale); },
         edit: function () { return (DEFAULT_SCALE / k.scale).toExponential(1); },
@@ -9096,7 +9086,6 @@
       }));
 
       what.appendChild(movieField("step", "Step of keyframe " + (i + 1), {
-        title: "The simulation step the map shows at this keyframe.",
         stepHint: "a step",
         show: function () { return Math.min(k.step, simulationSteps).toLocaleString(); },
         edit: function () { return String(Math.min(k.step, simulationSteps)); },
@@ -9112,7 +9101,6 @@
       var arriving = i > 0 ? moves[i - 1] : (movie.loop && movie.keyframes.length > 1 ? moves[moves.length - 1] : null);
       if (arriving) {
         what.appendChild(movieField("s", "Seconds to reach keyframe " + (i + 1), {
-          title: "How long the move arriving at this keyframe takes. Left empty, it is worked out from how far the camera and the simulation have to go.",
           stepHint: "a tenth of a second",
           placeholder: String(arriving.seconds),
           show: function () { return k.seconds ? String(k.seconds) : ""; },
@@ -9127,7 +9115,6 @@
       }
       if (movieFrictionEnabled) {
         what.appendChild(movieField("friction", "Friction at keyframe " + (i + 1), {
-          title: "Friction at this keyframe, in percent of speed lost per second, 0 to 99. The movie eases it from one keyframe to the next along with the camera.",
           stepHint: "a percent",
           show: function () { return frictionPercent(k.friction) + "%"; },
           edit: function () { return String(frictionPercent(k.friction)); },

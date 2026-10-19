@@ -575,7 +575,7 @@
   // ---- Inspect point ---- the Inspect preview of the center of the most zoomed-in keyframe (the last, if
   // several tie), drawn into a corner of every frame at that frame's Map Evolution frame, and into a download.
   // A movie whose keyframes share one simulation frame plays the point's run once instead, then fades it out.
-  var inspectField = $("inspect-field"), inspectCorner = $("inspect-corner"), inspectTitle = inspectField.title;
+  var inspectField = $("inspect-field"), inspectCorner = $("inspect-corner");
   var engineGrid = null;
   var inspection = null; // FractalGrid.inspection(), made the first time a corner is picked
   var inspectCanvas = document.createElement("canvas");
@@ -605,7 +605,7 @@
     }
     inspectCorner.disabled = false;
     inspectField.firstElementChild.textContent = "Inspect point";
-    inspectField.title = inspection ? inspectTitle : "This point couldn't be simulated.";
+    inspectField.title = inspection ? "" : "This point couldn't be simulated.";
     if (!inspection) inspectCorner.value = "off";
     if (shown) show(shown, shownFrame);
   }
@@ -738,8 +738,7 @@
     }
     if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
     btnSound.setAttribute("aria-pressed", soundOn ? "true" : "false");
-    btnSound.title = soundOn ? "Sound on" : "Sound off";
-    btnSound.setAttribute("aria-label", btnSound.title);
+    btnSound.setAttribute("aria-label", soundOn ? "Sound on" : "Sound off");
     updateSound();
   }
 
@@ -793,8 +792,7 @@
     playing = next;
     lastTickAt = 0;
     btnPlayPause.innerHTML = playing ? "&#10074;&#10074;" : "&#9654;";
-    btnPlayPause.title = playing ? "Pause" : "Play";
-    btnPlayPause.setAttribute("aria-label", btnPlayPause.title);
+    btnPlayPause.setAttribute("aria-label", playing ? "Pause" : "Play");
     updateSound();
   }
 

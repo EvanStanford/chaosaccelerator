@@ -39,12 +39,11 @@
     return node;
   }
 
-  function row(parent, label, value, note) {
+  function row(parent, label, value) {
     var r = el("div", "stat-row");
     r.appendChild(el("span", "stat-label", label));
     var v = el("span", "stat-value", value);
     r.appendChild(v);
-    if (note) r.title = note;
     parent.appendChild(r);
     return r;
   }
@@ -281,14 +280,10 @@
 
   // ---- The shape census, as a pie: warm for ridge, cool for valley ----
   var SHAPES = [
-    { key: "ridge", title: "Ridges", color: "#ffd479", fraction: "ridgeFraction",
-      note: "Curving down in every direction: the crests of the picture." },
-    { key: "valley", title: "Valleys", color: "#7fd4ff", fraction: "valleyFraction",
-      note: "Curving up in every direction: the troughs." },
-    { key: "saddle", title: "Saddles", color: "#c58cff", fraction: "saddleFraction",
-      note: "Curving up one way and down another: the passes between two basins. A high share means a tangled, interleaved structure." },
-    { key: "flat", title: "Flat", color: "#6b7280", fraction: "flatFraction",
-      note: "Curving negligibly compared with how much this view varies overall." },
+    { key: "ridge", title: "Ridges", color: "#ffd479", fraction: "ridgeFraction" },
+    { key: "valley", title: "Valleys", color: "#7fd4ff", fraction: "valleyFraction" },
+    { key: "saddle", title: "Saddles", color: "#c58cff", fraction: "saddleFraction" },
+    { key: "flat", title: "Flat", color: "#6b7280", fraction: "flatFraction" },
   ];
 
   // Draws the pie and returns its geometry (centre, radius, slice spans) for hit testing; `hot` is raised.
@@ -335,14 +330,13 @@
     return null;
   }
 
-  function legendRow(parent, color, label, value, note) {
+  function legendRow(parent, color, label, value) {
     var r = el("div", "stat-row stat-legend");
     var swatch = el("span", "stat-swatch");
     swatch.style.background = color;
     r.appendChild(swatch);
     r.appendChild(el("span", "stat-label", label));
     r.appendChild(el("span", "stat-value", value));
-    if (note) r.title = note;
     parent.appendChild(r);
     return r;
   }
@@ -354,7 +348,7 @@
     body.appendChild(holder);
     var legend = {};
     SHAPES.forEach(function (shape) {
-      legend[shape.key] = legendRow(body, shape.color, shape.title, percent(g[shape.fraction], 1), shape.note);
+      legend[shape.key] = legendRow(body, shape.color, shape.title, percent(g[shape.fraction], 1));
     });
 
     // ---- Hovering a class lights its legend line, its slice, and its samples on the map ----
@@ -390,9 +384,9 @@
     body.appendChild(el("div", "stat-divider"));
     // One hover row showing `show` ({ path } or { mask }) on the map. A path row can be
     // PINNED by click, one at a time, remembered by `key` since rows are rebuilt on redraw.
-    function hoverRow(label, valueText, note, show, key) {
+    function hoverRow(label, valueText, show, key) {
       var canPin = !!(show && show.path && key && host.setPinnedOverlay);
-      var r = row(body, label, valueText, note);
+      var r = row(body, label, valueText);
       if (!show) return r;
       r.classList.add("stat-legend");
       if (canPin) r.classList.add("stat-legend-pinnable");
@@ -444,27 +438,21 @@
     var ridgeWins = g.longestRidgeDiagonals >= g.longestValleyDiagonals;
     var longestLine = ridgeWins ? g.longestRidge : g.longestValley;
     hoverRow("Longest Open Contour", screens(g.longestOpenContourDiagonals, g.longestOpenContour),
-      "The longest contour at any level that runs from one edge of the view to another rather than closing on itself. Near a sharp boundary the contours follow it and inherit its wiggle, so this grows with the sampling resolution.",
       pathOf(g.longestOpenContour), "open");
     hoverRow("Longest Ridge/Valley", screens(ridgeWins ? g.longestRidgeDiagonals : g.longestValleyDiagonals, longestLine),
-      "The longest unbroken crest or trough in the view" + (longestLine ? (ridgeWins ? " (a crest)." : " (a trough).") : "."),
       pathOf(longestLine), "ridgeValley");
     if (g.returnContour !== undefined) {
       hoverRow("Return Line", screens(g.returnContourDiagonals, g.returnContour),
-        "The longest piece of the contour at the Output's starting value: every start in the view that brings the body back exactly to where it began, as the scene is authored.",
         pathOf(g.returnContour), "return");
     }
     hoverRow("Longest Sharp Edge", screens(g.longestEdgeDiagonals, g.longestEdge),
-      "The longest unbroken sharp boundary: a line along which the colour steps from one value to another and stays there, by at least 5% of the range somewhere along it.",
       pathOf(g.longestEdge), "edge");
     if (g.medianContour !== undefined) {
       hoverRow("Median Contour", screens(g.medianContourDiagonals, g.medianContour),
-        "The longest piece of the contour at the median value, the one level that splits the view into two equal halves by area.",
         pathOf(g.medianContour), "median");
     }
     if (g.watershed) {
       hoverRow("Catchments", g.watershed.basins.toLocaleString() + (g.watershed.basins === 1 ? " basin" : " basins"),
-        "Read as terrain, how many separate low points the view drains to. Hovering shows the divides between them, the complete network of ranges, where Longest Ridge/Valley is only the single longest crest. In a chaotic region every other sample is a low point of its own, and the divides there are honestly a mesh.",
         g.watershed.mask ? { mask: g.watershed.mask } : null);
     }
     // A pinned row whose line is gone from this result has nothing to keep.

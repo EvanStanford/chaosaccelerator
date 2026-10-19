@@ -1354,27 +1354,6 @@
     activeTool = tool;
     toolButtons.forEach(function (b) { b.classList.toggle("active", b.getAttribute("data-tool") === tool); });
     canvas.className = "tool-" + tool;
-    if (tool === "select") hideToolHint();
-  }
-
-  // A tool picked by touch shows its button's title in a toast (#editor-hint-toast), "click" read as "tap".
-  // Pointer type is noted at the window in the capture phase, before the click reaches a button.
-  var toolHintEl = document.getElementById("editor-hint-toast");
-  var toolHintTimer = null;
-  var TOOL_HINT_VISIBLE_MS = 6000;
-  var lastPointerType = "mouse";
-  window.addEventListener("pointerdown", function (e) { lastPointerType = e.pointerType || "mouse"; }, true);
-
-  function hideToolHint() {
-    if (toolHintTimer) { clearTimeout(toolHintTimer); toolHintTimer = null; }
-    if (toolHintEl) toolHintEl.classList.remove("visible");
-  }
-  function showToolHint(text) {
-    if (!toolHintEl || !text) return;
-    hideToolHint();
-    toolHintEl.textContent = text.replace(/\bClick\b/g, "Tap").replace(/\bclick\b/g, "tap");
-    toolHintEl.classList.add("visible");
-    toolHintTimer = setTimeout(hideToolHint, TOOL_HINT_VISIBLE_MS);
   }
 
   toolButtons.forEach(function (btn) {
@@ -1382,7 +1361,6 @@
       var tool = btn.getAttribute("data-tool");
       if (tool === "porthole") { addPorthole(); return; }
       setActiveTool(tool);
-      if (lastPointerType === "touch") showToolHint(btn.getAttribute("title"));
     });
   });
 
@@ -1448,9 +1426,7 @@
   }
   function updateVolumeUI(volume) {
     setVolumeIconState(btnMute, volume);
-    var label = volume <= 0 ? "Unmute" : "Mute";
-    btnMute.title = label;
-    btnMute.setAttribute("aria-label", label);
+    btnMute.setAttribute("aria-label", volume <= 0 ? "Unmute" : "Mute");
   }
   btnMute.addEventListener("click", function () { PhysicsSound.toggleMute(); });
   PhysicsSound.onVolumeChange(updateVolumeUI);
@@ -3064,7 +3040,6 @@
       btnPlayPause.setAttribute("data-icon", icon);
       btnPlayPause.innerHTML = isAdvancing ? PAUSE_ICON_SVG : PLAY_ICON_SVG;
     }
-    btnPlayPause.title = isAdvancing ? "Pause" : "Play";
     btnPlayPause.setAttribute("aria-label", isAdvancing ? "Pause" : "Play");
   }
 

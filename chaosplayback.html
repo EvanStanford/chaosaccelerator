@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#1b1e27">
 <title>Physics Fractal: Movie</title>
-<link rel="stylesheet" href="scripts/chaosplayback.css?v=m143">
+<link rel="stylesheet" href="scripts/chaosplayback.css?v=m144">
 </head>
 <body>
 
@@ -17,7 +17,7 @@
 <header id="player-bar">
   <a id="back-to-map" class="bar-link" href="chaos.html" data-back>&larr; Back to map</a>
   <span id="movie-facts"></span>
-  <label id="inspect-field" class="bar-select" hidden title="Show the simulation at the center of the most zoomed-in keyframe, in step with the movie.">
+  <label id="inspect-field" class="bar-select" hidden>
     <span>Inspect point</span>
     <select id="inspect-corner">
       <option value="off" selected>Off</option>
@@ -27,7 +27,7 @@
       <option value="bottom-right">Bottom right</option>
     </select>
   </label>
-  <label id="background-field" class="bar-select" hidden title="What the Inspect tab's bodies are drawn on. Changing it films the movie again.">
+  <label id="background-field" class="bar-select" hidden>
     <span>Background</span>
     <select id="background-choice">
       <option value="plain" selected>Plain</option>
@@ -35,14 +35,14 @@
       <option value="black">Black</option>
     </select>
   </label>
-  <label id="bodies-field" class="bar-select" hidden title="The bodies the Inspect tab draws as outlines: kept as outlines or drawn solid. Changing it films the movie again.">
+  <label id="bodies-field" class="bar-select" hidden>
     <span>Bodies</span>
     <select id="bodies-choice">
       <option value="outlined" selected>Outlined</option>
       <option value="filled">Filled</option>
     </select>
   </label>
-  <label id="pace-field" class="bar-select" hidden title="Slow motion: more frames, with the bodies placed between simulation steps. Changing it films the movie again.">
+  <label id="pace-field" class="bar-select" hidden>
     <span>Render at</span>
     <select id="pace-choice">
       <option value="1" selected>1x</option>
@@ -50,7 +50,7 @@
       <option value="0.25">0.25x</option>
     </select>
   </label>
-  <button id="download" class="bar-link" type="button" hidden title="Save the movie as an MP4 video, with the sound if it is on.">Download</button>
+  <button id="download" class="bar-link" type="button" hidden>Download</button>
 </header>
 
 <main id="stage">
@@ -67,7 +67,7 @@
     </div>
     <p id="render-detail"></p>
     <div id="render-actions">
-      <button id="end-early" class="bar-link" type="button" disabled title="Stop rendering here and make the movie out of the frames finished so far.">End Early</button>
+      <button id="end-early" class="bar-link" type="button" disabled>End Early</button>
     </div>
     <div id="end-early-confirm" hidden>
       <p id="end-early-question">Do you want to end the rendering now and create a video only with the frames rendered so far?</p>
@@ -85,28 +85,28 @@
 </main>
 
 <footer id="transport">
-  <button id="play-pause" class="transport-button" type="button" title="Play" aria-label="Play" disabled>&#9654;</button>
+  <button id="play-pause" class="transport-button" type="button" aria-label="Play" disabled>&#9654;</button>
   <input type="range" id="scrubber" min="0" max="0" step="1" value="0" aria-label="Movie position" disabled>
   <span id="time-readout">0:00 / 0:00</span>
-  <button id="speed" class="transport-button wide" type="button" title="Playback speed" aria-label="Playback speed" disabled>1x</button>
-  <button id="loop" class="transport-button" type="button" title="Loop" aria-label="Loop" aria-pressed="true" disabled>
+  <button id="speed" class="transport-button wide" type="button" aria-label="Playback speed" disabled>1x</button>
+  <button id="loop" class="transport-button" type="button" aria-label="Loop" aria-pressed="true" disabled>
     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 2l4 4-4 4"></path><path d="M3 11V9a3 3 0 0 1 3-3h15"></path><path d="M7 22l-4-4 4-4"></path><path d="M21 13v2a3 3 0 0 1-3 3H3"></path></svg>
   </button>
-  <button id="restart" class="transport-button" type="button" title="Back to the start" aria-label="Back to the start" disabled>
+  <button id="restart" class="transport-button" type="button" aria-label="Back to the start" disabled>
     <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="2.5" height="14" rx="1"></rect><path d="M19 6.1v11.8a.6.6 0 0 1-.94.5L9.6 12.5a.6.6 0 0 1 0-1l8.46-5.9a.6.6 0 0 1 .94.5z"></path></svg>
   </button>
-  <button id="sound" class="transport-button" type="button" title="Sound off" aria-label="Sound off" aria-pressed="false" disabled>
+  <button id="sound" class="transport-button" type="button" aria-label="Sound off" aria-pressed="false" disabled>
     <svg class="when-off" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5L6 9H2v6h4l5 4z"></path><path d="M23 9l-6 6"></path><path d="M17 9l6 6"></path></svg>
     <svg class="when-on" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5L6 9H2v6h4l5 4z"></path><path d="M15.5 8.5a5 5 0 0 1 0 7"></path><path d="M19 5a10 10 0 0 1 0 14"></path></svg>
   </button>
 </footer>
 
-<script src="scripts/share-url.js?v=m143"></script>
-<script src="scripts/movie-path.js?v=m143"></script>
-<script src="scripts/movie-store.js?v=m143"></script>
-<script src="scripts/mp4-muxer.js?v=m143"></script>
-<script src="scripts/physics-sound.js?v=m143"></script>
-<script src="scripts/back-link.js?v=m143"></script>
-<script src="scripts/chaosplayback.js?v=m143"></script>
+<script src="scripts/share-url.js?v=m144"></script>
+<script src="scripts/movie-path.js?v=m144"></script>
+<script src="scripts/movie-store.js?v=m144"></script>
+<script src="scripts/mp4-muxer.js?v=m144"></script>
+<script src="scripts/physics-sound.js?v=m144"></script>
+<script src="scripts/back-link.js?v=m144"></script>
+<script src="scripts/chaosplayback.js?v=m144"></script>
 </body>
 </html>
