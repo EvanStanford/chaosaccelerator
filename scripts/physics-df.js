@@ -664,7 +664,7 @@
     hornerGLSL("dfCosTaylor", cosLiterals, false, two ? "dfMul(x, x)" : "dfSqr(x)"),
     "",
     "void dfSinCos(MF a, out MF sn, out MF cs) {",
-    "  // Exact fast path, and not a micro-optimisation: the hinge solvers",
+    "  // Exact fast path, and not a micro-optimization: the hinge solvers",
     "  // rotate BOTH sides of every joint, and one side is very often the",
     "  // world pin, whose angle is a hard zero. Without this, a world-hinged",
     "  // scene spends half its trig budget evaluating a Taylor series to",

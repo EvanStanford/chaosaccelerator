@@ -8,17 +8,17 @@
 <meta name="theme-color" content="#14161c">
 <title>Chaos Accelerator</title>
 <!-- Both views share this document so transition.js can show them at once. -->
-<link rel="stylesheet" href="scripts/physics.css?v=m149">
-<link rel="stylesheet" href="scripts/fractal-grid.css?v=m149">
-<link rel="stylesheet" href="scripts/app-shell.css?v=m149">
-<link rel="stylesheet" href="scripts/fractal-stats.css?v=m149">
-<link rel="stylesheet" href="scripts/responsive-layout.css?v=m149">
+<link rel="stylesheet" href="scripts/physics.css?v=m159">
+<link rel="stylesheet" href="scripts/fractal-grid.css?v=m159">
+<link rel="stylesheet" href="scripts/app-shell.css?v=m159">
+<link rel="stylesheet" href="scripts/fractal-stats.css?v=m159">
+<link rel="stylesheet" href="scripts/responsive-layout.css?v=m159">
 <!-- mobile.css after the app sheets: it must win their cascade without !important. -->
-<link rel="stylesheet" href="scripts/mobile.css?v=m149">
-<link rel="stylesheet" href="scripts/eighties-app.css?v=m149">
-<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m149" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="scripts/mobile.css?v=m159">
+<link rel="stylesheet" href="scripts/eighties-app.css?v=m159">
+<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m159" as="font" type="font/woff2" crossorigin>
 <!-- In <head> on purpose: both views measure their canvas area as they start. -->
-<script src="scripts/layout-mode.js?v=m149"></script>
+<script src="scripts/layout-mode.js?v=m159"></script>
 <!-- A #map/ link should open on the map: hide the editor (still laid out) until transition.js picks the view. -->
 <script>
   if (/^#map\//.test(location.hash)) document.documentElement.classList.add("opening-map");
@@ -142,8 +142,8 @@
                   </span>
                 </label>
                 <label class="field">
-                  <span>Simulation Duration: <input type="number" class="steps-number" id="simulation-steps-readout" min="1" max="5000" step="1" value="1000" inputmode="numeric" aria-label="Simulation duration in steps"></span>
-                  <input type="range" id="simulation-steps-slider" min="1" max="50" value="10">
+                  <span>Simulation Duration: <input type="number" class="steps-number" id="simulation-steps-readout" min="1" max="5000" step="1" value="400" inputmode="numeric" aria-label="Simulation duration in steps"></span>
+                  <input type="range" id="simulation-steps-slider" min="1" max="50" value="4">
                 </label>
                 <label class="field">
                   <span>Edge Handling</span>
@@ -529,7 +529,7 @@
                     </details>
                   </section>
 
-                  <button id="grid-btn-reset-tips" class="secondary">Reset Tool Tips</button>
+                  <button id="grid-btn-tips" class="secondary">Don't Show Tool Tips</button>
                   <button id="grid-btn-replay-intro" class="secondary">Reset Intro Animation</button>
                   <button id="grid-btn-reset-all" class="secondary">Reset All</button>
                 </div>
@@ -735,15 +735,6 @@
         <div class="speed-value" id="grid-speed-value">1.0x</div>
       </div>
 
-      <!-- One shared tip popover, reworded and moved by showTip (fractal-grid.js). -->
-      <div id="tip-popover" class="tip-popover" role="tooltip" hidden>
-        <p id="tip-popover-text"></p>
-        <div class="tip-popover-actions">
-          <button id="tip-popover-dismiss" class="secondary">Don't tell me again</button>
-          <button id="tip-popover-ok">OK</button>
-        </div>
-      </div>
-
   </section>
 
   <div id="transition-layer" hidden>
@@ -753,25 +744,35 @@
 
   <div id="watermark">chaosaccelerator.com</div>
 
+  <!-- The tool tip popover for both views, filled by app-tips.js. -->
+  <div id="tip-popover" class="tip-popover" role="tooltip" hidden>
+    <p id="tip-popover-text"></p>
+    <div class="tip-popover-actions">
+      <button id="tip-popover-dismiss">Don't show me any<br>more tool tips</button>
+      <button id="tip-popover-ok">OK</button>
+    </div>
+  </div>
+
 </div>
 
-<script src="scripts/app-message.js?v=m149"></script>
-<script src="scripts/physics-engine.js?v=m149"></script>
-<script src="scripts/physics-coords.js?v=m149"></script>
-<script src="scripts/share-url.js?v=m149"></script>
-<script src="scripts/movie-path.js?v=m149"></script>
-<script src="scripts/movie-store.js?v=m149"></script>
-<script src="scripts/physics-sound.js?v=m149"></script>
-<script src="scripts/physics-hinge-geometry.js?v=m149"></script>
-<script src="scripts/physics-df.js?v=m149"></script>
-<script src="scripts/physics-gpu.js?v=m149"></script>
-<script src="scripts/physics-gpu-df.js?v=m149"></script>
-<script src="scripts/physics-grid-codegen.js?v=m149"></script>
-<script src="scripts/physics-ui.js?v=m149"></script>
-<script src="scripts/fractal-stats.js?v=m149"></script>
-<script src="scripts/fractal-stats-panel.js?v=m149"></script>
-<script src="scripts/fractal-grid.js?v=m149"></script>
-<script src="scripts/back-link.js?v=m149"></script>
-<script src="scripts/transition.js?v=m149"></script>
+<script src="scripts/app-message.js?v=m159"></script>
+<script src="scripts/app-tips.js?v=m159"></script>
+<script src="scripts/physics-engine.js?v=m159"></script>
+<script src="scripts/physics-coords.js?v=m159"></script>
+<script src="scripts/share-url.js?v=m159"></script>
+<script src="scripts/movie-path.js?v=m159"></script>
+<script src="scripts/movie-store.js?v=m159"></script>
+<script src="scripts/physics-sound.js?v=m159"></script>
+<script src="scripts/physics-hinge-geometry.js?v=m159"></script>
+<script src="scripts/physics-df.js?v=m159"></script>
+<script src="scripts/physics-gpu.js?v=m159"></script>
+<script src="scripts/physics-gpu-df.js?v=m159"></script>
+<script src="scripts/physics-grid-codegen.js?v=m159"></script>
+<script src="scripts/physics-ui.js?v=m159"></script>
+<script src="scripts/fractal-stats.js?v=m159"></script>
+<script src="scripts/fractal-stats-panel.js?v=m159"></script>
+<script src="scripts/fractal-grid.js?v=m159"></script>
+<script src="scripts/back-link.js?v=m159"></script>
+<script src="scripts/transition.js?v=m159"></script>
 </body>
 </html>

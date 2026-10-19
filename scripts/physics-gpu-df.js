@@ -266,7 +266,7 @@
     "  return result;",
     "}",
     "",
-    "// Sweep primitives: earliest t in [0, dt] at which a point travelling",
+    "// Sweep primitives: earliest t in [0, dt] at which a point traveling",
     "// from p at velocity v first reaches distance R from the feature, or a",
     "// negative sentinel if that never happens inside the step.",
     "MF dfSweepPointSphere(DVec2 p, DVec2 v, DVec2 c, MF R, MF dt) {",

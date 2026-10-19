@@ -131,7 +131,7 @@
     "}",
     "",
     "// Sweep primitives: each returns the earliest t in [0,dt] at which a",
-    "// point travelling from p at constant velocity v first reaches distance",
+    "// point traveling from p at constant velocity v first reaches distance",
     "// R from the feature, or -1.0 if that never happens inside the step.",
     "float sweepPointSphere(vec2 p, vec2 v, vec2 c, float R, float dt) {",
     "  vec2 d = p - c;",

@@ -102,7 +102,7 @@
       lineCount: $("inspect-line-sample-count-slider"), lineCountReadout: $("inspect-line-sample-count-readout"),
       gridSize: $("inspect-grid-size-slider"), gridSizeReadout: $("inspect-grid-size-readout"),
       volume: $("grid-sound-volume-slider"), volumeIcon: $("grid-sound-volume-icon"),
-      resetTips: $("grid-btn-reset-tips"), resetAll: $("grid-btn-reset-all"),
+      resetAll: $("grid-btn-reset-all"),
     };
     var labels = Array.prototype.slice.call(document.querySelectorAll(".perf-preset-labels [data-preset]"));
     var STOPS = { low: 0, custom: 1, high: 2 };
@@ -206,12 +206,6 @@
     el.volume.addEventListener("input", function () { PhysicsSound.setVolume(Number(el.volume.value) / 100); });
     PhysicsSound.onVolumeChange(volumeIcon);
     volumeIcon(PhysicsSound.getVolume());
-    el.resetTips.addEventListener("click", function () {
-      try { localStorage.removeItem("physicsAppDismissedTips"); } catch (err) { /* never reachable: nothing to clear */ }
-      var original = el.resetTips.textContent;
-      el.resetTips.textContent = "Tips reset";
-      setTimeout(function () { el.resetTips.textContent = original; }, 1500);
-    });
     el.resetAll.addEventListener("click", function () {
       global.AppMessage.prompt("Reset all settings? This resets Settings, dismissed tips and the intro animation, then reloads. Your scene and challenge progress are kept.",
         ["No", "Yes"], "Yes", function (answer) { if (answer === "Yes") resetAll(); });
@@ -325,10 +319,6 @@
   var separationPlayhead = document.getElementById("separation-playhead");
   var separationLambdaValue = document.getElementById("separation-lambda-value");
   var lyapunovMode = !!global.LayoutMode && global.LayoutMode.challengeKind() === "lyap";
-  var tipPopover = document.getElementById("tip-popover");
-  var tipPopoverText = document.getElementById("tip-popover-text");
-  var tipPopoverOk = document.getElementById("tip-popover-ok");
-  var tipPopoverDismiss = document.getElementById("tip-popover-dismiss");
   var statsPanelBodyEl = document.getElementById("grid-stats-panel-body");
   var stepsSlider = document.getElementById("steps-slider");
   var stepsReadout = document.getElementById("steps-readout");
@@ -534,106 +524,6 @@
     return perf.maxDpr > 0 ? Math.min(dpr, perf.maxDpr) : dpr;
   }
 
-  // ---- Reusable tip popover ----
-  // showTip(id, anchorEl, text); id is the "don't tell me again" localStorage key.
-  var TIP_DISMISSED_KEY = "physicsAppDismissedTips";
-  var activeTipId = null;
-
-  function loadDismissedTips() {
-    try {
-      return JSON.parse(localStorage.getItem(TIP_DISMISSED_KEY)) || {};
-    } catch (err) {
-      return {};
-    }
-  }
-
-  function isTipDismissed(id) {
-    return !!loadDismissedTips()[id];
-  }
-
-  function dismissTipForever(id) {
-    var dismissed = loadDismissedTips();
-    dismissed[id] = true;
-    try {
-      localStorage.setItem(TIP_DISMISSED_KEY, JSON.stringify(dismissed));
-    } catch (err) {
-    }
-  }
-
-  var activeTipAnchor = null;
-  var activeTipNoArrowAbove = false;
-  var activeTipOnOk = null;
-
-  function hideTip() {
-    tipPopover.hidden = true;
-    activeTipId = null;
-    activeTipAnchor = null;
-    activeTipOnOk = null;
-  }
-
-  function tipAnchorVisible(anchorEl) {
-    if (!anchorEl) return false;
-    var rect = anchorEl.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return false;
-    return rect.bottom > 0 && rect.top < window.innerHeight;
-  }
-
-  function positionTip(anchorEl) {
-    var rect = anchorEl.getBoundingClientRect();
-    var width = tipPopover.offsetWidth;
-    var height = tipPopover.offsetHeight;
-    var left = clamp(rect.left, 12, window.innerWidth - width - 12);
-    var above = rect.bottom + 10 + height > window.innerHeight - 12 && rect.top - 10 - height >= 12;
-    tipPopover.classList.toggle("tip-above", above);
-    tipPopover.classList.toggle("tip-no-arrow", above && activeTipNoArrowAbove);
-    tipPopover.style.top = clamp(above ? rect.top - 10 - height : rect.bottom + 10, 12, Math.max(12, window.innerHeight - height - 12)) + "px";
-    tipPopover.style.left = left + "px";
-    var ARROW_SIZE = 10, CORNER_INSET = 10;
-    var arrowLeft = rect.left + rect.width / 2 - left - ARROW_SIZE / 2;
-    tipPopover.style.setProperty("--tip-arrow-left",
-      clamp(arrowLeft, CORNER_INSET, Math.max(CORNER_INSET, width - CORNER_INSET - ARROW_SIZE)) + "px");
-  }
-
-  // False if this id was dismissed for good or is already showing. opts.onOk replaces OK and must hideTip.
-  function showTip(id, anchorEl, text, opts) {
-    if (isTipDismissed(id) || activeTipId === id) return false;
-    if (!bringTipAnchorIntoView(anchorEl)) return false;
-    activeTipId = id;
-    activeTipAnchor = anchorEl;
-    activeTipOnOk = (opts && opts.onOk) || null;
-    activeTipNoArrowAbove = !!(opts && opts.noArrowAbove);
-    tipPopoverOk.textContent = (opts && opts.okLabel) || "OK";
-    tipPopoverText.textContent = text;
-    tipPopover.hidden = false;
-    positionTip(anchorEl);
-    return true;
-  }
-
-  function bringTipAnchorIntoView(anchorEl) {
-    if (!anchorEl) return false;
-    var rect = anchorEl.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return false;
-    if (!tipAnchorVisible(anchorEl) && anchorEl.scrollIntoView) {
-      anchorEl.scrollIntoView({ block: "nearest" });
-    }
-    return tipAnchorVisible(anchorEl);
-  }
-
-  function repositionActiveTip() {
-    if (activeTipAnchor) positionTip(activeTipAnchor);
-  }
-  window.addEventListener("resize", repositionActiveTip);
-
-  tipPopoverOk.addEventListener("click", function () {
-    var onOk = activeTipOnOk;
-    if (onOk) onOk();
-    else hideTip();
-  });
-  tipPopoverDismiss.addEventListener("click", function () {
-    if (activeTipId) dismissTipForever(activeTipId);
-    hideTip();
-  });
-
   // ---- The menus ----
   // One accordion per side; "movie" is a group of one so the Movie card stays open beside Map Evolution.
   var menuGroups = { left: [], right: [], movie: [] };
@@ -669,7 +559,7 @@
       menuColumn.classList.toggle("has-open-menu",
         !!document.querySelector("#grid-menu-stack .menu-item.is-open"));
       if (onDockedMenuChange) onDockedMenuChange(api);
-      repositionActiveTip();
+      AppTips.follow();
       if (onChange) onChange(open);
     }
     toggle.addEventListener("click", function () { set(!open); });
@@ -1070,7 +960,7 @@
     PhysicsGridCodegen.withWords(loopStateVariables, precision);
 
     // ---- Derived display modes ----
-    // A derivative of the field from a stencil of neighbouring starting points, in
+    // A derivative of the field from a stencil of neighboring starting points, in
     // WORLD space: differencing 8-bit ramped color would show false edges at hue breakpoints.
     var OB = isRunTally ? PhysicsGridCodegen.backendFor("f32") : B;
     var outScalar = OB.scalar;
@@ -1087,7 +977,7 @@
 
     // ---- Raw Output value -> the t the color ramp reads ----
     var tLine =
-    // mod() at the pass's precision (folding in float32 first merges neighbouring
+    // mod() at the pass's precision (folding in float32 first merges neighboring
     // pixels); lifespan and distance clamp. Counts and Cumulative Rotation are scaled by
     // the largest value in view and NOT clamped; u_bounceMax = 0 reads back the raw value.
     isCount
@@ -1257,7 +1147,7 @@
       "}",
       "",
       "vec3 gradientColor(vec2 g) {",
-      // atan(0, 0) is undefined: a flat neighbourhood is common on integer outputs.
+      // atan(0, 0) is undefined: a flat neighborhood is common on integer outputs.
       "  float m = magnitudeLift(length(g));",
       "  if (m <= 0.0) return vec3(0.0);",
       "  float hue = degrees(atan(g.y, g.x));",
@@ -1315,7 +1205,7 @@
 
     var deltaTLines = [
       // ---- b - a, in t units ----
-      // Subtract at the pass's precision, THEN collapse: neighbours at a deep zoom
+      // Subtract at the pass's precision, THEN collapse: neighbors at a deep zoom
       // differ by under a float32 ULP of t. Fold: twin of fractal-stats.js's delta().
       "float deltaT(" + outScalar + " a, " + outScalar + " b) {",
       "  " + outScalar + " d = " + OB.sub("b", "a") + ";",
@@ -1328,7 +1218,7 @@
       "",
     ];
 
-    // ---- FTLE: the moving bodies' state difference between two neighbouring starts ----
+    // ---- FTLE: the moving bodies' state difference between two neighboring starts ----
     // Per body: position, velocity * FTLE_VELOCITY_SECONDS, and for a line or port hole the
     // same two for its end relative to its center. Twin of ftleMotionDelta in JS.
     var bodyPrefix = df ? "dbody" : "body";
@@ -1923,7 +1813,7 @@
 
   setStatus(true, "Ready");
 
-  // The centre is a DOUBLE-DOUBLE (x + xLo, ~106 bits): past ~1e-13 a float64
+  // The center is a DOUBLE-DOUBLE (x + xLo, ~106 bits): past ~1e-13 a float64
   // cannot tell pixels apart. Anything that must land on a PIXEL uses the helpers below.
   var view = { center: { x: DEFAULT_CENTER.x, y: DEFAULT_CENTER.y, xLo: 0, yLo: 0 }, scale: DEFAULT_SCALE };
 
@@ -2121,7 +2011,7 @@
     var text = PRECISION_LABELS[active];
     if (active !== wanted) {
       var name = PRECISION_LABELS[wanted].replace(/ \(.*$/, "");
-      text += " \u2014 " + name + (precisionPending(wanted) ? " compiling\u2026" : sliceTooHeavy[wanted] ? " too slow for this scene on this GPU" : " unavailable");
+      text += ", " + name + (precisionPending(wanted) ? " is compiling\u2026" : sliceTooHeavy[wanted] ? " is too slow for this scene on this GPU" : " is unavailable");
     }
     precisionReadout.textContent = text;
   }
@@ -2170,21 +2060,29 @@
   // ---- "Those radial lines aren't real" ----
   // Both axes on one body's velocity, zoomed out past speedCapFor: the cap keeps
   // direction and drops length, so the region is a function of angle alone, a fan.
-  var VELOCITY_CAP_TIP_ID = "velocity-speed-cap";
   var VELOCITY_CAP_TIP_MAX_ZOOM = 0.1;
-  function usesVelocityPlaneInput() {
+  // True when both axes are one body's `a` and `b` properties.
+  function inputPlaneIs(a, b) {
     var xi = scene && scene.xInput, yi = scene && scene.yInput;
     if (!xi || !yi) return false;
     if (xi.body !== yi.body) return false;
-    return [xi.property, yi.property].sort().join(",") === "vx,vy";
+    return [xi.property, yi.property].sort().join(",") === a + "," + b;
   }
   function maybeShowVelocityCapTip() {
-    if (!usesVelocityPlaneInput()) return false;
-    if (DEFAULT_SCALE / view.scale > VELOCITY_CAP_TIP_MAX_ZOOM) return false;
-    var anchor = tipAnchorVisible(zoomReadout) ? zoomReadout : displayMenu.anchor();
-    return showTip(VELOCITY_CAP_TIP_ID, anchor,
-      "Radial lines are an artifact of the maximum speed cap.",
-      { okLabel: "Dismiss", noArrowAbove: true });
+    if (!inputPlaneIs("vx", "vy") || DEFAULT_SCALE / view.scale > VELOCITY_CAP_TIP_MAX_ZOOM) {
+      AppTips.drop("velocity-speed-cap");
+      return false;
+    }
+    return AppTips.show("velocity-speed-cap", null);
+  }
+
+  function maybeShowMapIntroTip() {
+    if (!inputPlaneIs("x", "y")) {
+      AppTips.drop("map-intro");
+      return false;
+    }
+    var rect = canvas.getBoundingClientRect();
+    return AppTips.show("map-intro", { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
   }
 
   // Which of a scene's two programs the display mode calls for.
@@ -2286,7 +2184,7 @@
   // ids are the GLSL MODE_* constants. A blurb over ~5 wrapped lines drives row height.
   var DISPLAY_MODES = [
     { id: 0, value: "standard", label: "Standard", samples: 1,
-      blurb: "The Output value itself, straight through the rainbow ramp." },
+      blurb: "The Output value as hue." },
     { id: 2, value: "laplacian", label: "Laplacian", samples: 5,
       blurb: "Ridges and dips by sign as hue." },
     { id: 3, value: "contours", label: "Contours", samples: 5,
@@ -2547,15 +2445,19 @@
     return [bestA, bestB];
   }
 
+  function superlativeGrid() {
+    var aspect = canvasArea.clientHeight > 0 ? canvasArea.clientWidth / canvasArea.clientHeight : 1;
+    var w = aspect >= 1 ? SUPERLATIVE_SAMPLE_LONG_SIDE : Math.max(1, Math.round(SUPERLATIVE_SAMPLE_LONG_SIDE * aspect));
+    var h = aspect >= 1 ? Math.max(1, Math.round(SUPERLATIVE_SAMPLE_LONG_SIDE / aspect)) : SUPERLATIVE_SAMPLE_LONG_SIDE;
+    return sampleValueGrid(w, h);
+  }
+
   function runSuperlative(kind) {
     if (MAX_INSPECT_POINTS - reservedPointCount() < (kind === "edge" ? 2 : 1)) {
       toastInspectFull(false);
       return;
     }
-    var aspect = canvasArea.clientHeight > 0 ? canvasArea.clientWidth / canvasArea.clientHeight : 1;
-    var w = aspect >= 1 ? SUPERLATIVE_SAMPLE_LONG_SIDE : Math.max(1, Math.round(SUPERLATIVE_SAMPLE_LONG_SIDE * aspect));
-    var h = aspect >= 1 ? Math.max(1, Math.round(SUPERLATIVE_SAMPLE_LONG_SIDE / aspect)) : SUPERLATIVE_SAMPLE_LONG_SIDE;
-    var grid = sampleValueGrid(w, h);
+    var grid = superlativeGrid();
     if (!grid) return; // heuristic-only sampler unavailable (see setUpColorSpreadSampler), nothing to do
     if (kind === "largest") {
       var largest = findExtremeT(grid, true);
@@ -2570,6 +2472,27 @@
       var pair = findSharpestEdge(grid, precomputeInitialStates(grid));
       lockPoints([sampleCoordToWorld(grid, pair[0].col, pair[0].row), sampleCoordToWorld(grid, pair[1].col, pair[1].row)]);
     }
+  }
+
+  // Where Sharpest Pair would land, in client pixels; nothing is inspected. Sample row 0 is the bottom.
+  function sharpestPairClientPoint() {
+    var grid = superlativeGrid();
+    if (!grid) return null;
+    var pair = findSharpestEdge(grid, precomputeInitialStates(grid));
+    if (!pair[0]) return null;
+    var rect = canvas.getBoundingClientRect();
+    return {
+      x: rect.left + ((pair[0].col + pair[1].col) / 2 + 0.5) / grid.width * rect.width,
+      y: rect.bottom - ((pair[0].row + pair[1].row) / 2 + 0.5) / grid.height * rect.height,
+    };
+  }
+
+  // After a first inspected point, once the picture is finished.
+  function maybeShowZoomInTip() {
+    if (!AppTips.doneAt("inspected-point") || timeline.playing || renderedSteps() < simulationSteps) return false;
+    if (!AppTips.ready("zoom-in")) return false;
+    var spot = sharpestPairClientPoint();
+    return !!spot && AppTips.show("zoom-in", spot);
   }
 
   // Smallest arc of the color wheel holding every t: 1 minus the largest gap (t=0 and t=1 coincide).
@@ -2588,7 +2511,7 @@
   var colorSpreadCheckTimer = null;
 
   function colorZoomTipApplies() {
-    if (colorZoomEnabled || isTipDismissed("color-zoom") || activeTipId === "color-zoom") return false;
+    if (colorZoomEnabled || !AppTips.canShow("color-zoom")) return false;
     // Trick Shot and Lyapunov frames hide the Display card.
     var challenge = global.LayoutMode && global.LayoutMode.challengeKind();
     return challenge !== "trick" && challenge !== "lyap";
@@ -2605,9 +2528,14 @@
     if (!colorZoomTipApplies()) return;
     var values = [];
     for (var i = 0; i < sample.length; i += 4) values.push(sample[i]);
-    if (circularSpread(values) <= COLOR_SPREAD_SUGGEST_THRESHOLD) {
+    if (circularSpread(values) > COLOR_SPREAD_SUGGEST_THRESHOLD) {
+      AppTips.drop("color-zoom");
+    } else if (AppTips.ready("color-zoom")) {
       displayMenu.set(true);
-      showTip("color-zoom", colorZoomCheckbox, "Try Color Zoom to highlight subtle color differences");
+      AppTips.show("color-zoom", colorZoomCheckbox, function () {
+        colorZoomCheckbox.checked = true;
+        colorZoomCheckbox.dispatchEvent(new Event("change"));
+      });
     }
   }
 
@@ -2689,7 +2617,7 @@
 
   // One popover, so tips run in priority order: the speed cap explains a collapsed spread; Color Zoom does not.
   function checkSettledViewTips() {
-    if (maybeShowVelocityCapTip()) return;
+    if (maybeShowMapIntroTip() || maybeShowVelocityCapTip() || maybeShowZoomInTip()) return;
     checkColorSpreadAndMaybeSuggestColorZoom();
   }
 
@@ -2700,6 +2628,10 @@
       checkSettledViewTips();
     }, COLOR_SPREAD_CHECK_DELAY_MS);
   }
+  // Arriving on the map, or a tip answered, can let the next tip show.
+  AppTips.onChange(function () {
+    if (AppTips.view() === "grid" && !AppTips.showing()) scheduleColorSpreadCheck();
+  });
 
   // Bounce-count divisor: the largest count in the view, from a small offscreen float sample over the whole
   // duration. Measured once per VIEW change (beginProgressive): a mid-refinement re-measure would shift every hue.
@@ -2813,7 +2745,7 @@
     ftleInitValue = stretch > 1e-9 ? stretch : 1;
     return ftleInitValue;
   }
-  // u_ftleInit: starting separation of neighbours one full-res pixel either side. u_ftleRange: the
+  // u_ftleInit: starting separation of neighbors one full-res pixel either side. u_ftleRange: the
   // log stretch at which they are a scene apart, the top of the hue ramp at this zoom.
   function setFtleUniforms(u, heightPx) {
     if (!u.ftleInit || displayMode.value !== "ftle") return;
@@ -3481,10 +3413,10 @@
   // One GPU run of `compiled`, a slice per task, once its program has built (onWaiting is called meanwhile).
   // done(err, trajectories) is called once, never before this returns; cancel() stops it.
   function runInSteps(compiled, steps, done, onWaiting) {
-    var handle = { job: null, timer: null, progress: 0, cancelled: false, waiting: false, startedAt: performance.now() };
+    var handle = { job: null, timer: null, progress: 0, canceled: false, waiting: false, startedAt: performance.now() };
     function pump() {
       handle.timer = null;
-      if (handle.cancelled) return;
+      if (handle.canceled) return;
       var finished;
       try {
         if (!handle.job) {
@@ -3513,7 +3445,7 @@
       done(null, trajectories);
     }
     handle.cancel = function () {
-      handle.cancelled = true;
+      handle.canceled = true;
       if (handle.timer) clearTimeout(handle.timer);
       handle.timer = null;
       if (handle.job) handle.job.cancel();
@@ -3529,7 +3461,7 @@
     var precision = effectivePrecision(), steps = hoverStepCount();
     var batched = PhysicsDF.isExtended(precision);
     var queue = batched ? [worldPoints.map(function (p, i) { return i; })] : worldPoints.map(function (p, i) { return [i]; });
-    var handle = { timer: null, precision: precision, waiting: false, done: 0, cancelled: false, startedAt: performance.now() };
+    var handle = { timer: null, precision: precision, waiting: false, done: 0, canceled: false, startedAt: performance.now() };
     // The run in hand: its points, program, job, the trajectories read back so far and the next to make an entry of.
     var indices = null, compiled = null, job = null, ready = null, k = 0;
     handle.progress = function () {
@@ -3537,7 +3469,7 @@
     };
     function pump() {
       handle.timer = null;
-      if (handle.cancelled) return;
+      if (handle.canceled) return;
       var until = performance.now() + INSPECT_TASK_MS;
       do {
         if (!indices) {
@@ -3591,7 +3523,7 @@
       nextSlice(pump);
     }
     handle.cancel = function () {
-      handle.cancelled = true;
+      handle.canceled = true;
       if (handle.timer) clearTimeout(handle.timer);
       handle.timer = null;
       if (job) job.cancel();
@@ -3628,7 +3560,7 @@
 
   // ---- The lock in progress, and the ones waiting behind it ----
   // A lock's points arrive a run at a time: a row in the list, its finished dots, a status line under the preview.
-  // A cancelled lock keeps nothing.
+  // A canceled lock keeps nothing.
   var lockJob = null, lockQueue = [];
   var INSPECT_FULL_MESSAGE = "Inspect holds up to " + MAX_INSPECT_POINTS + " points";
 
@@ -3787,6 +3719,7 @@
           inspectedGroups.push({ type: "point", points: [entry], places: places });
           added = true;
         });
+        if (added && !linkItem) AppTips.done("inspected-point");
         return added;
       },
     };
@@ -3983,7 +3916,7 @@
 
   // ---- The per-frame work budget ----
   // A feedback loop on wall-clock frame time, relative to the DISPLAY's refresh period, not 16ms: intervals are
-  // quantised to whole refreshes, and on a 30Hz or throttled display 16ms would pin the budget to its floor.
+  // quantized to whole refreshes, and on a 30Hz or throttled display 16ms would pin the budget to its floor.
   var displayPeriodMs = 16.7;
   // Running minimum with a slow upward leak, fed by every frame (idle ones are the cleanest observation).
   var DISPLAY_PERIOD_LEAK = 1.01;
@@ -4407,7 +4340,7 @@
     return Math.min(1, ((progressive.sublattice - 1) + bandFraction) / 3);
   }
 
-  function renderRingGreyFraction() {
+  function renderRingGrayFraction() {
     if (progressive.complete) return 1;
     if (progressive.accumStride === 1) return 1;
     var idx = RENDER_RING_STRIDE_CHECKPOINTS.indexOf(progressive.accumStride);
@@ -4454,7 +4387,7 @@
   }
   function updateRenderProgressRing() {
     var playback = timeline.playing && timeline.drawing;
-    var gray = playback ? playbackRingFraction() : renderRingGreyFraction();
+    var gray = playback ? playbackRingFraction() : renderRingGrayFraction();
     var aa = playback ? 0 : renderRingAaFraction();
     setRenderRingFraction(renderProgressRingCoarse, gray);
     setRenderRingFraction(renderProgressRingAa, aa);
@@ -4529,7 +4462,7 @@
   // Blits a level magnified by its stride. The destination is w*stride, NOT the canvas size: levelWidth rounds up,
   // so scaling to the canvas would squash each level differently and the image would creep. GL clips the overhang.
   function presentLevel(target, w, h, stride) {
-    // blitFramebuffer honours the scissor box.
+    // blitFramebuffer honors the scissor box.
     gl.disable(gl.SCISSOR_TEST);
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, target.fbo);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
@@ -4562,8 +4495,8 @@
     };
   }
 
-  // to - from on one axis of two double-double centres: at the zoom limit a whole pan lives in the low halves.
-  function reuseCentreDelta(from, to, axis) {
+  // to - from on one axis of two double-double centers: at the zoom limit a whole pan lives in the low halves.
+  function reuseCenterDelta(from, to, axis) {
     var lows = PhysicsDF.twoSum64(to[axis + "Lo"], -from[axis + "Lo"]);
     return ((to[axis] - from[axis]) + lows[0]) + lows[1];
   }
@@ -4580,8 +4513,8 @@
     // See the state's comment: their colors depend on the zoom.
     if (displayMode.id !== 0 && a !== 1) return;
     var perWorld = H / reuse.scale;
-    var bx = 0.5 * W * (1 - a) + perWorld * reuseCentreDelta(reuse.center, view.center, "x");
-    var by = 0.5 * H * (1 - a) + perWorld * reuseCentreDelta(reuse.center, view.center, "y");
+    var bx = 0.5 * W * (1 - a) + perWorld * reuseCenterDelta(reuse.center, view.center, "x");
+    var by = 0.5 * H * (1 - a) + perWorld * reuseCenterDelta(reuse.center, view.center, "y");
     var samePrecision = reuse.precision === effectivePrecision();
     // The same view at another precision asks what the OTHER arithmetic makes of it; no preview of that.
     if (a === 1 && bx === 0 && by === 0 && !samePrecision) return;
@@ -4704,7 +4637,7 @@
     return { x: (k === 0 || k === 2) ? 0 : half, y: (k === 0 || k === 1) ? 0 : half };
   }
 
-  // Rows the pass in progress has to draw: what progressive.band counts towards.
+  // Rows the pass in progress has to draw: what progressive.band counts toward.
   function currentPassRows() {
     if (progressive.aaSample > 0) return levelSimRegion(1, 0, 0, true).rows;
     var stride = progressive.stride || startStride();
@@ -5011,7 +4944,7 @@
     if (!(oldW > 1 && oldH > 1)) return; // never sized before: nothing on screen to hold still
     var oldScale = view.scale;
     var newScale = clamp(oldScale * newH / oldH, MIN_SCALE, MAX_SCALE);
-    // Corner = centre + (-W/2H, +1/2) view-heights; exact products, for zoomAtClientPoint's reason.
+    // Corner = center + (-W/2H, +1/2) view-heights; exact products, for zoomAtClientPoint's reason.
     shiftViewCenterByProducts(0.5 * (newW - oldW) / oldH, oldScale, 0.5, oldScale - newScale);
     view.scale = newScale;
     updateZoomReadout();
@@ -5067,12 +5000,13 @@
     var uv = pixelToUV(clientX, clientY);
     var oldScale = view.scale;
     view.scale = clamp(view.scale * factor, MIN_SCALE, MAX_SCALE);
+    if (factor !== 1) AppTips.done("zoom-in");
     // center' = center + uv*(oldScale - newScale), formed EXACTLY: a rounded product is a lasting error at deep zoom.
     shiftViewCenterByProducts(uv.uvx, oldScale - view.scale, uv.uvy, oldScale - view.scale);
   }
 
   // ---- Gestures first ----
-  // WebGL has one queue, so prioritising a pan can only mean not ISSUING the render: with Prioritize panning on, a
+  // WebGL has one queue, so prioritizing a pan can only mean not ISSUING the render: with Prioritize panning on, a
   // frame mid-gesture just redraws the last picture moved to the view (presentWithSource); the ladder restarts after.
   var GESTURE_SETTLE_MS = 140;
   var gesture = { down: false, downAt: -1e9, movedAt: -1e9, wheelAt: -1e9 };
@@ -5467,7 +5401,7 @@
 
   colorZoomCheckbox.addEventListener("change", function () {
     colorZoomEnabled = colorZoomCheckbox.checked;
-    if (colorZoomEnabled && activeTipId === "color-zoom") hideTip();
+    if (colorZoomEnabled && AppTips.showing() === "color-zoom") AppTips.done("color-zoom");
     // Color Zoom only changes Standard's ramp, so land on Standard; in the change event so keyboard and Reset View go through it too.
     setDisplayMode(DISPLAY_MODES[0]);
     markDirty();
@@ -5699,7 +5633,7 @@
       slider.value = String(speedToSliderValue(playbackSpeed));
     });
 
-    // position:fixed, so placed by hand like positionTip: centered above the button, clamped to the window, below if no room.
+    // position:fixed, so placed by hand: centered above the button, clamped to the window, below if no room.
     function position() {
       var rect = button.getBoundingClientRect();
       var width = popup.offsetWidth, height = popup.offsetHeight;
@@ -6301,7 +6235,7 @@
       hoverCanvas.style.backgroundColor = hoverOutputColor(outputColorT(v0));
     }
     var hovered = coordTexts(worldPoint, viewPlaces());
-    hoverReadout.textContent = "X: " + hovered[0] + ", Y: " + hovered[1] + (lockJob ? "" : " - loading replay\u2026");
+    hoverReadout.textContent = "X: " + hovered[0] + ", Y: " + hovered[1] + (lockJob ? "" : " (loading replay\u2026)");
   }
 
   // From the per-frame duration only (so replay length is proportional to step count), times
@@ -7098,7 +7032,7 @@
   function finishStatsRun(run) {
     var result = run.job.result;
     var sampleHeight = run.height;
-    // sampleCoordToWorld normalises by the block's HEIGHT on both axes (like the shader's uv), so both are height ratios.
+    // sampleCoordToWorld normalizes by the block's HEIGHT on both axes (like the shader's uv), so both are height ratios.
     var worldPerSample = view.scale / sampleHeight;
     var cssHeight = Math.max(1, canvasArea.clientHeight);
     var screenPixelsPerSample = cssHeight / sampleHeight;
@@ -7126,7 +7060,7 @@
     statsPanel.showResult(result, info, run.merge);
     statsLastStatus = info.seamsFound > 0
       ? info.seamsFound + " input-seam line" + (info.seamsFound === 1 ? "" : "s") +
-        " excluded (see the X/Y Input mapping: those are where a starting position wraps back into the frame, not real edges)."
+        " excluded. These are where a starting position wraps back into the frame."
       : "";
     statsPanel.setStatus(statsLastStatus);
   }
@@ -7201,7 +7135,7 @@
       }
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
-      // Casing in the opposite colour: white and black are the two no hue ramp contains. Wide on purpose: 6px read as a hairline.
+      // Casing in the opposite color: white and black are the two no hue ramp contains. Wide on purpose: 6px read as a hairline.
       ctx.strokeStyle = casing;
       ctx.lineWidth = 12;
       ctx.stroke();
@@ -7212,7 +7146,7 @@
     stroke(css, "#000000", "#ffffff");
   }
 
-  // White at half strength over the hovered class, nearest-neighbour scaled: each sample IS a block of the map.
+  // White at half strength over the hovered class, nearest-neighbor scaled: each sample IS a block of the map.
   function drawFeatureHighlight(ctx, cw, ch) {
     var hl = featureHighlight;
     var W = hl.width, H = hl.height;
@@ -7381,7 +7315,7 @@
       var maxWidth = window.innerWidth * PANEL_MAX_WIDTH_FRACTION;
       var width = clamp(dragStartWidth + (e.clientX - dragStartX), PANEL_MIN_WIDTH, maxWidth);
       document.documentElement.style.setProperty("--panel-width", width + "px");
-      repositionActiveTip(); // a tip pointing at a sidebar element (e.g. Color Zoom) needs to follow it here: the anchor itself doesn't fire an event when the panel resizes around it
+      AppTips.follow(); // the anchor fires no event when the panel resizes around it
     }
     function onUp() {
       panelResizer.classList.remove("dragging");
@@ -7467,7 +7401,7 @@
       // Lattice tile the state holds, and stencil texels per pixel (stateWorldCoordLines); playback: (0, 0), 1.
       "uniform vec2 u_tileOrigin;",
       "uniform int u_stencil;",
-      // The centre, then the grid program's own STENCIL[] in its order.
+      // The center, then the grid program's own STENCIL[] in its order.
       "const vec2 STATE_STENCIL[5] = vec2[5](vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(-1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, -1.0));",
     ]).concat(
       PhysicsGridCodegen.generatePlaybackStateOutputsGLSL(layersPerGroup),
@@ -7535,8 +7469,8 @@
       [
         "const ivec2 PLAYBACK_STENCIL[4] = ivec2[4](ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1));",
         "",
-        // Derived modes from neighbouring TEXELS' saved values (re-simulating a
-        // stencil is the cost playback exists to avoid). Neighbours are u_gridStride
+        // Derived modes from neighboring TEXELS' saved values (re-simulating a
+        // stencil is the cost playback exists to avoid). Neighbors are u_gridStride
         // full-res pixels apart, so differences are rescaled to per full-res pixel.
         "vec3 shadePlaybackDerived(ivec2 texel, " + outScalar + " outputValue, float t) {",
         "  float d[4];",
@@ -7576,7 +7510,7 @@
         "  return ftleColor(ftleT(c1, c2, 1.0));",
         "}",
         "",
-        // Neighbouring texels are u_gridStride full-res pixels apart.
+        // Neighboring texels are u_gridStride full-res pixels apart.
         "vec3 shadePlaybackFTLE(ivec2 texel) {",
         "  ivec2 hi = u_stateSize - 1;",
         "  float c1[FTLE_K], c2[FTLE_K];",
@@ -8875,7 +8809,7 @@
     isTotalRotationOutput = scene.output.property === "totalRotation";
     isInfinitePositionOutput = scene.edgeMode === "infinite" &&
       (scene.output.property === "x" || scene.output.property === "y");
-    // Whether Output WRAPS decides hue range, superlative neighbour distance and circular stats.
+    // Whether Output WRAPS decides hue range, superlative neighbor distance and circular stats.
     isCircularOutput = computeIsCircularOutput();
     hueRangeMaxValue = isCircularOutput ? 360 : 300;
     relabelSuperlativeExtremeButtons();
@@ -10073,7 +10007,7 @@
     updateMovieInspectButton();
   }
 
-  // The scene as run here (its own Simulation Duration) and the view; inspection points as view-heights from the centre, pending included.
+  // The scene as run here (its own Simulation Duration) and the view; inspection points as view-heights from the center, pending included.
   global.FractalGrid.shareState = function () {
     var shared = {};
     Object.keys(scene).forEach(function (k) { shared[k] = scene[k]; });
@@ -10368,7 +10302,7 @@
   // ---- The performance readout ----
   //
   // Nerd Stats: text over the map, meant to be screenshotted from a device
-  // without a debugger, so it favours WHY a render is slow. Gathered whether or not showing (perfStats).
+  // without a debugger, so it favors WHY a render is slow. Gathered whether or not showing (perfStats).
   var PERF_READOUT_INTERVAL_MS = 250;
   var perfReadoutShown = perfReadoutCheckbox.checked; // off, unless switched on from the builder page
   var perfReadoutAt = 0;
@@ -10508,7 +10442,7 @@
   var dockMenus = [inspectMenu, statsMenu, displayMenu, playbackMenu, settingsMenu];
   var dockActive = false;
   var DOCK_MAX_SHARE = 0.5;
-  // True from a programmatic view reset until the dock settles: that resize re-frames about the centre, no corner pin.
+  // True from a programmatic view reset until the dock settles: that resize re-frames about the center, no corner pin.
   var dockSuppressPin = false;
   var dockLayoutQueued = false, dockLayoutWantsPin = false;
 
@@ -10529,7 +10463,7 @@
     resizeCanvas();
     pinViewCornerOnResize = false;
     if (statsPanel && statsOpen) statsPanel.relayout();
-    repositionActiveTip();
+    AppTips.follow();
   }
   // Coalesced to the end of the task: accordion side effects and a mid-reset Inspect open would mis-measure the sheet.
   function scheduleDockLayout(pin) {

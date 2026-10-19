@@ -101,6 +101,7 @@
     }
     editorView.style.removeProperty("--float-fade");
     current = which;
+    global.AppTips.setView(which);
     if (global.FractalGrid.placeSettings) global.FractalGrid.placeSettings(which);
     nudgeLayout();
     syncAddress();
@@ -223,7 +224,7 @@
     };
   }
 
-  // Where the zoom ENDS: the map's own centre, not the window's. Read per frame: the dock settles late.
+  // Where the zoom ENDS: the map's own center, not the window's. Read per frame: the dock settles late.
   function gridCenter(dims) {
     var rect = gridCanvasArea ? gridCanvasArea.getBoundingClientRect() : null;
     if (!rect || rect.width <= 0 || rect.height <= 0) return { x: dims.w / 2, y: dims.h / 2 };
@@ -335,6 +336,7 @@
   function transitionTo(which, scene) {
     // A run still going ends first, or its own address write would use up this navigation's push.
     stopActive(true);
+    global.AppTips.setView(null);
     if (which === "grid") {
       syncAddress();
       pushNext("grid", { fromEditor: PAGE_LOAD });
@@ -596,6 +598,7 @@
   }
 
   openAddress(true);
+  global.AppTips.setView(current);
   // Set by chaos.html's inline script for a map link, so the editor does not flash first.
   document.documentElement.classList.remove("opening-map");
   syncAddress();

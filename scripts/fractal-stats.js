@@ -493,7 +493,7 @@
       // Canny plus a plateau test: the sample is the crest of the step (non-maximum
       // suppression along the gradient), the step over two samples clears
       // EDGE_STEP_FOLLOW with EDGE_STEP_SEED somewhere along the piece, and the outer
-      // steps stay small. Thresholds are fractions of the colour range, same at every zoom.
+      // steps stay small. Thresholds are fractions of the color range, same at every zoom.
       var EDGE_STEP_SEED = 0.05;
       var EDGE_STEP_FOLLOW = 0.025;
       var EDGE_PLATEAU_RATIO = 0.5;
@@ -711,7 +711,7 @@
         cBorder[a] |= cBorder[b];
         return a;
       }
-      // Pairs of crossed edges joined inside cell (c, r), up to two; a saddle pairs by the centre value.
+      // Pairs of crossed edges joined inside cell (c, r), up to two; a saddle pairs by the center value.
       var cellPairsOut = [0, 0, 0, 0];
       function cellPairs(c, r, v) {
         var i00 = r * W + c, i10 = i00 + 1, i01 = i00 + W, i11 = i01 + 1;
@@ -723,8 +723,8 @@
         var n = (bottom ? 1 : 0) + (top ? 1 : 0) + (left ? 1 : 0) + (right ? 1 : 0);
         if (n < 2) return 0;
         if (n === 4) {
-          var centre = (d00 + d10 + d01 + d11) / 4 >= 0;
-          if (centre === (d00 >= 0)) {
+          var center = (d00 + d10 + d01 + d11) / 4 >= 0;
+          if (center === (d00 >= 0)) {
             cellPairsOut[0] = eBottom; cellPairsOut[1] = eRight; cellPairsOut[2] = eLeft; cellPairsOut[3] = eTop;
           } else {
             cellPairsOut[0] = eBottom; cellPairsOut[1] = eLeft; cellPairsOut[2] = eTop; cellPairsOut[3] = eRight;
@@ -736,7 +736,7 @@
         if (top) cellPairsOut[k++] = eTop;
         if (left) cellPairsOut[k++] = eLeft;
         if (right) cellPairsOut[k++] = eRight;
-        // On a wrapping output k can be 1 or 3: neighbours nearer each other via the
+        // On a wrapping output k can be 1 or 3: neighbors nearer each other via the
         // antipode have no crossing, so the contour ENDS here; cellLoose holds the unpaired.
         if (k === 2) { cellLoose = 0; return 1; }
         cellLoose = k;
@@ -924,12 +924,12 @@
       });
 
       // ---- Watershed: the catchments, and the divides between them ----
-      // Steepest descent with path memoisation (each sample walked once); samples
+      // Steepest descent with path memoization (each sample walked once); samples
       // draining to one low point are a catchment, and where two meet is a divide.
       // Not for a wrapping Output: "lower" means nothing on a wheel.
       var wsLabel = null, wsDivides = null, wsBasins = 0;
       var wsPath = [];
-      function lowestNeighbour(i, c, r) {
+      function lowestNeighbor(i, c, r) {
         var best = -1, bestT = t[i];
         for (var dr = -1; dr <= 1; dr++) {
           var rr = r + dr;
@@ -965,7 +965,7 @@
               for (;;) {
                 if (wsLabel[cur] !== -1) { label = wsLabel[cur]; break; }
                 wsPath.push(cur);
-                var next = lowestNeighbour(cur, cc, cr);
+                var next = lowestNeighbor(cur, cc, cr);
                 if (next < 0) { label = cur; wsBasins++; break; }
                 cur = next; cc = cur % W; cr = (cur - cc) / W;
               }

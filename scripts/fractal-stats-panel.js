@@ -286,7 +286,7 @@
     { key: "flat", title: "Flat", color: "#6b7280", fraction: "flatFraction" },
   ];
 
-  // Draws the pie and returns its geometry (centre, radius, slice spans) for hit testing; `hot` is raised.
+  // Draws the pie and returns its geometry (center, radius, slice spans) for hit testing; `hot` is raised.
   function drawShapePie(canvas, g, hot) {
     var p = readPalette();
     var c = prepareCanvas(canvas, 150);

@@ -6,7 +6,7 @@
 /* Saira, Latin subset, every weight in one variable file (SIL OFL, assets/fonts/OFL.txt). */
 @font-face {
   font-family: "Saira";
-  src: url("../assets/fonts/saira-latin.woff2?v=m149") format("woff2");
+  src: url("../assets/fonts/saira-latin.woff2?v=m159") format("woff2");
   font-weight: 100 900;
   font-display: swap;
 }
@@ -385,7 +385,7 @@ body.eighties { font-family: var(--font); background: var(--bg); }
 .eighties .slide-frame,
 .eighties .slide-scene { background: #05020a; }
 
-/* ---- '80s off: index.html's dark grey look with the same layout, no WebGL ---- */
+/* ---- '80s off: index.html's dark gray look with the same layout, no WebGL ---- */
 
 :root.eighties-off {
   --bg: #14161c;

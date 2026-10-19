@@ -658,11 +658,11 @@
 
   // ---- The sound ---- a Shepard tone following the zoom: three orders of magnitude
   // is one octave. Six sine partials an octave apart, each faded by a window over
-  // log-frequency centred on 220 Hz (flat within an octave, cosine to silence two further
+  // log-frequency centered on 220 Hz (flat within an octave, cosine to silence two further
   // out); a partial's volume depends only on its absolute frequency, so the wrap is seamless.
   var OCTAVES_PER_DECADE = 1 / 3;
   var TONE_CENTER_HZ = 220;
-  var TONE_FLAT = 1;           // octaves either side of the centre at full volume
+  var TONE_FLAT = 1;           // octaves either side of the center at full volume
   var TONE_HALF_WIDTH = 3;     // octaves; silent from here out, and partials live in [-3, 3)
   var TONE_LEVEL = 0.12;       // six sines, about four of them at full volume at once
   var TONE_FADE_S = 0.12;      // time constant of the fade in and out

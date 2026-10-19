@@ -2922,11 +2922,11 @@
       }
 
       // With the bug the GPU body started at rest and just fell.
-      var travelledSideways = Math.abs(trajectory[N - 1][0].x - (300 + WORLD_X));
+      var traveledSideways = Math.abs(trajectory[N - 1][0].x - (300 + WORLD_X));
       return {
-        pass: maxErr < 0.01 && travelledSideways > 20,
+        pass: maxErr < 0.01 && traveledSideways > 20,
         detail: "GPU vs JS over " + N + " steps: max error=" + maxErr.toFixed(5) +
-          "px; GPU body carried " + travelledSideways.toFixed(1) +
+          "px; GPU body carried " + traveledSideways.toFixed(1) +
           "px sideways from its start (0 would mean the velocity was dropped again)",
       };
     }
@@ -2998,7 +2998,7 @@
         detail: "4-body (chaotic): max error=" + cEarlyErr.toExponential(2) + "px over the first 5 steps, " +
           cErr.toExponential(2) + "px by step 40 (double-float " + dErr.toExponential(2) + "px throughout), after moving " + cMoved.toFixed(1) +
           "px; 2-body orbit, steps 1-300: max error=" + oErr.toExponential(2) +
-          "px after travelling " + oMoved.toFixed(1) + "px",
+          "px after traveling " + oMoved.toFixed(1) + "px",
       };
     }
   );
@@ -3036,7 +3036,7 @@
 
       return {
         pass: Math.abs(ratio - 10) < 1e-9 && anchorDrift === 0 && pulledIn,
-        detail: "identical neighbour pulls " + free.toFixed(3) + " free vs " + anchored.toFixed(3) +
+        detail: "identical neighbor pulls " + free.toFixed(3) + " free vs " + anchored.toFixed(3) +
           " anchored (ratio " + ratio.toFixed(6) + ", want 10); anchor drifted " + anchorDrift.toFixed(6) +
           "px over 60 steps; free body was drawn toward it=" + pulledIn,
       };
@@ -3167,7 +3167,7 @@
   );
 
   addTest(
-    "Mutual Gravity off leaves the old constant-gravity behaviour exactly as it was",
+    "Mutual Gravity off leaves the old constant-gravity behavior exactly as it was",
     "computeAccelerations replaced a hardcoded downward scalar for EVERY scene, so the default path had to come out bit-for-bit unchanged",
     function () {
       var scene = {
@@ -3213,7 +3213,7 @@
       // They meet at ~270px/s each, above the restitution threshold: elastic bounce.
       return {
         pass: touchedAt !== null && maxSepAfterTouch > contact + 20,
-        detail: "first contact at step " + touchedAt + "; afterwards they parted by up to " +
+        detail: "first contact at step " + touchedAt + "; afterward they parted by up to " +
           maxSepAfterTouch.toFixed(2) + "px (they touch at " + contact + " - a weld would have held them there)",
       };
     }
@@ -3610,7 +3610,7 @@
   // ---- df.8 The honest version of "does df buy resolution" ----
   addTest(
     "Where float32 renders one flat color, df still tracks the float64 engine",
-    "measuring the gain as \"do neighbouring pixels differ\" counts quantization noise as detail: it overstated this by ~3 decades",
+    "measuring the gain as \"do neighboring pixels differ\" counts quantization noise as detail: it overstated this by ~3 decades",
     function () {
       // Metric: agreement with the float64 engine, not whether adjacent pixels
       // differ (noise decorrelates from truth). samples/double_pendulum.json, hardcoded.
@@ -5017,8 +5017,8 @@
   );
 
     // ---- df.N The double-float pass must actually BUY its extra digits ----
-    // Measured as: two neighbouring pixels at a given zoom must end up somewhere different.
-    // Measured walls at 500 steps: float32 stops resolving neighbours between 1e5 and 1e6, df past 1e12;
+    // Measured as: two neighboring pixels at a given zoom must end up somewhere different.
+    // Measured walls at 500 steps: float32 stops resolving neighbors between 1e5 and 1e6, df past 1e12;
     // the assertions sit well inside both so this can't go flaky.
   addTest(
     "Double-float resolves pixels float32 cannot (guards against a f32 collapse in the df chain)",
@@ -5040,15 +5040,15 @@
       var STEPS = 500, WX = 0.37, WY = 0.11;
       var ref = cpuStateAt(scene(), WX, WY, STEPS, 0);
       // One pixel of world distance at `oom` orders of zoom, as the grid's own scale/resolution gives it.
-      function neighbourSeparation(precision, oom) {
+      function neighborSeparation(precision, oom) {
         var pixel = (900 / Math.pow(10, oom)) / 200;
         var a = gridResidualAtPoint(scene(), STEPS, WX, WY, precision, 0, ref);
         var b = gridResidualAtPoint(scene(), STEPS, WX + pixel, WY, precision, 0, ref);
         return Math.hypot(a.dx - b.dx, a.dy - b.dy);
       }
-      var f32At1e6 = neighbourSeparation("f32", 6);
-      var dfAt1e10 = neighbourSeparation("df", 10);
-      var detail = "at 1e6 zoom float32 separates neighbours by " + f32At1e6.toExponential(2) +
+      var f32At1e6 = neighborSeparation("f32", 6);
+      var dfAt1e10 = neighborSeparation("df", 10);
+      var detail = "at 1e6 zoom float32 separates neighbors by " + f32At1e6.toExponential(2) +
         " (0 = cannot tell them apart, its wall is ~1e5); at 1e10 zoom df separates them by " +
         dfAt1e10.toExponential(2) + " (df's own wall measured past 1e12)";
       return { pass: f32At1e6 === 0 && dfAt1e10 > 0, detail: detail };
@@ -5177,7 +5177,7 @@
 
   addTest(
     "Mutual Gravity with collisions off: the pull is continuous across the contact shell, and smooth inside it",
-    "the touching-bodies rule switched the pull from ~1963px/s^2 to exactly 0 at r=contact. With collisions on that's fine (the contact solver answers for it, and the overlap lasts a step) but with collisions off nothing answers for it and bodies coast through, making the shell a step discontinuity in the field itself. Its first replacement, the uniform-density ramp G*m*r/contact^3, was continuous but turned sharply from rising to falling at the shell: a corner the fixed step catches at a different phase for every starting state, which came out as a sawtooth across neighbouring pixels. The interior now meets G*m/r^2 at the shell in value, slope and curvature",
+    "the touching-bodies rule switched the pull from ~1963px/s^2 to exactly 0 at r=contact. With collisions on that's fine (the contact solver answers for it, and the overlap lasts a step) but with collisions off nothing answers for it and bodies coast through, making the shell a step discontinuity in the field itself. Its first replacement, the uniform-density ramp G*m*r/contact^3, was continuous but turned sharply from rising to falling at the shell: a corner the fixed step catches at a different phase for every starting state, which came out as a sawtooth across neighboring pixels. The interior now meets G*m/r^2 at the shell in value, slope and curvature",
     function () {
       function pullAt(r, collisions) {
         var scene = {
@@ -5230,7 +5230,7 @@
   );
 
   addTest(
-    "Mutual Gravity with collisions off: neighbouring starting states no longer come out a fixed distance apart",
+    "Mutual Gravity with collisions off: neighboring starting states no longer come out a fixed distance apart",
     "reported as 'non-continuousness' on a two-circle scene: two starts 4.7e-5px apart came out 133.9px apart, and bringing them 7 decades closer together did not shrink that gap at all - the signature of a discontinuity rather than chaos. Cause was the contact-shell cutoff above; this pins the outcome rather than the mechanism, so it fails if any future change reintroduces a branch anywhere in this path",
     function () {
       var SCENE = {
@@ -5299,7 +5299,7 @@
       var wentInside = closest < 30 + 6.1838;
       var detail = "closest approach " + closest.toFixed(1) + "px (shell at 36.2px, so the interior was exercised=" +
         wentInside + "); across 30 samples the output's slope reversed " + reversals +
-        " times (was 10) and the sharpest bend between neighbours was " + worstBend.toFixed(2) + "px (was 91.7)";
+        " times (was 10) and the sharpest bend between neighbors was " + worstBend.toFixed(2) + "px (was 91.7)";
       return { pass: wentInside && reversals === 0 && worstBend < 5, detail: detail };
     }
   );
@@ -6073,7 +6073,7 @@
 
   addTest(
     "A link's view center keeps every digit the zoom can use, from 1x to 1e26x",
-    "share-url.js's formatDD/parseDD - the map holds its center as a double-double because one float64 cannot tell neighbouring pixels apart past ~1e13x, and a link that carried only the float64 would reopen a deep view somewhere else entirely. The center travels as one decimal with zoom-dependent places; this checks it lands within a millionth of a pixel at every depth, by exact integer arithmetic rather than by the floating point under test",
+    "share-url.js's formatDD/parseDD - the map holds its center as a double-double because one float64 cannot tell neighboring pixels apart past ~1e13x, and a link that carried only the float64 would reopen a deep view somewhere else entirely. The center travels as one decimal with zoom-dependent places; this checks it lands within a millionth of a pixel at every depth, by exact integer arithmetic rather than by the floating point under test",
     function () {
       if (typeof BigInt !== "function") return { pass: true, detail: "no BigInt in this browser: centers keep float64 precision, which is as deep as it can render" };
       function exact(x) { // x === m * 2^e
@@ -6804,7 +6804,7 @@
 
   addTest(
     "A spring whose ends pass through each other no longer puts ridges in the map",
-    "a Hookean spring with a rest length pushes hardest at zero length, and as its ends pass through each other that push reverses in no distance at all, so each pass landed one 1/60s sample just before the flip or just after it, and starts a hair apart got a whole step of k*rest/m in opposite directions. Measured before the fix on this scene: neighbours 0.005px apart came out up to 261px apart, 124 such jumps in 2px of travel, and a gap that would not close under refinement (71px at 0.0005px). Inside an eighth of its rest length the law is now a smooth polynomial (PhysicsEngine.springForceFactor) meeting Hooke in value, slope and curvature",
+    "a Hookean spring with a rest length pushes hardest at zero length, and as its ends pass through each other that push reverses in no distance at all, so each pass landed one 1/60s sample just before the flip or just after it, and starts a hair apart got a whole step of k*rest/m in opposite directions. Measured before the fix on this scene: neighbors 0.005px apart came out up to 261px apart, 124 such jumps in 2px of travel, and a gap that would not close under refinement (71px at 0.0005px). Inside an eighth of its rest length the law is now a smooth polynomial (PhysicsEngine.springForceFactor) meeting Hooke in value, slope and curvature",
     function () {
       function finalY(t, sub) {
         var scene = buildPassThroughScene(t), dt = DT / sub;
@@ -6820,7 +6820,7 @@
       var curveIn = (q(c - 2 * h) - 2 * q(c - h) + q(c)) / (h * h), curveOut = (hooke(c) - 2 * hooke(c + h) + hooke(c + 2 * h)) / (h * h);
       var curveGap = Math.abs(curveIn - curveOut) / Math.abs(curveOut);
       var linearSpring = PhysicsEngine.springForceFactor(0, 0) === 1 && PhysicsEngine.springForceFactor(123, 0) === 1;
-      // 2. Neighbouring starts give neighbouring results, and the passes really happen.
+      // 2. Neighboring starts give neighboring results, and the passes really happen.
       var worst = 0, prev = null;
       for (var i = 0; i <= 200; i++) { var y = finalY((i / 200 - 0.5) * 2, 1); if (prev !== null) worst = Math.max(worst, Math.abs(y - prev)); prev = y; }
       var probe = buildPassThroughScene(0), passes = 0, side = 1;
@@ -6834,7 +6834,7 @@
       return {
         pass: valueGap < 1e-9 && slopeGap < 1e-3 && curveGap < 1e-2 && q(0) * 0 === 0 && linearSpring && passes >= 6 && worst < 1 && stepGap < 40,
         detail: "at the core's rim the law meets Hooke to " + valueGap.toExponential(1) + " in value, " + slopeGap.toExponential(1) + " in slope, " + curveGap.toExponential(1) +
-          " in curvature; rest length 0 stays exactly linear=" + linearSpring + "; the balls passed through each other " + passes + " times, and 201 starts across 2px never differed from a neighbour by more than " +
+          " in curvature; rest length 0 stays exactly linear=" + linearSpring + "; the balls passed through each other " + passes + " times, and 201 starts across 2px never differed from a neighbor by more than " +
           worst.toFixed(3) + "px (was 261); 1/60s vs 1/960s differ by " + stepGap.toFixed(1) + "px (was ~350)",
       };
     }

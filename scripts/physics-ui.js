@@ -7,6 +7,8 @@
 
   // Default only: simulationSteps travels with the scene (links, autosave, grid handoff).
   var DEFAULT_SIMULATION_STEPS = 1000;
+  // A first visit's empty scene. A link or save without a duration still means the default above.
+  var NEW_SCENE_SIMULATION_STEPS = 400;
   // Notches match fractal-grid.js's slider notch-for-notch.
   var SIMULATION_STEPS_PER_NOTCH = 100;
   var SIMULATION_STEPS_MAX_NOTCHES = 50;
@@ -24,7 +26,6 @@
   var EDITOR_STORAGE_KEY = "physicsEditorScene";
   // Non-null while the scene arrived by link and is unedited: see saveEditorAutosave.
   var sharedSceneIdentity = null;
-  var TIP_DISMISSED_KEY = "physicsAppDismissedTips";
 
   var canvas = document.getElementById("physics-canvas");
   var ctx = canvas.getContext("2d");
@@ -130,7 +131,7 @@
     mutualGravity: false,
     // Off: no pair contact at all. Toggling Planet Mode resets this to a default.
     collisionsEnabled: true,
-    simulationSteps: DEFAULT_SIMULATION_STEPS,
+    simulationSteps: NEW_SCENE_SIMULATION_STEPS,
     bodies: [],
     hinges: [],
     springs: [],
@@ -460,6 +461,8 @@
     } else {
       scene.bodies.push(PhysicsEngine.createLine(params.x, params.y, params.length, params.angle, false));
     }
+    AppTips.done("add-object");
+    AppTips.done("place-object");
     setActiveTool("select");
     refreshMappingUI();
     selectBody(scene.bodies.length - 1);
@@ -1267,6 +1270,7 @@
     if (!isPlaying) {
       saveEditorAutosave();
       recordUndoState(); // same piggyback, same reason: see "Undo / redo" below
+      checkBuilderTips();
     }
   }
 
@@ -1354,6 +1358,7 @@
     activeTool = tool;
     toolButtons.forEach(function (b) { b.classList.toggle("active", b.getAttribute("data-tool") === tool); });
     canvas.className = "tool-" + tool;
+    checkBuilderTips();
   }
 
   toolButtons.forEach(function (btn) {
@@ -1466,6 +1471,7 @@
     var w = scene.frameWidth || canvasArea.clientWidth || 1, h = scene.frameHeight || canvasArea.clientHeight || 1;
     var place = PORTHOLE_PLACEMENT[color];
     scene.bodies.push(PhysicsEngine.createPorthole(w / 2, h * place.y, DEFAULT_PORTHOLE_LENGTH, place.angle, color, false));
+    AppTips.done("add-object");
     setActiveTool("select");
     refreshMappingUI();
     selectBody(scene.bodies.length - 1);
@@ -1689,6 +1695,7 @@
       var hit2 = hitTestTopmost(p.x, p.y);
       if (hit2 >= 0) {
         scene.bodies[hit2].isAnchored = !scene.bodies[hit2].isAnchored;
+        AppTips.done("anchor-object");
         PhysicsEngine.computeMass(scene.bodies[hit2]);
         refreshOutputPairUI();
         render();
@@ -1720,6 +1727,7 @@
       if (hit3 >= 0) {
         scene.xInput = { body: hit3, property: "x" };
         scene.yInput = { body: hit3, property: "y" };
+        AppTips.done("set-input");
         refreshMappingUI();
       }
       setActiveTool("select");
@@ -1732,6 +1740,7 @@
       } else if (hit5 >= 0) {
         scene.xInput = { body: hit5, property: "vx" };
         scene.yInput = { body: hit5, property: "vy" };
+        AppTips.done("set-input");
         refreshMappingUI();
       }
       setActiveTool("select");
@@ -1743,6 +1752,7 @@
         AppMessage.toast("Output can't be an anchored object");
       } else if (hit4 >= 0) {
         scene.output = { body: hit4, property: "y" };
+        AppTips.done("set-output");
         refreshMappingUI();
       }
       setActiveTool("select");
@@ -2142,6 +2152,7 @@
     } else {
       var bodyIndex = Number(xInputBodySelect.value);
       scene.xInput = { body: bodyIndex, property: firstInputKey(bodyIndex) };
+      AppTips.done("set-input");
     }
     populatePropertySelect(xInputPropertySelect, scene.xInput ? scene.xInput.body : null, scene.xInput ? scene.xInput.property : null);
     render();
@@ -2159,6 +2170,7 @@
     } else {
       var bodyIndex = Number(yInputBodySelect.value);
       scene.yInput = { body: bodyIndex, property: firstInputKey(bodyIndex) };
+      AppTips.done("set-input");
     }
     populatePropertySelect(yInputPropertySelect, scene.yInput ? scene.yInput.body : null, scene.yInput ? scene.yInput.property : null);
     render();
@@ -2186,6 +2198,7 @@
       var newBody = Number(outputBodySelect.value);
       scene.output = { body: newBody, bodyB: keptB === newBody ? null : keptB, property: OUTPUT_PROPERTIES[0].key };
     }
+    if (scene.output) AppTips.done("set-output");
     refreshOutputPairUI();
     render();
   });
@@ -2615,7 +2628,7 @@
     });
   });
 
-  // Restores the last edited scene; any error falls back to the seed scene so a bad save can't break loading.
+  // Restores the last edited scene; any error leaves the scene empty so a bad save can't break loading.
   function loadPersistedScene() {
     try {
       var raw = localStorage.getItem(EDITOR_STORAGE_KEY);
@@ -3024,7 +3037,7 @@
     var displayStep = currentDisplayStep();
     var stoppedEarly = displayStep >= effectiveMaxSteps && effectiveMaxSteps < scene.simulationSteps;
     stepReadout.textContent = "Step " + displayStep + " / " + scene.simulationSteps +
-      (stoppedEarly ? " - stopped early: an object reached the frame edge" : "");
+      (stoppedEarly ? " (stopped early: an object reached the frame edge)" : "");
   }
 
   function updatePlaybackProgressSliderPosition() {
@@ -3067,7 +3080,7 @@
     speedSlider.value = String(speedToSliderValue(playbackSpeed));
   }
 
-  // Fixed positioning, so placed by hand (like fractal-grid.js's positionTip): centered above the button, clamped on-screen.
+  // Fixed positioning, so placed by hand: centered above the button, clamped on-screen.
   function positionSpeedPopup() {
     var rect = btnSpeed.getBoundingClientRect();
     var width = speedPopup.offsetWidth, height = speedPopup.offsetHeight;
@@ -3214,6 +3227,8 @@
     isAdvancing = true;
     lastTickTime = performance.now();
     updatePlayPauseButtonUI();
+    AppTips.done("played");
+    AppTips.done("try-play");
     rafId = requestAnimationFrame(tick);
   }
 
@@ -3256,23 +3271,83 @@
 
   btnReset.addEventListener("click", resetToInitialScene);
 
-  // ---- Init ----
+  // ---- Tool tips ----
+  // The builder's tips, in the order a new scene needs them; app-tips.js holds the text.
+  var BUILDER_TIPS = ["add-object", "place-object", "anchor-object", "try-play", "set-input", "set-output", "fractalize"];
+  var INPUT_TIP_DELAY_MS = 5000;
+  var inputTipTimer = null;
+  var checkingTips = false;
 
-  function seedDefaultScene() {
-    var w = canvasArea.clientWidth || 800, h = canvasArea.clientHeight || 600;
-    scene.bodies.push(PhysicsEngine.createLine(w / 2, h - 40, Math.max(200, w - 160), 0, true));
-    scene.bodies.push(PhysicsEngine.createCircle(w / 2 - 130, h * 0.25, 30, false));
-    scene.bodies.push(PhysicsEngine.createLine(w / 2 + 130, h * 0.25, 140, 0.3, false));
+  function toolButton(tool) { return document.querySelector('.tool-btn[data-tool="' + tool + '"]'); }
+
+  // After a play, or a while after the "Try playing" tip was answered.
+  function inputTipDue() {
+    if (AppTips.doneAt("played")) return true;
+    var answered = AppTips.doneAt("try-play");
+    if (!answered) return false;
+    var wait = answered + INPUT_TIP_DELAY_MS - Date.now();
+    if (wait <= 0) return true;
+    if (!inputTipTimer) inputTipTimer = setTimeout(function () { inputTipTimer = null; checkBuilderTips(); }, wait);
+    return false;
   }
 
-  // Order matters: the frame must be known before the scene is restored or seeded, and the scene must be
+  function builderTips() {
+    if (isPlaying) return [];
+    // A Circle or Line picked but not placed: point at the middle of the scene.
+    if ((activeTool === "circle" || activeTool === "line") && !drawingShape) {
+      var rect = canvas.getBoundingClientRect();
+      return [{ id: "place-object", anchor: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } }];
+    }
+    if (activeTool !== "select") return [];
+    var count = scene.bodies.length, hasInput = !!(scene.xInput && scene.yInput);
+    var anchored = scene.bodies.some(function (b) { return b.isAnchored; });
+    var tips = [];
+    if (count === 0) {
+      tips.push({ id: "add-object", anchor: toolButton("circle"), onOk: function () { setActiveTool("circle"); } });
+    }
+    if (count >= 2 && !hasInput && !scene.output && !anchored) {
+      tips.push({ id: "anchor-object", anchor: toolButton("anchor"), onOk: function () { setActiveTool("anchor"); } });
+    }
+    if (count >= 2 && !hasInput && !scene.output && anchored) {
+      tips.push({ id: "try-play", anchor: btnPlayPause, onOk: togglePlayPause });
+    }
+    if (count >= 2 && !hasInput && inputTipDue()) {
+      tips.push({ id: "set-input", anchor: toolButton("input"), onOk: function () { setActiveTool("input"); } });
+    }
+    if (count >= 2 && hasInput && !scene.output) {
+      tips.push({ id: "set-output", anchor: toolButton("output"), onOk: function () { setActiveTool("output"); } });
+    }
+    if (gridReadiness().ready) {
+      tips.push({ id: "fractalize", anchor: btnSendToGrid, onOk: function () { btnSendToGrid.click(); } });
+    }
+    return tips;
+  }
+
+  // Hides a builder tip that no longer applies, then shows the first one that does.
+  function checkBuilderTips() {
+    if (checkingTips || AppTips.view() !== "editor") return;
+    checkingTips = true;
+    var tips = builderTips();
+    var ids = tips.map(function (t) { return t.id; });
+    BUILDER_TIPS.forEach(function (id) { if (ids.indexOf(id) === -1) AppTips.drop(id); });
+    var showing = AppTips.showing();
+    if (showing && ids.indexOf(showing) === -1) AppTips.hide(showing);
+    for (var i = 0; i < tips.length && !AppTips.showing(); i++) AppTips.show(tips[i].id, tips[i].anchor, tips[i].onOk);
+    checkingTips = false;
+  }
+  AppTips.onChange(checkBuilderTips);
+
+  // ---- Init ----
+
+  // Order matters: the frame must be known before the scene is restored, and the scene must be
   // populated BEFORE the first resizeCanvas(), whose render() auto-saves and would overwrite the real save with an empty scene.
   if (canvasArea.clientWidth > 0 && canvasArea.clientHeight > 0) {
     scene.frameWidth = canvasArea.clientWidth;
     scene.frameHeight = canvasArea.clientHeight;
   }
-  if (!loadSceneFromLink() && !loadPersistedScene()) seedDefaultScene();
-  // Redundant after loadPersistedScene, but keeps a seeded scene's slider in sync without trusting the HTML default.
+  // A first visit starts empty: the tool tips walk through building a scene.
+  if (!loadSceneFromLink()) loadPersistedScene();
+  // Redundant after loadPersistedScene, but keeps a new scene's slider in sync without trusting the HTML default.
   simulationStepsSlider.value = String(simulationStepsNotch(scene.simulationSteps));
   updateSimulationStepsReadout(scene.simulationSteps);
   syncFrictionUI();
