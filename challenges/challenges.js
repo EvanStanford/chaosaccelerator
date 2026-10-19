@@ -17,11 +17,15 @@
   var APP = "../chaos.html";
   var SOLVED_KEY = "chaosChallengesSolved";
   var BEST_KEY = "chaosChallengesBest";
+  var CELEBRATED_KEY = "chaosChallengesCelebrated";
   var CLICK_SLOP_PX = 5;
   // Shows as 100.0%.
   var ROSE_WIN = 0.9995;
   // Exponents show to 3 places; this is the first that shows as negative.
   var LYAP_WIN = -0.0005;
+  // A level with "above" is won by an exponent over it, and keeps the highest; the rest win below zero.
+  function lyapWins(c, lambda) { return typeof c.above === "number" ? lambda > c.above : lambda <= LYAP_WIN; }
+  function lyapBetter(c, a, b) { return typeof c.above === "number" ? a > b : a < b; }
   var LYAP_PLOT_SAMPLES = 120;
   // "nearby": the two furthest runs start no further apart than a hundredth of the zoom 1 view's height.
   var NEARBY_GAP = (200 / 0.17) / 100;
@@ -193,7 +197,8 @@
   }
 
   // ---- A small separation plot: a falling gold line for the goal, a run's log10 separation in blue ----
-  function drawLyapShape(canvas, plot) {
+  // rising: the gold goal line climbs, for a level won above zero.
+  function drawLyapShape(canvas, plot, rising) {
     var chart = chartContext(canvas), ctx = chart.ctx, w = chart.w, h = chart.h, pad = 14, inset = 8;
     ctx.strokeStyle = "#2c3040";
     ctx.lineWidth = 1;
@@ -207,8 +212,8 @@
     ctx.strokeStyle = "#c9a227";
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(x0, y0);
-    ctx.lineTo(x1, y1);
+    ctx.moveTo(x0, rising ? y1 : y0);
+    ctx.lineTo(x1, rising ? y0 : y1);
     ctx.stroke();
     ctx.setLineDash([]);
     if (!plot) return;
@@ -332,8 +337,68 @@
     return canvas;
   }
 
+  // "N/M completed" for the page and each section.
+  function renderProgress(solved) {
+    var all = 0, done = 0, kinds = {};
+    challenges.forEach(function (c) {
+      var k = kinds[c.kind] = kinds[c.kind] || { all: 0, done: 0 };
+      k.all++; all++;
+      if (solved[c.id]) { k.done++; done++; }
+    });
+    function show(el, n, of) {
+      el.textContent = of ? n + "/" + of + " completed" : "";
+      el.classList.toggle("progress-done", of > 0 && n === of);
+    }
+    show($("progress-total"), done, all);
+    if (all > 0 && done === all) $("progress-total").textContent = "\uD83C\uDFC6 " + done + "/" + all + " complete! \uD83C\uDFC6";
+    ["trick", "rose", "lyap"].forEach(function (kind) { show($("progress-" + kind), kinds[kind] ? kinds[kind].done : 0, kinds[kind] ? kinds[kind].all : 0); });
+  }
+
+  function celebrate() {
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    var canvas = document.createElement("canvas"), ctx = canvas.getContext("2d"), dpr = window.devicePixelRatio || 1;
+    canvas.className = "confetti";
+    document.body.appendChild(canvas);
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * dpr; canvas.height = h * dpr;
+    var colors = ["#c9a227", "#5b8cff", "#36d399", "#ff8a1f", "#ff5f9e", "#ffffff"], pieces = [];
+    for (var i = 0; i < 240; i++) {
+      var fromLeft = i % 2 === 0, angle = (fromLeft ? -1 : 1) * (0.35 + Math.random() * 0.5);
+      var speed = 600 + Math.random() * 700;
+      pieces.push({
+        x: fromLeft ? 0 : w, y: h * (0.55 + Math.random() * 0.25),
+        vx: -Math.sin(angle) * speed, vy: -Math.cos(angle) * speed,
+        size: 6 + Math.random() * 7, spin: (Math.random() - 0.5) * 12, turn: Math.random() * Math.PI,
+        wobble: Math.random() * Math.PI * 2, color: colors[i % colors.length],
+      });
+    }
+    var start = null, last = null, LIFE = 5000;
+    function frame(t) {
+      if (start === null) { start = last = t; }
+      var dt = Math.min(0.05, (t - last) / 1000), age = t - start;
+      last = t;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+      ctx.globalAlpha = Math.max(0, Math.min(1, (LIFE - age) / 1000));
+      pieces.forEach(function (p) {
+        p.vy += 900 * dt; p.vx *= 1 - 1.2 * dt; p.vy *= 1 - 0.9 * dt;
+        p.x += p.vx * dt; p.y += p.vy * dt; p.turn += p.spin * dt; p.wobble += 6 * dt;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.turn);
+        ctx.scale(1, Math.cos(p.wobble));
+        ctx.fillStyle = p.color;
+        ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+        ctx.restore();
+      });
+      if (age < LIFE) requestAnimationFrame(frame); else canvas.remove();
+    }
+    requestAnimationFrame(frame);
+  }
+
   function renderLists() {
     var solved = readStore(SOLVED_KEY);
+    renderProgress(solved);
     btnResetAll.disabled = !Object.keys(solved).length && !Object.keys(readStore(BEST_KEY)).length;
     listEl.textContent = "";
     roseListEl.textContent = "";
@@ -365,7 +430,7 @@
       } else {
         made.note.textContent = made.locked ? "Not available until the previous challenge is complete" : "Not attempted yet";
         canvas = sideCanvas("card-plot", 160);
-        drawLyapShape(canvas, best ? best.plot : null);
+        drawLyapShape(canvas, best ? best.plot : null, typeof c.above === "number");
         made.el.appendChild(canvas);
         if (best) made.el.classList.add("has-best");
         if (best) made.el.appendChild(bestBox(c, i, best, !!solved[c.id], "Best so far: " + exponentText(best.lambda)));
@@ -375,6 +440,70 @@
   }
 
   // ---- Play mode ----
+
+  // A Lyapunov level with no best of its own starts from the previous level's best scene, fitted to its rules.
+  function inheritedStart(c) {
+    var prev = c.kind === "lyap" && c.after && !bestOf(c.id) ? bestOf(c.after) : null;
+    if (!prev || !window.ShareUrl) return null;
+    var shared;
+    try { shared = ShareUrl.decode(prev.link.slice(prev.link.indexOf("#"))); } catch (err) { return null; }
+    if (!shared || !shared.scene) return null;
+    return "#" + ShareUrl.encode({ page: ShareUrl.PAGE_BUILDER, scene: fitToRules(shared.scene, c) });
+  }
+
+  // A copy of an authored scene that meets a level's rules: friction off, velocity inputs, runs at least so
+  // long, and at most so many bodies.
+  function fitToRules(scene, c) {
+    var r = c.rules || {}, s = JSON.parse(JSON.stringify(scene));
+    if (c.noFriction) s.friction = 0;
+    if (r.velocityInputs) {
+      if (s.xInput) s.xInput.property = "vx";
+      if (s.yInput) s.yInput.property = "vy";
+    }
+    if (r.minSteps && !(s.simulationSteps >= r.minSteps)) s.simulationSteps = r.minSteps;
+    if (r.noWrap && s.edgeMode === "wrap") s.edgeMode = "sticky";
+    if (r.maxBodies && s.bodies.length > r.maxBodies) keepBodies(s, r.maxBodies);
+    return s;
+  }
+
+  // Keeps `max` bodies, the ones the inputs and output use first, and drops whatever pointed at the rest.
+  function keepBodies(s, max) {
+    var keep = [], i;
+    [s.xInput, s.yInput, s.output].forEach(function (m) {
+      [m && m.body, m && m.bodyB].forEach(function (b) {
+        if (typeof b === "number" && keep.indexOf(b) === -1 && keep.length < max) keep.push(b);
+      });
+    });
+    for (i = 0; i < s.bodies.length && keep.length < max; i++) if (keep.indexOf(i) === -1) keep.push(i);
+    keep.sort(function (a, b) { return a - b; });
+    function at(b) { var k = keep.indexOf(b); return k === -1 ? null : k; }
+    function mapping(m) {
+      if (!m || typeof m.body !== "number") return m;
+      if (at(m.body) === null) return null;
+      var out = { body: at(m.body), property: m.property };
+      if (typeof m.bodyB === "number") {
+        if (at(m.bodyB) === null) return m.property === "distance" ? null : out;
+        out.bodyB = at(m.bodyB);
+      }
+      return out;
+    }
+    function links(list) {
+      return (list || []).filter(function (h) {
+        return (typeof h.bodyA !== "number" || at(h.bodyA) !== null) && at(h.bodyB) !== null;
+      }).map(function (h) {
+        var out = JSON.parse(JSON.stringify(h));
+        if (typeof h.bodyA === "number") out.bodyA = at(h.bodyA);
+        out.bodyB = at(h.bodyB);
+        return out;
+      });
+    }
+    s.bodies = keep.map(function (b) { return s.bodies[b]; });
+    s.xInput = mapping(s.xInput);
+    s.yInput = mapping(s.yInput);
+    s.output = mapping(s.output);
+    s.hinges = links(s.hinges);
+    s.springs = links(s.springs);
+  }
 
   // hash: a map link's "#map/..." to open in place of the challenge's own start. The id gives each challenge
   // its own address: two that differ only after the "#" would not reload the frame.
@@ -438,9 +567,11 @@
       updateRoseScore(null);
     }
     if (c.kind === "lyap") {
-      drawLyapShape(targetPlot, null);
-      targetOrder.textContent = "Goal: Lyapunov exponent below 0";
-      targetHelp.textContent = "Build a scene, open its map and inspect a line to show the Lyapunov exponent. A scene with a negative Lyapunov exponent will reduce separation over time." +
+      drawLyapShape(targetPlot, null, typeof c.above === "number");
+      targetOrder.textContent = "Goal: Lyapunov exponent " + (typeof c.above === "number" ? "above " + c.above : "below 0");
+      targetHelp.textContent = "Build a scene, open its map and inspect a line to show the Lyapunov exponent. " +
+        (typeof c.above === "number" ? "A scene with a large positive Lyapunov exponent pulls nearby runs apart fast."
+          : "A scene with a negative Lyapunov exponent will reduce separation over time.") +
         (rulesText(c) ? " " + rulesText(c) : "");
       updateLyapScore(null);
     }
@@ -449,7 +580,7 @@
     playPage.hidden = false;
     document.title = c.title + ": Chaos Accelerator";
     // replace(): a frame load must not add a history entry of its own.
-    engine.contentWindow.location.replace(frameAddress(c, link ? link.slice(link.indexOf("#")) : null));
+    engine.contentWindow.location.replace(frameAddress(c, link ? link.slice(link.indexOf("#")) : inheritedStart(c)));
   }
 
   function backToList() {
@@ -523,7 +654,7 @@
       drawRoseShape(bestRose, c.target, best.plot);
       bestText.textContent = "Best: " + percent(best.inside) + " inside the target";
     } else {
-      drawLyapShape(bestPlot, best.plot);
+      drawLyapShape(bestPlot, best.plot, typeof c.above === "number");
       bestText.textContent = "Best exponent: " + exponentText(best.lambda);
     }
     bestLink.href = best.link;
@@ -540,6 +671,7 @@
     askConfirm("Reset all challenges?", "Every best attempt and Solved mark will be cleared.", "Reset all", function () {
       writeStore(BEST_KEY, {});
       writeStore(SOLVED_KEY, {});
+      writeStore(CELEBRATED_KEY, {});
       renderLists();
     });
   });
@@ -621,6 +753,11 @@
   function win(text) {
     var c = challenges[current];
     markSolved(c.id);
+    var solved = readStore(SOLVED_KEY), allDone = challenges.every(function (ch) { return solved[ch.id]; });
+    if (allDone && !readStore(CELEBRATED_KEY).done) {
+      writeStore(CELEBRATED_KEY, { done: true });
+      celebrate();
+    }
     winText.textContent = text;
     var link = currentMapLink();
     winLink.hidden = !link;
@@ -729,7 +866,7 @@
     var html = "Lyapunov exponent: <b>" + (lambda === null ? status || "inspect a line" : exponentText(lambda)) + "</b>";
     if (best) html += " &middot; Best: <b>" + exponentText(best.lambda) + "</b>";
     scoreEl.innerHTML = html;
-    scoreEl.classList.toggle("score-win", lambda !== null && lambda <= LYAP_WIN);
+    scoreEl.classList.toggle("score-win", lambda !== null && lyapWins(c, lambda));
   }
 
   // A Lyapunov level's extra rules ("rules" in lyapunov.json, plus noFriction), as one line.
@@ -738,6 +875,7 @@
     if (c.noFriction) parts.push("no friction");
     if (r.velocityInputs) parts.push("both inputs are velocities");
     if (r.maxBodies) parts.push("at most " + r.maxBodies + " objects");
+    if (r.noWrap) parts.push("no Pac-Man Warp edges");
     if (r.minSteps) parts.push("every run lasts at least " + r.minSteps + " frames, none stopping at an edge");
     if (r.nearby) parts.push("a short line (no longer than the screen's height at 100x zoom)");
     return parts.length ? "Rules: " + parts.join(", ") + "." : "";
@@ -751,6 +889,7 @@
     if (c.noFriction && w.PhysicsEngine.frictionOf(scene) > 0) return "Friction has to stay off for this one.";
     if (r.velocityInputs && !(isVelocity(scene.xInput) && isVelocity(scene.yInput))) return "Both inputs have to be velocities for this one.";
     if (r.maxBodies && scene.bodies.length > r.maxBodies) return "Use at most " + r.maxBodies + " objects for this one.";
+    if (r.noWrap && scene.edgeMode === "wrap") return "Pac-Man Warp edges aren't allowed for this one.";
     if (r.minSteps && !(result.shortest >= r.minSteps)) return "Every run has to last at least " + r.minSteps + " frames, none stopping at an edge, for this one.";
     if (r.nearby && !(result.gap <= NEARBY_GAP)) return "Draw a shorter line, no longer than the screen's height at 100x zoom.";
     return null;
@@ -771,7 +910,7 @@
     if (lambda !== null) {
       fillPicture(c);
       var best = bestOf(c.id);
-      if (!best || lambda < best.lambda) {
+      if (!best || lyapBetter(c, lambda, best.lambda)) {
         var link = currentMapLink();
         if (link) {
           saveBest(c.id, { lambda: lambda, plot: logSamples(result.distance), link: link, picture: scenePicture() });
@@ -780,9 +919,9 @@
       }
     }
     updateLyapScore(lambda, status);
-    if (lambda !== null && lambda <= LYAP_WIN && !wonThisPlay) {
+    if (lambda !== null && lyapWins(c, lambda) && !wonThisPlay) {
       wonThisPlay = true;
-      win("The runs draw together: a negative Lyapunov exponent.");
+      win(typeof c.above === "number" ? "The runs fly apart: a Lyapunov exponent above " + c.above + "." : "The runs draw together: a negative Lyapunov exponent.");
     }
   }
 
@@ -842,6 +981,9 @@
   Promise.all([fetchJSON("trick-shot.json"), fetchJSON("analysis-maxing.json"), fetchJSON("lyapunov.json")]).then(function (data) {
     challenges = ofKind(data[0], "trick").concat(ofKind(data[1], "rose"), ofKind(data[2], "lyap"));
     renderLists();
+    // Every visit with everything solved gets the confetti.
+    var solved = readStore(SOLVED_KEY);
+    if (challenges.length && challenges.every(function (c) { return solved[c.id]; })) celebrate();
     // A reload on a challenge's entry opens it again.
     var index = playIndex(history.state);
     if (index !== -1) show(index, history.state.link);

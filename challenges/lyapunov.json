@@ -8,7 +8,7 @@
     {
       "id": "settle-down-frictionless",
       "title": "Settle Down Without Friction",
-      "lockedTitle": "Settle Down With Constraint",
+      "lockedTitle": "Settle Down With Additional Constraints",
       "after": "settle-down",
       "scene": "body:,frmw:979,frmh:934",
       "noFriction": true
@@ -20,7 +20,8 @@
       "after": "settle-down-frictionless",
       "rules": {
         "velocityInputs": true
-      }
+      },
+      "lockedTitle": "Settle Down With Additional Constraints"
     },
     {
       "id": "settle-down-alone",
@@ -30,7 +31,8 @@
       "rules": {
         "velocityInputs": true,
         "maxBodies": 2
-      }
+      },
+      "lockedTitle": "Settle Down With Additional Constraints"
     },
     {
       "id": "perfectly-still",
@@ -41,6 +43,19 @@
       "rules": {
         "minSteps": 1000,
         "nearby": true
+      },
+      "lockedTitle": "Settle Down With Additional Constraints"
+    },
+    {
+      "id": "stir-it-up",
+      "title": "Stir It Up",
+      "scene": "body:,frmw:979,frmh:934",
+      "after": "perfectly-still",
+      "lockedTitle": "Ramp Up With Additional Constraints",
+      "above": 12,
+      "rules": {
+        "maxBodies": 2,
+        "noWrap": true
       }
     }
   ]

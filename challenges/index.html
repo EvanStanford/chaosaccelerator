@@ -6,8 +6,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#14161c">
 <title>Challenges: Chaos Accelerator</title>
-<link rel="stylesheet" href="../scripts/landing.css?v=m144">
-<link rel="stylesheet" href="challenges.css?v=m144">
+<link rel="stylesheet" href="../scripts/landing.css?v=m149">
+<link rel="stylesheet" href="challenges.css?v=m149">
 </head>
 <body>
 
@@ -18,11 +18,12 @@
   <header class="page-head">
     <a class="back-link" href="../index.html" data-back>&larr; Chaos Accelerator</a>
     <h1>Challenges</h1>
-    <script src="../scripts/corner-menu.js?v=m144"></script>
+    <script src="../scripts/corner-menu.js?v=m149"></script>
   </header>
+  <p id="progress-total" class="progress-total"></p>
 
   <section class="challenge-intro">
-    <h2>Trick Shot</h2>
+    <h2>Trick Shot <span id="progress-trick" class="section-progress"></span></h2>
     <p>Find the starting point that bounces the ball in the specified order.</p>
   </section>
 
@@ -31,14 +32,14 @@
   </section>
 
   <section class="challenge-intro">
-    <h2>Rose Plot Targets</h2>
+    <h2>Rose Plot Targets <span id="progress-rose" class="section-progress"></span></h2>
     <p>Create a map that lies within the given goal rose plot.</p>
   </section>
 
   <section id="rose-list" class="challenge-list" aria-live="polite"></section>
 
   <section class="challenge-intro">
-    <h2>Order From Chaos</h2>
+    <h2>Order From Chaos <span id="progress-lyap" class="section-progress"></span></h2>
     <p>Build a scene whose Lyapunov exponent is negative.</p>
   </section>
 
@@ -107,7 +108,8 @@
   </div>
 </dialog>
 
-<script src="../scripts/back-link.js?v=m144"></script>
-<script src="challenges.js?v=m144"></script>
+<script src="../scripts/back-link.js?v=m149"></script>
+<script src="../scripts/share-url.js?v=m149"></script>
+<script src="challenges.js?v=m149"></script>
 </body>
 </html>
