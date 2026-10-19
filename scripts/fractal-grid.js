@@ -215,6 +215,7 @@
       try {
         localStorage.removeItem("physicsAppDismissedTips");
         localStorage.removeItem(global.AppMode.STORE_KEY);
+        localStorage.removeItem(global.ColorBlind.STORE_KEY);
       } catch (err) { /* nothing to clear */ }
       if (global.AppShell) global.AppShell.replayIntro();
       try {
@@ -1037,6 +1038,7 @@
       "uniform float u_scale;",
       "uniform bool u_colorZoom;",
       "uniform bool u_lowSaturation;",
+      "uniform int u_colorBlind;",
       "uniform int u_maxSteps;",
       "uniform int u_durationSteps;",
       "uniform float u_bounceMax;",
@@ -1106,9 +1108,11 @@
       "  return linear2srgb(oklab2linear(vec3(L2, dir * C2)));",
       "}",
       "",
+    ].concat(ColorBlind.glsl, [
       // 360 for circular outputs (t=0 and t=1 coincide), 300 otherwise. Color Zoom
       // repeats the ramp 10x, saturation 40%-100% across full t to tell repeats apart.
       "const float HUE_RANGE_MAX = " + PhysicsGPU.fnum(hueRangeMax) + ";",
+      "const bool CIRCULAR_OUTPUT = " + isCircularOutput + ";",
       "float frameSigmoid(float v) {",
       "  return 1.0 / (1.0 + exp(" + PhysicsGPU.fnum(-PhysicsEngine.OUTPUT_SIGMOID_STEEPNESS) + " * (v - 0.5)));",
       "}",
@@ -1120,9 +1124,19 @@
       "  return hsl2rgb(hue, 1.0, 0.5);",
       "}",
       "",
+      // Color Blind Support's scale for this Output; Low Saturation does not apply to it.
+      "vec3 colorBlindRamp(float t) {",
+      "  return CIRCULAR_OUTPUT ? cbCyclic(u_colorBlind, t) : cbSequential(u_colorBlind, t);",
+      "}",
+      "",
       "vec3 colorMap(float t) {",
       "  t = clamp(t, 0.0, 1.0);",
       "  vec3 color;",
+      "  if (u_colorBlind != 0) {",
+      "    if (!u_colorZoom) return colorBlindRamp(t);",
+      "    color = colorBlindRamp(mod(t * 10.0, 1.0));",
+      "    return mix(vec3(dot(color, vec3(0.2126, 0.7152, 0.0722))), color, t * 0.6 + 0.4);",
+      "  }",
       "  if (u_colorZoom) {",
       "    float tZoom = mod(t * 10.0, 1.0);",
       "    float hue = HUE_RANGE_MAX * (1.0 - tZoom);",
@@ -1154,6 +1168,7 @@
       "vec3 gradientColor(vec2 g) {",
       // atan(0, 0) is undefined: a flat neighborhood is common on integer outputs.
       "  float m = magnitudeLift(length(g));",
+      "  if (u_colorBlind != 0) return cbVector(u_colorBlind, g, m);",
       "  if (m <= 0.0) return vec3(0.0);",
       "  float hue = degrees(atan(g.y, g.x));",
       "  if (hue < 0.0) hue += 360.0;",
@@ -1161,6 +1176,8 @@
       "}",
       "",
       "vec3 laplacianColor(float lap) {",
+      // Blue against orange holds up for both dichromacies; monochrome gets lighter and darker instead.
+      "  if (u_colorBlind == 3) return cbDiverging(sign(lap) * magnitudeLift(abs(lap) * 0.5));",
       "  return hsl2rgb(lap < 0.0 ? 205.0 : 25.0, 0.9, 0.5 * magnitudeLift(abs(lap) * 0.5));",
       "}",
       "",
@@ -1178,10 +1195,11 @@
       "  float alpha = 1.0 - smoothstep(0.0, CONTOUR_WIDTH_PX, distInPixels);",
       "  alpha *= 1.0 - smoothstep(0.5, 1.5, slope);",
       "  alpha *= smoothstep(CONTOUR_SLOPE_FLOOR, CONTOUR_SLOPE_FLOOR * 3.0, slope);",
-      "  return rainbow(t) * alpha;",
+      // Off the scale's dark end, which would vanish on the black.
+      "  return (u_colorBlind != 0 ? cbSequential(u_colorBlind, 0.2 + 0.8 * t) : rainbow(t)) * alpha;",
       "}",
       "",
-    ];
+    ]);
 
     var gridPhysicsLines = [
       isRunTally ? "" : "const float OUTPUT_RANGE_MAX = " + PhysicsGPU.fnum(rangeMax) + ";",
@@ -1293,6 +1311,7 @@
       "}",
       "",
       "vec3 ftleColor(float t) {",
+      "  if (u_colorBlind != 0) return cbSequential(u_colorBlind, t);",
       "  return hsl2rgb(300.0 * (1.0 - t), 1.0, 0.5);",
       "}",
       "");
@@ -1599,6 +1618,7 @@
       scale: gl.getUniformLocation(prog, "u_scale"),
       colorZoom: gl.getUniformLocation(prog, "u_colorZoom"),
       lowSaturation: gl.getUniformLocation(prog, "u_lowSaturation"),
+      colorBlind: gl.getUniformLocation(prog, "u_colorBlind"),
       maxSteps: gl.getUniformLocation(prog, "u_maxSteps"),
       durationSteps: gl.getUniformLocation(prog, "u_durationSteps"),
       bounceMax: gl.getUniformLocation(prog, "u_bounceMax"),
@@ -2802,6 +2822,7 @@
     gl.uniform1f(pass.uniforms.scale, view.scale);
     gl.uniform1i(pass.uniforms.colorZoom, colorZoomEnabled ? 1 : 0);
     gl.uniform1i(pass.uniforms.lowSaturation, lowSaturationEnabled ? 1 : 0);
+    gl.uniform1i(pass.uniforms.colorBlind, ColorBlind.id());
     gl.uniform1i(pass.uniforms.maxSteps, steps);
     gl.uniform1i(pass.uniforms.durationSteps, simulationSteps);
     gl.uniform1f(pass.uniforms.bounceMax, bounceMax);
@@ -2838,9 +2859,12 @@
   var nextColorIndex = 0;
   // Golden-angle hue step keeps successive points visually distinct.
   var INSPECT_HUE_STEP = 137.5;
+  // `made` says how to remake the color when Color Blind Support changes.
   function lockedPointColor(colorIndex) {
+    var made = ["point", colorIndex];
+    if (ColorBlind.on()) return { fill: ColorBlind.categorical(colorIndex), stroke: "#000000", made: made };
     var hue = (colorIndex * INSPECT_HUE_STEP) % 360;
-    return { fill: "hsl(" + hue + ", 100%, 50%)", stroke: "#000000" };
+    return { fill: "hsl(" + hue + ", 100%, 50%)", stroke: "#000000", made: made };
   }
 
   // Points per Inspect (Line) drag, hues split evenly; the dot pool is built at the slider's max so it never resizes.
@@ -2850,8 +2874,11 @@
   var INSPECT_LINE_MAX_HUE = 324;
   function inspectLinePointColor(i, count) {
     count = count || inspectLineSampleCount;
+    var made = ["line", i, count];
+    // The scale from a quarter up: its dark end is lost on the map.
+    if (ColorBlind.on()) return { fill: ColorBlind.css(ColorBlind.sequential(0.25 + 0.75 * (count > 1 ? i / (count - 1) : 0))), stroke: "#000000", made: made };
     var hue = count > 1 ? i * (INSPECT_LINE_MAX_HUE / (count - 1)) : 0;
-    return { fill: "hsl(" + hue + ", 100%, 50%)", stroke: "#000000" };
+    return { fill: "hsl(" + hue + ", 100%, 50%)", stroke: "#000000", made: made };
   }
   function evenlySpacedPoints(start, end, count) {
     var points = [];
@@ -2896,8 +2923,16 @@
   function inspectGridPointColor(col, row, denseSize) {
     var x = denseSize > 1 ? col / (denseSize - 1) : 0;
     var y = denseSize > 1 ? row / (denseSize - 1) : 0;
-    var r = Math.round(x * 255), g = Math.round(y * 255), b = Math.round(0.5 * 255);
-    return { r: r, g: g, b: b, fill: "rgb(" + r + "," + g + "," + b + ")", stroke: "#000000" };
+    var rgb = ColorBlind.on() ? ColorBlind.gridColor(x, y) : [x, y, 0.5];
+    var r = Math.round(rgb[0] * 255), g = Math.round(rgb[1] * 255), b = Math.round(rgb[2] * 255);
+    return { r: r, g: g, b: b, fill: "rgb(" + r + "," + g + "," + b + ")", stroke: "#000000", made: ["grid", col, row, denseSize] };
+  }
+  function remadeInspectColor(color) {
+    var m = color && color.made;
+    if (!m) return color;
+    if (m[0] === "point") return lockedPointColor(m[1]);
+    if (m[0] === "line") return inspectLinePointColor(m[1], m[2]);
+    return inspectGridPointColor(m[1], m[2], m[3]);
   }
   function averageRgbFill(colorA, colorB) {
     return "rgb(" + Math.round((colorA.r + colorB.r) / 2) + "," + Math.round((colorA.g + colorB.g) / 2) + "," + Math.round((colorA.b + colorB.b) / 2) + ")";
@@ -4506,7 +4541,7 @@
 
   function reuseLookKey() {
     return [sceneGeneration, renderedSteps(), simulationSteps, displayMode ? displayMode.id : 0,
-      colorZoomEnabled ? 1 : 0, lowSaturationEnabled ? 1 : 0, bounceMaxValue, canvas.width, canvas.height].join(" ") +
+      colorZoomEnabled ? 1 : 0, lowSaturationEnabled ? 1 : 0, ColorBlind.id(), bounceMaxValue, canvas.width, canvas.height].join(" ") +
       (frictionUniform ? " " + drawnFriction() : "");
   }
 
@@ -5489,7 +5524,110 @@
 
     row.addEventListener("click", function () { setDisplayMode(mode); });
     displayModePanelBody.appendChild(row);
-    displayModeRows.push({ mode: mode, row: row });
+    var entry = { mode: mode, row: row, img: img };
+    // Lazy loading still decides when: the first load of the original is kept for recoloring.
+    img.addEventListener("load", function () {
+      if (img.dataset.colorBlind) return;
+      if (!thumbnailPixels[mode.value]) thumbnailPixels[mode.value] = imagePixels(img);
+      paintThumbnail(entry);
+    });
+    displayModeRows.push(entry);
+  });
+
+  // ---- The rows' pictures under Color Blind Support: each pixel's own hue says what it showed ----
+  var thumbnailPixels = {};
+  function imagePixels(img) {
+    var c = document.createElement("canvas");
+    c.width = img.naturalWidth;
+    c.height = img.naturalHeight;
+    var cx = c.getContext("2d");
+    cx.drawImage(img, 0, 0);
+    return cx.getImageData(0, 0, c.width, c.height);
+  }
+  // Laplacian keeps its blue and orange for both dichromacies, as laplacianColor does.
+  function thumbnailRecolors(value) {
+    return ColorBlind.on() && (value !== "laplacian" || ColorBlind.mode() === "monochrome");
+  }
+  function paintThumbnail(entry) {
+    var img = entry.img, value = entry.mode.value, original = thumbnailPixels[value];
+    if (!thumbnailRecolors(value)) {
+      if (img.dataset.colorBlind) {
+        delete img.dataset.colorBlind;
+        img.src = "assets/" + value + ".jpg";
+      }
+      return;
+    }
+    if (!original || img.dataset.colorBlind === ColorBlind.mode()) return;
+    var out = new ImageData(original.width, original.height), src = original.data, dst = out.data;
+    for (var i = 0; i < src.length; i += 4) {
+      var rgb = recolorThumbnailPixel(value, src[i] / 255, src[i + 1] / 255, src[i + 2] / 255);
+      dst[i] = rgb[0] * 255;
+      dst[i + 1] = rgb[1] * 255;
+      dst[i + 2] = rgb[2] * 255;
+      dst[i + 3] = 255;
+    }
+    var c = document.createElement("canvas");
+    c.width = out.width;
+    c.height = out.height;
+    c.getContext("2d").putImageData(out, 0, 0);
+    img.dataset.colorBlind = ColorBlind.mode();
+    img.src = c.toDataURL("image/jpeg", 0.92);
+  }
+  // The inverse of each mode's shader colors (hsl2rgb at s 1, lightness 0.5 or 0.5 * magnitude), then the new scale.
+  function recolorThumbnailPixel(value, r, g, b) {
+    var max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min, l = (max + min) / 2, h = 0;
+    if (d > 0) {
+      if (max === r) h = 60 * (((g - b) / d + 6) % 6);
+      else if (max === g) h = 60 * ((b - r) / d + 2);
+      else h = 60 * ((r - g) / d + 4);
+    }
+    var t = h <= 300 ? (300 - h) / 300 : (h > 330 ? 1 : 0);
+    if (value === "laplacian") return ColorBlind.diverging((h >= 90 && h < 300 ? -1 : 1) * Math.min(1, 2 * l));
+    if (value === "gradient") {
+      var a = h * Math.PI / 180;
+      return ColorBlind.vector(Math.cos(a), Math.sin(a), Math.min(1, 2 * l));
+    }
+    if (value === "contours") {
+      var line = ColorBlind.sequential(0.2 + 0.8 * t);
+      return [line[0] * max, line[1] * max, line[2] * max];
+    }
+    return ColorBlind.sequential(t);
+  }
+
+  // ---- Color Blind Support changed (color-blind.js): the map, its pictures and every inspected point ----
+  function syncLowSaturationAvailability() {
+    lowSaturationCheckbox.disabled = ColorBlind.on();
+    lowSaturationField.title = ColorBlind.on() ? "Low Saturation is off while Color Blind Support is on" : "";
+  }
+  syncLowSaturationAvailability();
+  function recolorInspected() {
+    function recolor(entry) {
+      if (entry) entry.color = remadeInspectColor(entry.color);
+    }
+    function restroke(segments, lineEls, colorAt) {
+      segments.forEach(function (pair, i) {
+        lineEls[i].setAttribute("stroke", averageRgbFill(colorAt(pair[0]), colorAt(pair[1])));
+      });
+    }
+    inspectedGroups.forEach(function (group) {
+      group.points.forEach(recolor);
+      if (group.type === "grid") restroke(group.segments, group.meshLineEls, function (i) { return group.points[i].color; });
+    });
+    if (lockJob) {
+      lockJob.entries.forEach(recolor);
+      if (lockJob.type === "grid") restroke(lockJob.segments, lockJob.meshLineEls, lockJob.colorOf);
+    }
+    lockQueue.forEach(function (job) {
+      if (job.type === "grid") restroke(job.segments, job.meshLineEls, job.colorOf);
+    });
+    updateInspectUI();
+  }
+  ColorBlind.onChange(function () {
+    syncLowSaturationAvailability();
+    recolorInspected();
+    displayModeRows.forEach(paintThumbnail);
+    markDirty();
+    if (statsPanel) statsPanel.relayout();
   });
 
   function syncDisplayModeUI() {
@@ -5733,6 +5871,7 @@
   // OKLCH, not HSL, for this animated window: HSL lightness isn't perceptually uniform, so a sweeping
   // hue would flash. Under Color Zoom the hue repeats 10x; chroma/lightness stay fixed.
   function hoverOutputColor(t) {
+    if (ColorBlind.on()) return colorBlindOutputColor(t);
     var hue = colorZoomEnabled ? hueRangeMaxValue * (1 - (t * 10 % 1)) : hueRangeMaxValue * (1 - t);
     return "oklch(60% 0.136 " + hue.toFixed(2) + ")";
   }
@@ -5740,6 +5879,7 @@
   // The exact grid color (colorMap's HSL): only for the FINAL frozen frame, where nothing flashes and
   // the swatch can match the pixel. In a derived display mode it still shows the value's own color.
   function hoverOutputColorFinal(t) {
+    if (ColorBlind.on()) return colorBlindOutputColor(t);
     var hue, sat;
     if (colorZoomEnabled) {
       hue = hueRangeMaxValue * (1 - (t * 10 % 1));
@@ -5750,6 +5890,16 @@
     }
     if (lowSaturationEnabled) return lowSaturate(hslToRgb(hue, sat, 0.5));
     return "hsl(" + hue.toFixed(2) + ", " + (sat * 100).toFixed(2) + "%, 50%)";
+  }
+
+  // The shader's colorMap under Color Blind Support, for the swatch and the animated window alike.
+  function colorBlindOutputColor(t) {
+    t = Math.min(1, Math.max(0, t));
+    var ramp = isCircularOutput ? ColorBlind.cyclic : ColorBlind.sequential;
+    if (!colorZoomEnabled) return ColorBlind.css(ramp(t));
+    var c = ramp(t * 10 % 1), sat = t * 0.6 + 0.4;
+    var luma = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    return ColorBlind.css(c.map(function (v) { return luma + (v - luma) * sat; }));
   }
 
   function hslToRgb(h, s, l) {
@@ -5911,8 +6061,9 @@
       var pointer = PhysicsHingeGeometry.offscreenPointer(
         at.x, at.y, scene.frameWidth, scene.frameHeight, maxLength);
       if (!pointer) return;
+      var pal = ColorBlind.palette();
       var color = colorOverride ? colorOverride.fill
-        : (scene.bodies[key].isAnchored ? "#7a8199" : "#7ea0ff");
+        : (scene.bodies[key].isAnchored ? pal.anchoredStroke : pal.bodyStroke);
       drawHoverOffscreenArrow(pointer, color, colorOverride ? colorOverride.stroke : null);
     });
   }
@@ -6001,8 +6152,9 @@
   }
 
   function drawHoverBody(spec, row, colorOverride, hollow) {
-    var fill = colorOverride ? colorOverride.fill : (spec.isAnchored ? "#5a6178" : "#3a63d1");
-    var stroke = colorOverride ? colorOverride.stroke : (spec.type === "circle" ? (spec.isAnchored ? "#7a8199" : "#7ea0ff") : (spec.isAnchored ? "#5a6178" : "#3a63d1"));
+    var pal = ColorBlind.palette();
+    var fill = colorOverride ? colorOverride.fill : (spec.isAnchored ? pal.anchoredFill : pal.bodyFill);
+    var stroke = colorOverride ? colorOverride.stroke : (spec.type === "circle" ? (spec.isAnchored ? pal.anchoredStroke : pal.bodyStroke) : fill);
     hoverCtx.fillStyle = fill;
     if (hollow) {
       var outline = colorOverride ? colorOverride.fill : stroke;
@@ -6177,7 +6329,6 @@
   // Cheap pure-JS path: the offset scene at t=0, no WebGL, fast enough for every mousemove; t=0 here is
   // the replay's first frame. A VELOCITY Input starts every pixel in the same place, so only this preview
   // draws the throw as an arrow (the editor's); in the replay the motion shows it.
-  var HOVER_VELOCITY_ARROW_COLOR = "#e06bff"; // physics-ui.js's VELOCITY_ARROW_COLOR
   function drawHoverInputVelocityArrows(offsetScene) {
     var targets = {};
     [scene.xInput, scene.yInput].forEach(function (input) {
@@ -6197,8 +6348,8 @@
       var tipX = body.x + ux * len, tipY = body.y + uy * len;
       var head = Math.min(9 * px, Math.max(5 * px, len * 0.25));
       hoverCtx.save();
-      hoverCtx.strokeStyle = HOVER_VELOCITY_ARROW_COLOR;
-      hoverCtx.fillStyle = HOVER_VELOCITY_ARROW_COLOR;
+      hoverCtx.strokeStyle = ColorBlind.palette().velocity;
+      hoverCtx.fillStyle = ColorBlind.palette().velocity;
       hoverCtx.lineWidth = 2 * px;
       hoverCtx.lineCap = "round";
       hoverCtx.beginPath();
@@ -7471,6 +7622,7 @@
       "uniform float u_gridStride;",
       "uniform bool u_colorZoom;",
       "uniform bool u_lowSaturation;",
+      "uniform int u_colorBlind;",
       "uniform int u_durationSteps;",
       "uniform float u_bounceMax;",
       "uniform int u_displayMode;",
@@ -7577,7 +7729,7 @@
   }
 
   var PLAYBACK_STEP_UNIFORMS = ["resolution", "gridStride", "gridOrigin", "centerHi", "centerLo", "centerLo2", "centerLo3", "scale", "state", "init", "baseStep", "steps", "group", "tileOrigin", "stencil"];
-  var PLAYBACK_COLOR_UNIFORMS = ["state", "stateSize", "stateSteps", "gridStride", "colorZoom", "lowSaturation", "durationSteps", "bounceMax", "displayMode", "targetOrigin", "stencil", "sampleField", "ftleInit", "ftleRange"];
+  var PLAYBACK_COLOR_UNIFORMS = ["state", "stateSize", "stateSteps", "gridStride", "colorZoom", "lowSaturation", "colorBlind", "durationSteps", "bounceMax", "displayMode", "targetOrigin", "stencil", "sampleField", "ftleInit", "ftleRange"];
 
   function finishedPlaybackProgram(build, uniformNames) {
     var prog = build.program;
@@ -7989,6 +8141,7 @@
     gl.uniform1f(u.gridStride, spec.stride);
     gl.uniform1i(u.colorZoom, colorZoomEnabled ? 1 : 0);
     gl.uniform1i(u.lowSaturation, lowSaturationEnabled ? 1 : 0);
+    gl.uniform1i(u.colorBlind, ColorBlind.id());
     gl.uniform1i(u.durationSteps, simulationSteps);
     gl.uniform1f(u.bounceMax, opts.bounceMax === undefined ? bounceMaxValue : opts.bounceMax);
     gl.uniform1i(u.displayMode, displayMode.id);
@@ -8343,6 +8496,7 @@
     gl.uniform1f(u.gridStride, res.stride);
     gl.uniform1i(u.colorZoom, colorZoomEnabled ? 1 : 0);
     gl.uniform1i(u.lowSaturation, lowSaturationEnabled ? 1 : 0);
+    gl.uniform1i(u.colorBlind, ColorBlind.id());
     gl.uniform1i(u.durationSteps, simulationSteps);
     gl.uniform1f(u.bounceMax, bounceMaxValue);
     gl.uniform1i(u.displayMode, displayMode.id);

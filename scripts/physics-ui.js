@@ -209,7 +209,6 @@
   // Planet Mode's sky. Stars are hashed per cell counted from the frame center, so a resize
   // uncovers more sky without moving any star.
   var STAR_CELL = 64;
-  var STAR_TINTS = ["255,255,255", "207,220,255", "255,240,214"];
   var STAR_TWINKLE_MS = 2600;
   var starTwinkleStart = -Infinity, starTwinkleFrame = 0;
   function starRandom(cx, cy, salt) {
@@ -241,7 +240,7 @@
             alpha *= Math.min(1, Math.max(0, (t - 0.45 * phase) / 0.15)) * (1 - 0.85 * fade * flicker);
           }
           if (alpha <= 0) continue;
-          var tint = STAR_TINTS[Math.floor(starRandom(cx, cy, s + 6) * STAR_TINTS.length)];
+          var tints = ColorBlind.palette().stars, tint = tints[Math.floor(starRandom(cx, cy, s + 6) * tints.length)];
           ctx.globalAlpha = alpha;
           if (m > 0.9) {
             var glow = ctx.createRadialGradient(x, y, 0, x, y, radius * 5);
@@ -276,8 +275,9 @@
 
   function drawBody(body, selected) {
     ctx.save();
-    ctx.fillStyle = body.isAnchored ? "#5a6178" : "#3a63d1";
-    ctx.strokeStyle = selected ? "#ffcf4d" : (body.isAnchored ? "#7a8199" : "#7ea0ff");
+    var p = ColorBlind.palette();
+    ctx.fillStyle = body.isAnchored ? p.anchoredFill : p.bodyFill;
+    ctx.strokeStyle = selected ? p.selected : (body.isAnchored ? p.anchoredStroke : p.bodyStroke);
     ctx.lineWidth = selected ? 3 : 2;
     if (body.type === "circle") {
       var drawRadius = playbackDisplayRadius(body.radius);
@@ -300,11 +300,11 @@
       ctx.lineTo(endpoints[1].x, endpoints[1].y);
       if (selected) {
         ctx.lineWidth = PhysicsEngine.LINE_THICKNESS + 4;
-        ctx.strokeStyle = "#ffcf4d";
+        ctx.strokeStyle = p.selected;
         ctx.stroke();
       }
       ctx.lineWidth = PhysicsEngine.LINE_THICKNESS;
-      ctx.strokeStyle = body.isAnchored ? "#5a6178" : "#3a63d1";
+      ctx.strokeStyle = body.isAnchored ? p.anchoredFill : p.bodyFill;
       ctx.stroke();
     }
     ctx.restore();
@@ -315,7 +315,6 @@
   // bodies in. The rim is an ellipse stroked along its own inset path; PhysicsEngine.portholeOval is
   // the two-arc fit of this outline that the physics bounces off. Local coordinates: x along the
   // port hole, y toward its back.
-  var PORTHOLE_PAINT = { orange: "#ff8a1f", green: "#36d399" };
   var PORTHOLE_RIM = 5;
   var PORTHOLE_BULGE = 2;
   var PORTHOLE_BULGE_SPAN = 0.9;
@@ -384,7 +383,8 @@
   function drawPorthole(c, x, y, angle, length, color, opts) {
     opts = opts || {};
     var o = PhysicsEngine.portholeOval(length);
-    var paint = opts.paint || PORTHOLE_PAINT[color] || PORTHOLE_PAINT.orange;
+    var p = ColorBlind.palette();
+    var paint = opts.paint || p.porthole[color] || p.porthole.orange;
     var light = lighten(paint, 0.45), streaks = portholeStreaks(o);
     var far = streaks.filter(function (s) { return s.y <= 0; }), near = streaks.filter(function (s) { return s.y > 0; });
     c.save();
@@ -395,10 +395,10 @@
       c.lineWidth = PORTHOLE_RIM + opts.underlay.width; c.strokeStyle = opts.underlay.color; c.stroke();
     }
     if (opts.selected) {
-      c.lineWidth = PORTHOLE_RIM + 6; c.strokeStyle = "#ffcf4d"; c.stroke();
+      c.lineWidth = PORTHOLE_RIM + 6; c.strokeStyle = p.selected; c.stroke();
     }
     // An anchored port hole's rim is the anchored gray; its light keeps the port hole's color.
-    c.lineWidth = PORTHOLE_RIM; c.strokeStyle = opts.anchored && !opts.paint ? "#5a6178" : paint; c.stroke();
+    c.lineWidth = PORTHOLE_RIM; c.strokeStyle = opts.anchored && !opts.paint ? p.anchoredFill : paint; c.stroke();
     c.fillStyle = "#000"; c.fill();
     drawPortholeStreaks(c, far, paint, light);
     c.save();
@@ -429,8 +429,9 @@
   function drawShapePreview(shape) {
     var params = computeShapeParams(shape, shape.current);
     ctx.save();
-    ctx.strokeStyle = "#ffcf4d";
-    ctx.fillStyle = "rgba(255, 207, 77, 0.15)";
+    var p = ColorBlind.palette();
+    ctx.strokeStyle = p.selected;
+    ctx.fillStyle = p.selectedWash;
     ctx.lineWidth = 2;
     ctx.setLineDash([6, 4]);
     if (shape.tool === "circle") {
@@ -441,7 +442,7 @@
       ctx.setLineDash([]);
       ctx.beginPath();
       ctx.arc(shape.start.x, shape.start.y, 3, 0, Math.PI * 2);
-      ctx.fillStyle = "#ffcf4d";
+      ctx.fillStyle = p.selected;
       ctx.fill();
     } else {
       var hx = Math.cos(params.angle) * params.length / 2, hy = Math.sin(params.angle) * params.length / 2;
@@ -471,7 +472,6 @@
   // ---- Starting-velocity arrows (the Set Velocity tool) ----
   // Starting speed per pixel of drag; at 1 the engine's speed cap is beyond a canvas-wide drag.
   var VELOCITY_DRAG_SCALE = 1;
-  var VELOCITY_ARROW_COLOR = "#e06bff";
   var VELOCITY_ARROW_MIN_SPEED = 1;
 
   function velocityFromDrag(drag) {
@@ -497,8 +497,8 @@
     var perpX = -uy, perpY = ux;
 
     ctx.save();
-    ctx.strokeStyle = VELOCITY_ARROW_COLOR;
-    ctx.fillStyle = VELOCITY_ARROW_COLOR;
+    ctx.strokeStyle = ColorBlind.palette().velocity;
+    ctx.fillStyle = ColorBlind.palette().velocity;
     ctx.lineWidth = 2.5;
     ctx.lineCap = "round";
     if (isPreview) ctx.setLineDash([6, 4]); // dashed only while the drag is still live
@@ -540,15 +540,15 @@
     var p = PhysicsEngine.getHingeWorldPoint(hinge, bodies || scene.bodies);
     ctx.beginPath();
     ctx.arc(p.x, p.y, HINGE_RADIUS, 0, Math.PI * 2);
-    ctx.fillStyle = "#ffcf4d";
+    ctx.fillStyle = ColorBlind.palette().selected;
     ctx.fill();
-    ctx.strokeStyle = "#8a6d1a";
+    ctx.strokeStyle = ColorBlind.palette().selectedDark;
     ctx.lineWidth = 2;
     ctx.stroke();
     if (grabbed) {
       ctx.beginPath();
       ctx.arc(p.x, p.y, HINGE_RADIUS + 5, 0, Math.PI * 2);
-      ctx.strokeStyle = "#ffcf4d";
+      ctx.strokeStyle = ColorBlind.palette().selected;
       ctx.lineWidth = 2;
       ctx.stroke();
     }
@@ -561,7 +561,7 @@
     ctx.save();
     ctx.globalAlpha = 0.6;
     ctx.setLineDash([4, 4]);
-    ctx.strokeStyle = "#ffcf4d";
+    ctx.strokeStyle = ColorBlind.palette().selected;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(p.x, p.y);
@@ -570,9 +570,9 @@
     ctx.setLineDash([]);
     ctx.beginPath();
     ctx.arc(drag.current.x, drag.current.y, HINGE_RADIUS, 0, Math.PI * 2);
-    ctx.fillStyle = "#ffcf4d";
+    ctx.fillStyle = ColorBlind.palette().selected;
     ctx.fill();
-    ctx.strokeStyle = "#8a6d1a";
+    ctx.strokeStyle = ColorBlind.palette().selectedDark;
     ctx.lineWidth = 2;
     ctx.stroke();
     ctx.restore();
@@ -592,7 +592,7 @@
     ctx.save();
     ctx.globalAlpha = 0.6;
     ctx.setLineDash([4, 4]);
-    ctx.strokeStyle = SPRING_SELECTED_COLOR;
+    ctx.strokeStyle = ColorBlind.palette().selected;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(mx, my);
@@ -620,8 +620,6 @@
 
   // ---- Springs ----
   // Thickness is stiffness (log scale); coil count follows REST length, so stretch reads as open coils.
-  var SPRING_COLOR = "#c8d3e6";
-  var SPRING_SELECTED_COLOR = "#ffcf4d";
   var SPRING_COIL_AMPLITUDE = 8;   // half the zigzag's width
   var SPRING_COIL_PITCH = 16;      // one full zig-and-zag per this much REST length
   var SPRING_COIL_MAX_PITCH = 44;  // ...but never drawn more open than this, however far it is stretched
@@ -663,14 +661,14 @@
   function drawSpringShape(a, b, stiffness, restLength, selected, alpha, color) {
     ctx.save();
     ctx.globalAlpha = alpha === undefined ? 1 : alpha;
-    color = color || SPRING_COLOR;
+    color = color || ColorBlind.palette().spring;
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
     var width = springLineWidth(stiffness);
     traceSpringPath(a, b, restLength);
     if (selected) {
       ctx.lineWidth = width + 4;
-      ctx.strokeStyle = SPRING_SELECTED_COLOR;
+      ctx.strokeStyle = ColorBlind.palette().selected;
       ctx.stroke();
     }
     ctx.lineWidth = width;
@@ -679,7 +677,7 @@
     [a, b].forEach(function (p) {
       ctx.beginPath();
       ctx.arc(p.x, p.y, Math.max(3.5, width * 0.9), 0, Math.PI * 2);
-      ctx.fillStyle = selected ? SPRING_SELECTED_COLOR : color;
+      ctx.fillStyle = selected ? ColorBlind.palette().selected : color;
       ctx.fill();
     });
     ctx.restore();
@@ -693,7 +691,7 @@
     var ux = dx / len, uy = dy / len;
     var rx = a.x + ux * restLength, ry = a.y + uy * restLength;
     ctx.save();
-    ctx.strokeStyle = SPRING_SELECTED_COLOR;
+    ctx.strokeStyle = ColorBlind.palette().selected;
     ctx.globalAlpha = 0.85;
     ctx.lineWidth = 1.5;
     ctx.setLineDash([3, 4]);
@@ -848,8 +846,8 @@
     ctx.lineTo(-halfLen + halfWid, halfWid);
     ctx.arc(-halfLen + halfWid, 0, halfWid, Math.PI / 2, -Math.PI / 2);
     ctx.closePath();
-    ctx.fillStyle = "#ffcf4d";
-    ctx.strokeStyle = "#8a6d1a";
+    ctx.fillStyle = ColorBlind.palette().selected;
+    ctx.strokeStyle = ColorBlind.palette().selectedDark;
     ctx.lineWidth = 2;
     ctx.fill();
     ctx.stroke();
@@ -857,7 +855,7 @@
 
   function drawHandleGripLines() {
     var gripHalfLen = 5, gripSpacing = 3;
-    ctx.strokeStyle = "#1b1e27";
+    ctx.strokeStyle = ColorBlind.palette().hole;
     ctx.lineWidth = 1.5;
     [-gripSpacing, gripSpacing].forEach(function (gx) {
       ctx.beginPath();
@@ -878,8 +876,8 @@
 
     drawHandleCapsuleBase(halfLen, halfWid);
 
-    ctx.strokeStyle = "#1b1e27";
-    ctx.fillStyle = "#1b1e27";
+    ctx.strokeStyle = ColorBlind.palette().hole;
+    ctx.fillStyle = ColorBlind.palette().hole;
     ctx.lineCap = "round";
     var tipDist = halfLen - 3, headLen = 6, headHalfWidth = 3.5;
     var shaftEnd = tipDist - headLen;
@@ -983,8 +981,8 @@
     var sagitta = R * (1 - Math.cos(half));
     var arcCenterY = R - sagitta / 2;
     var startAngle = -Math.PI / 2 - half, endAngle = -Math.PI / 2 + half;
-    ctx.strokeStyle = "#1b1e27";
-    ctx.fillStyle = "#1b1e27";
+    ctx.strokeStyle = ColorBlind.palette().hole;
+    ctx.fillStyle = ColorBlind.palette().hole;
     ctx.lineCap = "round";
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -1062,12 +1060,12 @@
     ctx.save();
     ctx.beginPath();
     ctx.arc(geo.x, geo.y, ANCHOR_ICON_RADIUS, 0, Math.PI * 2);
-    ctx.fillStyle = "#ffcf4d";
-    ctx.strokeStyle = "#8a6d1a";
+    ctx.fillStyle = ColorBlind.palette().selected;
+    ctx.strokeStyle = ColorBlind.palette().selectedDark;
     ctx.lineWidth = 2;
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = "#1b1e27";
+    ctx.fillStyle = ColorBlind.palette().hole;
     ctx.font = "14px sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -1126,7 +1124,7 @@
     ctx.save();
     ctx.beginPath();
     ctx.arc(zone.x, zone.y, r, 0, Math.PI * 2);
-    ctx.fillStyle = armed ? "#ff7a72" : "#ff5f56";
+    ctx.fillStyle = armed ? ColorBlind.palette().dangerArmed : ColorBlind.palette().danger;
     ctx.fill();
     ctx.strokeStyle = "rgba(0, 0, 0, 0.25)";
     ctx.lineWidth = 2;
@@ -1181,9 +1179,9 @@
 
   function drawMappingBadges() {
     var entries = [
-      { mapping: scene.xInput, label: "X", color: "#ff6b6b" },
-      { mapping: scene.yInput, label: "Y", color: "#6bafff" },
-      { mapping: scene.output, label: "O", color: "#7ee0a0" },
+      { mapping: scene.xInput, label: "X", color: ColorBlind.palette().axisX },
+      { mapping: scene.yInput, label: "Y", color: ColorBlind.palette().axisY },
+      { mapping: scene.output, label: "O", color: ColorBlind.palette().axisO },
     ].filter(function (e) { return e.mapping && scene.bodies[e.mapping.body]; });
 
     var byBody = {};
@@ -1198,7 +1196,7 @@
       var pointer = PhysicsHingeGeometry.offscreenPointer(
         body.x, body.y, scene.frameWidth, scene.frameHeight, offscreenArrowMaxLength());
       if (!pointer) return;
-      drawOffscreenArrow(pointer, body.isAnchored ? "#7a8199" : "#7ea0ff");
+      drawOffscreenArrow(pointer, body.isAnchored ? ColorBlind.palette().anchoredStroke : ColorBlind.palette().bodyStroke);
     });
 
     ctx.font = "bold 12px Saira, sans-serif";
@@ -2076,7 +2074,7 @@
   // ---- X / Y input mapping ----
 
   function bodyOptionLabel(body, index) {
-    return "Body " + index + " (" + (body.type === "porthole" ? body.color + " port hole" : body.type) + ")";
+    return "Body " + index + " (" + (body.type === "porthole" ? ColorBlind.palette().portholeName[body.color] + " port hole" : body.type) + ")";
   }
 
   function propsListFor(bodyIndex) {
@@ -2769,6 +2767,8 @@
   // Same rainbow as the fractal grid, hue 360 (min) down to 0 (max). OKLCH, not HSL: HSL lightness
   // isn't perceptually uniform and flashes as the hue sweeps on something animating in place.
   function outputColorForNormalized(t, hueRange) {
+    // Color Blind Support's scales are the map's own: cyclic for a wrapping range, sequential otherwise.
+    if (ColorBlind.on()) return ColorBlind.css((hueRange || 360) === 360 ? ColorBlind.cyclic(t) : ColorBlind.sequential(t));
     var hue = (hueRange || 360) * (1 - t);
     return "oklch(60% 0.136 " + hue.toFixed(2) + ")";
   }
@@ -3007,6 +3007,14 @@
       else el.style.removeProperty("--output-key");
     });
   }
+
+  // Color Blind Support changed: the Output's colors, port hole names in the menus, and everything drawn.
+  ColorBlind.onChange(function () {
+    outputKeyControlsState = null;
+    refreshMappingUI();
+    if (isPlaying) updateOutputBackground(currentDisplayStep());
+    render();
+  });
 
   // Set Input buttons turn green once both inputs are that kind, on any objects.
   var inputToolsState = null;

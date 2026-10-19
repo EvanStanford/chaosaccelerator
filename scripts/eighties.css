@@ -6,7 +6,7 @@
 /* Saira, Latin subset, every weight in one variable file (SIL OFL, assets/fonts/OFL.txt). */
 @font-face {
   font-family: "Saira";
-  src: url("../assets/fonts/saira-latin.woff2?v=m165") format("woff2");
+  src: url("../assets/fonts/saira-latin.woff2?v=m166") format("woff2");
   font-weight: 100 900;
   font-display: swap;
 }
@@ -250,7 +250,7 @@ body.eighties { font-family: var(--font); background: var(--bg); }
 .eighties .credits { color: var(--text-dim); text-shadow: 0 0 3px #000, 0 0 6px #000; }
 /* Wrapped credits would run under the watermark. */
 @media (max-width: 640px) {
-  .eighties .foot { padding-bottom: 22px; }
+  .eighties .foot { padding-bottom: calc(var(--corner-bottom) + 22px - max(10px, env(safe-area-inset-bottom, 0px))); }
 }
 
 /* ---- The corner menu ---- */
@@ -307,7 +307,7 @@ body.eighties { font-family: var(--font); background: var(--bg); }
 .eighties-toggle {
   position: fixed;
   left: max(12px, env(safe-area-inset-left));
-  bottom: 8px;
+  bottom: calc(var(--corner-bottom) - 2px);
   z-index: 2000;
   display: flex;
   align-items: center;

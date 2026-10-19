@@ -283,6 +283,70 @@
   display: none;
 }
 
+/* ---- Color Blind Support: each option drawn on its own Output color scale ---- */
+.color-blind-field {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+.color-blind-field > span {
+  color: var(--text-dim);
+  flex-shrink: 0;
+  line-height: 30px;
+}
+.color-blind-select {
+  flex: 1;
+  min-width: 0;
+}
+#color-blind-list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  outline: none;
+}
+#color-blind-field .color-blind-option {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  color: #ffffff;
+  text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 0 2px #000;
+  cursor: pointer;
+}
+#color-blind-list .color-blind-option + .color-blind-option { margin-top: 4px; }
+#color-blind-button::after {
+  content: "\25BE";
+  float: right;
+}
+#color-blind-list .color-blind-option[aria-selected="true"],
+#color-blind-list .color-blind-option.is-active {
+  border-color: var(--text);
+}
+#color-blind-field .color-blind-option[data-value="off"] {
+  background: var(--bg-input);
+  color: var(--text);
+  font-weight: normal;
+  text-shadow: none;
+}
+/* Cividis */
+#color-blind-field .color-blind-option[data-value="red-green"] {
+  background: linear-gradient(to right, #00204d, #00336f, #39486b, #575c6d, #707173, #8a8779, #a69d75, #c4b56c, #e4cf5b, #ffea46);
+}
+/* Inferno */
+#color-blind-field .color-blind-option[data-value="blue-yellow"] {
+  background: linear-gradient(to right, #000004, #1b0c42, #4b0c6b, #781c6d, #a52c60, #cf4446, #ed6925, #fb9a06, #f7d03c, #fcffa4);
+}
+#color-blind-field .color-blind-option[data-value="monochrome"] {
+  background: linear-gradient(to right in oklab, oklch(30% 0 0), oklch(97% 0 0));
+}
+
 /* ---- The shared settings body (#shared-settings-body) while it is a guest in the builder's panel ---- */
 #editor-settings-mount {
   padding: 0;
@@ -323,7 +387,7 @@
 }
 
 /* Simple Mode: the map keeps only Inspect and Settings, the builder only the basic tools. */
-html.simple-mode #shared-settings-body > :not(#mode-switch, .volume-field, #grid-btn-tips, #grid-btn-reset-all),
+html.simple-mode #shared-settings-body > :not(#mode-switch, .volume-field, #color-blind-field, #grid-btn-tips, #grid-btn-reset-all),
 html.simple-mode #menu-stats,
 html.simple-mode #grid-btn-stats,
 html.simple-mode #grid-stats-panel,

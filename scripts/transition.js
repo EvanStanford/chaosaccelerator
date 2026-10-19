@@ -173,9 +173,9 @@
         ctx.stroke();
       } else {
         // The '80s theme: purple seams with a glow and a thin white core, like the landing page's grid.
-        ctx.strokeStyle = "#a855ff";
+        ctx.strokeStyle = ColorBlind.palette().seam;
         ctx.lineWidth = border * 2;
-        ctx.shadowColor = "#9933ff";
+        ctx.shadowColor = ColorBlind.palette().seamGlow;
         ctx.shadowBlur = Math.min(border * 6, cw * 0.15);
         ctx.stroke();
         ctx.stroke();

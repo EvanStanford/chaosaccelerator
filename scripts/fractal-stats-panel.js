@@ -113,7 +113,7 @@
     ctx.lineTo(c.w, baseY);
     ctx.stroke();
 
-    var MEDIAN_COLOR = "#ffffff", MEAN_COLOR = "#9399ad";
+    var MEDIAN_COLOR = ColorBlind.palette().median, MEAN_COLOR = ColorBlind.palette().mean;
     var marks = [];
     if (dist.median !== undefined && isFinite(dist.median)) {
       marks.push({ t: dist.median, text: "median", color: MEDIAN_COLOR });
@@ -227,7 +227,7 @@
         if (ts === 0) ctx.moveTo(tx, ty); else ctx.lineTo(tx, ty);
       }
       ctx.closePath();
-      ctx.strokeStyle = "#c9a227";
+      ctx.strokeStyle = ColorBlind.palette().gold;
       ctx.lineWidth = 2;
       ctx.stroke();
     }
@@ -244,7 +244,7 @@
         if (s === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
       }
       ctx.closePath();
-      ctx.fillStyle = "rgba(91, 140, 255, 0.28)";
+      ctx.fillStyle = ColorBlind.palette().accentWash;
       ctx.fill();
       ctx.strokeStyle = p.accent;
       ctx.lineWidth = 1.5;
@@ -278,12 +278,12 @@
     return function () { drawRose(canvas, g); };
   }
 
-  // ---- The shape census, as a pie: warm for ridge, cool for valley ----
+  // ---- The shape census, as a pie: warm for ridge, cool for valley (colors by key in ColorBlind.palette()) ----
   var SHAPES = [
-    { key: "ridge", title: "Ridges", color: "#ffd479", fraction: "ridgeFraction" },
-    { key: "valley", title: "Valleys", color: "#7fd4ff", fraction: "valleyFraction" },
-    { key: "saddle", title: "Saddles", color: "#c58cff", fraction: "saddleFraction" },
-    { key: "flat", title: "Flat", color: "#6b7280", fraction: "flatFraction" },
+    { key: "ridge", title: "Ridges", fraction: "ridgeFraction" },
+    { key: "valley", title: "Valleys", fraction: "valleyFraction" },
+    { key: "saddle", title: "Saddles", fraction: "saddleFraction" },
+    { key: "flat", title: "Flat", fraction: "flatFraction" },
   ];
 
   // Draws the pie and returns its geometry (center, radius, slice spans) for hit testing; `hot` is raised.
@@ -307,7 +307,7 @@
       ctx.moveTo(cx, cy);
       ctx.arc(cx, cy, radius + (isHot ? 4 : 0), at, at + sweep);
       ctx.closePath();
-      ctx.fillStyle = SHAPES[i].color;
+      ctx.fillStyle = ColorBlind.palette()[SHAPES[i].key];
       ctx.fill();
       ctx.strokeStyle = isHot ? "#ffffff" : p.inputBg;
       ctx.lineWidth = isHot ? 2 : 1.5;
@@ -348,7 +348,7 @@
     body.appendChild(holder);
     var legend = {};
     SHAPES.forEach(function (shape) {
-      legend[shape.key] = legendRow(body, shape.color, shape.title, percent(g[shape.fraction], 1));
+      legend[shape.key] = legendRow(body, ColorBlind.palette()[shape.key], shape.title, percent(g[shape.fraction], 1));
     });
 
     // ---- Hovering a class lights its legend line, its slice, and its samples on the map ----

@@ -229,7 +229,9 @@
 
   function frameKey(f) {
     var key = [f.center.x, f.center.xLo, f.center.y, f.center.yLo, f.scale, f.step].join(" ");
-    return f.friction === undefined ? key : key + " " + f.friction;
+    if (f.friction !== undefined) key += " " + f.friction;
+    // Frames from another Color Blind Support setting are not this movie's.
+    return ColorBlind.on() ? key + " " + ColorBlind.mode() : key;
   }
 
   function finishRender() {

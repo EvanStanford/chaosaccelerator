@@ -44,10 +44,15 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 .page-wide .section { max-width: 980px; margin-left: auto; margin-right: auto; }
 
 /* Site name, lower right; same mark as #watermark in app-shell.css. */
+/* Bottom gap for the watermark and '80s switch; phones get room above the gesture bar. */
+:root { --corner-bottom: calc(env(safe-area-inset-bottom, 0px) + 10px); }
+@media (pointer: coarse) {
+  :root { --corner-bottom: max(36px, calc(env(safe-area-inset-bottom, 0px) + 14px)); }
+}
 .watermark {
   position: fixed;
   right: 12px;
-  bottom: 12px;
+  bottom: calc(var(--corner-bottom) + 2px);
   z-index: 2000;
   color: #fff;
   font-size: 12px;

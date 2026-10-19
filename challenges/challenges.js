@@ -98,7 +98,8 @@
   }
   function eventText(token, colors) {
     if (token.charAt(0) !== "w") return token;
-    return colors[Number(token.slice(1))] === "green" ? "green to orange" : "orange to green";
+    var name = ColorBlind.palette().portholeName;
+    return colors[Number(token.slice(1))] === "green" ? name.green + " to " + name.orange : name.orange + " to " + name.green;
   }
   function orderText(c) {
     var goal = c.goal.map(String), colors = portholeColors(c.scene);
@@ -125,7 +126,8 @@
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     var x = w - 6, y = 9;
-    [["yours", "#5b8cff"], ["goal", "#c9a227"]].forEach(function (item) {
+    var p = ColorBlind.palette();
+    [["yours", p.accent], ["goal", p.gold]].forEach(function (item) {
       x -= ctx.measureText(item[0]).width;
       ctx.fillStyle = "#9399ad";
       ctx.fillText(item[0], x, y);
@@ -165,15 +167,16 @@
       }
       ctx.closePath();
     }
+    var p = ColorBlind.palette();
     polygon(target, 0.01);
-    ctx.strokeStyle = "#c9a227";
+    ctx.strokeStyle = p.gold;
     ctx.lineWidth = 2;
     ctx.stroke();
     if (plot) {
       polygon(plot, 1);
-      ctx.fillStyle = "rgba(91, 140, 255, 0.28)";
+      ctx.fillStyle = p.accentWash;
       ctx.fill();
-      ctx.strokeStyle = "#5b8cff";
+      ctx.strokeStyle = p.accent;
       ctx.lineWidth = 1.5;
       ctx.stroke();
       drawLegend(ctx, w);
@@ -209,7 +212,7 @@
     ctx.stroke();
     var x0 = pad + inset, x1 = w - pad - inset, y0 = pad + inset, y1 = h - pad - inset;
     ctx.setLineDash([6, 5]);
-    ctx.strokeStyle = "#c9a227";
+    ctx.strokeStyle = ColorBlind.palette().gold;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(x0, rising ? y1 : y0);
@@ -222,7 +225,7 @@
     plot.forEach(function (v) { if (v !== null) { lo = Math.min(lo, v); hi = Math.max(hi, v); } });
     if (!(hi >= lo)) return;
     if (hi - lo < 1) { lo = (hi + lo) / 2 - 0.5; hi = lo + 1; }
-    ctx.strokeStyle = "#5b8cff";
+    ctx.strokeStyle = ColorBlind.palette().accent;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     var pen = false;
@@ -361,7 +364,7 @@
     document.body.appendChild(canvas);
     var w = window.innerWidth, h = window.innerHeight;
     canvas.width = w * dpr; canvas.height = h * dpr;
-    var colors = ["#c9a227", "#5b8cff", "#36d399", "#ff8a1f", "#ff5f9e", "#ffffff"], pieces = [];
+    var colors = ColorBlind.palette().confetti, pieces = [];
     for (var i = 0; i < 240; i++) {
       var fromLeft = i % 2 === 0, angle = (fromLeft ? -1 : 1) * (0.35 + Math.random() * 0.5);
       var speed = 600 + Math.random() * 700;

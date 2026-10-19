@@ -1,0 +1,107 @@
+/* CPAL-1.0 License. See chaosaccelerator.com/license.html */
+
+/* Color Blind Support (color-blind.js sets html[data-color-blind]): the pages' own colors per mode.
+   Loaded after every other sheet; the canvases and the map take theirs from ColorBlind.palette(). */
+
+/* Every mode's scales have light stretches: the Set Output swatch's label gets a full outline. */
+html[data-color-blind] button.tool-btn.output-key {
+  text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 0 2px #000;
+}
+
+/* Trick Shot's goal tile (challenge-frame.css): these scales reach white, so the tile is striped too. */
+html[data-color-blind].challenge-trick #grid-canvas-area {
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='180'%20height='220'%3E%3Ctext%20x='90'%20y='64'%20text-anchor='middle'%20font-family='Helvetica,Arial,sans-serif'%20font-weight='700'%20font-size='34'%20fill='%23c9a227'%3EGOAL!%3C/text%3E%3Ctext%20x='0'%20y='174'%20text-anchor='middle'%20font-family='Helvetica,Arial,sans-serif'%20font-weight='700'%20font-size='34'%20fill='%23c9a227'%3EGOAL!%3C/text%3E%3Ctext%20x='180'%20y='174'%20text-anchor='middle'%20font-family='Helvetica,Arial,sans-serif'%20font-weight='700'%20font-size='34'%20fill='%23c9a227'%3EGOAL!%3C/text%3E%3C/svg%3E"), repeating-linear-gradient(45deg, #ffffff 0 10px, #c4c4c4 10px 20px);
+  background-size: 180px 220px, auto;
+}
+
+/* ---- Red-Green: danger and error move to vermillion and orange, away from the greens ---- */
+html[data-color-blind="red-green"] {
+  --danger: #d55e00;
+  --danger-hover: #e8743a;
+}
+html[data-color-blind="red-green"] .status-playing { background: #3a3510; color: #ffe066; }
+html[data-color-blind="red-green"] .status-error { background: #3a1c0a; color: #f0a060; }
+html[data-color-blind="red-green"] .app-toast { color: #ffb27a; }
+html[data-color-blind="red-green"] .challenge-card button.danger,
+html[data-color-blind="red-green"] .reset-all button,
+html[data-color-blind="red-green"] .confirm-actions .danger { color: #d55e00; border-color: #d55e00; }
+html[data-color-blind="red-green"] .challenge-card button.danger:hover,
+html[data-color-blind="red-green"] .reset-all button:hover:not(:disabled),
+html[data-color-blind="red-green"] .confirm-actions .danger:hover { color: #fff; background: #d55e00; }
+html[data-color-blind="red-green"] .confirm-card { border-color: #d55e00; }
+
+/* ---- Blue-Yellow: Playing stops looking like the blue Editing ---- */
+html[data-color-blind="blue-yellow"] .status-playing { background: #30333d; color: #ffffff; }
+
+/* ---- Monochrome: every color a gray, told apart by lightness ---- */
+html[data-color-blind="monochrome"] {
+  --bg: #161616;
+  --bg-panel: #1e1e1e;
+  --bg-input: #111111;
+  --bg-panel-float: rgba(30, 30, 30, 0.9);
+  --border: #333333;
+  --text: #e8e8e8;
+  --text-dim: #9e9e9e;
+  --accent: #808080;
+  --accent-hover: #929292;
+  --danger: #bebebe;
+  --danger-hover: #d1d1d1;
+}
+html[data-color-blind="monochrome"].drop-shadow-off { --bg-panel-float: rgba(30, 30, 30, 0.95); }
+html[data-color-blind="monochrome"] button.danger:hover,
+html[data-color-blind="monochrome"] .challenge-card button.danger:hover,
+html[data-color-blind="monochrome"] .reset-all button:hover:not(:disabled),
+html[data-color-blind="monochrome"] .confirm-actions .danger:hover { color: #111111; background: #bebebe; }
+html[data-color-blind="monochrome"] .challenge-card button.danger,
+html[data-color-blind="monochrome"] .reset-all button,
+html[data-color-blind="monochrome"] .confirm-actions .danger { color: #bebebe; border-color: #bebebe; }
+html[data-color-blind="monochrome"] .confirm-card { border-color: #bebebe; }
+
+html[data-color-blind="monochrome"] .status-ok { background: #262626; color: #b0b0b0; }
+html[data-color-blind="monochrome"] .status-playing { background: #3d3d3d; color: #ffffff; }
+html[data-color-blind="monochrome"] .status-error { background: #dedede; color: #111111; }
+html[data-color-blind="monochrome"] .stats-status-stale { color: #bebebe; }
+html[data-color-blind="monochrome"] .app-toast { color: #dedede; }
+
+html[data-color-blind="monochrome"] .tool-btn:hover { background: #1a1a1a; }
+html[data-color-blind="monochrome"] .tool-btn.porthole-one,
+html[data-color-blind="monochrome"] .tool-btn.porthole-one:hover { background: linear-gradient(to right, #555555 50%, var(--bg-input) 50%); }
+html[data-color-blind="monochrome"] .tool-btn.porthole-two,
+html[data-color-blind="monochrome"] .tool-btn.porthole-two:hover { background: #555555; border-color: #9e9e9e; }
+html[data-color-blind="monochrome"] button.tool-btn.input-set { background: #5a5a5a; border-color: #8a8a8a; }
+html[data-color-blind="monochrome"] button.tool-btn.input-set:hover { background: #666666; }
+html[data-color-blind="monochrome"] .tool-btn.highlight-hint {
+  border-color: #ffffff;
+  animation-name: highlightHintPulseGray;
+}
+@keyframes highlightHintPulseGray {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.6); }
+  50% { box-shadow: 0 0 0 6px rgba(255, 255, 255, 0); }
+}
+
+html[data-color-blind="monochrome"] .fractalize-btn:not(.not-ready),
+html[data-color-blind="monochrome"] .fractalize-btn:not(.not-ready):hover {
+  color: #111111;
+  background: linear-gradient(135deg, #f2f2f2, #b0b0b0 55%, #7a7a7a);
+  box-shadow: 0 4px 18px rgba(255, 255, 255, 0.25);
+  animation-name: fractalizePulseGray;
+}
+html[data-color-blind="monochrome"]:not(.eighties-off) .fractalize-btn:not(.not-ready),
+html[data-color-blind="monochrome"]:not(.eighties-off) .fractalize-btn:not(.not-ready):hover {
+  color: #000000;
+  background: linear-gradient(#f2f2f2, #b0b0b0 50%, #7a7a7a);
+}
+@keyframes fractalizePulseGray {
+  0%, 100% { box-shadow: 0 4px 18px rgba(255, 255, 255, 0.2); }
+  50% { box-shadow: 0 4px 30px rgba(255, 255, 255, 0.45); }
+}
+
+html[data-color-blind="monochrome"] #tip-popover-dismiss { border-color: #5a5a5a; background: #383838; }
+html[data-color-blind="monochrome"] #tip-popover-dismiss:hover { background: #454545; }
+
+html[data-color-blind="monochrome"] .progress-done,
+html[data-color-blind="monochrome"] .challenge-card .solved,
+html[data-color-blind="monochrome"] .best-box .best-solved,
+html[data-color-blind="monochrome"] .score.score-win b,
+html[data-color-blind="monochrome"] .win-card h2 { color: #dedede; }
+html[data-color-blind="monochrome"] .win-card { border-color: #dedede; }
