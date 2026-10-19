@@ -285,32 +285,52 @@
     });
     velocityTargets.forEach(function (t) { applyVelocityTarget(t.body, t.property, t.expr); });
 
-    // ---- Settle each hinge assembly into the frame by its leader with mod() (normalizeAllBodiesIntoFrame):
-    // moving bodies always, anchored ones only when entirely past an edge. Skipped under Infinite Space ----
+    // ---- Settle into the frame with mod(), as normalizeAllBodiesIntoFrame and assemblyWrapDelta do.
+    // Skipped under Infinite Space ----
     if (PhysicsEngine.wrapsAtEdges(scene)) {
       // mod() takes a plain float modulus (an integer frame size); overhang tests use the pass's precision.
       var frameW = fnum(scene.frameWidth), frameH = fnum(scene.frameHeight);
       var frameWLit = B.lit(scene.frameWidth), frameHLit = B.lit(scene.frameHeight);
       // Spring groups settle as one (PhysicsEngine.springGroups); a tethered group stays put.
-      var springGroups = PhysicsEngine.springGroups(scene);
+      var springGroups = PhysicsEngine.springGroups(scene), assemblies = PhysicsEngine.hingeAssemblies(scene);
       for (var wi = 0; wi < n; wi++) {
         var springGroup = springGroups ? springGroups.groupOf[wi] : null;
-        if (springGroup ? springGroup.tethered || springGroup.leader !== wi : PhysicsHingeGeometry.hingeAssemblyLeader(scene, wi) !== wi) continue;
+        var assembly = assemblies.groupOf[wi];
+        if (springGroup ? springGroup.tethered || springGroup.leader !== wi : assembly.leader !== wi) continue;
         var bx = state[wi].x, by = state[wi].y;
         var dxExpr, dyExpr;
-        if (consts[wi].isAnchored) {
-          var halfX, halfY;
-          if (consts[wi].type === "circle") {
-            halfX = shapeState[wi].half;
-            halfY = shapeState[wi].half;
-          } else {
-            halfX = num(B.mul(B.absCos(state[wi].angle), shapeState[wi].half));
-            halfY = num(B.mul(B.absSin(state[wi].angle), shapeState[wi].half));
-          }
-          dxExpr = "(" + B.greater(B.sub(bx, halfX), frameWLit) + " || " + B.less(B.add(bx, halfX), B.zero) + ") ? (" +
-            B.sub(B.mod(bx, frameW), bx) + ") : " + B.zero;
-          dyExpr = "(" + B.greater(B.sub(by, halfY), frameHLit) + " || " + B.less(B.add(by, halfY), B.zero) + ") ? (" +
-            B.sub(B.mod(by, frameH), by) + ") : " + B.zero;
+        if (!springGroup && assembly.held) {
+          // Out of the frame entirely (every body and pin), then the leader's shape decides each axis.
+          var outside = [], isMember = {}, leaderPast;
+          var past = function (x, y, halfX, halfY) {
+            return {
+              x: B.greater(halfX ? B.sub(x, halfX) : x, frameWLit) + " || " + B.less(halfX ? B.add(x, halfX) : x, B.zero),
+              y: B.greater(halfY ? B.sub(y, halfY) : y, frameHLit) + " || " + B.less(halfY ? B.add(y, halfY) : y, B.zero),
+            };
+          };
+          assembly.members.forEach(function (m) {
+            var halfX, halfY;
+            if (consts[m].type === "circle") {
+              halfX = shapeState[m].half;
+              halfY = shapeState[m].half;
+            } else {
+              halfX = num(B.mul(B.absCos(state[m].angle), shapeState[m].half));
+              halfY = num(B.mul(B.absSin(state[m].angle), shapeState[m].half));
+            }
+            isMember[m] = true;
+            var p = past(state[m].x, state[m].y, halfX, halfY);
+            if (m === wi) leaderPast = p;
+            outside.push("(" + p.x + " || " + p.y + ")");
+          });
+          scene.hinges.forEach(function (h, hi) {
+            if (h.bodyA !== null || !isMember[h.bodyB]) return;
+            var p = past(anchorA[hi].x, anchorA[hi].y);
+            outside.push("(" + p.x + " || " + p.y + ")");
+          });
+          // A lone body is out of the frame whenever an axis of its own is past.
+          var gone = outside.length > 1 ? "(" + outside.join(" && ") + ") && " : "";
+          dxExpr = "(" + gone + (gone ? "(" + leaderPast.x + ")" : leaderPast.x) + ") ? (" + B.sub(B.mod(bx, frameW), bx) + ") : " + B.zero;
+          dyExpr = "(" + gone + (gone ? "(" + leaderPast.y + ")" : leaderPast.y) + ") ? (" + B.sub(B.mod(by, frameH), by) + ") : " + B.zero;
         } else {
           dxExpr = B.sub(B.mod(bx, frameW), bx);
           dyExpr = B.sub(B.mod(by, frameH), by);

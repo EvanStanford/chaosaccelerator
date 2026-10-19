@@ -344,6 +344,7 @@
   }
 
   // ---- The map's view ---- what FractalGrid.shareState() hands over and applyShareView()
+  // A missing precision, speed or volume reads as undefined: the viewer keeps their own setting.
   // takes back: { center: {x, xLo, y, yLo}, scale, zoom, display, lowSaturation, precision, speed,
   // volume, inspect: [{type, a, b, count|size, twoPart, places}], movie: {keyframes, size: {width, height}, antialias, loop, subject, background, filled, pace} }.
   // A movie's subject is "map" (its keyframes) or "inspect" (the Inspect tab's points, played once, on a
@@ -465,6 +466,10 @@
     return { width: width, height: height };
   }
 
+  // The precision a link leaves out: this device's default, set by the map. null writes any precision.
+  var omittedPrecision = null;
+  function setOmittedPrecision(p) { omittedPrecision = p || null; }
+
   function encodeView(view) {
     var fields = [];
     // Inspect points are written against the center and zoom as a reader gets them back.
@@ -482,7 +487,7 @@
     }
     if (view.display && view.display !== "standard") fields.push("disp:" + DISPLAY_CODES[view.display]);
     if (view.lowSaturation === true) fields.push("lsat:t");
-    if (view.precision && view.precision !== "auto") fields.push("prec:" + view.precision);
+    if (view.precision && view.precision !== omittedPrecision) fields.push("prec:" + view.precision);
     if (view.speed !== undefined && num(view.speed) !== "1") fields.push("sped:" + num(view.speed));
     if (view.volume !== undefined && num(view.volume) !== "0") fields.push("snd:" + num(view.volume));
     if (view.inspect && view.inspect.length) {
@@ -522,9 +527,9 @@
       zoom: zoom,
       display: attempt("disp", function (t) { return DISPLAYS_BY_CODE[t] || "standard"; }, "standard"),
       lowSaturation: attempt("lsat", function (t) { return parseBool(t, "lsat"); }, false),
-      precision: attempt("prec", function (t) { return PRECISIONS.indexOf(t) === -1 ? "auto" : t; }, "auto"),
-      speed: attempt("sped", function (t) { return parseNum(t, "sped"); }, 1),
-      volume: attempt("snd", function (t) { return Math.min(1, Math.max(0, parseNum(t, "snd"))); }, 0),
+      precision: attempt("prec", function (t) { return PRECISIONS.indexOf(t) === -1 ? undefined : t; }, undefined),
+      speed: attempt("sped", function (t) { return parseNum(t, "sped"); }, undefined),
+      volume: attempt("snd", function (t) { return Math.min(1, Math.max(0, parseNum(t, "snd"))); }, undefined),
       inspect: attempt("insp", function (t) { return splitList(t).map(function (entry) { return decodeInspect(entry, frame); }); }, []),
       movie: {
         keyframes: attempt("kfrm", function (t) { return splitList(t).map(decodeKeyframe); }, []),
@@ -596,5 +601,6 @@
     fixedDD: fixedDD,
     parseDD: parseDD,
     centerDecimals: centerDecimals,
+    setOmittedPrecision: setOmittedPrecision,
   };
 })(typeof window !== "undefined" ? window : globalThis);

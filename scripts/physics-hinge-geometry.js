@@ -142,6 +142,11 @@
     if (!body.isAnchored) {
       return { dx: wrapIntoRange(body.x, frameWidth) - body.x, dy: wrapIntoRange(body.y, frameHeight) - body.y };
     }
+    return shapeWrapDelta(body, frameWidth, frameHeight);
+  }
+
+  // Wraps an axis once the body's whole shape is past an edge along it.
+  function shapeWrapDelta(body, frameWidth, frameHeight) {
     var half = frameHalfExtent(body);
     var dx = 0, dy = 0;
     if (body.x - half.x > frameWidth || body.x + half.x < 0) dx = wrapIntoRange(body.x, frameWidth) - body.x;
@@ -149,50 +154,51 @@
     return { dx: dx, dy: dy };
   }
 
-  // Hinged to another body: the bodyB of a body-to-body hinge.
-  function isHingeChild(scene, bodyIndex) {
-    for (var i = 0; i < scene.hinges.length; i++) {
-      if (scene.hinges[i].bodyB === bodyIndex && scene.hinges[i].bodyA !== null) return true;
-    }
-    return false;
+  // A free hinge assembly settles once its leader's center is out; a held one only once none of it (bodies
+  // or pins) is in the frame, then by the leader's shape as an anchored body does.
+  function assemblyWrapDelta(scene, assembly, frameWidth, frameHeight) {
+    var leader = scene.bodies[assembly.leader];
+    if (!assembly.held) return frameWrapDelta(leader, frameWidth, frameHeight);
+    var isMember = {}, seen = false;
+    function inFrame(x, y, hx, hy) { return x + hx >= 0 && x - hx <= frameWidth && y + hy >= 0 && y - hy <= frameHeight; }
+    assembly.members.forEach(function (m) {
+      var body = scene.bodies[m], half = frameHalfExtent(body);
+      isMember[m] = true;
+      if (inFrame(body.x, body.y, half.x, half.y)) seen = true;
+    });
+    scene.hinges.forEach(function (h) { if (h.bodyA === null && isMember[h.bodyB] && inFrame(h.localAnchorA.x, h.localAnchorA.y, 0, 0)) seen = true; });
+    return seen ? { dx: 0, dy: 0 } : shapeWrapDelta(leader, frameWidth, frameHeight);
   }
 
-  // The member whose position decides when a hinge assembly wraps: its lowest root, else its lowest index.
-  function hingeAssemblyLeader(scene, bodyIndex) {
-    var members = hingeAssembly(scene, bodyIndex).sort(function (a, b) { return a - b; });
-    for (var k = 0; k < members.length; k++) if (!isHingeChild(scene, members[k])) return members[k];
-    return members[0];
-  }
-
-  function normalizeBodyIntoFrame(scene, bodyIndex) {
-    var delta = frameWrapDelta(scene.bodies[bodyIndex], scene.frameWidth, scene.frameHeight);
-    if (delta.dx !== 0 || delta.dy !== 0) translateBodyPreservingHinges(scene, bodyIndex, delta.dx, delta.dy);
-  }
-
-  // Wraps each hinge assembly once, by its leader. bySpringGroup settles sprung bodies as the
-  // engine wraps them (tethered: not at all; else as one, by its leader).
+  // Settles every hinge assembly into the frame by assemblyWrapDelta. bySpringGroup settles sprung
+  // bodies as the engine wraps them (tethered: not at all; else as one, by its leader).
   function normalizeAllBodiesIntoFrame(scene, bySpringGroup) {
     if (!scene.frameWidth || !scene.frameHeight) return;
     var groups = bySpringGroup ? global.PhysicsEngine.springGroups(scene) : null;
+    var assemblies = global.PhysicsEngine.hingeAssemblies(scene);
     for (var i = 0; i < scene.bodies.length; i++) {
       var group = groups ? groups.groupOf[i] : null;
-      if (!group) { if (hingeAssemblyLeader(scene, i) === i) normalizeBodyIntoFrame(scene, i); continue; }
-      if (group.tethered || group.leader !== i) continue;
-      var delta = frameWrapDelta(scene.bodies[i], scene.frameWidth, scene.frameHeight);
+      var delta;
+      if (group) {
+        if (group.tethered || group.leader !== i) continue;
+        delta = frameWrapDelta(scene.bodies[i], scene.frameWidth, scene.frameHeight);
+      } else {
+        group = assemblies.groupOf[i];
+        if (group.leader !== i) continue;
+        delta = assemblyWrapDelta(scene, group, scene.frameWidth, scene.frameHeight);
+      }
       if (delta.dx !== 0 || delta.dy !== 0) global.PhysicsEngine.translateSpringGroup(scene, group, delta.dx, delta.dy);
     }
   }
 
-  // Bodies whose edge crossing can trigger Sticky Edges' early stop: the roots PhysicsEngine.step
-  // wraps. Hinge children and spring followers only follow a wrap, so watching them double-counts.
+  // Bodies whose edge crossing can trigger Sticky Edges' early stop: the leaders PhysicsEngine.step
+  // wraps. The rest only follow a wrap, so watching them double-counts.
   function wrapWatchedBodyIndices(scene) {
     var result = [];
-    var groups = global.PhysicsEngine.springGroups(scene);
+    var groups = global.PhysicsEngine.springGroups(scene), assemblies = global.PhysicsEngine.hingeAssemblies(scene);
     for (var i = 0; i < scene.bodies.length; i++) {
-      if (scene.bodies[i].isAnchored) continue;
-      if (isHingeChild(scene, i)) continue;
       var group = groups ? groups.groupOf[i] : null;
-      if (group && (group.tethered || group.leader !== i)) continue;
+      if (group ? group.tethered || group.leader !== i : assemblies.groupOf[i].held || assemblies.groupOf[i].leader !== i) continue;
       result.push(i);
     }
     return result;
@@ -287,13 +293,12 @@
     findOwnHinge: findOwnHinge,
     hingeWorldPointA: hingeWorldPointA,
     hingeAssembly: hingeAssembly,
-    hingeAssemblyLeader: hingeAssemblyLeader,
     translateBodyPreservingHinges: translateBodyPreservingHinges,
     applyBodyEditPreservingHinge: applyBodyEditPreservingHinge,
     frameHalfExtent: frameHalfExtent,
     wrapIntoRange: wrapIntoRange,
     frameWrapDelta: frameWrapDelta,
-    isHingeChild: isHingeChild,
+    assemblyWrapDelta: assemblyWrapDelta,
     normalizeAllBodiesIntoFrame: normalizeAllBodiesIntoFrame,
     wrapWatchedBodyIndices: wrapWatchedBodyIndices,
     findWrapStopStep: findWrapStopStep,

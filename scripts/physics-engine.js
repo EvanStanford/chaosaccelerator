@@ -354,20 +354,20 @@
     return total;
   }
 
-  // Union-find over every hinge and spring joining two bodies; links to the background are left out.
-  function linkedRoot(scene) {
+  // Union-find over every hinge and spring (unless hingesOnly) joining two bodies; links to the background are left out.
+  function linkedRoot(scene, hingesOnly) {
     var n = scene.bodies.length, parent = new Array(n), i;
     for (i = 0; i < n; i++) parent[i] = i;
     function find(x) { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
     function union(a, b) { a = find(a); b = find(b); if (a !== b) parent[Math.max(a, b)] = Math.min(a, b); }
-    sceneSprings(scene).forEach(function (s) { if (s.bodyA !== null) union(s.bodyA, s.bodyB); });
+    if (!hingesOnly) sceneSprings(scene).forEach(function (s) { if (s.bodyA !== null) union(s.bodyA, s.bodyB); });
     scene.hinges.forEach(function (h) { if (h.bodyA !== null) union(h.bodyA, h.bodyB); });
     return find;
   }
 
   // ---- Springs and the frame's edges: a sprung set wraps together or not at all. GROUPS of
-  // bodies joined by springs (directly or via hinges): `tethered` (a spring to the background, or
-  // an anchored member) never wraps; else it wraps with its `leader`, the lowest free non-hinge-child.
+  // bodies joined by springs (directly or via hinges): `tethered` (a spring or pin to the background,
+  // or an anchored member) never wraps; else it wraps with its `leader`, the lowest free non-hinge-child.
   function springGroups(scene) {
     var springs = sceneSprings(scene);
     if (!springs.length) return null;
@@ -394,6 +394,26 @@
       else if (g.leader === -1 && !isHingeChild[i]) g.leader = i;
     }
     springs.forEach(function (s) { if (s.bodyA === null) groupOf[s.bodyB].tethered = true; });
+    scene.hinges.forEach(function (h) { if (h.bodyA === null && groupOf[h.bodyB]) groupOf[h.bodyB].tethered = true; });
+    return { groups: groups, groupOf: groupOf };
+  }
+
+  // ---- Hinge twin of springGroups: bodies joined by body-to-body hinges wrap as one with their `leader`
+  // (lowest non-hinge-child, else lowest); one `held` by a background pin or an anchored member never wraps.
+  function hingeAssemblies(scene) {
+    var n = scene.bodies.length, find = linkedRoot(scene, true), i;
+    var pinned = {}, isHingeChild = {};
+    scene.hinges.forEach(function (h) { if (h.bodyA === null) pinned[h.bodyB] = true; else isHingeChild[h.bodyB] = true; });
+    var byRoot = {}, groups = [], groupOf = new Array(n);
+    for (i = 0; i < n; i++) {
+      var root = find(i), g = byRoot[root];
+      if (!g) { g = byRoot[root] = { members: [], held: false, leader: -1 }; groups.push(g); }
+      g.members.push(i);
+      if (scene.bodies[i].isAnchored || pinned[i]) g.held = true;
+      if (g.leader === -1 && !isHingeChild[i]) g.leader = i;
+      groupOf[i] = g;
+    }
+    groups.forEach(function (g) { if (g.leader === -1) g.leader = g.members[0]; });
     return { groups: groups, groupOf: groupOf };
   }
 
@@ -659,8 +679,8 @@
   var LINE_PARALLEL_EPS = 0.05; // ~3 degrees
 
   // Crossed segments, or null: out the shorter way, toward the side each center was on before b's move
-  // against a (back); depth is that way's. With liftAlongA the point sits on b's side of a.
-  function crossedSegments(a0, a1, b0, b1, liftAlongA, back) {
+  // against a (back); depth is that way's.
+  function crossedSegments(a0, a1, b0, b1, back) {
     var ux = a1.x - a0.x, uy = a1.y - a0.y, ul = Math.sqrt(ux * ux + uy * uy) || 1;
     var vx = b1.x - b0.x, vy = b1.y - b0.y, vl = Math.sqrt(vx * vx + vy * vy) || 1;
     ux /= ul; uy /= ul; vx /= vl; vy /= vl;
@@ -671,18 +691,48 @@
     var depthA = upA ? -Math.min(sb0, sb1) : Math.max(sb0, sb1), depthB = upB ? -Math.min(sa0, sa1) : Math.max(sa0, sa1);
     var sideA = upA ? { x: -uy, y: ux } : { x: uy, y: -ux };
     var n = depthA <= depthB ? sideA : (upB ? { x: vy, y: -vx } : { x: -vy, y: vx });
-    var k = sa0 / (sa0 - sa1), lift = liftAlongA ? sideA : n;
+    var k = sa0 / (sa0 - sa1);
     return {
       normal: n,
-      point: { x: a0.x + (a1.x - a0.x) * k + lift.x * LINE_THICKNESS / 2, y: a0.y + (a1.y - a0.y) * k + lift.y * LINE_THICKNESS / 2 },
+      point: { x: a0.x + (a1.x - a0.x) * k + n.x * LINE_THICKNESS / 2, y: a0.y + (a1.y - a0.y) * k + n.y * LINE_THICKNESS / 2 },
       depth: Math.min(depthA, depthB),
     };
   }
 
-  // Touching at the step's start: the overlap as it stands, tHit 0.
-  function lineLineContacts(lineA, lineB, dt) {
+  // Near-parallel a and b overlapping along a: each end of the overlap is one line's end on the other's
+  // flat side, so it takes that side's normal (a -> b) and its own gap. sgn: the side of a that b is on.
+  function overlapEnds(a0, a1, b0, b1, sgn) {
+    var ux = a1.x - a0.x, uy = a1.y - a0.y, lenA = Math.sqrt(ux * ux + uy * uy) || 1;
+    var vx = b1.x - b0.x, vy = b1.y - b0.y, lenB = Math.sqrt(vx * vx + vy * vy) || 1;
+    ux /= lenA; uy /= lenA; vx /= lenB; vy /= lenB;
+    var t0 = (b0.x - a0.x) * ux + (b0.y - a0.y) * uy, t1 = (b1.x - a0.x) * ux + (b1.y - a0.y) * uy;
+    var lo = Math.max(0, Math.min(t0, t1)), hi = Math.min(lenA, Math.max(t0, t1));
+    if (!(hi > lo)) return null;
+    var nA = { x: -uy * sgn, y: ux * sgn }, flip = ux * vx + uy * vy < 0 ? -sgn : sgn, nB = { x: -vy * flip, y: vx * flip };
+    function end(t, ownA, bi) {
+      if (ownA) {
+        var p = { x: a0.x + ux * t, y: a0.y + uy * t }, g = (b0.x - p.x) * nB.x + (b0.y - p.y) * nB.y;
+        return { point: { x: p.x + nB.x * g / 2, y: p.y + nB.y * g / 2 }, normal: nB, gap: g, end: t > 0 ? 1 : 0, s: ((p.x - b0.x) * vx + (p.y - b0.y) * vy) / lenB };
+      }
+      var q = bi ? b1 : b0, h = (q.x - a0.x) * nA.x + (q.y - a0.y) * nA.y;
+      return { point: { x: q.x - nA.x * h / 2, y: q.y - nA.y * h / 2 }, normal: nA, gap: h, end: bi + 2, s: t / lenA };
+    }
+    var ends = [end(lo, Math.min(t0, t1) <= 0, t0 <= t1 ? 0 : 1)];
+    if (hi - lo > 1e-6) ends.push(end(hi, Math.max(t0, t1) >= lenA, t0 >= t1 ? 0 : 1));
+    return ends;
+  }
+
+  // How far an overlap end closes on the other line over the whole step (sA, sB: lineSweep's).
+  function endClosing(e, sA, sB) {
+    var own = [sA.d0, sA.d1, sB.d0, sB.d1][e.end], sup = e.end < 2 ? sB : sA;
+    var mx = own.x - sup.d0.x - (sup.d1.x - sup.d0.x) * e.s, my = own.y - sup.d0.y - (sup.d1.y - sup.d0.y) * e.s;
+    return (e.end < 2 ? 1 : -1) * (mx * e.normal.x + my * e.normal.y);
+  }
+
+  // Touching at the step's start: the overlap as it stands, tHit 0. sA, sB: the lines' sweeps.
+  function lineLineContacts(lineA, lineB, dt, sA, sB) {
     var eA = getLineEndpoints(lineA), eB = getLineEndpoints(lineB);
-    var crossed = crossedSegments(eA[0], eA[1], eB[0], eB[1], false, { x: (lineB.vx - lineA.vx) * dt, y: (lineB.vy - lineA.vy) * dt });
+    var crossed = crossedSegments(eA[0], eA[1], eB[0], eB[1], { x: (lineB.vx - lineA.vx) * dt, y: (lineB.vy - lineA.vy) * dt });
     if (crossed) {
       var cp0 = crossed.point;
       return [{
@@ -708,27 +758,21 @@
     if (dist2 >= rsum) return null;
 
     if (Math.abs(cross) < LINE_PARALLEL_EPS) {
-      var b0 = dot({ x: eB[0].x - eA[0].x, y: eB[0].y - eA[0].y }, dirA);
-      var b1 = dot({ x: eB[1].x - eA[0].x, y: eB[1].y - eA[0].y }, dirA);
-      var lo = Math.max(0, Math.min(b0, b1));
-      var hi = Math.min(lenA, Math.max(b0, b1));
-      if (hi > lo) {
-        var perp = { x: -dirA.y, y: dirA.x };
-        // Their gap along A's normal where they are closest.
-        var offset = dx * perp.x + dy * perp.y;
-        var sign = offset >= 0 ? 1 : -1;
-        var normal = { x: perp.x * sign, y: perp.y * sign };
-        var penetration = LINE_THICKNESS - Math.abs(offset);
-        var ts = hi - lo > 1e-6 ? [lo, hi] : [lo];
-        return ts.map(function (t) {
-          var pOnA = { x: eA[0].x + dirA.x * t, y: eA[0].y + dirA.y * t };
-          var px = pOnA.x + perp.x * offset / 2, py = pOnA.y + perp.y * offset / 2;
+      var ends = overlapEnds(eA[0], eA[1], eB[0], eB[1], dx * -dirA.y + dy * dirA.x >= 0 ? 1 : -1);
+      // An end within slop counts, and one closing slowly within the step with its gap as a negative
+      // penetration (solveContactPairVelocity lets it close that far); a fast one is the sweep's.
+      var near = ends ? ends.filter(function (e) {
+        var gap = e.gap - LINE_THICKNESS, closing = gap > POSITION_SLOP ? endClosing(e, sA, sB) : 0;
+        return gap <= POSITION_SLOP || (gap < closing && closing < RESTITUTION_THRESHOLD * dt);
+      }) : [];
+      if (near.length) {
+        return near.map(function (e) {
           return {
-            normal: normal,
-            point: { x: px, y: py },
-            rA: { x: px - lineA.x, y: py - lineA.y },
-            rB: { x: px - lineB.x, y: py - lineB.y },
-            penetration: penetration,
+            normal: e.normal,
+            point: e.point,
+            rA: { x: e.point.x - lineA.x, y: e.point.y - lineA.y },
+            rB: { x: e.point.x - lineB.x, y: e.point.y - lineB.y },
+            penetration: LINE_THICKNESS - e.gap,
             tHit: 0,
           };
         });
@@ -802,23 +846,6 @@
     return s >= 0 && s <= dx * dx + dy * dy ? f : -1;
   }
 
-  // sweepPointMovingSlab for a port hole arc's far center c, then two Newton steps on the exact distance.
-  function sweepFarPointSlab(c, q0, dq0, q1, dq1, len, R) {
-    var f = sweepPointMovingSlab(c, { x: 0, y: 0 }, q0, dq0, q1, dq1, len, R);
-    if (f < 0) return -1;
-    var Dx = q1.x - q0.x, Dy = q1.y - q0.y, mDx = dq1.x - dq0.x, mDy = dq1.y - dq0.y, Px = c.x - q0.x, Py = c.y - q0.y;
-    var side = Dx * Py - Dy * Px < 0 ? -1 : 1;
-    for (var k = 0; k < 2; k++) {
-      var dx = Dx + mDx * f, dy = Dy + mDy * f, px = Px - dq0.x * f, py = Py - dq0.y * f, dl = Math.sqrt(dx * dx + dy * dy);
-      var F = side * (dx * py - dy * px) - R * dl;
-      var dF = side * (mDx * py - mDy * px - dx * dq0.y + dy * dq0.x) - R * (dx * mDx + dy * mDy) / dl;
-      if (dF < 0) f -= F / dF;
-    }
-    if (!(f >= 0 && f <= 1)) return -1;
-    var ex = Dx + mDx * f, ey = Dy + mDy * f, s = (Px - dq0.x * f) * ex + (Py - dq0.y * f) * ey;
-    return s >= 0 && s <= ex * ex + ey * ey ? f : -1;
-  }
-
   // A line's ends at the step's start and how far each moves over the step: the center at its
   // velocity, the turn at its spin, each end along its chord.
   function lineSweep(line, dt) {
@@ -869,35 +896,38 @@
     return { f: best.f, normal: { x: nx * best.own, y: ny * best.own }, point: { x: best.p.x + nx * R / 2, y: best.p.y + ny * R / 2 } };
   }
 
-  // The contacts of that first touch: its own point, or (unless single) both ends of the overlap when
-  // the two are near-parallel then, on the touch's side. Touching, so no penetration.
+  // Does a contact close at least as fast as a bounce?
+  function closesFast(c, lineA, lineB) {
+    var vx = lineB.vx - lineB.w * c.rB.y - lineA.vx + lineA.w * c.rA.y, vy = lineB.vy + lineB.w * c.rB.x - lineA.vy - lineA.w * c.rA.x;
+    return -(vx * c.normal.x + vy * c.normal.y) >= RESTITUTION_THRESHOLD;
+  }
+
+  // The contacts of that first touch: its own point, or (unless single) when near-parallel then, the
+  // nearer end of the overlap and the other one if it closes within the step, its gap as a negative penetration.
   function lineLineSweptContacts(lineA, sA, lineB, sB, hit, dt, single) {
     var tHit = hit.f * dt;
     var cA = { x: lineA.x + lineA.vx * tHit, y: lineA.y + lineA.vy * tHit };
     var cB = { x: lineB.x + lineB.vx * tHit, y: lineB.y + lineB.vy * tHit };
-    function contact(p, normal) {
-      return { normal: normal, point: p, rA: { x: p.x - cA.x, y: p.y - cA.y }, rB: { x: p.x - cB.x, y: p.y - cB.y }, penetration: 0, tHit: tHit };
+    function contact(p, normal, gap) {
+      return { normal: normal, point: p, rA: { x: p.x - cA.x, y: p.y - cA.y }, rB: { x: p.x - cB.x, y: p.y - cB.y }, penetration: -gap, tHit: tHit };
     }
     if (!single) {
       var a0 = sweptPoint(sA.e0, sA.d0, hit.f), a1 = sweptPoint(sA.e1, sA.d1, hit.f);
       var b0 = sweptPoint(sB.e0, sB.d0, hit.f), b1 = sweptPoint(sB.e1, sB.d1, hit.f);
       var dirA = { x: a1.x - a0.x, y: a1.y - a0.y }, lenA = Math.sqrt(dot(dirA, dirA)) || 1;
-      dirA.x /= lenA; dirA.y /= lenA;
       var dirB = { x: b1.x - b0.x, y: b1.y - b0.y }, lenB = Math.sqrt(dot(dirB, dirB)) || 1;
-      if (Math.abs(dirA.x * (dirB.y / lenB) - dirA.y * (dirB.x / lenB)) < LINE_PARALLEL_EPS) {
-        var t0 = dot({ x: b0.x - a0.x, y: b0.y - a0.y }, dirA), t1 = dot({ x: b1.x - a0.x, y: b1.y - a0.y }, dirA);
-        var lo = Math.max(0, Math.min(t0, t1)), hi = Math.min(lenA, Math.max(t0, t1));
-        if (hi > lo) {
-          var side = dirA.x * hit.normal.y - dirA.y * hit.normal.x < 0 ? -1 : 1;
-          var normal = { x: -dirA.y * side, y: dirA.x * side }, half = LINE_THICKNESS / 2;
-          var ts = hi - lo > 1e-6 ? [lo, hi] : [lo];
-          return ts.map(function (t) {
-            return contact({ x: a0.x + dirA.x * t + normal.x * half, y: a0.y + dirA.y * t + normal.y * half }, normal);
-          });
+      var cr = (dirA.x * dirB.y - dirA.y * dirB.x) / (lenA * lenB);
+      var ends = Math.abs(cr) < LINE_PARALLEL_EPS ? overlapEnds(a0, a1, b0, b1, dirA.x * hit.normal.y - dirA.y * hit.normal.x < 0 ? -1 : 1) : null;
+      if (ends) {
+        var first = ends.length > 1 && ends[1].gap < ends[0].gap ? 1 : 0, out = [contact(ends[first].point, ends[first].normal, 0)];
+        if (ends.length > 1) {
+          var e = ends[1 - first], gap = Math.max(e.gap - LINE_THICKNESS, 0);
+          if (gap <= POSITION_SLOP || gap < endClosing(e, sA, sB) * (1 - hit.f)) out.push(contact(e.point, e.normal, gap));
         }
+        return out;
       }
     }
-    return [contact(hit.point, hit.normal)];
+    return [contact(hit.point, hit.normal, 0)];
   }
 
   // Two capsules moving and turning over the step: the overlap at the start and the first touch within
@@ -909,14 +939,18 @@
     var eA = getLineEndpoints(lineA), eB = getLineEndpoints(lineB);
     var travel = Math.sqrt(mx * mx + my * my) + (Math.abs(lineA.w) * lineA.length + Math.abs(lineB.w) * lineB.length) / 2 * dt;
     if (!linesMayTouch(eA[0], eA[1], eB[0], eB[1], travel)) return null;
-    var touching = lineLineContacts(lineA, lineB, dt);
+    var sA = lineSweep(lineA, dt), sB = lineSweep(lineB, dt);
+    var touching = lineLineContacts(lineA, lineB, dt, sA, sB);
     // Two already, or crossed: nothing further this step.
     if (touching && (touching.length > 1 || touching[0].penetration > LINE_THICKNESS)) return touching;
-    var sA = lineSweep(lineA, dt), sB = lineSweep(lineB, dt);
     var hit = lineLineFirstTouch(sA, lineA.length, sB, lineB.length);
     if (!hit) return touching;
     var swept = lineLineSweptContacts(lineA, sA, lineB, sB, hit, dt, !!touching);
-    return touching ? touching.concat(swept) : swept;
+    if (!touching) return swept;
+    // A later touch closing slowly waits for the next step; a fast one goes alone at its own instant
+    // unless the one already touching is closing fast too.
+    if (!closesFast(swept[0], lineA, lineB)) return touching;
+    return closesFast(touching[0], lineA, lineB) ? touching.concat(swept) : swept;
   }
 
   // ---- Port hole outline: two big arcs and two tip circles, tangent where they meet. a is a tip's
@@ -949,10 +983,9 @@
   }
 
   // The port hole's frame: x along it, y toward its back.
-  function portholeFrame(ph) { return turnFrame(Math.cos(ph.angle), Math.sin(ph.angle)); }
-  function turnFrame(cs, sn) {
+  function portholeFrame(ph) {
+    var cs = Math.cos(ph.angle), sn = Math.sin(ph.angle);
     return {
-      cs: cs, sn: sn,
       toLocal: function (wx, wy) { return { x: wx * cs + wy * sn, y: wy * cs - wx * sn }; },
       toWorld: function (lx, ly) { return { x: lx * cs - ly * sn, y: lx * sn + ly * cs }; },
     };
@@ -990,20 +1023,17 @@
     }];
   }
 
-  // Where segment e0-e1 crosses the line through p and q, or null.
-  function segmentCrossing(e0, e1, p, q) {
-    var dx = q.x - p.x, dy = q.y - p.y;
-    var s0 = dx * (e0.y - p.y) - dy * (e0.x - p.x), s1 = dx * (e1.y - p.y) - dy * (e1.x - p.x);
-    if (s0 * s1 > 0 || s0 === s1) return null;
-    var k = s0 / (s0 - s1);
-    return { x: e0.x + (e1.x - e0.x) * k, y: e0.y + (e1.y - e0.y) * k };
-  }
+  var PORTHOLE_LINE_STEPS = 2;
 
-  // Segment e0-e1's nearest point to the oval, in its frame: an end, a feature center's owned foot, or
-  // where it crosses the junction rays or the center line.
-  function portholeLineNearest(o, e0, e1) {
-    var best = null;
-    function consider(q, f) { if (!best || f.d < best.f.d) best = { q: q, f: f }; }
+  // Port hole = A (its oval), line = B (its capsule). The segment's nearest point to the oval is an
+  // endpoint or the foot of a feature circle's center, when that feature owns the foot. One contact: touching,
+  // or that point reaching the oval within the step, at that instant.
+  function collidePortholeLine(ph, line, dt) {
+    var o = portholeOval(ph.length), fr = portholeFrame(ph);
+    var ends = getLineEndpoints(line);
+    var e0 = fr.toLocal(ends[0].x - ph.x, ends[0].y - ph.y), e1 = fr.toLocal(ends[1].x - ph.x, ends[1].y - ph.y);
+    var bestQ = null, bestF = null;
+    function consider(q, f) { if (!bestF || f.d < bestF.d) { bestQ = q; bestF = f; } }
     consider(e0, portholeFeature(o, e0.x, e0.y));
     consider(e1, portholeFeature(o, e1.x, e1.y));
     for (var kind = 0; kind < 4; kind++) {
@@ -1012,98 +1042,39 @@
       var f = portholeFeature(o, q.x, q.y);
       if (f.kind === kind) consider(q, f);
     }
-    var tipL = { x: -o.ax, y: 0 }, tipR = { x: o.ax, y: 0 };
-    [[{ x: 0, y: -o.cy }, tipL], [{ x: 0, y: -o.cy }, tipR], [{ x: 0, y: o.cy }, tipL], [{ x: 0, y: o.cy }, tipR], [tipL, tipR]].forEach(function (ray) {
-      var c = segmentCrossing(e0, e1, ray[0], ray[1]);
-      if (c) consider(c, portholeFeature(o, c.x, c.y));
-    });
-    return best;
-  }
-
-  // The contact at that point, with the port hole's center c and frame fr and the line's center lc at tHit.
-  function portholeLineContact(near, fr, c, lc, tHit) {
-    var half = LINE_THICKNESS / 2, q = near.q, f = near.f;
-    var nx = f.dist > 1e-9 ? (q.x - f.cx) / f.dist : 0, ny = f.dist > 1e-9 ? (q.y - f.cy) / f.dist : 1;
-    // Midway between the two surfaces, as collideLineLine puts it, but never deeper than a quarter
-    // thickness inside the oval: a push out the front stays a front contact.
-    var lift = f.radius + Math.max(f.d - half, -half) / 2;
-    var m = fr.toWorld(f.cx + nx * lift, f.cy + ny * lift);
+    var half = LINE_THICKNESS / 2, tHit = 0, m;
+    var nx = bestF.dist > 1e-9 ? (bestQ.x - bestF.cx) / bestF.dist : 0, ny = bestF.dist > 1e-9 ? (bestQ.y - bestF.cy) / bestF.dist : 1;
+    if (bestF.d >= half) {
+      var qw = fr.toWorld(bestQ.x, bestQ.y), rx = ph.x + qw.x - line.x, ry = ph.y + qw.y - line.y;
+      var v = fr.toLocal(line.vx - line.w * ry - ph.vx + ph.w * qw.y, line.vy + line.w * rx - ph.vy - ph.w * qw.x);
+      // Newton steps on that point's gap as it moves, from below since the oval is convex; a near miss
+      // ends them moving away or past the step, with no contact.
+      var q = bestQ, f = bestF;
+      for (var it = 0; it < PORTHOLE_LINE_STEPS && f.d - half > POSITION_SLOP; it++) {
+        var along = -(v.x * (q.x - f.cx) + v.y * (q.y - f.cy));
+        if (!(along > 0)) return null;
+        tHit += (f.d - half) * f.dist / along;
+        if (!(tHit < dt)) return null;
+        q = { x: bestQ.x + v.x * tHit, y: bestQ.y + v.y * tHit };
+        f = portholeFeature(o, q.x, q.y);
+      }
+      if (f.d - half > POSITION_SLOP) return null;
+      nx = (q.x - f.cx) / f.dist; ny = (q.y - f.cy) / f.dist;
+      m = fr.toWorld(f.cx + nx * f.radius, f.cy + ny * f.radius);
+    } else {
+      // Midway between the two surfaces, as collideLineLine puts it.
+      m = fr.toWorld((bestF.cx + nx * bestF.radius + bestQ.x - nx * half) / 2, (bestF.cy + ny * bestF.radius + bestQ.y - ny * half) / 2);
+    }
     var n = fr.toWorld(nx, ny);
-    var px = c.x + m.x, py = c.y + m.y;
+    var px = ph.x + m.x + ph.vx * tHit, py = ph.y + m.y + ph.vy * tHit;
     return [{
       normal: { x: n.x, y: n.y },
       point: { x: px, y: py },
       rA: { x: m.x, y: m.y },
-      rB: { x: px - lc.x, y: py - lc.y },
-      penetration: Math.max(half - f.d, 0),
+      rB: { x: px - line.x - line.vx * tHit, y: py - line.y - line.vy * tHit },
+      penetration: Math.max(half - bestF.d, 0),
       tHit: tHit,
     }];
-  }
-
-  // Port hole = A (its oval), line = B (its capsule), either moving and turning: the overlap at the start
-  // and the first touch within the step, swept in the port hole's frame onto each owned feature circle.
-  function collidePortholeLine(ph, line, dt) {
-    var o = portholeOval(ph.length), half = LINE_THICKNESS / 2;
-    var dx = line.x - ph.x, dy = line.y - ph.y, mx = (line.vx - ph.vx) * dt, my = (line.vy - ph.vy) * dt;
-    if (!sweptReachMeets(dx, dy, mx, my, o.a + line.length / 2 + half)) return null;
-    // The oval lies inside its own segment's capsule; in its frame a turn carries the line round too.
-    var eP = getLineEndpoints(ph), eL = getLineEndpoints(line);
-    var travel = Math.sqrt(mx * mx + my * my) + (Math.abs(line.w) * line.length / 2 + Math.abs(ph.w) * (Math.sqrt(dx * dx + dy * dy) + line.length / 2)) * dt;
-    if (!linesMayTouch(eP[0], eP[1], eL[0], eL[1], travel)) return null;
-    var fr = portholeFrame(ph), sw = lineSweep(line, dt);
-    var l0 = fr.toLocal(sw.e0.x - ph.x, sw.e0.y - ph.y), l1 = fr.toLocal(sw.e1.x - ph.x, sw.e1.y - ph.y);
-    // Crossing its center line: out the shorter way, with the point on the side the line mostly lies so
-    // that a leader's front contact is still dropped; nothing further this step.
-    var crossed = crossedSegments({ x: -ph.length / 2, y: 0 }, { x: ph.length / 2, y: 0 }, l0, l1, true, { x: 0, y: 0 });
-    if (crossed) {
-      var cn = fr.toWorld(crossed.normal.x, crossed.normal.y), cm = fr.toWorld(crossed.point.x, crossed.point.y);
-      return [{
-        normal: cn,
-        point: { x: ph.x + cm.x, y: ph.y + cm.y },
-        rA: cm,
-        rB: { x: ph.x + cm.x - line.x, y: ph.y + cm.y - line.y },
-        penetration: crossed.depth + LINE_THICKNESS,
-        tHit: 0,
-      }];
-    }
-    var near = portholeLineNearest(o, l0, l1);
-    // Inside the oval, the arc on the side the line mostly lies (its farther end's) pushes it out.
-    if (near.f.d < 0 && near.f.kind < 2) {
-      var arc = portholeFeatureCircle(o, (Math.abs(l0.y) > Math.abs(l1.y) ? l0.y : l1.y) < 0 ? 1 : 0), qx = near.q.x - arc.cx, qy = near.q.y - arc.cy;
-      arc.dist = Math.sqrt(qx * qx + qy * qy);
-      arc.d = arc.dist - arc.radius;
-      near = { q: near.q, f: arc };
-    }
-    var touching = near.f.d < half ? portholeLineContact(near, fr, ph, line, 0) : null;
-    var endX = ph.x + ph.vx * dt, endY = ph.y + ph.vy * dt;
-    var frEnd = ph.w !== 0 ? portholeFrame({ angle: ph.angle + ph.w * dt }) : fr;
-    var m0 = frEnd.toLocal(sw.e0.x + sw.d0.x - endX, sw.e0.y + sw.d0.y - endY), m1 = frEnd.toLocal(sw.e1.x + sw.d1.x - endX, sw.e1.y + sw.d1.y - endY);
-    var d0 = { x: m0.x - l0.x, y: m0.y - l0.y }, d1 = { x: m1.x - l1.x, y: m1.y - l1.y };
-    // The segment's touching point (an end, or the foot of the feature's center), kept if owned.
-    var best = -1, bestQ = null;
-    function keep(f, q, kind) {
-      if (best >= 0 && f >= best) return;
-      if (portholeFeature(o, q.x, q.y).kind === kind) { best = f; bestQ = q; }
-    }
-    for (var kind = 0; kind < 4; kind++) {
-      var fc = portholeFeatureCircle(o, kind), c = { x: fc.cx, y: fc.cy }, R = fc.radius + half;
-      var f0 = sweepPointSphere(l0.x, l0.y, d0.x, d0.y, c.x, c.y, R, 1);
-      if (f0 > 0) keep(f0, sweptPoint(l0, d0, f0), kind);
-      var f1 = sweepPointSphere(l1.x, l1.y, d1.x, d1.y, c.x, c.y, R, 1);
-      if (f1 > 0) keep(f1, sweptPoint(l1, d1, f1), kind);
-      var fs = kind < 2 ? sweepFarPointSlab(c, l0, d0, l1, d1, line.length, R) : sweepPointMovingSlab(c, { x: 0, y: 0 }, l0, d0, l1, d1, line.length, R);
-      if (fs > 0) keep(fs, closestPointOnSegment(sweptPoint(l0, d0, fs), sweptPoint(l1, d1, fs), c), kind);
-    }
-    if (best < 0) return touching;
-    var tHit = best * dt, frHit = fr;
-    if (ph.w !== 0) {
-      // Its tangent at the hit, along the chord of the turn.
-      var tx = fr.cs + (frEnd.cs - fr.cs) * best, ty = fr.sn + (frEnd.sn - fr.sn) * best, tl = Math.sqrt(tx * tx + ty * ty);
-      frHit = turnFrame(tx / tl, ty / tl);
-    }
-    var nearHit = { q: bestQ, f: portholeFeature(o, bestQ.x, bestQ.y) };
-    var swept = portholeLineContact(nearHit, frHit, { x: ph.x + ph.vx * tHit, y: ph.y + ph.vy * tHit }, { x: line.x + line.vx * tHit, y: line.y + line.vy * tHit }, tHit);
-    return touching ? touching.concat(swept) : swept;
   }
 
   // Computed as (B, A): flip the normal and swap rA/rB back to the caller's order.
@@ -1165,6 +1136,103 @@
     applyImpulse(bodyA, -n.x * j, -n.y * j, rA);
     applyImpulse(bodyB, n.x * j, n.y * j, rB);
     // Frictionless. No position fixup here: step()'s two-leg integration handles the sub-step.
+  }
+
+  // The 2x2 effective mass of a line pair's two contacts, with g0, g1 their lever arms across the normal
+  // on A and B; not ok when they act as one, which solves c0 alone.
+  function pairMatrix(c0, c1, g0, g1, bodyA, bodyB) {
+    var mSum = bodyA.invMass + bodyB.invMass, iA = bodyA.invInertia, iB = bodyB.invInertia;
+    var k00 = mSum + g0[0] * g0[0] * iA + g0[1] * g0[1] * iB, k11 = mSum + g1[0] * g1[0] * iA + g1[1] * g1[1] * iB;
+    var k01 = mSum * dot(c0.normal, c1.normal) + g0[0] * g1[0] * iA + g0[1] * g1[1] * iB;
+    var det = k00 * k11 - k01 * k01;
+    return { ok: k00 > 0 && k11 > 0 && det > 1e-9 * k00 * k11, k00: k00, k01: k01, k11: k11, det: det, g0: g0, g1: g1 };
+  }
+  function leverArms(c) {
+    return [c.rA.x * c.normal.y - c.rA.y * c.normal.x, c.rB.x * c.normal.y - c.rB.y * c.normal.x];
+  }
+
+  // Before the velocity passes: the pair's matrix, and each contact's restitution off the speed ramp at the
+  // rate it closes then.
+  function contactPairMatrix(c0, c1, bodyA, bodyB) {
+    var k = pairMatrix(c0, c1, leverArms(c0), leverArms(c1), bodyA, bodyB);
+    function ramp(c) {
+      var vA = velocityAt(bodyA, c.rA), vB = velocityAt(bodyB, c.rB);
+      return smoothstep(0.5 * RESTITUTION_THRESHOLD, RESTITUTION_THRESHOLD, -((vB.x - vA.x) * c.normal.x + (vB.y - vA.y) * c.normal.y));
+    }
+    k.e0 = ramp(c0); k.e1 = ramp(c1);
+    return k;
+  }
+
+  // Impulses j0, j1 >= 0 that bring each contact's closing rate to at least its target (a 2x2 LCP), or null.
+  function pairImpulses(k, b0, b1) {
+    var j0 = (k.k11 * b0 - k.k01 * b1) / k.det, j1 = (k.k00 * b1 - k.k01 * b0) / k.det;
+    if (j0 >= 0 && j1 >= 0) return [j0, j1];
+    j0 = b0 / k.k00;
+    if (j0 > 0 && k.k01 * j0 >= b1) return [j0, 0];
+    j1 = b1 / k.k11;
+    if (j1 > 0 && k.k01 * j1 >= b0) return [0, j1];
+    return null;
+  }
+
+  function applyPairImpulse(c0, c1, k, j, bodyA, bodyB) {
+    var ix = c0.normal.x * j[0] + c1.normal.x * j[1], iy = c0.normal.y * j[0] + c1.normal.y * j[1];
+    if (!bodyA.isAnchored) {
+      bodyA.vx -= ix * bodyA.invMass; bodyA.vy -= iy * bodyA.invMass;
+      bodyA.w -= bodyA.invInertia * (k.g0[0] * j[0] + k.g1[0] * j[1]);
+    }
+    if (!bodyB.isAnchored) {
+      bodyB.vx += ix * bodyB.invMass; bodyB.vy += iy * bodyB.invMass;
+      bodyB.w += bodyB.invInertia * (k.g0[1] * j[0] + k.g1[1] * j[1]);
+    }
+  }
+
+  // A line pair's two contacts at once, so equal ends get equal impulses. A contact still gap away
+  // (negative penetration) may close that far over a step, less as it bounces.
+  function solveContactPairVelocity(c0, c1, k, bodyA, bodyB, dt) {
+    if (!k.ok) { solveContactVelocity(c0, bodyA, bodyB); return; }
+    function closing(c) {
+      var vA = velocityAt(bodyA, c.rA), vB = velocityAt(bodyB, c.rB);
+      return (vB.x - vA.x) * c.normal.x + (vB.y - vA.y) * c.normal.y;
+    }
+    function target(c, v, e) {
+      return -e * v - (c.penetration < 0 ? (1 - e) * -c.penetration / dt : 0);
+    }
+    var v0 = closing(c0), v1 = closing(c1), b0 = target(c0, v0, k.e0) - v0, b1 = target(c1, v1, k.e1) - v1;
+    if (b0 <= 0 && b1 <= 0) return;
+    var j = pairImpulses(k, b0, b1);
+    if (j) applyPairImpulse(c0, c1, k, j, bodyA, bodyB);
+  }
+
+  // A contact at one line's end and not the other's turns that line in the push and only moves the other,
+  // unless it is fixed: a support under an off-center load then stays level. At an end, the lever arm
+  // across the normal is all but the half-length.
+  var LINE_END_SHARE = 0.99;
+  function pushArms(c, bodyA, bodyB) {
+    var g = leverArms(c);
+    var endA = Math.abs(g[0]) >= LINE_END_SHARE * bodyA.length / 2, endB = Math.abs(g[1]) >= LINE_END_SHARE * bodyB.length / 2;
+    if (endA && !endB && !bodyA.isAnchored) g[1] = 0;
+    else if (endB && !endA && !bodyB.isAnchored) g[0] = 0;
+    return g;
+  }
+
+  // Their push-out for one position pass, solved together so it turns the bodies too: a deeper end lifts more.
+  // Returns each body's move and turn, or null.
+  function contactPairPush(c0, c1, k, bodyA, bodyB) {
+    if (!k.ok) {
+      // solveContactPosition's push for c0 alone.
+      var mSum = bodyA.invMass + bodyB.invMass, cor = mSum > 0 ? Math.max(c0.penetration - POSITION_SLOP, 0) / mSum * POSITION_PERCENT : 0;
+      return { ax: -c0.normal.x * cor * bodyA.invMass, ay: -c0.normal.y * cor * bodyA.invMass, aw: 0, bx: c0.normal.x * cor * bodyB.invMass, by: c0.normal.y * cor * bodyB.invMass, bw: 0 };
+    }
+    var b0 = POSITION_PERCENT * (c0.penetration - POSITION_SLOP), b1 = POSITION_PERCENT * (c1.penetration - POSITION_SLOP);
+    if (b0 <= 0 && b1 <= 0) return null;
+    k = pairMatrix(c0, c1, pushArms(c0, bodyA, bodyB), pushArms(c1, bodyA, bodyB), bodyA, bodyB);
+    var j = k.ok ? pairImpulses(k, b0, b1) : null;
+    if (!j) return null;
+    var x = c0.normal.x * j[0] + c1.normal.x * j[1], y = c0.normal.y * j[0] + c1.normal.y * j[1];
+    return {
+      ax: -x * bodyA.invMass, ay: -y * bodyA.invMass, aw: -bodyA.invInertia * (k.g0[0] * j[0] + k.g1[0] * j[1]),
+      bx: x * bodyB.invMass, by: y * bodyB.invMass, bw: bodyB.invInertia * (k.g0[1] * j[0] + k.g1[1] * j[1]),
+    };
   }
 
   function solveContactPosition(contact, bodyA, bodyB) {
@@ -1363,8 +1431,6 @@
     return false;
   }
 
-  // ---- Frame-wrap helpers: a world-hinged body wraps by its PIN and its whole hinged assembly
-  // translates with it (keeps every hinge satisfied on a torus); a hinge child never wraps alone.
   // ---- Edge modes (all share frameWidth/frameHeight):
   //   "sticky"   run ends at an edge (engine still wraps; PhysicsHingeGeometry.findWrapStopStep)
   //   "wrap"     Pac-Man: leaving one edge reappears at the opposite
@@ -1396,19 +1462,7 @@
     return v;
   }
 
-  // Not physics-hinge-geometry.js's version (it depends on this file). Translates the hinge subtree.
-  function wrapTranslateAndCascade(scene, bodyIndex, dx, dy, visited) {
-    if (visited[bodyIndex]) return;
-    visited[bodyIndex] = true;
-    var body = scene.bodies[bodyIndex];
-    body.x += dx;
-    body.y += dy;
-    scene.hinges.forEach(function (h) {
-      if (h.bodyA === bodyIndex) wrapTranslateAndCascade(scene, h.bodyB, dx, dy, visited);
-    });
-  }
-
-  // Same for a spring group, including background pins members hang from, or a hinge tears.
+  // Moves a spring group or hinge assembly, with the background pins its members hang from, or a hinge tears.
   function translateSpringGroup(scene, group, dx, dy) {
     var isMember = {};
     group.members.forEach(function (m) {
@@ -1690,11 +1744,25 @@
       b1.vx = vPre.x + (sh ? sh.x : 0); b1.vy = vPre.y + (sh ? sh.y : 0);
     }
 
+    // A pair's two contacts solve together (contactPairMatrix); pairs[i] is set on the first of them.
+    var pairs = new Array(contacts.length);
+    for (i = 0; i + 1 < contacts.length; i++) {
+      var c0 = contacts[i], c1 = contacts[i + 1];
+      if (c1.a !== c0.a || c1.b !== c0.b) continue;
+      pairs[i++] = { k: contactPairMatrix(c0, c1, bodies[c0.a], bodies[c0.b]), push: null };
+    }
+
     var iter;
     for (iter = 0; iter < velIter; iter++) {
       for (i = 0; i < scene.hinges.length; i++) solveHingeVelocity(scene.hinges[i], bodies);
       for (i = 0; i < contacts.length; i++) {
-        solveContactVelocity(contacts[i], bodies[contacts[i].a], bodies[contacts[i].b]);
+        var cv = contacts[i];
+        if (pairs[i]) {
+          solveContactPairVelocity(cv, contacts[i + 1], pairs[i].k, bodies[cv.a], bodies[cv.b], dt);
+          i++;
+        } else {
+          solveContactVelocity(cv, bodies[cv.a], bodies[cv.b]);
+        }
       }
     }
 
@@ -1711,41 +1779,41 @@
 
     // The shake lands the joints closed; the projection is for steps a contact or the spin guard spoiled.
     var projectHinges = scene.hinges.length && (contacts.length > 0 || !shake);
+    // A pair's turns land before the passes, whole, so the hinge passes see them.
+    for (i = 0; i < contacts.length; i++) {
+      if (!pairs[i]) continue;
+      var pt = pairs[i].push = contactPairPush(contacts[i], contacts[i + 1], pairs[i].k, bodies[contacts[i].a], bodies[contacts[i].b]);
+      if (!pt) continue;
+      if (!bodies[contacts[i].a].isAnchored) bodies[contacts[i].a].angle += pt.aw * posIter;
+      if (!bodies[contacts[i].b].isAnchored) bodies[contacts[i].b].angle += pt.bw * posIter;
+    }
     for (iter = 0; iter < posIter; iter++) {
       if (projectHinges) for (i = 0; i < scene.hinges.length; i++) solveHingePosition(scene.hinges[i], bodies);
       for (i = 0; i < contacts.length; i++) {
-        solveContactPosition(contacts[i], bodies[contacts[i].a], bodies[contacts[i].b]);
+        var cq = contacts[i], bA = bodies[cq.a], bB = bodies[cq.b];
+        if (!pairs[i]) { solveContactPosition(cq, bA, bB); continue; }
+        var pu = pairs[i++].push;
+        if (!pu) continue;
+        if (!bA.isAnchored) { bA.x += pu.ax; bA.y += pu.ay; }
+        if (!bB.isAnchored) { bB.x += pu.bx; bB.y += pu.by; }
       }
     }
 
     if (portals) applyPortholeTransports(scene, portals, passGroup, startPose, u, acc, dt, maxSpeed, friction, warpFlags);
 
-    // Edge wrapping, last (matches the GLSL). Only roots decide; world-hinged by PIN; sprung by group.
+    // Edge wrapping, last (matches the GLSL). A spring group, else a hinge assembly, wraps as one by its
+    // leader's center, unless it is tethered or held.
     if (wrapsAtEdges(scene)) {
-      var isHingeChild = {};
-      var ownWorldHinge = {};
-      scene.hinges.forEach(function (h) {
-        if (h.bodyA === null) ownWorldHinge[h.bodyB] = h;
-        else isHingeChild[h.bodyB] = true;
-      });
-      var sprung = springGroups(scene);
+      var sprung = springGroups(scene), assemblies = hingeAssemblies(scene);
       for (i = 0; i < bodies.length; i++) {
-        var wb = bodies[i];
-        if (wb.isAnchored || isHingeChild[i]) continue;
         var group = sprung ? sprung.groupOf[i] : null;
-        if (group && (group.tethered || group.leader !== i)) continue;
-        var worldHinge = ownWorldHinge[i];
-        var ref = worldHinge ? worldHinge.localAnchorA : wb;
-        var dx = wrapCoord(ref.x, scene.frameWidth) - ref.x;
-        var dy = wrapCoord(ref.y, scene.frameHeight) - ref.y;
+        var wrapGroup = group || assemblies.groupOf[i];
+        if (group ? group.tethered || group.leader !== i : wrapGroup.held || wrapGroup.leader !== i) continue;
+        var dx = wrapCoord(bodies[i].x, scene.frameWidth) - bodies[i].x;
+        var dy = wrapCoord(bodies[i].y, scene.frameHeight) - bodies[i].y;
         if (wrapFlags) wrapFlags[i] = (dx !== 0 ? 1 : 0) | (dy !== 0 ? 2 : 0);
         if (dx === 0 && dy === 0) continue;
-        if (group) {
-          translateSpringGroup(scene, group, dx, dy);
-          continue;
-        }
-        if (worldHinge) worldHinge.localAnchorA = { x: worldHinge.localAnchorA.x + dx, y: worldHinge.localAnchorA.y + dy };
-        wrapTranslateAndCascade(scene, i, dx, dy, {});
+        translateSpringGroup(scene, wrapGroup, dx, dy);
       }
     }
   }
@@ -2061,6 +2129,7 @@
     springEffectiveStiffness: springEffectiveStiffness,
     springPotentialEnergy: springPotentialEnergy,
     springGroups: springGroups,
+    hingeAssemblies: hingeAssemblies,
     translateSpringGroup: translateSpringGroup,
     LINE_THICKNESS: LINE_THICKNESS,
     EDGE_MODES: EDGE_MODES,

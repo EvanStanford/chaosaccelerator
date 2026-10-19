@@ -9,10 +9,13 @@
   // Everything runs on demand: nothing touches WebGL until FractalGrid.start(scene).
   // Started once and kept alive; a later scene goes through setScene().
   var started = false;
+  // Set once boot gets as far as installing setScene; a boot that stops early leaves the stubs below.
+  var booted = false;
   // A Lyapunov challenge page's { onResult } (challenges/), bound while the builder is still up.
   var lyapunovChallenge = null;
   global.FractalGrid = {
     start: function (scene) {
+      if (started && !booted) { restartInMap(scene); return; }
       if (started) { global.FractalGrid.setScene(scene); return; }
       started = true;
       boot(scene);
@@ -32,6 +35,23 @@
     setLyapunovChallenge: function (challenge) { lyapunovChallenge = challenge || null; },
   };
 
+  // Starts the map over in a fresh page, for a tab whose first boot stopped early.
+  function restartInMap(scene) {
+    var fragment = null;
+    try {
+      var precision = document.getElementById("precision-select").value;
+      fragment = global.ShareUrl.encode({
+        page: global.ShareUrl.PAGE_MAP,
+        scene: global.PhysicsCoords.toAuthoredJSON(scene),
+        view: { precision: precision, volume: PhysicsSound.getVolume() },
+      });
+    } catch (err) {
+      // Reloads where it is: the editor, with the scene it auto-saved.
+    }
+    if (fragment && global.AppShell && global.AppShell.reloadTo) global.AppShell.reloadTo(fragment);
+    else global.location.reload();
+  }
+
   // One Settings body (#shared-settings-body) is MOVED between the builder's panel
   // and the map's card (placeSettings). Until the map starts, the controls hold the state.
   var PERF_PRESETS = {
@@ -39,6 +59,7 @@
     high: { endStride: 1, antialias: true, reuse: true, maxDpr: 0, frameMs: 0, drawMs: 5, playbackMB: 256, gestureFirst: false, noTransitions: false, precision: "auto", gravitySubsteps: true, dropShadow: true },
   };
   var perfDefaultPreset = global.LayoutMode && global.LayoutMode.isConstrained() ? "low" : "high";
+  if (global.ShareUrl) global.ShareUrl.setOmittedPrecision(PERF_PRESETS[perfDefaultPreset].precision);
   // Each control at the Low preset or wherever it already sits below it. 0 for maxDpr and frameMs means uncapped.
   function lowerPerfValues(cur) {
     var low = PERF_PRESETS.low;
@@ -208,8 +229,8 @@
         var state = global.ShareUrl.decode(global.location.hash);
         if (state && state.page === global.ShareUrl.PAGE_MAP) {
           // A challenge keeps the precision its start link pins.
-          if (!(global.LayoutMode && global.LayoutMode.challengeKind())) state.view.precision = PERF_PRESETS[perfDefaultPreset].precision;
-          state.view.volume = 0;
+          if (!(global.LayoutMode && global.LayoutMode.challengeKind())) state.view.precision = undefined;
+          state.view.volume = undefined;
           global.history.replaceState(global.history.state, "", "#" + global.ShareUrl.encode(state));
         }
       } catch (err) { /* reloads the address as it is */ }
@@ -1560,7 +1581,7 @@
   // KHR_parallel_shader_compile) -> warming (1x1 draw per format + fence) -> ready/failed.
   var parallelCompileExt = gl.getExtension("KHR_parallel_shader_compile");
 
-  function startProgramBuild(fragmentSource, label) {
+  function startProgramBuild(fragmentSource, label, precision) {
     noteGpuActivity("compile " + label);
     programSizes[label] = fragmentSource.length;
     var shader = gl.createShader(gl.FRAGMENT_SHADER);
@@ -1570,7 +1591,7 @@
     gl.attachShader(program, vs);
     gl.attachShader(program, shader);
     gl.linkProgram(program);
-    return { status: "linking", program: program, shader: shader, sync: null, error: null, startedAt: performance.now(), label: label };
+    return { status: "linking", program: program, shader: shader, sync: null, error: null, startedAt: performance.now(), label: label, precision: precision };
   }
 
   function discardProgramBuild(build) {
@@ -1630,6 +1651,8 @@
         build.status = "failed";
         return build.status;
       }
+      // The warm draw below pauses the screen: the loading notice goes up first.
+      if (!wait && !loadingNoticeReady(build.precision)) return build.status;
       gl.deleteShader(build.shader);
       build.shader = null;
       if (wait) { build.status = "ready"; noteBuildDone(build); return build.status; }
@@ -1725,7 +1748,7 @@
       var pass = { key: key, precision: precision, variant: variant, status: "building", build: null,
         program: null, posLoc: -1, uniforms: null, error: null };
       try {
-        pass.build = startProgramBuild(buildFragmentShader(scene, precision, variant), precision + " " + variant + " grid program");
+        pass.build = startProgramBuild(buildFragmentShader(scene, precision, variant), precision + " " + variant + " grid program", precision);
       } catch (err) {
         pass.status = "failed";
         pass.error = err.message || String(err);
@@ -1760,6 +1783,42 @@
   }
 
   var buildStatusShowing = false;
+  // "Compiling double precision" over the map while a higher precision builds, up at least two frames before
+  // a build's first draw, which pauses the screen.
+  var loadingNotice = document.getElementById("precision-loading");
+  var loadingNoticeText = document.getElementById("precision-loading-text");
+  var loadingNoticeGlyph = document.getElementById("precision-loading-glyph");
+  var LOADING_NOTICE_LINGER_MS = 300;
+  var loadingWanted = null, loadingShownAt = -1, loadingWantedAt = 0, frameIndex = 0;
+  function noteLoading(precision) {
+    if (!PhysicsDF.isExtended(precision)) return;
+    if (!loadingWanted || PRECISION_LADDER.indexOf(precision) > PRECISION_LADDER.indexOf(loadingWanted)) loadingWanted = precision;
+  }
+  function loadingNoticeReady(precision) {
+    if (!PhysicsDF.isExtended(precision)) return true;
+    noteLoading(precision);
+    return loadingShownAt >= 0 && frameIndex - loadingShownAt >= 2;
+  }
+  function updateLoadingNotice(now) {
+    Object.keys(passes).forEach(function (k) { if (passes[k].status === "building") noteLoading(passes[k].precision); });
+    Object.keys(playbackGpu.programs).forEach(function (p) { if (playbackGpu.programs[p].status === "building") noteLoading(p); });
+    PhysicsGPU.pendingTrajectoryPrecisions().forEach(noteLoading);
+    if (loadingWanted) {
+      loadingWantedAt = now;
+      var text = "Compiling " + PRECISION_TITLES[loadingWanted].toLowerCase();
+      if (loadingNoticeText.textContent !== text) {
+        loadingNoticeText.textContent = text;
+        loadingNoticeGlyph.setAttribute("href", "#precision-glyph-" + loadingWanted);
+      }
+      if (loadingNotice.hidden) { loadingNotice.hidden = false; loadingShownAt = frameIndex; }
+    } else if (!loadingNotice.hidden && now - loadingWantedAt > LOADING_NOTICE_LINGER_MS) {
+      loadingNotice.hidden = true;
+      loadingShownAt = -1;
+    }
+    loadingWanted = null;
+  }
+  PhysicsGPU.setWarmGate(loadingNoticeReady);
+
   function refreshBuildStatus() {
     var message = null;
     if (pickPrecision() !== "f32" && precisionPending(pickPrecision())) message = "Preparing high precision\u2026";
@@ -1991,8 +2050,10 @@
   function renderedSteps() { return Math.min(timeline.step, simulationSteps); }
 
   var dirty = true;
+  // Whether the canvas shows a picture of the current view: a level of it, a playback frame or its average.
+  var viewPictured = false;
   // Invalidates the image, every partial refinement level and Global Stats.
-  function markDirty() { dirty = true; resetProgressive(); scheduleColorSpreadCheck(); statsOnViewChanged(); }
+  function markDirty() { dirty = true; viewPictured = false; resetProgressive(); scheduleColorSpreadCheck(); statsOnViewChanged(); }
 
   // ---- Choosing a precision ----
   // The float32 wall: one pixel's world distance under the ULP of the largest coordinate in play.
@@ -2173,6 +2234,28 @@
   function prewarmPasses() {
     if (precisionMode !== "auto") return;
     precisionReady(precisionForSpacing(worldPixelSpacing() / DF_PREWARM_FACTOR));
+  }
+
+  // The hover replay's program, built as soon as the map draws at an extended precision, so its pipeline build
+  // pauses the screen beside the map's own instead of on the first hover. Skipped where the GPU is weak or no one hovers.
+  var hoverWarm = { key: null, compiled: null };
+  var inMovieEngine = (function () {
+    try { return !!global.frameElement && global.frameElement.id === "engine" && !(global.LayoutMode && global.LayoutMode.challengeKind()); }
+    catch (err) { return false; }
+  })();
+  function prewarmHoverProgram() {
+    var precision = effectivePrecision();
+    if (!PhysicsDF.isExtended(precision) || inMovieEngine || (global.LayoutMode && global.LayoutMode.isConstrained())) return;
+    var key = sceneGeneration + " " + precision;
+    if (hoverWarm.key !== key) {
+      hoverWarm.key = key;
+      try {
+        hoverWarm.compiled = PhysicsGridCodegen.compileHoverTrajectoryGLSL(scene, 0, 0, hoverStepCount(), precision, 0, 0);
+      } catch (err) {
+        hoverWarm.compiled = null; // a hover reports it
+      }
+    }
+    if (hoverWarm.compiled && !PhysicsGPU.trajectoryProgramPending(hoverWarm.compiled)) hoverWarm.compiled = null;
   }
 
   // Binds the single-draw program; above float32 only float-texture-less devices use it.
@@ -2465,8 +2548,8 @@
   }
 
   function runSuperlative(kind) {
-    if (MAX_INSPECT_POINTS - totalInspectedPointCount() < (kind === "edge" ? 2 : 1)) {
-      global.AppMessage.toast(INSPECT_FULL_MESSAGE);
+    if (MAX_INSPECT_POINTS - reservedPointCount() < (kind === "edge" ? 2 : 1)) {
+      toastInspectFull(false);
       return;
     }
     var aspect = canvasArea.clientHeight > 0 ? canvasArea.clientWidth / canvasArea.clientHeight : 1;
@@ -2528,8 +2611,7 @@
     }
   }
 
-  // The tip's sample, one slice draw a frame and read back behind a fence: at a deep zoom the whole sample is
-  // seconds of GPU work. A view change drops it; the settled view asks again.
+  // The tip's sample: one slice draw a frame, read back behind a fence. A view change drops it.
   var colorSpreadProbe = null;
   function colorSpreadKey() { return bounceMaxViewKey() + " " + renderedSteps() + " " + bounceMaxValue + " " + sceneGeneration; }
 
@@ -2571,6 +2653,7 @@
     colorSpreadProbe = null;
     if (probe.sync) gl.deleteSync(probe.sync);
     if (probe.pbo) gl.deleteBuffer(probe.pbo);
+    if (probe.job) releaseSliceState("tip");
     freeSampleTarget(probe.target);
   }
 
@@ -2768,7 +2851,7 @@
 
   // ---- Inspect: locked reference points played back alongside the hover ----
   // Groups: "point" (one entry), "line" (entries along a drag), "grid" (a computeGridLayout-sized set over a
-  // dragged box, drawn as a mesh). An entry is computeTrajectoryEntry's result plus a color; Grid Size 8 needs 176.
+  // dragged box, drawn as a mesh). An entry is trajectoryEntry's result plus a color; Grid Size 8 needs 176.
   var MAX_INSPECT_POINTS = 300;
   var inspectGridSize = Number(document.getElementById("inspect-grid-size-slider").value) || 3;
   var inspectGridTwoPart = document.getElementById("inspect-grid-two-part-checkbox").checked;
@@ -2939,7 +3022,7 @@
       el.addEventListener("click", function () {
         var slot = inspectMarkerEls.indexOf(el);
         if (slot === -1) return;
-        if (inspectMarkerGroupIndex[slot] === -1) cancelLockJob();
+        if (inspectMarkerGroupIndex[slot] === -1) dropLockJob(lockJob);
         else removeInspectedGroup(inspectMarkerGroupIndex[slot]);
       });
       // The dot sits over the canvas, so it must zoom too or it blocks the wheel.
@@ -3111,11 +3194,12 @@
       inspectListEl.appendChild(inspectRow(group.type, group.type === "point" ? group.points[0].color.fill : null,
         corners, group.places, function () { removeInspectedGroup(i); }));
     });
-    if (lockJob) {
-      var job = lockJob, d = job.describe[0];
+    [lockJob].concat(lockQueue).forEach(function (job) {
+      if (!job) return;
+      var d = job.describe[0];
       inspectListEl.appendChild(inspectRow(job.type, job.colorOf(0).fill, job.type === "point" ? job.worldPoints : [d.a, d.b],
-        d.places, function () { cancelLockJob(); }));
-    }
+        d.places, function () { dropLockJob(job); }));
+    });
   }
 
   // ---- Separation plot: how spread out every inspected run is, frame by frame ----
@@ -3351,7 +3435,10 @@
     if (inspectedGroups.length > 0) {
       beginInspectOnlySession();
     } else if (isHoveringGrid && hoverWorldPoint && !hoverPreviewSuppressed()) {
-      runHoverAt(hoverWorldPoint);
+      // The cell's instant preview until its replay lands, not the last replay; no replay while a lock runs.
+      stopHoverReplay();
+      showHoverInstant(hoverWorldPoint);
+      if (!lockJob) runHoverAt(hoverWorldPoint);
     } else {
       showHoverEmpty();
     }
@@ -3361,13 +3448,16 @@
     updateInspectMarkers();
     updateInspectList();
     updateSeparationPlot();
-    var full = totalInspectedPointCount() >= MAX_INSPECT_POINTS;
+    updateInspectButtons();
+    restartCurrentPreview();
+  }
+  function updateInspectButtons() {
+    var full = reservedPointCount() >= MAX_INSPECT_POINTS;
     btnInspectPoint.disabled = full;
     btnInspectLine.disabled = full;
     btnInspectGrid.disabled = full;
     btnInspectClearAll.hidden = inspectedGroups.length === 0 && !lockJob;
     updateMovieInspectButton();
-    restartCurrentPreview();
   }
   // Not while a link's points are still being rebuilt: the movie would miss the rest.
   function updateMovieInspectButton() {
@@ -3392,7 +3482,7 @@
   // One GPU run of `compiled`, a slice per task, once its program has built (onWaiting is called meanwhile).
   // done(err, trajectories) is called once, never before this returns; cancel() stops it.
   function runInSteps(compiled, steps, done, onWaiting) {
-    var handle = { job: null, timer: null, progress: 0, cancelled: false, waiting: false };
+    var handle = { job: null, timer: null, progress: 0, cancelled: false, waiting: false, startedAt: performance.now() };
     function pump() {
       handle.timer = null;
       if (handle.cancelled) return;
@@ -3434,18 +3524,17 @@
     return handle;
   }
 
-  // runHoverAt's replay plus its wrap-stop work for each point, at the precision and duration of now: onEntry(i, entry)
-  // in order (null for a point whose run failed), then onDone(). Above float32 the points share one run (split up
-  // by the runner); float32 keeps one run per point, see compileHoverTrajectoryGLSL. As many runs a task as fit.
+  // Each point's replay entry at the current precision and duration: onEntry(i, entry) in order (null if its run
+  // failed), then onDone(). One shared run above float32, one run per point at float32.
   function computeEntriesInSteps(worldPoints, onEntry, onDone, onWaiting) {
     var precision = effectivePrecision(), steps = hoverStepCount();
     var batched = PhysicsDF.isExtended(precision);
     var queue = batched ? [worldPoints.map(function (p, i) { return i; })] : worldPoints.map(function (p, i) { return [i]; });
-    var handle = { timer: null, precision: precision, waiting: false, done: 0, cancelled: false };
-    // The run in hand: its points, program, job, and once read back its trajectories, the next to make an entry of.
-    var indices = null, compiled = null, job = null, trajectories = null, k = 0;
+    var handle = { timer: null, precision: precision, waiting: false, done: 0, cancelled: false, startedAt: performance.now() };
+    // The run in hand: its points, program, job, the trajectories read back so far and the next to make an entry of.
+    var indices = null, compiled = null, job = null, ready = null, k = 0;
     handle.progress = function () {
-      return (handle.done + (job ? job.progress * indices.length : 0)) / Math.max(1, worldPoints.length);
+      return (handle.done + (job ? job.progress * indices.length - k : 0)) / Math.max(1, worldPoints.length);
     };
     function pump() {
       handle.timer = null;
@@ -3456,12 +3545,12 @@
           indices = queue.shift();
           if (!indices) { onDone(); return; }
           compiled = null;
-          trajectories = null;
+          ready = null;
           k = 0;
         }
-        if (trajectories) {
+        if (ready && k < ready.length) {
           var i = indices[k], entry = null;
-          try { entry = trajectoryEntry(worldPoints[i], trajectories[k]); } catch (err) { /* as a failed run */ }
+          try { entry = trajectoryEntry(worldPoints[i], ready[k]); } catch (err) { /* as a failed run */ }
           handle.done += 1;
           k += 1;
           if (k === indices.length) indices = null;
@@ -3483,22 +3572,20 @@
             }
             handle.waiting = false;
             job = PhysicsGPU.startTrajectoryRun(compiled, steps);
+            ready = job.ready;
           }
-          if (job.step(Math.max(0, until - performance.now()))) {
-            trajectories = job.trajectories;
-            job = null;
-          }
+          if (job.step(Math.max(0, until - performance.now()))) job = null;
         } catch (err) {
           job = null;
-          // A batch fails as a whole: then one at a time, so one bad point doesn't take the rest with it.
+          // A batch fails as a whole: its undelivered points go again one at a time.
+          var left = indices.slice(k);
           if (indices.length > 1) {
-            queue = indices.map(function (n) { return [n]; }).concat(queue);
+            queue = left.map(function (n) { return [n]; }).concat(queue);
             indices = null;
           } else {
-            var failed = indices[0];
             indices = null;
             handle.done += 1;
-            onEntry(failed, null);
+            onEntry(left[0], null);
           }
         }
       } while (performance.now() < until);
@@ -3540,57 +3627,115 @@
     };
   }
 
-  // ---- The lock in progress ----
-  // Its points arrive a run at a time: a row in the list, its finished dots, a progress line under the preview. A new
-  // lock, Clear All, its row's remove button, a new scene or leaving the map cancels it, and nothing of it is kept.
-  var lockJob = null;
+  // ---- The lock in progress, and the ones waiting behind it ----
+  // A lock's points arrive a run at a time: a row in the list, its finished dots, a status line under the preview.
+  // A cancelled lock keeps nothing.
+  var lockJob = null, lockQueue = [];
   var INSPECT_FULL_MESSAGE = "Inspect holds up to " + MAX_INSPECT_POINTS + " points";
 
+  // What the cap counts: points inspected, being locked or waiting to be.
+  function reservedPointCount() {
+    return [lockJob].concat(lockQueue).reduce(function (n, job) {
+      return n + (job ? job.worldPoints.length : 0);
+    }, totalInspectedPointCount());
+  }
+  // Points of the point locks ahead of `job`: a waiting point's color is the one it will get.
+  function pointsAheadOf(job) {
+    var jobs = [lockJob].concat(lockQueue), n = 0;
+    for (var i = 0; i < jobs.length && jobs[i] !== job; i++) {
+      if (jobs[i] && jobs[i].type === "point") n += jobs[i].worldPoints.length;
+    }
+    return n;
+  }
+
+  // A link's groups toast once between them, preferring the cut-short wording: the plain one waits for the last group.
+  var linkCapToast = null; // null | "owed" | "shown"
+  function toastInspectFull(cut, linkItem) {
+    if (linkItem) {
+      if (linkCapToast === "shown") return;
+      if (!cut && pendingInspect) { linkCapToast = "owed"; return; }
+      linkCapToast = "shown";
+    }
+    global.AppMessage.toast(INSPECT_FULL_MESSAGE + (cut ? ", so this line was cut short" : ""));
+  }
+
   // job: { type, worldPoints, describe (its share-link groups), colorOf(i), finish(entries) (true if it added a
-  // group), relock(), linkItem (a link's pending group), meshLineEls and segments for a grid }.
+  // group), relock(), meshLineEls and segments for a grid }. It waits its turn behind a lock in progress.
   function startLockJob(job) {
-    cancelLockJob(true);
-    lockJob = job;
     job.entries = [];
     job.filled = 0;
-    job.steps = hoverStepCount();
-    job.generation = sceneGeneration;
     job.armMode = inspectArmMode;
     disarmInspect();
+    if (lockJob) lockQueue.push(job);
+    else runLockJob(job);
+    updateLockUI();
+  }
+
+  function runLockJob(job) {
+    lockJob = job;
+    job.steps = hoverStepCount();
+    job.generation = sceneGeneration;
+    // Over a hover preview: its replay, if still computing, gives way to the lock.
+    if (inspectedGroups.length === 0 && !activeReplay && !previewEmpty && hoverWorldPoint) showHoverInstant(hoverWorldPoint);
     job.handle = computeEntriesInSteps(job.worldPoints, function (i, entry) {
       if (entry) entry.color = job.colorOf(i);
       job.entries[i] = entry;
     }, function () {
       if (lockJob !== job) return;
       lockJob = null;
-      // The duration or the physics changed meanwhile: again, with the new runs.
+      // The duration or the physics changed meanwhile: again, with the new runs, ahead of the others.
       if (job.steps !== hoverStepCount() || job.generation !== sceneGeneration) {
-        if (job.meshLineEls) job.meshLineEls.forEach(function (el) { el.remove(); });
+        removeLockMesh(job);
         job.relock();
+        if (!lockJob) runNextLock();
+        updateLockUI();
         return;
       }
       // A grid or point that failed stays armed for a retry.
       if (!job.finish(job.entries) && job.armMode && job.type !== "line" && !inspectArmMode) armInspect(job.armMode);
+      runNextLock();
       updateInspectUI();
     });
-    updateInspectMarkers();
-    updateInspectList();
-    btnInspectClearAll.hidden = false;
-    updateMovieInspectButton();
   }
 
-  // requeue: a link's group gives way to the user's own lock and is rebuilt after it.
-  function cancelLockJob(requeue) {
-    if (!lockJob) return;
-    var job = lockJob;
-    lockJob = null;
-    job.handle.cancel();
+  function runNextLock() {
+    var next = lockQueue.shift();
+    if (next) runLockJob(next);
+  }
+
+  function removeLockMesh(job) {
     if (job.meshLineEls) job.meshLineEls.forEach(function (el) { el.remove(); });
-    if (requeue && job.linkItem) pendingInspect = [job.linkItem].concat(pendingInspect || []);
+  }
+
+  // One lock, running or waiting; the next waiting one starts.
+  function dropLockJob(job) {
+    if (!job) return;
+    if (job === lockJob) {
+      lockJob = null;
+      job.handle.cancel();
+      runNextLock();
+    } else if (lockQueue.indexOf(job) !== -1) {
+      lockQueue.splice(lockQueue.indexOf(job), 1);
+    }
+    removeLockMesh(job);
+    updateLockUI();
+    if (!lockJob && inspectedGroups.length === 0) restartCurrentPreview();
+  }
+
+  // Every lock, running and waiting.
+  function cancelAllLocks() {
+    if (!lockJob) return;
+    lockJob.handle.cancel();
+    [lockJob].concat(lockQueue).forEach(removeLockMesh);
+    lockJob = null;
+    lockQueue = [];
+    updateLockUI();
+  }
+
+  function updateLockUI() {
     updateInspectMarkers();
     updateInspectList();
-    btnInspectClearAll.hidden = inspectedGroups.length === 0;
-    updateMovieInspectButton();
+    updateInspectButtons();
   }
 
   function lockJobStatus(job) {
@@ -3599,10 +3744,17 @@
     return "Adding " + n + " point" + (n === 1 ? "" : "s") + ": " + Math.floor(100 * job.handle.progress()) + "%";
   }
 
-  // Every frame: the lock's new dots and its line under the preview (empty, so hidden, when none runs).
+  // Every frame: the lock's new dots and its status. Over the empty preview the status replaces the hint and the
+  // placeholder readout; elsewhere it is the line under the preview (empty, so hidden, when no lock runs).
   var inspectProgressEl = document.getElementById("inspect-progress");
   function showLockProgress() {
     var job = lockJob, text = job ? lockJobStatus(job) : "";
+    if (previewEmpty) {
+      hoverEmptyState.hidden = !!job;
+      var readout = job ? text : EMPTY_READOUT;
+      if (hoverReadout.textContent !== readout) hoverReadout.textContent = readout;
+      text = "";
+    }
     if (inspectProgressEl.textContent !== text) inspectProgressEl.textContent = text;
     if (job && job.handle.done !== job.filled) {
       job.filled = job.handle.done;
@@ -3617,16 +3769,15 @@
 
   // A point group per point, all of them or none when they don't fit.
   function lockPoints(worldPoints, places, linkItem) {
-    if (MAX_INSPECT_POINTS - totalInspectedPointCount() < worldPoints.length) {
-      global.AppMessage.toast(INSPECT_FULL_MESSAGE);
+    if (MAX_INSPECT_POINTS - reservedPointCount() < worldPoints.length) {
+      toastInspectFull(false, linkItem);
       return;
     }
     if (places === undefined) places = viewPlaces();
-    var firstColor = nextColorIndex;
-    startLockJob({
-      type: "point", worldPoints: worldPoints, linkItem: linkItem,
+    var job = {
+      type: "point", worldPoints: worldPoints,
       describe: worldPoints.map(function (p) { return { type: "point", a: p, places: places }; }),
-      colorOf: function (i) { return lockedPointColor(firstColor + i); },
+      colorOf: function (i) { return lockedPointColor(nextColorIndex + pointsAheadOf(job) + i); },
       relock: function () { lockPoints(worldPoints, places, linkItem); },
       finish: function (entries) {
         var added = false;
@@ -3639,24 +3790,25 @@
         });
         return added;
       },
-    });
+    };
+    startLockJob(job);
   }
 
   // Inspect (Line) drag. Past MAX_INSPECT_POINTS only the first `available` points are added.
   // relocked: the same line again at a new duration, already toasted if it was cut.
   function lockLineOfPoints(startWorld, endWorld, sampleCount, places, linkItem, relocked) {
     sampleCount = sampleCount || inspectLineSampleCount;
-    var available = MAX_INSPECT_POINTS - totalInspectedPointCount();
+    var available = MAX_INSPECT_POINTS - reservedPointCount();
     if (available <= 0) {
       // Stays armed: Clear All (or removing a point) might free up room to retry.
-      global.AppMessage.toast(INSPECT_FULL_MESSAGE);
+      toastInspectFull(false, linkItem);
       return;
     }
     var worldPoints = evenlySpacedPoints(startWorld, endWorld, sampleCount);
-    if (worldPoints.length > available && !relocked) global.AppMessage.toast(INSPECT_FULL_MESSAGE + ", so this line was cut short");
+    if (worldPoints.length > available && !relocked) toastInspectFull(true, linkItem);
     if (places === undefined) places = viewPlaces();
     startLockJob({
-      type: "line", worldPoints: worldPoints.slice(0, available), linkItem: linkItem,
+      type: "line", worldPoints: worldPoints.slice(0, available),
       describe: [{ type: "line", a: startWorld, b: endWorld, count: sampleCount, places: places }],
       colorOf: function (i) { return inspectLinePointColor(i, sampleCount); },
       relock: function () { lockLineOfPoints(startWorld, endWorld, sampleCount, places, linkItem, true); },
@@ -3679,8 +3831,8 @@
     var layout = computeGridLayout(gridSize, twoPart);
     var worldPoints = evenlySpacedGrid(startWorld, endWorld, layout.size, layout.size)
       .filter(function (p) { return isAxisIn(layout.axes, p.row) || isAxisIn(layout.axes, p.col); });
-    if (MAX_INSPECT_POINTS - totalInspectedPointCount() < worldPoints.length) {
-      global.AppMessage.toast(INSPECT_FULL_MESSAGE);
+    if (MAX_INSPECT_POINTS - reservedPointCount() < worldPoints.length) {
+      toastInspectFull(false, linkItem);
       return;
     }
     if (places === undefined) places = viewPlaces();
@@ -3696,7 +3848,7 @@
       return lineEl;
     });
     startLockJob({
-      type: "grid", worldPoints: worldPoints, linkItem: linkItem, segments: segments, meshLineEls: meshLineEls,
+      type: "grid", worldPoints: worldPoints, segments: segments, meshLineEls: meshLineEls,
       describe: [{ type: "grid", a: startWorld, b: endWorld, size: gridSize, twoPart: !!twoPart, places: places }],
       colorOf: colorOf,
       relock: function () { lockGridOfPoints(startWorld, endWorld, gridSize, twoPart, places, linkItem); },
@@ -3737,7 +3889,7 @@
   }
 
   function clearInspected() {
-    cancelLockJob();
+    cancelAllLocks();
     cancelRecompute();
     inspectedGroups.forEach(function (group) {
       if (group.type === "grid") group.meshLineEls.forEach(function (el) { el.remove(); });
@@ -3758,15 +3910,15 @@
     btnInspectGrid.classList.toggle("inspect-armed", mode === "grid");
   }
   btnInspectPoint.addEventListener("click", function () {
-    if (totalInspectedPointCount() >= MAX_INSPECT_POINTS) return;
+    if (reservedPointCount() >= MAX_INSPECT_POINTS) return;
     armInspect("point");
   });
   btnInspectLine.addEventListener("click", function () {
-    if (totalInspectedPointCount() >= MAX_INSPECT_POINTS) return;
+    if (reservedPointCount() >= MAX_INSPECT_POINTS) return;
     armInspect("line");
   });
   btnInspectGrid.addEventListener("click", function () {
-    if (totalInspectedPointCount() >= MAX_INSPECT_POINTS) return;
+    if (reservedPointCount() >= MAX_INSPECT_POINTS) return;
     armInspect("grid");
   });
 
@@ -4385,6 +4537,7 @@
     gl.blitFramebuffer(0, 0, w, h, 0, 0, w * stride, h * stride, gl.COLOR_BUFFER_BIT, gl.NEAREST);
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+    viewPictured = true;
   }
 
   // ---- Picture reuse: the machinery (see the state's own comment, above) ----
@@ -4650,6 +4803,7 @@
     gl.uniform2f(prog.uniforms.b, run.bx, run.by);
     gl.uniform2i(prog.uniforms.sourceSize, reuse.source.width, reuse.source.height);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
+    if (level) viewPictured = true;
   }
 
   // Draws about `pixelsAvailable` more of the current level; returns the real cost (0: the level is done).
@@ -4717,6 +4871,7 @@
     updateRenderProgressRing();
     if (progressive.aaSample > 0 && aaAccum) {
       drawPresent(aaAccum.tex, canvas.width, canvas.height);
+      viewPictured = true;
       return;
     }
     var level = null;
@@ -5704,6 +5859,9 @@
     playbackPlaying = false;
   }
 
+  // A placeholder, not blank: an empty line would collapse and reflow everything below.
+  var EMPTY_READOUT = "X: 0, Y: 0";
+  var previewEmpty = true;
   function showHoverEmpty(message) {
     cancelHoverRun();
     stopHoverReplay();
@@ -5715,14 +5873,14 @@
     setPlaybackControlsEnabled(false);
     updatePlayPauseButtonUI();
     updateProgressSliderPosition();
-    hoverEmptyState.hidden = false;
+    previewEmpty = true;
     // Asked fresh each time: a tablet can gain or lose a mouse.
     hoverEmptyState.textContent = message || (hoverPreviewSuppressed() ? "Click a point on the map to inspect it."
       : global.LayoutMode && !global.LayoutMode.canHover()
       ? "Press Inspect (Point), then tap the map to see that spot\u2019s simulation"
       : "Hover over the map to inspect a point.");
-    // A placeholder, not blank: an empty line would collapse and reflow everything below.
-    hoverReadout.textContent = "X: 0, Y: 0";
+    hoverReadout.textContent = EMPTY_READOUT;
+    showLockProgress();
     hoverCanvas.style.backgroundColor = "";
     hoverCtx.setTransform(1, 0, 0, 1, 0, 0);
     hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);
@@ -5766,7 +5924,7 @@
     if (w <= 0 || h <= 0 || (hoverCanvas.width === w && hoverCanvas.height === h)) return;
     hoverCanvas.width = w;
     hoverCanvas.height = h;
-    if (!hoverEmptyState.hidden) return;
+    if (previewEmpty) return;
     if (activeReplay || inspectedGroups.length > 0) renderPlaybackFrame();
     else if (hoverWorldPoint) showHoverInstant(hoverWorldPoint);
   }
@@ -6117,6 +6275,7 @@
     playbackPlaying = false;
     updatePlayPauseButtonUI();
 
+    previewEmpty = false;
     hoverEmptyState.hidden = true;
     hoverCtx.setTransform(1, 0, 0, 1, 0, 0);
     hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);
@@ -6148,7 +6307,7 @@
       hoverCanvas.style.backgroundColor = hoverOutputColor(outputColorT(v0));
     }
     var hovered = coordTexts(worldPoint, viewPlaces());
-    hoverReadout.textContent = "X: " + hovered[0] + ", Y: " + hovered[1] + " - loading replay\u2026";
+    hoverReadout.textContent = "X: " + hovered[0] + ", Y: " + hovered[1] + (lockJob ? "" : " - loading replay\u2026");
   }
 
   // From the per-frame duration only (so replay length is proportional to step count), times
@@ -6344,6 +6503,7 @@
     if (autoplay) ensurePlaybackAdvancing();
     if (mapFollowsInspect()) linkMapToPreview();
     renderPlaybackFrame();
+    previewEmpty = false;
     hoverEmptyState.hidden = true;
   }
 
@@ -6472,6 +6632,21 @@
   function inspectRunning() {
     return [hoverRun, lockJob && lockJob.handle, recomputeHandle].some(function (h) { return h && !h.waiting; });
   }
+  // A hover replay or lock the user waits on has the GPU: the map draws nothing meanwhile, once it shows a picture of
+  // the current view and unless the view was moved since the run started.
+  function mapWaitsForInspect() {
+    if (stillJob || gesture.down || !viewPictured) return false;
+    var moved = Math.max(gesture.movedAt, gesture.wheelAt);
+    return [hoverRun, lockJob && lockJob.handle].some(function (h) { return h && !h.waiting && h.startedAt > moved; });
+  }
+  // A frame with nothing drawn must not read as slow work, nor move the timeline.
+  function sitOutForInspect() {
+    ladderBudget.lastWorkAt = 0;
+    ladderBudget.lastSpent = 0;
+    playbackBudget.lastWorkAt = 0;
+    playbackBudget.lastSpent = 0;
+    timeline.lastTickAt = 0;
+  }
   function cancelHoverRun() {
     if (hoverRun) hoverRun.cancel();
     hoverRun = null;
@@ -6536,7 +6711,7 @@
     showHoverInstant(world);
     hoverUpgradeTimer = setTimeout(function () {
       if (key !== hoverKey) return; // cursor moved on before the dwell delay elapsed: superseded
-      if (inspectedGroups.length > 0) return; // a lock finished meanwhile and its group has the panel
+      if (inspectedGroups.length > 0 || lockJob) return; // a lock, finished or running, has the panel
       runHoverAt(world);
     }, HOVER_UPGRADE_DELAY_MS);
   });
@@ -7480,8 +7655,8 @@
       programs: null,
       layers: layers,
       groups: Math.ceil(layers / MAX_STATE_ATTACHMENTS),
-      stepBuild: startProgramBuild(buildPlaybackStepShader(pieces, vars, MAX_STATE_ATTACHMENTS), precision + " step program"),
-      colorBuild: startProgramBuild(buildPlaybackColorShader(pieces, vars), precision + " color program"),
+      stepBuild: startProgramBuild(buildPlaybackStepShader(pieces, vars, MAX_STATE_ATTACHMENTS), precision + " step program", precision),
+      colorBuild: startProgramBuild(buildPlaybackColorShader(pieces, vars), precision + " color program", precision),
     };
   }
 
@@ -7727,8 +7902,8 @@
     return !entry || entry.status === "building";
   }
 
-  // Named state-texture pairs: "ladder" (the tile in flight, lives across frames)
-  // and "sampler" (measurements, start and finish in one call: must not share).
+  // Named state-texture pairs: "ladder" (the tile in flight, lives across frames), "sampler" (measurements, start
+  // and finish in one call: must not share) and "tip" (the Color Zoom tip's sample, freed when it ends).
   var sliceStates = {};
 
   function releaseSliceState(name) {
@@ -8627,21 +8802,28 @@
   requestAnimationFrame(function frame(now) {
     // Every GL call on a lost context is a silent no-op returning null. See "Losing the WebGL context".
     if (contextLost) { requestAnimationFrame(frame); return; }
+    frameIndex += 1;
     updatePerfReadout(now);
     noteFrameCadence(now);
     pumpPassBuilds();
     pumpPlaybackBuilds();
     prewarmPasses();
+    prewarmHoverProgram();
     pollBounceMax();
-    pumpColorSpreadProbe();
     refreshBuildStatus();
     pumpPendingInspect();
     showLockProgress();
     retryCalibrations(now);
     if (dirty) { resetProgressive(); dirty = false; }
     releasePlaybackIfViewMoved();
-    if (!presentGestureFrame(now) && !stepPlayback(now)) stepProgressive(now);
-    stepExport();
+    if (mapWaitsForInspect()) {
+      sitOutForInspect();
+    } else {
+      pumpColorSpreadProbe();
+      if (!presentGestureFrame(now) && !stepPlayback(now)) stepProgressive(now);
+      stepExport();
+    }
+    updateLoadingNotice(now);
     requestAnimationFrame(frame);
   });
 
@@ -8665,7 +8847,7 @@
   };
   // Leaving the grid for the editor (transition.js): hiding #grid-view stops neither the preview loop, its sounds, nor the timeline.
   global.FractalGrid.pausePlayback = function () {
-    cancelLockJob();
+    cancelAllLocks();
     cancelHoverRun();
     pausePlayback();
     endExport(null);
@@ -8679,11 +8861,14 @@
     stepProgressive(performance.now());
   };
 
+  booted = true;
   global.FractalGrid.setScene = function (nextScene) {
     // Context gone while the editor was up: reload into the map with this scene ("Losing the WebGL context").
     if (contextLost) { reloadIntoMap(nextScene); return; }
     // The default framing is for whatever size the canvas ends up: no corner pinning (see the dock).
     dockSuppressPin = true;
+    // An old replay or run must not reach the new scene's bodies.
+    showHoverEmpty();
     scene = nextScene;
     sceneGeneration += 1;
     reuse.image = null;
@@ -9882,21 +10067,23 @@
     return { type: "grid", a: group.startWorld, b: group.endWorld, size: group.gridSize, twoPart: group.twoPart, places: group.places };
   }
 
-  // One group at a time (each a lock job), none until the map has drawn a couple
-  // of frames, and none until the view's precision is built: the float32
-  // stand-in can't tell a deep zoom's points apart.
+  // One group at a time (each a lock job), once the view's precision is built (the float32 stand-in can't tell a deep
+  // zoom's points apart) and the map has drawn a first picture with it, or PENDING_INSPECT_MAX_FRAMES have passed.
+  var PENDING_INSPECT_MAX_FRAMES = 30;
   function pumpPendingInspect() {
     if (!pendingInspect || lockJob) return;
-    if (++pendingInspectFrames < 3) return;
     var wanted = pickPrecision();
-    if (effectivePrecision() !== wanted && precisionPending(wanted)) return;
+    if (effectivePrecision() !== wanted && precisionPending(wanted)) { pendingInspectFrames = 0; return; }
+    if (++pendingInspectFrames < (viewPictured ? 3 : PENDING_INSPECT_MAX_FRAMES)) return;
     var next = pendingInspect.shift();
     if (!pendingInspect.length) pendingInspect = null;
     if (next.type === "point") lockPointAt(next.a, next.places, next);
     else if (next.type === "line") lockLineOfPoints(next.a, next.b, next.count, next.places, next);
     else lockGridOfPoints(next.a, next.b, next.size, next.twoPart, next.places, next);
+    if (pendingInspect) return;
+    if (linkCapToast === "owed") toastInspectFull(false, next);
     // A last group that failed to lock leaves the button as it was.
-    if (!pendingInspect) updateMovieInspectButton();
+    updateMovieInspectButton();
   }
 
   // The scene as run here (its own Simulation Duration) and the view; inspection points as view-heights from the centre, pending included.
@@ -9904,7 +10091,8 @@
     var shared = {};
     Object.keys(scene).forEach(function (k) { shared[k] = scene[k]; });
     shared.simulationSteps = simulationSteps;
-    var inspect = inspectedGroups.map(describeInspectGroup).concat(lockJob ? lockJob.describe : [], pendingInspect || []);
+    var locking = [lockJob].concat(lockQueue).reduce(function (all, job) { return job ? all.concat(job.describe) : all; }, []);
+    var inspect = inspectedGroups.map(describeInspectGroup).concat(locking, pendingInspect || []);
     return {
       scene: shared,
       view: {
@@ -9946,12 +10134,13 @@
     lowSaturationCheckbox.checked = lowSaturationEnabled;
     setDisplayMode(colorZoomEnabled ? DISPLAY_MODES[0] : displayModeByValue(shared.display));
 
-    // A rung this browser can't build (PRECISION_LADDER) becomes Auto.
-    precisionMode = (shared.precision === "auto" || PRECISION_LADDER.indexOf(shared.precision) !== -1) ? shared.precision : "auto";
-    if (precisionSelect) precisionSelect.value = precisionMode;
-
-    setPlaybackSpeed(shared.speed);
-    PhysicsSound.setVolume(shared.volume);
+    // Left out of the link: the viewer's own setting stays. A rung this browser can't build (PRECISION_LADDER) becomes Auto.
+    if (shared.precision !== undefined) {
+      precisionMode = (shared.precision === "auto" || PRECISION_LADDER.indexOf(shared.precision) !== -1) ? shared.precision : "auto";
+      if (precisionSelect) precisionSelect.value = precisionMode;
+    }
+    if (shared.speed !== undefined) setPlaybackSpeed(shared.speed);
+    if (shared.volume !== undefined) PhysicsSound.setVolume(shared.volume);
 
     clearInspected();
     var groups = shared.inspect.map(function (group) {
@@ -9967,6 +10156,7 @@
     });
     pendingInspect = groups.length ? groups : null;
     pendingInspectFrames = 0;
+    linkCapToast = null;
 
     movie.keyframes = shared.movie.keyframes.map(function (k) {
       return {

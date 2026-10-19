@@ -155,7 +155,7 @@
   // on average, and at least one. Work is steps times a cost per step at the frame's precision: measured once frames
   // render at it, and until then the last measured cost scaled by the precisions' slowdowns over float32 (10x, 40x, 70x).
   var refreshMs = 1000 / 60;
-  var frameCosts = [];  // per frame { precision, slowdown, steps }; null where it repeats the frame before, which is free
+  var frameCosts = [];  // per frame { precision, slowdown, steps }
   var stepCosts = {};   // precision -> { slowdown, ms: recent ms per step }; the first frame at each may build its program, so is left out
   var lastMeasured = null, measuredFrames = 0;
 
@@ -280,11 +280,6 @@
       finishRender();
       return;
     }
-    if (i > 0 && frameKey(frames[i]) === frameKey(frames[i - 1])) {
-      blobPromises[i] = blobPromises[i - 1];
-      frameDone(grid, i);
-      return;
-    }
     frameStartedAt = performance.now();
     var spec = frames[i];
     grid.renderStill({ center: spec.center, scale: spec.scale, step: spec.step, friction: spec.friction, antialias: antialias,
@@ -333,8 +328,7 @@
     frames = MoviePath.frames(movie.keyframes.map(function (k) {
       return { center: k.center, scale: defaultScale / k.zoom, step: Math.min(k.step, lastStep), seconds: k.seconds, friction: k.friction };
     }), movie.loop, link.scene.friction);
-    frameCosts = frames.map(function (f, i) {
-      if (i > 0 && frameKey(f) === frameKey(frames[i - 1])) return null;
+    frameCosts = frames.map(function (f) {
       var precision = grid.stillPrecision({ center: f.center, scale: f.scale, width: movieSize.width, height: movieSize.height });
       return { precision: precision.name, slowdown: precision.slowdown, steps: Math.max(1, f.step) };
     });

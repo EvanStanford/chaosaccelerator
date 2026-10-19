@@ -15,6 +15,7 @@
   var POSITION_ITERATIONS = 4;
   var POSITION_SLOP = 0.01;
   var POSITION_PERCENT = 0.2;
+  var LINE_END_SHARE = 0.99;
   var FIXED_DT = 1 / 60;
 
   function fnum(n) {
@@ -62,6 +63,7 @@
     "",
     "const float LINE_THICKNESS = " + fnum(LINE_THICKNESS) + ";",
     "const float LINE_PARALLEL_EPS = " + fnum(LINE_PARALLEL_EPS) + ";",
+    "const float LINE_END_SHARE = " + fnum(LINE_END_SHARE) + ";",
     "const float RESTITUTION_THRESHOLD = " + fnum(RESTITUTION_THRESHOLD) + ";",
     "const float POSITION_SLOP = " + fnum(POSITION_SLOP) + ";",
     "const float POSITION_PERCENT = " + fnum(POSITION_PERCENT) + ";",
@@ -214,27 +216,6 @@
     "  float s = dot(P + mP * f, Df);",
     "  return s >= 0.0 && s <= dot(Df, Df) ? f : -1.0;",
     "}",
-    "// PhysicsEngine.sweepFarPointSlab: a port hole's arc center onto the line's flat side, refined.",
-    "float farPointNewton(vec2 c, vec2 q0, vec2 dq0, vec2 q1, vec2 dq1, float R, float side, float f) {",
-    "  vec2 D = q1 - q0, mD = dq1 - dq0, P = c - q0;",
-    "  vec2 d = D + mD * f, p = P - dq0 * f;",
-    "  float dl = length(d);",
-    "  float F = side * (d.x * p.y - d.y * p.x) - R * dl;",
-    "  float dF = side * (mD.x * p.y - mD.y * p.x - d.x * dq0.y + d.y * dq0.x) - R * dot(d, mD) / dl;",
-    "  return dF < 0.0 ? f - F / dF : f;",
-    "}",
-    "float sweepFarPointSlab(vec2 c, vec2 q0, vec2 dq0, vec2 q1, vec2 dq1, float len, float R) {",
-    "  float f = sweepPointMovingSlab(c, vec2(0.0), q0, dq0, q1, dq1, len, R);",
-    "  if (f < 0.0) return -1.0;",
-    "  vec2 D = q1 - q0, mD = dq1 - dq0, P = c - q0;",
-    "  float side = D.x * P.y - D.y * P.x < 0.0 ? -1.0 : 1.0;",
-    "  f = farPointNewton(c, q0, dq0, q1, dq1, R, side, f);",
-    "  f = farPointNewton(c, q0, dq0, q1, dq1, R, side, f);",
-    "  if (!(f >= 0.0 && f <= 1.0)) return -1.0;",
-    "  vec2 e = D + mD * f;",
-    "  float s = dot(P - dq0 * f, e);",
-    "  return s >= 0.0 && s <= dot(e, e) ? f : -1.0;",
-    "}",
     "// How far a line's half vector h turns over the step, at its spin.",
     "vec2 lineTurn(Body line, float halfLen, vec2 h) {",
     "  if (line.w == 0.0) return vec2(0.0);",
@@ -282,7 +263,7 @@
     "  return best;",
     "}",
     "// PhysicsEngine.crossedSegments; .penetration is the depth alone, rA/rB are the caller's.",
-    "Contact crossedSegments(vec2 a0, vec2 a1, vec2 b0, vec2 b1, bool liftAlongA, vec2 back) {",
+    "Contact crossedSegments(vec2 a0, vec2 a1, vec2 b0, vec2 b1, vec2 back) {",
     "  Contact c = noContact();",
     "  vec2 u = a1 - a0, v = b1 - b0;",
     "  float ul = length(u), vl = length(v);",
@@ -298,7 +279,7 @@
     "  vec2 n = depthA <= depthB ? sideA : (upB ? vec2(v.y, -v.x) : vec2(-v.y, v.x));",
     "  c.hit = true;",
     "  c.normal = n;",
-    "  c.point = a0 + (a1 - a0) * (sa0 / (sa0 - sa1)) + (liftAlongA ? sideA : n) * (LINE_THICKNESS * 0.5);",
+    "  c.point = a0 + (a1 - a0) * (sa0 / (sa0 - sa1)) + n * (LINE_THICKNESS * 0.5);",
     "  c.penetration = min(depthA, depthB);",
     "  return c;",
     "}",
@@ -429,17 +410,84 @@
     "  return sweptCapsuleCircleContact(e0, e1, vec2(line.vx, line.vy), vec2(line.x, line.y), circle, radius, LINE_THICKNESS * 0.5);",
     "}",
     "",
-    "// Touching at the step's start (tHit 0): crossed, or both ends of the overlap when near-parallel (one",
-    "// point can't stop a rod spinning about it), else the closest points.",
-    "ContactPair lineLineContacts(Body lineA, vec2 eA0, vec2 eA1, Body lineB, vec2 eB0, vec2 eB1) {",
+    "// PhysicsEngine.overlapEnds' end at A's span t: A's own end (A-end 0 or 1) on B's flat side, else B's end",
+    "// bi on A's. normal is that side's (A -> B), gap its own, end 0-3 (A's two, B's two), s its foot's fraction.",
+    "struct OverlapEnd { vec2 point; vec2 normal; float gap; int end; float s; };",
+    "OverlapEnd overlapEnd(vec2 a0, vec2 u, float lenA, vec2 b0, vec2 b1, vec2 v, float lenB, vec2 nA, vec2 nB, float t, bool ownA, int bi) {",
+    "  OverlapEnd e;",
+    "  if (ownA) {",
+    "    vec2 p = a0 + u * t;",
+    "    e.gap = dot(b0 - p, nB);",
+    "    e.point = p + nB * (e.gap * 0.5);",
+    "    e.normal = nB;",
+    "    e.end = t > 0.0 ? 1 : 0;",
+    "    e.s = dot(p - b0, v) / lenB;",
+    "  } else {",
+    "    vec2 q = bi == 1 ? b1 : b0;",
+    "    e.gap = dot(q - a0, nA);",
+    "    e.point = q - nA * (e.gap * 0.5);",
+    "    e.normal = nA;",
+    "    e.end = bi + 2;",
+    "    e.s = t / lenA;",
+    "  }",
+    "  return e;",
+    "}",
+    "struct Overlap { bool ok; bool two; OverlapEnd e0; OverlapEnd e1; };",
+    "// PhysicsEngine.overlapEnds: sgn is the side of A that B is on.",
+    "Overlap overlapEnds(vec2 a0, vec2 a1, vec2 b0, vec2 b1, float sgn) {",
+    "  Overlap o;",
+    "  vec2 u = a1 - a0, v = b1 - b0;",
+    "  float lenA = length(u), lenB = length(v);",
+    "  if (lenA == 0.0) lenA = 1.0;",
+    "  if (lenB == 0.0) lenB = 1.0;",
+    "  u /= lenA;",
+    "  v /= lenB;",
+    "  float t0 = dot(b0 - a0, u), t1 = dot(b1 - a0, u);",
+    "  float lo = max(0.0, min(t0, t1)), hi = min(lenA, max(t0, t1));",
+    "  o.ok = hi > lo;",
+    "  o.two = hi - lo > 1e-6;",
+    "  vec2 nA = vec2(-u.y, u.x) * sgn, nB = vec2(-v.y, v.x) * (dot(u, v) < 0.0 ? -sgn : sgn);",
+    "  o.e0 = overlapEnd(a0, u, lenA, b0, b1, v, lenB, nA, nB, lo, min(t0, t1) <= 0.0, t0 <= t1 ? 0 : 1);",
+    "  o.e1 = overlapEnd(a0, u, lenA, b0, b1, v, lenB, nA, nB, hi, max(t0, t1) >= lenA, t0 >= t1 ? 0 : 1);",
+    "  return o;",
+    "}",
+    "// PhysicsEngine.endClosing: how far an overlap end closes on the other line over the whole step.",
+    "float endClosing(OverlapEnd e, LineSweep a, LineSweep b) {",
+    "  vec2 own = e.end == 0 ? a.d0 : (e.end == 1 ? a.d1 : (e.end == 2 ? b.d0 : b.d1));",
+    "  vec2 s0 = e.end < 2 ? b.d0 : a.d0, s1 = e.end < 2 ? b.d1 : a.d1;",
+    "  return (e.end < 2 ? 1.0 : -1.0) * dot(own - s0 - (s1 - s0) * e.s, e.normal);",
+    "}",
+    "Contact endContact(OverlapEnd e, vec2 cA, vec2 cB, float penetration, float tHit) {",
+    "  Contact c = noContact();",
+    "  c.hit = true; c.normal = e.normal; c.point = e.point; c.rA = e.point - cA; c.rB = e.point - cB;",
+    "  c.penetration = penetration; c.tHit = tHit;",
+    "  return c;",
+    "}",
+    "// PhysicsEngine.lineLineContacts' choice: within slop, or closing slowly within the step.",
+    "bool keepEnd(OverlapEnd e, LineSweep a, LineSweep b) {",
+    "  float gap = e.gap - LINE_THICKNESS;",
+    "  if (gap <= POSITION_SLOP) return true;",
+    "  float closing = endClosing(e, a, b);",
+    "  return gap < closing && closing < RESTITUTION_THRESHOLD * DT;",
+    "}",
+    "// PhysicsEngine.closesFast.",
+    "bool closesFast(Contact c, Body a, Body b) {",
+    "  vec2 v = vec2(b.vx - b.w * c.rB.y, b.vy + b.w * c.rB.x) - vec2(a.vx - a.w * c.rA.y, a.vy + a.w * c.rA.x);",
+    "  return -dot(v, c.normal) >= RESTITUTION_THRESHOLD;",
+    "}",
+    "",
+    "// Touching at the step's start (tHit 0): crossed, or each end of a near-parallel overlap that touches or",
+    "// closes slowly (PhysicsEngine.lineLineContacts), else the closest points.",
+    "ContactPair lineLineContacts(Body lineA, vec2 eA0, vec2 eA1, Body lineB, vec2 eB0, vec2 eB1, LineSweep sA, LineSweep sB) {",
     "  ContactPair result;",
     "  result.c0 = noContact();",
     "  result.c1 = noContact();",
-    "  Contact cr = crossedSegments(eA0, eA1, eB0, eB1, false, (vec2(lineB.vx, lineB.vy) - vec2(lineA.vx, lineA.vy)) * DT);",
+    "  vec2 cA = vec2(lineA.x, lineA.y), cB = vec2(lineB.x, lineB.y);",
+    "  Contact cr = crossedSegments(eA0, eA1, eB0, eB1, (vec2(lineB.vx, lineB.vy) - vec2(lineA.vx, lineA.vy)) * DT);",
     "  if (cr.hit) {",
     "    result.c0 = cr;",
-    "    result.c0.rA = cr.point - vec2(lineA.x, lineA.y);",
-    "    result.c0.rB = cr.point - vec2(lineB.x, lineB.y);",
+    "    result.c0.rA = cr.point - cA;",
+    "    result.c0.rB = cr.point - cB;",
     "    result.c0.penetration = cr.penetration + LINE_THICKNESS;",
     "    return result;",
     "  }",
@@ -460,39 +508,15 @@
     "  if (dist2 >= LINE_THICKNESS) return result;",
     "",
     "  if (abs(crossVal) < LINE_PARALLEL_EPS) {",
-    "    float b0 = dot(eB0 - eA0, dirA);",
-    "    float b1 = dot(eB1 - eA0, dirA);",
-    "    float lo = max(0.0, min(b0, b1));",
-    "    float hi = min(lenA, max(b0, b1));",
-    "    if (hi > lo) {",
-    "      vec2 perp = vec2(-dirA.y, dirA.x);",
-    "      // Their gap along A's normal where they are closest.",
-    "      float offset = dot(d2, perp);",
-    "      float sgn = offset >= 0.0 ? 1.0 : -1.0;",
-    "      vec2 normal = perp * sgn;",
-    "      float penetration = LINE_THICKNESS - abs(offset);",
-    "      vec2 pOnA0 = eA0 + dirA * lo;",
-    "      vec2 pOnA1 = eA0 + dirA * hi;",
-    "      vec2 pt0 = pOnA0 + perp * offset * 0.5;",
-    "      result.c0.hit = true;",
-    "      result.c0.normal = normal;",
-    "      result.c0.point = pt0;",
-    "      result.c0.rA = pt0 - vec2(lineA.x, lineA.y);",
-    "      result.c0.rB = pt0 - vec2(lineB.x, lineB.y);",
-    "      result.c0.penetration = penetration;",
-    "      result.c0.tHit = 0.0;",
-    "      if (hi - lo > 1e-6) {",
-    "        vec2 pt1 = pOnA1 + perp * offset * 0.5;",
-    "        result.c1.hit = true;",
-    "        result.c1.normal = normal;",
-    "        result.c1.point = pt1;",
-    "        result.c1.rA = pt1 - vec2(lineA.x, lineA.y);",
-    "        result.c1.rB = pt1 - vec2(lineB.x, lineB.y);",
-    "        result.c1.penetration = penetration;",
-    "        result.c1.tHit = 0.0;",
-    "      }",
-    "      return result;",
+    "    Overlap ov = overlapEnds(eA0, eA1, eB0, eB1, dot(d2, vec2(-dirA.y, dirA.x)) >= 0.0 ? 1.0 : -1.0);",
+    "    bool k0 = ov.ok && keepEnd(ov.e0, sA, sB), k1 = ov.ok && ov.two && keepEnd(ov.e1, sA, sB);",
+    "    if (k0) result.c0 = endContact(ov.e0, cA, cB, LINE_THICKNESS - ov.e0.gap, 0.0);",
+    "    if (k1) {",
+    "      Contact c1 = endContact(ov.e1, cA, cB, LINE_THICKNESS - ov.e1.gap, 0.0);",
+    "      if (k0) result.c1 = c1;",
+    "      else result.c0 = c1;",
     "    }",
+    "    if (k0 || k1) return result;",
     "  }",
     "",
     "  vec2 n2 = dist2 > 1e-9 ? d2 / dist2 : vec2(0.0, 1.0);",
@@ -500,8 +524,8 @@
     "  result.c0.hit = true;",
     "  result.c0.normal = n2;",
     "  result.c0.point = pt2;",
-    "  result.c0.rA = pt2 - vec2(lineA.x, lineA.y);",
-    "  result.c0.rB = pt2 - vec2(lineB.x, lineB.y);",
+    "  result.c0.rA = pt2 - cA;",
+    "  result.c0.rB = pt2 - cB;",
     "  result.c0.penetration = LINE_THICKNESS - dist2;",
     "  result.c0.tHit = 0.0;",
     "  return result;",
@@ -519,37 +543,39 @@
     "  vec2 hA = vec2(cos(lineA.angle), sin(lineA.angle)) * halfLenA, hB = vec2(cos(lineB.angle), sin(lineB.angle)) * halfLenB;",
     "  float travel = length(mRel) + (abs(lineA.w) * halfLenA + abs(lineB.w) * halfLenB) * DT;",
     "  if (!linesMayTouch(cA - hA, cA + hA, cB - hB, cB + hB, travel)) return result;",
-    "  result = lineLineContacts(lineA, cA - hA, cA + hA, lineB, cB - hB, cB + hB);",
-    "  if (result.c1.hit || result.c0.penetration > LINE_THICKNESS) return result;",
     "  LineSweep sA = lineSweep(cA, hA, vA * DT, lineTurn(lineA, halfLenA, hA));",
     "  LineSweep sB = lineSweep(cB, hB, vB * DT, lineTurn(lineB, halfLenB, hB));",
+    "  result = lineLineContacts(lineA, cA - hA, cA + hA, lineB, cB - hB, cB + hB, sA, sB);",
+    "  if (result.c1.hit || result.c0.penetration > LINE_THICKNESS) return result;",
     "  SweptHit hit = lineLineFirstTouch(sA, 2.0 * halfLenA, sB, 2.0 * halfLenB);",
     "  if (hit.f < 0.0) return result;",
     "  float tHit = hit.f * DT;",
     "  vec2 pA = cA + vA * tHit, pB = cB + vB * tHit;",
     "  Contact c = noContact();",
     "  c.hit = true; c.normal = hit.normal; c.point = hit.point; c.rA = hit.point - pA; c.rB = hit.point - pB; c.tHit = tHit;",
-    "  if (result.c0.hit) { result.c1 = c; return result; }",
+    "  if (result.c0.hit) {",
+    "    // A slow later touch waits; a fast one goes alone unless the one touching closes fast too.",
+    "    if (!closesFast(c, lineA, lineB)) return result;",
+    "    if (closesFast(result.c0, lineA, lineB)) result.c1 = c;",
+    "    else result.c0 = c;",
+    "    return result;",
+    "  }",
     "  result.c0 = c;",
-    "  // Near-parallel then: both ends of the overlap, on the touch's side.",
+    "  // Near-parallel then: the nearer end of the overlap, and the other if it closes within the step.",
     "  vec2 a0 = sA.e0 + sA.d0 * hit.f, a1 = sA.e1 + sA.d1 * hit.f, b0 = sB.e0 + sB.d0 * hit.f, b1 = sB.e1 + sB.d1 * hit.f;",
     "  vec2 dirA = a1 - a0, dirB = b1 - b0;",
     "  float lenA = length(dirA), lenB = length(dirB);",
     "  if (lenA == 0.0) lenA = 1.0;",
     "  if (lenB == 0.0) lenB = 1.0;",
-    "  dirA /= lenA;",
-    "  dirB /= lenB;",
-    "  if (abs(dirA.x * dirB.y - dirA.y * dirB.x) >= LINE_PARALLEL_EPS) return result;",
-    "  float t0 = dot(b0 - a0, dirA), t1 = dot(b1 - a0, dirA);",
-    "  float lo = max(0.0, min(t0, t1)), hi = min(lenA, max(t0, t1));",
-    "  if (hi <= lo) return result;",
-    "  vec2 normal = vec2(-dirA.y, dirA.x) * (dirA.x * hit.normal.y - dirA.y * hit.normal.x < 0.0 ? -1.0 : 1.0);",
-    "  vec2 p0 = a0 + dirA * lo + normal * (LINE_THICKNESS * 0.5);",
-    "  result.c0.normal = normal; result.c0.point = p0; result.c0.rA = p0 - pA; result.c0.rB = p0 - pB;",
-    "  if (hi - lo > 1e-6) {",
-    "    vec2 p1 = a0 + dirA * hi + normal * (LINE_THICKNESS * 0.5);",
-    "    result.c1 = result.c0; result.c1.point = p1; result.c1.rA = p1 - pA; result.c1.rB = p1 - pB;",
-    "  }",
+    "  if (abs((dirA.x * dirB.y - dirA.y * dirB.x) / (lenA * lenB)) >= LINE_PARALLEL_EPS) return result;",
+    "  Overlap ov = overlapEnds(a0, a1, b0, b1, dirA.x * hit.normal.y - dirA.y * hit.normal.x < 0.0 ? -1.0 : 1.0);",
+    "  if (!ov.ok) return result;",
+    "  OverlapEnd first = ov.e0, other = ov.e1;",
+    "  if (ov.two && ov.e1.gap < ov.e0.gap) { first = ov.e1; other = ov.e0; }",
+    "  result.c0 = endContact(first, pA, pB, 0.0, tHit);",
+    "  if (!ov.two) return result;",
+    "  float gap = max(other.gap - LINE_THICKNESS, 0.0);",
+    "  if (gap <= POSITION_SLOP || gap < endClosing(other, sA, sB) * (1.0 - hit.f)) result.c1 = endContact(other, pA, pB, -gap, tHit);",
     "  return result;",
     "}",
     "",
@@ -631,64 +657,62 @@
     "  Feature f = portholeFeature(o, q);",
     "  if (f.kind == kind && f.d < bestF.d) { bestQ = q; bestF = f; }",
     "}",
-    "void portholeConsider(Oval o, vec2 q, inout vec2 bestQ, inout Feature bestF) {",
-    "  Feature f = portholeFeature(o, q);",
-    "  if (f.d < bestF.d) { bestQ = q; bestF = f; }",
+    "// One of PhysicsEngine.collidePortholeLine's Newton steps on the gap of point q0 moving at v in the port",
+    "// hole's frame, now at q with feature f; tHit at DT is a miss.",
+    "void portholeLineStep(Oval o, vec2 q0, vec2 v, inout float tHit, inout vec2 q, inout Feature f) {",
+    "  float gap = f.d - LINE_THICKNESS * 0.5;",
+    "  if (gap <= POSITION_SLOP || tHit >= DT) return;",
+    "  float along = -dot(v, q - f.c);",
+    "  tHit = along > 0.0 ? tHit + gap * f.dist / along : DT;",
+    "  if (tHit >= DT) return;",
+    "  q = q0 + v * tHit;",
+    "  f = portholeFeature(o, q);",
     "}",
-    "// Where segment e0-e1 crosses the line through p and q, if it does.",
-    "void portholeCrossing(Oval o, vec2 e0, vec2 e1, vec2 p, vec2 q, inout vec2 bestQ, inout Feature bestF) {",
-    "  vec2 d = q - p;",
-    "  float s0 = d.x * (e0.y - p.y) - d.y * (e0.x - p.x), s1 = d.x * (e1.y - p.y) - d.y * (e1.x - p.x);",
-    "  if (s0 * s1 > 0.0 || s0 == s1) return;",
-    "  portholeConsider(o, e0 + (e1 - e0) * (s0 / (s0 - s1)), bestQ, bestF);",
-    "}",
-    "// PhysicsEngine.portholeLineNearest: an endpoint, an owned foot, or a crossing between features.",
-    "void portholeLineNearest(Oval o, vec2 e0, vec2 e1, out vec2 bestQ, out Feature bestF) {",
-    "  bestQ = e0;",
-    "  bestF = portholeFeature(o, e0);",
-    "  portholeConsider(o, e1, bestQ, bestF);",
+    "// Port hole = A (its oval), line = B (its capsule): PhysicsEngine.collidePortholeLine. The segment's nearest",
+    "// point to the oval, touching or reaching it within the step. One contact.",
+    "ContactPair collidePortholeLine(Body ph, float halfLen, Body line, float halfLenB) {",
+    "  Oval o = portholeOval(halfLen);",
+    "  float cs = cos(ph.angle), sn = sin(ph.angle);",
+    "  vec2 phC = vec2(ph.x, ph.y);",
+    "  vec2 e0 = portholeToLocal(lineEndpoint0(line, halfLenB) - phC, sn, cs);",
+    "  vec2 e1 = portholeToLocal(lineEndpoint1(line, halfLenB) - phC, sn, cs);",
+    "  ContactPair result;",
+    "  result.c0 = noContact();",
+    "  result.c1 = noContact();",
+    "  vec2 bestQ = e0;",
+    "  Feature bestF = portholeFeature(o, e0);",
+    "  Feature f1 = portholeFeature(o, e1);",
+    "  if (f1.d < bestF.d) { bestQ = e1; bestF = f1; }",
     "  portholeFoot(o, e0, e1, 0, bestQ, bestF);",
     "  portholeFoot(o, e0, e1, 1, bestQ, bestF);",
     "  portholeFoot(o, e0, e1, 2, bestQ, bestF);",
     "  portholeFoot(o, e0, e1, 3, bestQ, bestF);",
-    "  vec2 tipL = vec2(-o.ax, 0.0), tipR = vec2(o.ax, 0.0);",
-    "  portholeCrossing(o, e0, e1, vec2(0.0, -o.cy), tipL, bestQ, bestF);",
-    "  portholeCrossing(o, e0, e1, vec2(0.0, -o.cy), tipR, bestQ, bestF);",
-    "  portholeCrossing(o, e0, e1, vec2(0.0, o.cy), tipL, bestQ, bestF);",
-    "  portholeCrossing(o, e0, e1, vec2(0.0, o.cy), tipR, bestQ, bestF);",
-    "  portholeCrossing(o, e0, e1, tipL, tipR, bestQ, bestF);",
-    "}",
-    "// The contact at segment point q nearest feature f, with the port hole's center c and turn (sn, cs)",
-    "// and the line's center lc at tHit.",
-    "Contact portholeLineContact(vec2 q, Feature f, float sn, float cs, vec2 c, vec2 lc, float tHit) {",
-    "  float halfT = LINE_THICKNESS * 0.5;",
+    "  float halfT = LINE_THICKNESS * 0.5, tHit = 0.0;",
+    "  vec2 q = bestQ;",
+    "  Feature f = bestF;",
+    "  if (bestF.d >= halfT) {",
+    "    vec2 qw = rotateBy(bestQ, sn, cs), r = phC + qw - vec2(line.x, line.y);",
+    "    vec2 v = portholeToLocal(vec2(line.vx - line.w * r.y - ph.vx + ph.w * qw.y, line.vy + line.w * r.x - ph.vy - ph.w * qw.x), sn, cs);",
+    "    portholeLineStep(o, bestQ, v, tHit, q, f);",
+    "    portholeLineStep(o, bestQ, v, tHit, q, f);",
+    "    if (tHit >= DT || f.d - halfT > POSITION_SLOP) return result;",
+    "  }",
     "  vec2 nl = f.dist > 1e-9 ? (q - f.c) / f.dist : vec2(0.0, 1.0);",
-    "  vec2 m = rotateBy(f.c + nl * (f.radius + max(f.d - halfT, -halfT) * 0.5), sn, cs);",
-    "  Contact r = noContact();",
-    "  r.hit = true;",
-    "  r.normal = rotateBy(nl, sn, cs);",
-    "  r.point = c + m;",
-    "  r.rA = m;",
-    "  r.rB = c + m - lc;",
-    "  r.penetration = max(halfT - f.d, 0.0);",
-    "  r.tHit = tHit;",
-    "  return r;",
+    "  vec2 n = rotateBy(nl, sn, cs), ml = f.c + nl * f.radius;",
+    "  // Touching: midway between the two surfaces, as collideLineLine puts it.",
+    "  if (bestF.d < halfT) ml = (ml + q - nl * halfT) * 0.5;",
+    "  vec2 m = rotateBy(ml, sn, cs);",
+    "  vec2 pt = phC + m + vec2(ph.vx, ph.vy) * tHit;",
+    "  result.c0.hit = true;",
+    "  result.c0.normal = n;",
+    "  result.c0.point = pt;",
+    "  result.c0.rA = m;",
+    "  result.c0.rB = pt - vec2(line.x, line.y) - vec2(line.vx, line.vy) * tHit;",
+    "  result.c0.penetration = max(halfT - bestF.d, 0.0);",
+    "  result.c0.tHit = tHit;",
+    "  return result;",
     "}",
-    "void portholeKeep(Oval o, float f, vec2 q, int kind, inout float best, inout vec2 bestQ) {",
-    "  if (best >= 0.0 && f >= best) return;",
-    "  if (portholeFeature(o, q).kind == kind) { best = f; bestQ = q; }",
-    "}",
-    "// The line's ends and the feature center's foot swept onto one feature circle, kept where owned.",
-    "void portholeSweepLine(Oval o, vec2 e0, vec2 d0, vec2 e1, vec2 d1, float len, int kind, inout float best, inout vec2 bestQ) {",
-    "  Feature fc = portholeFeatureCircle(o, kind);",
-    "  float R = fc.radius + LINE_THICKNESS * 0.5;",
-    "  float f0 = sweepPointSphere(e0, d0, fc.c, R, 1.0);",
-    "  if (f0 > 0.0) portholeKeep(o, f0, e0 + d0 * f0, kind, best, bestQ);",
-    "  float f1 = sweepPointSphere(e1, d1, fc.c, R, 1.0);",
-    "  if (f1 > 0.0) portholeKeep(o, f1, e1 + d1 * f1, kind, best, bestQ);",
-    "  float fs = kind < 2 ? sweepFarPointSlab(fc.c, e0, d0, e1, d1, len, R) : sweepPointMovingSlab(fc.c, vec2(0.0), e0, d0, e1, d1, len, R);",
-    "  if (fs > 0.0) portholeKeep(o, fs, closestPointOnSegment(e0 + d0 * fs, e1 + d1 * fs, fc.c), kind, best, bestQ);",
-    "}",
+    "",
     "// ---- Float32 ranking for physics-gpu-df.js's sweeps: touch fractions with near misses kept, or -1 ----",
     "float rankSphere(vec2 p, vec2 v, vec2 c, float R) {",
     "  vec2 d = p - c;",
@@ -745,135 +769,6 @@
     "  rankKeep(rankSphere(a1, da1 - db0, b0, R), 6, f1, c1, f2, c2);",
     "  rankKeep(rankSphere(a1, da1 - db1, b1, R), 7, f1, c1, f2, c2);",
     "  if (c2 >= 0 && c2 < c1) { int t = c1; c1 = c2; c2 = t; }",
-    "}",
-    "// portholeLineNearest's candidates in its order: 0-1 the ends, 2-5 the feature centers' feet, 6-10 the",
-    "// crossings. false: that crossing misses the segment.",
-    "bool portholeNearPoint(Oval o, vec2 e0, vec2 e1, int code, out vec2 q) {",
-    "  q = code == 1 ? e1 : e0;",
-    "  if (code < 2) return true;",
-    "  if (code < 6) { q = closestPointOnSegment(e0, e1, portholeFeatureCircle(o, code - 2).c); return true; }",
-    "  vec2 tip = vec2(code == 6 || code == 8 || code == 10 ? -o.ax : o.ax, 0.0);",
-    "  vec2 p = code == 10 ? vec2(o.ax, 0.0) : vec2(0.0, code < 8 ? -o.cy : o.cy);",
-    "  vec2 d = tip - p;",
-    "  float s0 = d.x * (e0.y - p.y) - d.y * (e0.x - p.x), s1 = d.x * (e1.y - p.y) - d.y * (e1.x - p.x);",
-    "  if (s0 * s1 > 0.0 || s0 == s1) return false;",
-    "  q = e0 + (e1 - e0) * (s0 / (s0 - s1));",
-    "  return true;",
-    "}",
-    "void rankNear(Oval o, vec2 e0, vec2 e1, int code, inout float d1, inout int c1, inout float d2, inout int c2) {",
-    "  vec2 q;",
-    "  if (!portholeNearPoint(o, e0, e1, code, q)) return;",
-    "  Feature f = portholeFeature(o, q);",
-    "  if (code >= 2 && code < 6 && f.kind != code - 2) return;",
-    "  if (c1 < 0 || f.d < d1) { d2 = d1; c2 = c1; d1 = f.d; c1 = code; }",
-    "  else if (c2 < 0 || f.d < d2) { d2 = f.d; c2 = code; }",
-    "}",
-    "void rankPortholeNear(Oval o, vec2 e0, vec2 e1, out int c1, out int c2) {",
-    "  float d1 = 0.0, d2 = 0.0;",
-    "  c1 = -1; c2 = -1;",
-    "  rankNear(o, e0, e1, 0, d1, c1, d2, c2);",
-    "  rankNear(o, e0, e1, 1, d1, c1, d2, c2);",
-    "  rankNear(o, e0, e1, 2, d1, c1, d2, c2);",
-    "  rankNear(o, e0, e1, 3, d1, c1, d2, c2);",
-    "  rankNear(o, e0, e1, 4, d1, c1, d2, c2);",
-    "  rankNear(o, e0, e1, 5, d1, c1, d2, c2);",
-    "  rankNear(o, e0, e1, 6, d1, c1, d2, c2);",
-    "  rankNear(o, e0, e1, 7, d1, c1, d2, c2);",
-    "  rankNear(o, e0, e1, 8, d1, c1, d2, c2);",
-    "  rankNear(o, e0, e1, 9, d1, c1, d2, c2);",
-    "  rankNear(o, e0, e1, 10, d1, c1, d2, c2);",
-    "  if (c2 >= 0 && c2 < c1) { int t = c1; c1 = c2; c2 = t; }",
-    "}",
-    "// collidePortholeLine's candidates in its order, owned in float32: kind * 3 + (0 end 0, 1 end 1, 2 the",
-    "// feature center's foot).",
-    "void rankPortholeKind(Oval o, vec2 e0, vec2 d0, vec2 e1, vec2 d1, float len, int kind, inout float f1, inout int c1, inout float f2, inout int c2) {",
-    "  Feature fc = portholeFeatureCircle(o, kind);",
-    "  float R = fc.radius + LINE_THICKNESS * 0.5;",
-    "  float g = rankSphere(e0, d0, fc.c, R);",
-    "  if (g >= 0.0 && portholeFeature(o, e0 + d0 * g).kind == kind) rankKeep(g, kind * 3, f1, c1, f2, c2);",
-    "  g = rankSphere(e1, d1, fc.c, R);",
-    "  if (g >= 0.0 && portholeFeature(o, e1 + d1 * g).kind == kind) rankKeep(g, kind * 3 + 1, f1, c1, f2, c2);",
-    "  g = rankSlab(fc.c, vec2(0.0), e0, d0, e1, d1, len, R);",
-    "  if (g >= 0.0 && kind < 2) {",
-    "    vec2 D = e1 - e0, P = fc.c - e0;",
-    "    float side = D.x * P.y - D.y * P.x < 0.0 ? -1.0 : 1.0;",
-    "    g = clamp(farPointNewton(fc.c, e0, d0, e1, d1, R, side, farPointNewton(fc.c, e0, d0, e1, d1, R, side, g)), 0.0, 1.0);",
-    "  }",
-    "  if (g >= 0.0 && portholeFeature(o, closestPointOnSegment(e0 + d0 * g, e1 + d1 * g, fc.c)).kind == kind) rankKeep(g, kind * 3 + 2, f1, c1, f2, c2);",
-    "}",
-    "void rankPortholeLine(Oval o, vec2 e0, vec2 d0, vec2 e1, vec2 d1, float len, out int c1, out int c2) {",
-    "  float f1 = -1.0, f2 = -1.0;",
-    "  c1 = -1; c2 = -1;",
-    "  rankPortholeKind(o, e0, d0, e1, d1, len, 0, f1, c1, f2, c2);",
-    "  rankPortholeKind(o, e0, d0, e1, d1, len, 1, f1, c1, f2, c2);",
-    "  rankPortholeKind(o, e0, d0, e1, d1, len, 2, f1, c1, f2, c2);",
-    "  rankPortholeKind(o, e0, d0, e1, d1, len, 3, f1, c1, f2, c2);",
-    "  if (c2 >= 0 && c2 < c1) { int t = c1; c1 = c2; c2 = t; }",
-    "}",
-    "// Port hole = A (its oval), line = B (its capsule): PhysicsEngine.collidePortholeLine. The overlap",
-    "// at the start, and the first touch within the step swept in the port hole's frame.",
-    "ContactPair collidePortholeLine(Body ph, float halfLen, Body line, float halfLenB) {",
-    "  ContactPair result;",
-    "  result.c0 = noContact();",
-    "  result.c1 = noContact();",
-    "  Oval o = portholeOval(halfLen);",
-    "  float halfT = LINE_THICKNESS * 0.5;",
-    "  vec2 phC = vec2(ph.x, ph.y), phV = vec2(ph.vx, ph.vy), lc = vec2(line.x, line.y), lv = vec2(line.vx, line.vy);",
-    "  vec2 mRel = (lv - phV) * DT;",
-    "  if (!sweptReachMeets(lc - phC, mRel, o.a + halfLenB + halfT)) return result;",
-    "  float cs = cos(ph.angle), sn = sin(ph.angle);",
-    "  vec2 h = vec2(cos(line.angle), sin(line.angle)) * halfLenB, hP = vec2(cs, sn) * halfLen;",
-    "  float travel = length(mRel) + (abs(line.w) * halfLenB + abs(ph.w) * (length(lc - phC) + halfLenB)) * DT;",
-    "  if (!linesMayTouch(phC - hP, phC + hP, lc - h, lc + h, travel)) return result;",
-    "  vec2 w0 = lc - h, w1 = lc + h;",
-    "  vec2 e0 = portholeToLocal(w0 - phC, sn, cs), e1 = portholeToLocal(w1 - phC, sn, cs);",
-    "  // Crossing its center line: out the shorter way, the point on the line's side; nothing further.",
-    "  Contact cr = crossedSegments(vec2(-halfLen, 0.0), vec2(halfLen, 0.0), e0, e1, true, vec2(0.0));",
-    "  if (cr.hit) {",
-    "    vec2 m = rotateBy(cr.point, sn, cs);",
-    "    result.c0 = cr;",
-    "    result.c0.normal = rotateBy(cr.normal, sn, cs);",
-    "    result.c0.point = phC + m;",
-    "    result.c0.rA = m;",
-    "    result.c0.rB = phC + m - lc;",
-    "    result.c0.penetration = cr.penetration + LINE_THICKNESS;",
-    "    return result;",
-    "  }",
-    "  vec2 bestQ;",
-    "  Feature bestF;",
-    "  portholeLineNearest(o, e0, e1, bestQ, bestF);",
-    "  // Inside the oval, the arc on the side the line mostly lies (its farther end's) pushes it out.",
-    "  if (bestF.d < 0.0 && bestF.kind < 2) {",
-    "    bestF = portholeFeatureCircle(o, (abs(e0.y) > abs(e1.y) ? e0.y : e1.y) < 0.0 ? 1 : 0);",
-    "    bestF.dist = length(bestQ - bestF.c);",
-    "    bestF.d = bestF.dist - bestF.radius;",
-    "  }",
-    "  if (bestF.d < halfT) result.c0 = portholeLineContact(bestQ, bestF, sn, cs, phC, lc, 0.0);",
-    "  vec2 phEnd = phC + phV * DT;",
-    "  float cs1 = cs, sn1 = sn;",
-    "  if (ph.w != 0.0) { float a1 = ph.angle + ph.w * DT; cs1 = cos(a1); sn1 = sin(a1); }",
-    "  vec2 m = lv * DT, t = lineTurn(line, halfLenB, h);",
-    "  vec2 d0 = portholeToLocal(w0 + (m - t) - phEnd, sn1, cs1) - e0, d1 = portholeToLocal(w1 + (m + t) - phEnd, sn1, cs1) - e1;",
-    "  float best = -1.0;",
-    "  vec2 sQ = vec2(0.0);",
-    "  float len = 2.0 * halfLenB;",
-    "  portholeSweepLine(o, e0, d0, e1, d1, len, 0, best, sQ);",
-    "  portholeSweepLine(o, e0, d0, e1, d1, len, 1, best, sQ);",
-    "  portholeSweepLine(o, e0, d0, e1, d1, len, 2, best, sQ);",
-    "  portholeSweepLine(o, e0, d0, e1, d1, len, 3, best, sQ);",
-    "  if (best < 0.0) return result;",
-    "  float tHit = best * DT;",
-    "  float csH = cs, snH = sn;",
-    "  if (ph.w != 0.0) {",
-    "    // Its tangent at the hit, along the chord of the turn.",
-    "    vec2 tt = vec2(cs, sn) + (vec2(cs1, sn1) - vec2(cs, sn)) * best;",
-    "    tt /= length(tt);",
-    "    csH = tt.x; snH = tt.y;",
-    "  }",
-    "  Contact c = portholeLineContact(sQ, portholeFeature(o, sQ), snH, csH, phC + phV * tHit, lc + lv * tHit, tHit);",
-    "  if (result.c0.hit) result.c1 = c;",
-    "  else result.c0 = c;",
-    "  return result;",
     "}",
     "",
     "// invMass/invInertia are 0 for static bodies, which already makes every",
@@ -936,6 +831,92 @@
     "  bodyA.y -= n.y * correction * invMassA;",
     "  bodyB.x += n.x * correction * invMassB;",
     "  bodyB.y += n.y * correction * invMassB;",
+    "}",
+    "",
+    "// ---- A line pair's two contacts solved together (PhysicsEngine.contactPairMatrix and its users) ----",
+    "// m: the matrix as (k00, k01, k11, det); not ok, c0 alone as solveContactVelocity and solveContactPosition",
+    "// would. e: each contact's restitution (pairRamps).",
+    "struct ContactPairSolve { bool ok; vec4 m; vec2 g0; vec2 g1; vec2 e; vec2 pushA; vec2 pushB; float turnA; float turnB; };",
+    "// PhysicsEngine.pairMatrix, the lever arms g0, g1 across each normal on A (x) and B (y).",
+    "vec4 pairMatrix(Contact c0, Contact c1, vec2 g0, vec2 g1, float invMassA, float invInertiaA, float invMassB, float invInertiaB) {",
+    "  float mSum = invMassA + invMassB;",
+    "  float k00 = mSum + g0.x * g0.x * invInertiaA + g0.y * g0.y * invInertiaB, k11 = mSum + g1.x * g1.x * invInertiaA + g1.y * g1.y * invInertiaB;",
+    "  float k01 = mSum * dot(c0.normal, c1.normal) + g0.x * g1.x * invInertiaA + g0.y * g1.y * invInertiaB;",
+    "  return vec4(k00, k01, k11, k00 * k11 - k01 * k01);",
+    "}",
+    "bool pairOk(vec4 m) { return m.x > 0.0 && m.z > 0.0 && m.w > 1e-9 * m.x * m.z; }",
+    "// PhysicsEngine.pairImpulses: j >= 0 bringing each contact's closing rate to its target, or false.",
+    "bool pairImpulses(vec4 m, float b0, float b1, out vec2 j) {",
+    "  j = vec2((m.z * b0 - m.y * b1) / m.w, (m.x * b1 - m.y * b0) / m.w);",
+    "  if (j.x >= 0.0 && j.y >= 0.0) return true;",
+    "  j = vec2(b0 / m.x, 0.0);",
+    "  if (j.x > 0.0 && m.y * j.x >= b1) return true;",
+    "  j = vec2(0.0, b1 / m.z);",
+    "  return j.y > 0.0 && m.y * j.y >= b0;",
+    "}",
+    "vec2 leverArms(Contact c) { return vec2(c.rA.x * c.normal.y - c.rA.y * c.normal.x, c.rB.x * c.normal.y - c.rB.y * c.normal.x); }",
+    "// PhysicsEngine.pushArms, with each line's half-length.",
+    "vec2 pushArms(vec2 g, float halfA, bool movesA, float halfB, bool movesB) {",
+    "  bool endA = abs(g.x) >= LINE_END_SHARE * halfA, endB = abs(g.y) >= LINE_END_SHARE * halfB;",
+    "  if (endA && !endB && movesA) g.y = 0.0;",
+    "  else if (endB && !endA && movesB) g.x = 0.0;",
+    "  return g;",
+    "}",
+    "// The pair's matrix, and its push-out per position pass with the turn it gives (contactPairPush).",
+    "ContactPairSolve prepareContactPair(Contact c0, Contact c1, float invMassA, float invInertiaA, bool movesA, float halfA, float invMassB, float invInertiaB, bool movesB, float halfB) {",
+    "  ContactPairSolve k;",
+    "  k.g0 = leverArms(c0);",
+    "  k.g1 = leverArms(c1);",
+    "  k.m = pairMatrix(c0, c1, k.g0, k.g1, invMassA, invInertiaA, invMassB, invInertiaB);",
+    "  k.ok = c0.hit && c1.hit && pairOk(k.m);",
+    "  k.e = vec2(0.0); k.pushA = vec2(0.0); k.pushB = vec2(0.0); k.turnA = 0.0; k.turnB = 0.0;",
+    "  float mSum = invMassA + invMassB;",
+    "  if (!k.ok) {",
+    "    float cor = c0.hit && mSum > 0.0 ? max(c0.penetration - POSITION_SLOP, 0.0) / mSum * POSITION_PERCENT : 0.0;",
+    "    k.pushA = -c0.normal * cor * invMassA; k.pushB = c0.normal * cor * invMassB;",
+    "    return k;",
+    "  }",
+    "  float b0 = POSITION_PERCENT * (c0.penetration - POSITION_SLOP), b1 = POSITION_PERCENT * (c1.penetration - POSITION_SLOP);",
+    "  if (b0 <= 0.0 && b1 <= 0.0) return k;",
+    "  vec2 p0 = pushArms(k.g0, halfA, movesA, halfB, movesB), p1 = pushArms(k.g1, halfA, movesA, halfB, movesB);",
+    "  vec4 m = pairMatrix(c0, c1, p0, p1, invMassA, invInertiaA, invMassB, invInertiaB);",
+    "  vec2 j;",
+    "  if (pairOk(m) && pairImpulses(m, b0, b1, j)) {",
+    "    vec2 push = c0.normal * j.x + c1.normal * j.y;",
+    "    k.pushA = -push * invMassA; k.pushB = push * invMassB;",
+    "    k.turnA = -invInertiaA * (p0.x * j.x + p1.x * j.y); k.turnB = invInertiaB * (p0.y * j.x + p1.y * j.y);",
+    "  }",
+    "  return k;",
+    "}",
+    "// After leg 1: each contact's restitution off the speed ramp at the rate it closes then.",
+    "void pairRamps(inout ContactPairSolve k, Contact c0, Contact c1, Body bodyA, Body bodyB) {",
+    "  float v0 = dot(velocityAt(bodyB, c0.rB) - velocityAt(bodyA, c0.rA), c0.normal);",
+    "  float v1 = dot(velocityAt(bodyB, c1.rB) - velocityAt(bodyA, c1.rA), c1.normal);",
+    "  k.e = vec2(smoothstep(0.5 * RESTITUTION_THRESHOLD, RESTITUTION_THRESHOLD, -v0), smoothstep(0.5 * RESTITUTION_THRESHOLD, RESTITUTION_THRESHOLD, -v1));",
+    "}",
+    "// Its bounce (or, still gap away, the closing that covers the gap in a step).",
+    "float pairTarget(Contact c, float v, float e) {",
+    "  return -e * v - (c.penetration < 0.0 ? (1.0 - e) * -c.penetration / DT : 0.0);",
+    "}",
+    "void solveContactPairVelocity(inout Body bodyA, float invMassA, float invInertiaA, inout Body bodyB, float invMassB, float invInertiaB,",
+    "                              Contact c0, Contact c1, ContactPairSolve k) {",
+    "  float v0 = dot(velocityAt(bodyB, c0.rB) - velocityAt(bodyA, c0.rA), c0.normal);",
+    "  float v1 = dot(velocityAt(bodyB, c1.rB) - velocityAt(bodyA, c1.rA), c1.normal);",
+    "  vec2 j;",
+    "  if (k.ok) {",
+    "    float b0 = pairTarget(c0, v0, k.e.x) - v0, b1 = pairTarget(c1, v1, k.e.y) - v1;",
+    "    if ((b0 <= 0.0 && b1 <= 0.0) || !pairImpulses(k.m, b0, b1, j)) return;",
+    "  } else {",
+    "    if (!c0.hit || v0 > 0.0 || k.m.x <= 0.0) return;",
+    "    j = vec2(-(1.0 + smoothstep(0.5 * RESTITUTION_THRESHOLD, RESTITUTION_THRESHOLD, -v0)) * v0 / k.m.x, 0.0);",
+    "  }",
+    "  vec2 impulse = c0.normal * j.x + c1.normal * j.y;",
+    "  bodyA.vx -= impulse.x * invMassA; bodyA.vy -= impulse.y * invMassA; bodyA.w -= invInertiaA * (k.g0.x * j.x + k.g1.x * j.y);",
+    "  bodyB.vx += impulse.x * invMassB; bodyB.vy += impulse.y * invMassB; bodyB.w += invInertiaB * (k.g0.y * j.x + k.g1.y * j.y);",
+    "}",
+    "void solveContactPairPosition(inout Body bodyA, inout Body bodyB, ContactPairSolve k) {",
+    "  bodyA.x += k.pushA.x; bodyA.y += k.pushA.y;",
+    "  bodyB.x += k.pushB.x; bodyB.y += k.pushB.y;",
     "}",
     "",
     "vec2 solve2x2(float mA, float iA, vec2 rA, float mB, float iB, vec2 rB, float rhsX, float rhsY) {",
@@ -1833,12 +1814,17 @@
     // A port hole meets a plain line as its oval (two port holes meet as capsules).
     function portholeLineCall(pi, li) {
       return df
-        ? E.collidePortholeLine + "(" + probeRef(pi) + ", " + segExpr(pi) + ", BODY" + pi + "_HALF, " + probeRef(li) + ", " + segExpr(li) + ", BODY" + li + "_HALF)"
+        ? E.collidePortholeLine + "(" + probeRef(pi) + ", " + segExpr(pi) + ", BODY" + pi + "_HALF, " + moves(pi) + ", " + probeRef(li) + ", " + segExpr(li) + ")"
         : E.collidePortholeLine + "(" + probeRef(pi) + ", BODY" + pi + "_HALF, " + probeRef(li) + ", BODY" + li + "_HALF)";
     }
     // Only a line<->line pair can fill its second contact slot.
     function pairSlots(pair) {
       return consts[pair[0]].type !== "circle" && consts[pair[1]].type !== "circle" ? ["c0", "c1"] : ["c0"];
+    }
+    // Pairs that meet in collideLineLine (two port holes meet as two lines); they solve both slots together.
+    function twoSlots(pair) {
+      var tA = consts[pair[0]].type, tB = consts[pair[1]].type;
+      return tA !== "circle" && tB !== "circle" && (tA === "porthole") === (tB === "porthole");
     }
 
     // Contacts are computed once per step and reused by every solver iteration.
@@ -1863,13 +1849,10 @@
       } else if (tA === "porthole" && tB !== "porthole") {
         lines.push(detected(E.contactPairType, varName, portholeLineCall(i, j)));
       } else if (tB === "porthole" && tA !== "porthole") {
-        // collidePortholeLine takes (port hole, line): swap rA/rB back and flip the normal, in both slots.
+        // collidePortholeLine takes (port hole, line): swap rA/rB back and flip the normal.
         lines.push(detected(E.contactPairType, varName, portholeLineCall(j, i)));
-        ["c0", "c1"].forEach(function (slot) {
-          var c = varName + "." + slot;
-          lines.push("  " + c + ".normal = " + E.negVec(c + ".normal") + ";");
-          lines.push("  { " + E.vecType + " tmp_" + i + "_" + j + " = " + c + ".rA; " + c + ".rA = " + c + ".rB; " + c + ".rB = tmp_" + i + "_" + j + "; }");
-        });
+        lines.push("  " + varName + ".c0.normal = " + E.negVec(varName + ".c0.normal") + ";");
+        lines.push("  { " + E.vecType + " tmp_" + i + "_" + j + " = " + varName + ".c0.rA; " + varName + ".c0.rA = " + varName + ".c0.rB; " + varName + ".c0.rB = tmp_" + i + "_" + j + "; }");
       } else {
         // df also takes the half-lengths, for the step's end pose.
         var halves = df ? [", BODY" + i + "_HALF", ", BODY" + j + "_HALF"] : ["", ""];
@@ -1897,11 +1880,19 @@
     }
     if (df) {
       pairs.forEach(function (pair) {
+        if (twoSlots(pair)) return;
         pairSlots(pair).forEach(function (slot) {
           lines.push(prepareContactLine("pair_" + pair[0] + "_" + pair[1] + "." + slot, pair[0], pair[1]));
         });
       });
     }
+    // A line pair's two slots solve together (PhysicsEngine.contactPairMatrix).
+    pairs.forEach(function (pair) {
+      if (!twoSlots(pair)) return;
+      var a = pair[0], b = pair[1], vn = "pair_" + a + "_" + b;
+      lines.push("  " + (df ? "DContactPairSolve " : "ContactPairSolve ") + vn + "_k = " + (df ? "dfPrepareContactPair(" : "prepareContactPair(") +
+        vn + ".c0, " + vn + ".c1, " + massArgs(a) + ", " + moves(a) + ", BODY" + a + "_HALF, " + massArgs(b) + ", " + moves(b) + ", BODY" + b + "_HALF);");
+    });
     lines.push("");
 
     // "Touching anything this step?" for the flagged body. Globals: a constant-initialized
@@ -2048,20 +2039,44 @@
         : "solveContactPosition(" + B(a) + ", BODY" + a + "_INV_MASS, " + B(b) + ", BODY" + b + "_INV_MASS, " + contactExpr + ");";
     }
 
+    // A line pair's restitution, from the velocities leg 1 left.
+    pairs.forEach(function (pair) {
+      if (!twoSlots(pair)) return;
+      var a = pair[0], b = pair[1], vn = "pair_" + a + "_" + b;
+      lines.push("  " + (df
+        ? "dfPairRamps(" + vn + "_k, " + vn + ".c0, " + vn + ".c1, " + B(a) + ", " + moves(a) + ", " + B(b) + ", " + moves(b) + ");"
+        : "pairRamps(" + vn + "_k, " + vn + ".c0, " + vn + ".c1, " + B(a) + ", " + B(b) + ");"));
+    });
     var solves = hingeAnchors.length || pairs.length;
     // One 2x2 solve is exact for a lone hinge with nothing else to solve (PhysicsEngine.step).
     var velIterCount = hingeAnchors.length === 1 && !pairs.length ? 1 : VELOCITY_ITERATIONS;
     if (solves) lines.push("  for (int iter = 0; iter < " + velIterCount + "; iter++) {");
     hingeAnchors.forEach(function (hg, hi) { lines.push("    " + hingeCall(hg, hi, "velocity")); });
     pairs.forEach(function (pair) {
-      var varName = "pair_" + pair[0] + "_" + pair[1];
+      var varName = "pair_" + pair[0] + "_" + pair[1], a = pair[0], b = pair[1];
       // c1 only for line<->line: elsewhere it is noContact() by construction.
-      pairSlots(pair).forEach(function (slot) {
-        lines.push("    " + contactVelocityCall(pair[0], pair[1], varName + "." + slot));
-      });
+      if (twoSlots(pair)) {
+        lines.push("    " + (df
+          ? "dfSolveContactPairVelocity(" + B(a) + ", " + massArgs(a) + ", " + moves(a) + ", " + B(b) + ", " + massArgs(b) + ", " + moves(b) + ", "
+          : "solveContactPairVelocity(" + B(a) + ", " + massArgs(a) + ", " + B(b) + ", " + massArgs(b) + ", ") +
+          varName + ".c0, " + varName + ".c1, " + varName + "_k);");
+        return;
+      }
+      pairSlots(pair).forEach(function (slot) { lines.push("    " + contactVelocityCall(a, b, varName + "." + slot)); });
     });
     if (solves) lines.push("  }");
     lines.push("");
+    // A line pair's turns, whole, per body: they land after leg 2, before the position passes (PhysicsEngine.step).
+    var pairTurns = {};
+    pairs.forEach(function (pair) {
+      if (!twoSlots(pair)) return;
+      var vn = "pair_" + pair[0] + "_" + pair[1] + "_k";
+      [[pair[0], "turnA"], [pair[1], "turnB"]].forEach(function (side) {
+        if (consts[side[0]].isAnchored) return;
+        var turn = E.mul(df ? global.PhysicsDF.num(POSITION_ITERATIONS) : fnum(POSITION_ITERATIONS), vn + "." + side[1]);
+        pairTurns[side[0]] = pairTurns[side[0]] ? E.add(pairTurns[side[0]], turn) : turn;
+      });
+    });
     // Leg 2: the rest of the step, and of the kick, on the post-impulse velocity; no contact means identity.
     for (var g2 = 0; g2 < n; g2++) {
       if (consts[g2].isAnchored || !paired[g2]) continue;
@@ -2074,12 +2089,17 @@
       lines.push("  " + B(g2) + ".x = " + E.add(B(g2) + ".x", E.mul("vPost" + g2 + ".x", t2)) + ";");
       lines.push("  " + B(g2) + ".y = " + E.add(B(g2) + ".y", E.mul("vPost" + g2 + ".y", t2)) + ";");
       if (df && hingeBodies[g2]) {
-        // A hinged body's carried sin/cos follows its angle into the position loop.
-        lines.push("  dfTurn(" + B(g2) + ".angle, " + trig(g2) + ", " + E.mul(B(g2) + ".w", t2) + ");");
+        // A hinged body's carried sin/cos follows its angle into the position loop, in one turn.
+        var spun = E.mul(B(g2) + ".w", t2);
+        lines.push("  dfTurn(" + B(g2) + ".angle, " + trig(g2) + ", " + (pairTurns[g2] ? E.add(spun, pairTurns[g2]) : spun) + ");");
+        delete pairTurns[g2];
       } else {
         lines.push("  " + B(g2) + ".angle = " + E.add(B(g2) + ".angle", E.mul(B(g2) + ".w", t2)) + ";");
       }
     }
+    Object.keys(pairTurns).forEach(function (idx) {
+      lines.push("  " + B(idx) + ".angle = " + E.add(B(idx) + ".angle", pairTurns[idx]) + ";");
+    });
     lines.push("");
     // The shake lands the joints closed; hinges project only on steps a contact or the spin guard spoiled.
     var projectWhen = [];
@@ -2100,10 +2120,14 @@
       if (projectWhen.length) lines.push("    }");
     }
     pairs.forEach(function (pair) {
-      var varName = "pair_" + pair[0] + "_" + pair[1];
-      pairSlots(pair).forEach(function (slot) {
-        lines.push("    " + contactPositionCall(pair[0], pair[1], varName + "." + slot));
-      });
+      var varName = "pair_" + pair[0] + "_" + pair[1], a = pair[0], b = pair[1];
+      if (twoSlots(pair)) {
+        lines.push("    " + (df
+          ? "dfSolveContactPairPosition(" + B(a) + ", " + moves(a) + ", " + B(b) + ", " + moves(b) + ", "
+          : "solveContactPairPosition(" + B(a) + ", " + B(b) + ", ") + varName + "_k);");
+        return;
+      }
+      pairSlots(pair).forEach(function (slot) { lines.push("    " + contactPositionCall(a, b, varName + "." + slot)); });
     });
     if (solves) lines.push("  }");
 
@@ -2288,37 +2312,21 @@
       });
     }
 
-    // Frame wrap, last so it never feeds this step's position solve. Decided only
-    // by a root body (free, or hinged to the world); hinge children follow their
-    // parent. A world-hinged root wraps by its PIN (HINGEh_A, inout), which lives in frame space.
+    // Frame wrap, last so it never feeds this step's position solve; PhysicsEngine.step's rule.
     if (frame) {
-      var isChild = {};
-      var ownWorldHingeIdx = {};
-      hingeAnchors.forEach(function (hg, hi) {
-        if (hg.aIsWorld) ownWorldHingeIdx[hg.b] = hi;
-        else isChild[hg.b] = true;
-      });
-      function collectDescendants(root, visited) {
-        visited[root] = true;
-        hingeAnchors.forEach(function (hg) {
-          if (!hg.aIsWorld && hg.a === root && !visited[hg.b]) collectDescendants(hg.b, visited);
-        });
-      }
-      // A spring group wraps as one with its leader, or never if tethered (PhysicsEngine.springGroups).
-      var springGroups = PE.springGroups({
+      var linkScene = {
         bodies: consts,
         hinges: hingeAnchors.map(function (hg) { return { bodyA: hg.aIsWorld ? null : hg.a, bodyB: hg.b }; }),
         springs: springList.map(function (sp) { return { bodyA: sp.aIsWorld ? null : sp.a, bodyB: sp.b }; }),
-      });
+      };
+      var springGroups = PE.springGroups(linkScene), assemblies = PE.hingeAssemblies(linkScene);
       var frameW = fnum(frame.width), frameH = fnum(frame.height);
       lines.push("");
       for (var root = 0; root < n; root++) {
-        if (consts[root].isAnchored || isChild[root]) continue;
         var springGroup = springGroups ? springGroups.groupOf[root] : null;
-        if (springGroup && (springGroup.tethered || springGroup.leader !== root)) continue;
-        var hasWorldHinge = ownWorldHingeIdx[root] !== undefined;
-        var wrapTarget = hasWorldHinge ? "HINGE" + ownWorldHingeIdx[root] + "_A" : B(root);
-        var refX = wrapTarget + ".x", refY = wrapTarget + ".y";
+        var wrapGroup = springGroup || assemblies.groupOf[root];
+        if (springGroup ? springGroup.tethered || springGroup.leader !== root : wrapGroup.held || wrapGroup.leader !== root) continue;
+        var refX = B(root) + ".x", refY = B(root) + ".y";
         var dxVar = "wrapDx" + root, dyVar = "wrapDy" + root;
         lines.push("  float " + dxVar + " = 0.0;");
         lines.push("  float " + dyVar + " = 0.0;");
@@ -2331,15 +2339,10 @@
           lines.push("  if (" + refY + " > " + frameH + ") " + dyVar + " = -" + frameH + "; else if (" + refY + " < 0.0) " + dyVar + " = " + frameH + ";");
         }
         lines.push("  g_wrapDx" + root + " = " + dxVar + "; g_wrapDy" + root + " = " + dyVar + ";");
-        // What moves with this root: pin and hinge descendants, or the whole spring group and its pins.
-        var movedPins = [], descendants = {};
-        if (springGroup) {
-          springGroup.members.forEach(function (m) { descendants[m] = true; });
-          hingeAnchors.forEach(function (hg, hi) { if (hg.aIsWorld && descendants[hg.b]) movedPins.push(hi); });
-        } else {
-          if (hasWorldHinge) movedPins.push(ownWorldHingeIdx[root]);
-          collectDescendants(root, descendants);
-        }
+        // What moves with the leader: every member and the pins they hang from.
+        var movedPins = [], moved = {};
+        wrapGroup.members.forEach(function (m) { moved[m] = true; });
+        hingeAnchors.forEach(function (hg, hi) { if (hg.aIsWorld && moved[hg.b]) movedPins.push(hi); });
         // df adds are real work even by zero: only on a wrap step.
         var wrapIndent = df ? "    " : "  ";
         if (df) lines.push("  if (" + dxVar + " != 0.0 || " + dyVar + " != 0.0) {");
@@ -2349,7 +2352,7 @@
             ? wrapIndent + hv + ".x = dfAddFloat(" + hv + ".x, " + dxVar + "); " + hv + ".y = dfAddFloat(" + hv + ".y, " + dyVar + ");"
             : wrapIndent + hv + " += vec2(" + dxVar + ", " + dyVar + ");");
         });
-        Object.keys(descendants).forEach(function (memberStr) {
+        Object.keys(moved).forEach(function (memberStr) {
           lines.push(df
             ? wrapIndent + E.body + memberStr + ".x = dfAddFloat(" + E.body + memberStr + ".x, " + dxVar + "); " + E.body + memberStr + ".y = dfAddFloat(" + E.body + memberStr + ".y, " + dyVar + ");"
             : wrapIndent + "body" + memberStr + ".x += " + dxVar + "; body" + memberStr + ".y += " + dyVar + ";");
@@ -2409,6 +2412,10 @@
   var TRAJECTORY_MAX_CHUNK = 256;
   // Steered chunk time: well under the limit.
   var TRAJECTORY_TARGET_MS = 4;
+  // A chunk slower than this is believed at once, not taken for a wait behind other work.
+  var TRAJECTORY_SLOW_MS = 4 * TRAJECTORY_TARGET_MS;
+  // Recent chunk timings the sizing compares.
+  var TRAJECTORY_TIMINGS_KEPT = 8;
   // Written beside the data by every draw so a dropped draw is noticed.
   var TRAJECTORY_SENTINEL = 8191;
   // Past the 2 * MAX_BODIES wrap bits; all of them stay under float32's 24 exact integer bits.
@@ -2907,13 +2914,13 @@
       gl.attachShader(program, runner.vs);
       gl.attachShader(program, shader);
       gl.linkProgram(program);
-      build = runner.builds[source] = { source: source, shader: shader, program: program, outputs: 1 + (compiled.chunk.loOutputs || 0),
+      build = runner.builds[source] = { source: source, shader: shader, program: program, outputs: 1 + (compiled.chunk.loOutputs || 0), precision: compiled.precision,
         status: "linking", sync: null, entry: null, error: null };
     }
     return pumpTrajectoryBuild(runner, build, false) === "pending";
   }
 
-  // linking -> warming -> cached, or "failed" with the error kept for the run to throw. `wait` finishes it now.
+  // linking -> warming -> cached, or "failed" with the error kept for the run to throw. `wait` finishes it on the spot.
   function pumpTrajectoryBuild(runner, build, wait) {
     var gl = runner.gl;
     build.polledAt = performance.now();
@@ -2928,6 +2935,7 @@
         build.status = "failed";
         return build.status;
       }
+      if (!wait && warmGate && !warmGate(build.precision)) return "pending";
       gl.deleteShader(build.shader);
       build.entry = { source: build.source, program: build.program, posLoc: gl.getAttribLocation(build.program, "a_position") };
       warmTrajectoryProgram(runner, build.entry, build.outputs);
@@ -2943,6 +2951,19 @@
     delete runner.builds[build.source];
     cacheTrajectoryProgram(runner, build.entry);
     return "ready";
+  }
+
+  // Asked before a background build's first draw, which pauses the screen; false puts the draw off to a later poll.
+  var warmGate = null;
+  function setWarmGate(fn) { warmGate = fn; }
+
+  // Precisions of the background builds still being asked after (a loading notice).
+  function pendingTrajectoryPrecisions() {
+    if (!trajectoryRunner) return [];
+    var now = performance.now();
+    return Object.keys(trajectoryRunner.builds).map(function (source) { return trajectoryRunner.builds[source]; })
+      .filter(function (build) { return build.status !== "failed" && now - build.polledAt < 1000; })
+      .map(function (build) { return build.precision; });
   }
 
   // Builds nobody asked after for a while (the scene or view moved on) are dropped when a new one starts.
@@ -3019,13 +3040,14 @@
   }
 
   // The same run as a job for callers that spread it over tasks: step(budgetMs) works until about budgetMs has
-  // passed and returns true once job.trajectories is set; it throws as the run would. progress is 0 to 1.
+  // passed and returns true once job.trajectories is set; it throws as the run would. progress is 0 to 1. ready
+  // holds the trajectories so far, in order: a batch too wide for one texture finishes a part at a time.
   function startTrajectoryRun(compiled, maxSteps) {
     var count = compiled.pointCount || 1;
-    var job = { trajectories: null, progress: 0, step: null, cancel: null };
-    var parts = [], out = [], batch = null, finished = 0;
+    var job = { trajectories: null, ready: [], progress: 0, step: null, cancel: null };
+    var parts = [], batch = null, part = null;
     if (compiled.numBodies === 0) {
-      out = new Array(count).fill([]);
+      job.ready = new Array(count).fill([]);
     } else {
       var runner = getTrajectoryRunner();
       var gl = runner.gl;
@@ -3043,28 +3065,26 @@
         }
       }
     }
-    var total = parts.length;
     job.step = function (budgetMs) {
       var until = performance.now() + budgetMs;
       try {
         while (batch || parts.length) {
           if (!batch) {
-            var part = parts.shift();
+            part = parts.shift();
             batch = startTrajectoryBatch(part.compiled, maxSteps, part.n);
           }
           var result = batch.advance(until);
-          job.progress = (finished + batch.progress()) / total;
+          job.progress = (job.ready.length + batch.progress() * part.n) / count;
           if (!result) return false;
-          out = out.concat(result);
+          Array.prototype.push.apply(job.ready, result);
           batch = null;
-          finished += 1;
           if (parts.length && performance.now() >= until) return false;
         }
       } catch (err) {
         job.cancel();
         throw err;
       }
-      job.trajectories = out;
+      job.trajectories = job.ready;
       job.progress = 1;
       return true;
     };
@@ -3113,8 +3133,7 @@
     var runStrip = chunk.layers + 1;
     var stripWidth = runStrip * count;
     var states = [floatTexture(gl, stripWidth, 1), floatTexture(gl, stripWidth, 1)];
-    // The strip's framebuffer takes the log's shape, padded, so both draws share one pipeline: on ANGLE/Metal
-    // each shape's first draw builds its own, seconds at tf, and nothing on screen updates meanwhile.
+    // Padded to the log framebuffer's shape, so both draws share one pipeline.
     var pads = loTextures.map(function () { return floatTexture(gl, stripWidth, 1); });
     var logFbo = gl.createFramebuffer(), stateFbo = gl.createFramebuffer();
     var sentinels = new Float32Array(stripWidth * 4);
@@ -3186,9 +3205,11 @@
     }
 
     // Each chunk is timed and the next sized from it (TRAJECTORY_TARGET_MS); the time
-    // includes the readback, erring safe. Growth caps at doubling; the size is kept with the program,
-    // scaled down for a batch wider than the one it was measured on.
-    var steps = Math.max(1, Math.floor((entry.chunkSteps || 1) * Math.min(1, (entry.chunkRuns || 1) / count)));
+    // includes the readback, erring safe. Growth caps at doubling; the size and the best per-step time are
+    // kept with the program, scaled for a batch wider than the one they were measured on.
+    var widthScale = Math.min(1, (entry.chunkRuns || 1) / count);
+    var steps = Math.max(1, Math.floor((entry.chunkSteps || 1) * widthScale));
+    var stepTimes = entry.stepMs ? [entry.stepMs / widthScale] : [];
     var current = 0, base = 0, run = 0;
     var phase = "chunks";
     var pixels = null, loPixels = null, glError = gl.NO_ERROR;
@@ -3206,6 +3227,7 @@
         if (base >= maxSteps || failure) {
           entry.chunkSteps = steps;
           entry.chunkRuns = count;
+          entry.stepMs = stepTimes.length ? Math.min.apply(null, stepTimes) : 0;
           phase = "read";
           break;
         }
@@ -3226,8 +3248,16 @@
               failure = "the state after step " + (base + rows) + " was never written";
             }
           }
-          var perStep = (performance.now() - startedAt) / (2 * rows);
-          steps = Math.max(1, Math.min(Math.floor(TRAJECTORY_TARGET_MS / perStep), rows * 2, chunk.maxSteps));
+          var took = performance.now() - startedAt, perStep = took / (2 * rows);
+          stepTimes.push(perStep);
+          if (stepTimes.length > TRAJECTORY_TIMINGS_KEPT) stepTimes.shift();
+          var want = Math.floor(TRAJECTORY_TARGET_MS / perStep);
+          // A slow chunk may have waited behind another context's draws (the map's): below TRAJECTORY_SLOW_MS it
+          // shrinks the next one only as far as the best recent timing says.
+          if (took < TRAJECTORY_SLOW_MS) {
+            want = Math.min(Math.floor(TRAJECTORY_TARGET_MS / Math.min.apply(null, stepTimes)), Math.max(rows, want));
+          }
+          steps = Math.max(1, Math.min(want, rows * 2, chunk.maxSteps));
           current = 1 - current;
         }
         base += rows;
@@ -3263,6 +3293,7 @@
       // A dropped draw reports no error: only the sentinel notices. Chunk size forgotten so the retry starts over.
       if (failure) {
         entry.chunkSteps = 1;
+        entry.stepMs = 0;
         throw new Error("The GPU dropped a physics draw (" + failure + "): the scene is too heavy for it at this precision.");
       }
       return trajectories;
@@ -3325,6 +3356,8 @@
     runCompiledTrajectoriesOnGPU: runCompiledTrajectoriesOnGPU,
     startTrajectoryRun: startTrajectoryRun,
     trajectoryProgramPending: trajectoryProgramPending,
+    setWarmGate: setWarmGate,
+    pendingTrajectoryPrecisions: pendingTrajectoryPrecisions,
     generateTrajectoryMainGLSL: generateTrajectoryMainGLSL,
     generateTrajectoryHeaderGLSL: generateTrajectoryHeaderGLSL,
     trajectoryChunkInfo: trajectoryChunkInfo,
