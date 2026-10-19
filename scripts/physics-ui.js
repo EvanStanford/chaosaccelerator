@@ -1369,6 +1369,12 @@
     });
   });
 
+  // Simple Mode hides every tool but these.
+  var SIMPLE_MODE_TOOLS = ["select", "circle", "anchor", "input", "output"];
+  AppMode.onChange(function () {
+    if (AppMode.isSimple() && SIMPLE_MODE_TOOLS.indexOf(activeTool) === -1) setActiveTool("select");
+  });
+
   // No Select button: any panel click that isn't a tool button backs out of the tool (canvas clicks excluded).
   panelEl.addEventListener("click", function (e) {
     if (e.target.closest("[data-tool]")) return;
@@ -2329,8 +2335,34 @@
     }
     sendToGridErrorEl.textContent = "";
     sendToGridErrorEl.className = "readout";
-    window.AppShell.goToGrid(serializeScene());
+    var data = serializeScene();
+    noteMappedScene(data);
+    window.AppShell.goToGrid(data);
   });
+
+  // For the Advanced Mode tip: a second, different scene taken to the map.
+  function noteMappedScene(data) {
+    if (AppTips.doneAt("mapped-two-scenes")) return;
+    var key = sceneKey(data), first = AppTips.recall("first-mapped-scene");
+    if (!first) AppTips.remember("first-mapped-scene", key);
+    else if (first !== key) AppTips.done("mapped-two-scenes");
+  }
+
+  // A short hash of the scene, measured from its first body so a re-centered window gives the same key.
+  function sceneKey(data) {
+    var copy = JSON.parse(JSON.stringify(data));
+    var ox = copy.bodies.length ? copy.bodies[0].x : 0, oy = copy.bodies.length ? copy.bodies[0].y : 0;
+    copy.bodies.forEach(function (b) { b.x = roundNum(b.x - ox); b.y = roundNum(b.y - oy); });
+    copy.hinges.concat(copy.springs).forEach(function (j) {
+      if (j.bodyA !== null) return;
+      j.localAnchorA = { x: roundNum(j.localAnchorA.x - ox), y: roundNum(j.localAnchorA.y - oy) };
+    });
+    delete copy.frameWidth;
+    delete copy.frameHeight;
+    var text = JSON.stringify(copy), hash = 0;
+    for (var i = 0; i < text.length; i++) hash = (hash * 31 + text.charCodeAt(i)) | 0;
+    return (hash >>> 0).toString(36);
+  }
 
   // ---- Scene JSON: a live, editable description of the starting scene ----
 

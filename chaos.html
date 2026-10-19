@@ -8,17 +8,18 @@
 <meta name="theme-color" content="#14161c">
 <title>Chaos Accelerator</title>
 <!-- Both views share this document so transition.js can show them at once. -->
-<link rel="stylesheet" href="scripts/physics.css?v=m159">
-<link rel="stylesheet" href="scripts/fractal-grid.css?v=m159">
-<link rel="stylesheet" href="scripts/app-shell.css?v=m159">
-<link rel="stylesheet" href="scripts/fractal-stats.css?v=m159">
-<link rel="stylesheet" href="scripts/responsive-layout.css?v=m159">
+<link rel="stylesheet" href="scripts/physics.css?v=m163">
+<link rel="stylesheet" href="scripts/fractal-grid.css?v=m163">
+<link rel="stylesheet" href="scripts/app-shell.css?v=m163">
+<link rel="stylesheet" href="scripts/fractal-stats.css?v=m163">
+<link rel="stylesheet" href="scripts/responsive-layout.css?v=m163">
 <!-- mobile.css after the app sheets: it must win their cascade without !important. -->
-<link rel="stylesheet" href="scripts/mobile.css?v=m159">
-<link rel="stylesheet" href="scripts/eighties-app.css?v=m159">
-<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m159" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="scripts/mobile.css?v=m163">
+<link rel="stylesheet" href="scripts/eighties-app.css?v=m163">
+<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m163" as="font" type="font/woff2" crossorigin>
 <!-- In <head> on purpose: both views measure their canvas area as they start. -->
-<script src="scripts/layout-mode.js?v=m159"></script>
+<script src="scripts/layout-mode.js?v=m163"></script>
+<script src="scripts/app-mode.js?v=m163"></script>
 <!-- A #map/ link should open on the map: hide the editor (still laid out) until transition.js picks the view. -->
 <script>
   if (/^#map\//.test(location.hash)) document.documentElement.classList.add("opening-map");
@@ -122,7 +123,7 @@
             </details>
           </section>
 
-          <section class="panel-section">
+          <section class="panel-section" id="simulation-section">
             <h2>Simulation</h2>
             <label class="toggle-field" title="Objects are attracted to each other with mutual gravity.">
               <span>Planet Mode</span>
@@ -367,6 +368,14 @@
                   <button id="grid-btn-settings-close" class="icon-button menu-collapse" type="button" aria-label="Collapse Settings">&#9660;</button>
                 </div>
                 <div class="menu-card-body" id="shared-settings-body">
+                  <div class="mode-switch" id="mode-switch">
+                    <span data-mode="simple">Simple Mode</span>
+                    <span class="toggle-switch">
+                      <input type="checkbox" id="advanced-mode-checkbox" aria-label="Advanced Mode">
+                      <span class="toggle-slider"></span>
+                    </span>
+                    <span data-mode="advanced">Advanced Mode</span>
+                  </div>
                   <label class="volume-field">
                     <span>Sound</span>
                     <span class="volume-icon" id="grid-sound-volume-icon" aria-hidden="true">
@@ -755,24 +764,24 @@
 
 </div>
 
-<script src="scripts/app-message.js?v=m159"></script>
-<script src="scripts/app-tips.js?v=m159"></script>
-<script src="scripts/physics-engine.js?v=m159"></script>
-<script src="scripts/physics-coords.js?v=m159"></script>
-<script src="scripts/share-url.js?v=m159"></script>
-<script src="scripts/movie-path.js?v=m159"></script>
-<script src="scripts/movie-store.js?v=m159"></script>
-<script src="scripts/physics-sound.js?v=m159"></script>
-<script src="scripts/physics-hinge-geometry.js?v=m159"></script>
-<script src="scripts/physics-df.js?v=m159"></script>
-<script src="scripts/physics-gpu.js?v=m159"></script>
-<script src="scripts/physics-gpu-df.js?v=m159"></script>
-<script src="scripts/physics-grid-codegen.js?v=m159"></script>
-<script src="scripts/physics-ui.js?v=m159"></script>
-<script src="scripts/fractal-stats.js?v=m159"></script>
-<script src="scripts/fractal-stats-panel.js?v=m159"></script>
-<script src="scripts/fractal-grid.js?v=m159"></script>
-<script src="scripts/back-link.js?v=m159"></script>
-<script src="scripts/transition.js?v=m159"></script>
+<script src="scripts/app-message.js?v=m163"></script>
+<script src="scripts/app-tips.js?v=m163"></script>
+<script src="scripts/physics-engine.js?v=m163"></script>
+<script src="scripts/physics-coords.js?v=m163"></script>
+<script src="scripts/share-url.js?v=m163"></script>
+<script src="scripts/movie-path.js?v=m163"></script>
+<script src="scripts/movie-store.js?v=m163"></script>
+<script src="scripts/physics-sound.js?v=m163"></script>
+<script src="scripts/physics-hinge-geometry.js?v=m163"></script>
+<script src="scripts/physics-df.js?v=m163"></script>
+<script src="scripts/physics-gpu.js?v=m163"></script>
+<script src="scripts/physics-gpu-df.js?v=m163"></script>
+<script src="scripts/physics-grid-codegen.js?v=m163"></script>
+<script src="scripts/physics-ui.js?v=m163"></script>
+<script src="scripts/fractal-stats.js?v=m163"></script>
+<script src="scripts/fractal-stats-panel.js?v=m163"></script>
+<script src="scripts/fractal-grid.js?v=m163"></script>
+<script src="scripts/back-link.js?v=m163"></script>
+<script src="scripts/transition.js?v=m163"></script>
 </body>
 </html>

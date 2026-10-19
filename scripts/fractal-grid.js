@@ -212,7 +212,10 @@
     });
     // Settings are page state, so a reload in place resets them; a map address also carries precision and sound.
     function resetAll() {
-      try { localStorage.removeItem("physicsAppDismissedTips"); } catch (err) { /* nothing to clear */ }
+      try {
+        localStorage.removeItem("physicsAppDismissedTips");
+        localStorage.removeItem(global.AppMode.STORE_KEY);
+      } catch (err) { /* nothing to clear */ }
       if (global.AppShell) global.AppShell.replayIntro();
       try {
         global.sessionStorage.removeItem(PERF_LOWERED_KEY);
@@ -577,7 +580,9 @@
     return api;
   }
 
-  var settingsMenu = makeMenu("menu-settings", "grid-btn-settings", "right");
+  // Closing Settings under the Advanced Mode tip starts its wait over.
+  var settingsMenu = makeMenu("menu-settings", "grid-btn-settings", "right",
+    function (open) { if (!open) AppTips.drop("advanced-mode"); });
 
   // Collapsing Inspect stops the preview (it has sound) and disarms Line/Grid, but keeps inspectedGroups so
   // reopening restores them. With the map following locked points the preview plays on, muted, for Map Evolution.
@@ -2511,7 +2516,7 @@
   var colorSpreadCheckTimer = null;
 
   function colorZoomTipApplies() {
-    if (colorZoomEnabled || !AppTips.canShow("color-zoom")) return false;
+    if (colorZoomEnabled || !AppTips.canShow("color-zoom") || global.AppMode.isSimple()) return false;
     // Trick Shot and Lyapunov frames hide the Display card.
     var challenge = global.LayoutMode && global.LayoutMode.challengeKind();
     return challenge !== "trick" && challenge !== "lyap";
@@ -2615,9 +2620,32 @@
     useCurrentPass();
   }
 
+  // Simple Mode only, once the user has zoomed, inspected a point and a line, and mapped two different scenes,
+  // or has had the page open a minute and been to the map.
+  var advancedModeLabel = document.querySelector('#mode-switch [data-mode="advanced"]');
+  var ADVANCED_MODE_TIP_FACTS = ["zoomed", "inspected-point", "inspected-line", "mapped-two-scenes"];
+  var ADVANCED_MODE_TIP_PAGE_MS = 60000;
+  function maybeShowAdvancedModeTip() {
+    var explored = ADVANCED_MODE_TIP_FACTS.every(function (id) { return AppTips.doneAt(id); });
+    var lingered = performance.now() >= ADVANCED_MODE_TIP_PAGE_MS && !!AppTips.doneAt("visited-map");
+    if (!global.AppMode.isSimple() || !(explored || lingered)) {
+      AppTips.drop("advanced-mode");
+      return false;
+    }
+    if (!AppTips.ready("advanced-mode")) return false;
+    settingsMenu.set(true);
+    if (AppTips.show("advanced-mode", advancedModeLabel, function () { global.AppMode.set("advanced"); })) return true;
+    scheduleColorSpreadCheck(); // a docked card is sized after this task
+    return false;
+  }
+  // The minute passing is no event of its own.
+  setTimeout(function () {
+    if (AppTips.view() === "grid" && !AppTips.showing()) scheduleColorSpreadCheck();
+  }, Math.max(0, ADVANCED_MODE_TIP_PAGE_MS - performance.now()));
+
   // One popover, so tips run in priority order: the speed cap explains a collapsed spread; Color Zoom does not.
   function checkSettledViewTips() {
-    if (maybeShowMapIntroTip() || maybeShowVelocityCapTip() || maybeShowZoomInTip()) return;
+    if (maybeShowMapIntroTip() || maybeShowVelocityCapTip() || maybeShowZoomInTip() || maybeShowAdvancedModeTip()) return;
     checkColorSpreadAndMaybeSuggestColorZoom();
   }
 
@@ -3684,7 +3712,8 @@
       hoverEmptyState.hidden = !!job;
       var readout = job ? text : EMPTY_READOUT;
       if (hoverReadout.textContent !== readout) hoverReadout.textContent = readout;
-      text = "";
+      // Simple Mode hides the readout, so the status stays on the line below.
+      if (!global.AppMode.isSimple()) text = "";
     }
     if (inspectProgressEl.textContent !== text) inspectProgressEl.textContent = text;
     if (job && job.handle.done !== job.filled) {
@@ -3751,6 +3780,7 @@
         inspectedGroups.push({
           type: "line", points: points, startWorld: startWorld, endWorld: endWorld, sampleCount: sampleCount, places: places,
         });
+        if (!linkItem) AppTips.done("inspected-line");
         return true;
       },
     });
@@ -5000,7 +5030,10 @@
     var uv = pixelToUV(clientX, clientY);
     var oldScale = view.scale;
     view.scale = clamp(view.scale * factor, MIN_SCALE, MAX_SCALE);
-    if (factor !== 1) AppTips.done("zoom-in");
+    if (factor !== 1) {
+      AppTips.done("zoom-in");
+      AppTips.done("zoomed");
+    }
     // center' = center + uv*(oldScale - newScale), formed EXACTLY: a rounded product is a lasting error at deep zoom.
     shiftViewCenterByProducts(uv.uvx, oldScale - view.scale, uv.uvy, oldScale - view.scale);
   }
@@ -8877,6 +8910,15 @@
   }
   movieCenterLinesCheckbox.addEventListener("change", updateMovieCenterLines);
   var challengesMenu = makeMenu("menu-challenges", "grid-btn-challenges", "movie");
+  global.AppMode.onChange(function () {
+    if (!global.AppMode.isSimple()) {
+      AppTips.done("advanced-mode");
+      return;
+    }
+    [statsMenu, displayMenu, playbackMenu, movieMenu, challengesMenu, renderProgressMenu].forEach(function (menu) { menu.set(false); });
+    if (inspectArmMode === "grid") disarmInspect();
+    if (!inspectMenu.docked) setInspectOpen(true);
+  });
   var movieHint = document.getElementById("movie-hint");
   var btnMovieAddKeyframe = document.getElementById("movie-add-keyframe");
   var movieKeyframeList = document.getElementById("movie-keyframe-list");

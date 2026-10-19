@@ -301,6 +301,57 @@
 #editor-settings-mount button.secondary { padding: 6px 10px; }
 #editor-settings-mount .readout { white-space: nowrap; }
 
+/* ---- Simple Mode / Advanced Mode switch (app-mode.js) ---- */
+.mode-switch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: 13px;
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px dashed var(--border);
+}
+.mode-switch [data-mode] {
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+.mode-switch .is-current {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* Simple Mode: the map keeps only Inspect and Settings, the builder only the basic tools. */
+html.simple-mode #shared-settings-body > :not(#mode-switch, .volume-field, #grid-btn-tips, #grid-btn-reset-all),
+html.simple-mode #menu-stats,
+html.simple-mode #grid-btn-stats,
+html.simple-mode #grid-stats-panel,
+html.simple-mode #menu-display,
+html.simple-mode #grid-btn-display,
+html.simple-mode #grid-display-panel,
+html.simple-mode #menu-playback,
+html.simple-mode #grid-btn-playback,
+html.simple-mode #grid-playback-panel,
+html.simple-mode #menu-movie,
+html.simple-mode #grid-btn-movie,
+html.simple-mode #menu-challenges,
+html.simple-mode #grid-btn-challenges,
+html.simple-mode #menu-render-progress,
+html.simple-mode #hover-readout,
+html.simple-mode #separation-details,
+html.simple-mode #btn-inspect-grid,
+html.simple-mode #grid-inspect-panel .section-label,
+html.simple-mode #grid-inspect-panel .tool-grid,
+html.simple-mode #panel .tool-btn:is([data-tool="line"], [data-tool="porthole"], [data-tool="hinge"],
+  [data-tool="spring"], [data-tool="velocity"], [data-tool="input-velocity"]),
+html.simple-mode #panel .collapsible,
+html.simple-mode #simulation-section,
+html.simple-mode #btn-speed,
+html.simple-mode #speed-popup {
+  display: none !important;
+}
+
 /* ---- Toasts (app-message.js): opacity-animated, never [hidden] ---- */
 .app-toast {
   position: absolute;

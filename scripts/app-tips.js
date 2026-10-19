@@ -6,6 +6,7 @@
   "use strict";
 
   // ok: the colored button. "OK" when the page passes an action for it, "Got it" when it only closes.
+  // wait: how long the condition must hold first, when not SHOW_DELAY_MS.
   var TIPS = {
     "add-object": { text: "Add an object to your simulation", ok: "OK" },
     "place-object": { text: "Click the grid to place the object", ok: "Got it" },
@@ -18,6 +19,7 @@
     "velocity-speed-cap": { text: "Radial lines are an artifact of the maximum speed cap.", ok: "Got it" },
     "zoom-in": { text: "Try zooming in on interesting sections of the map", ok: "Got it" },
     "color-zoom": { text: "Try Color Zoom to highlight subtle color differences", ok: "OK" },
+    "advanced-mode": { text: "Try advanced mode for more options", ok: "OK", wait: 15000 },
   };
   // Time each tip was answered, by id. Also holds "all" (every tip off) and facts like "played".
   var STORE_KEY = "physicsAppDismissedTips";
@@ -33,7 +35,8 @@
   try { framed = global.top !== global; } catch (err) { framed = true; }
 
   var store = load();
-  if (!framed && landedFromSceneLink() && !store.all) {
+  // A visitor arriving on a scene link from outside the site gets no tips.
+  if (!framed && global.AppMode.landedFromSceneLink() && !store.all) {
     store.all = Date.now();
     save();
   }
@@ -50,18 +53,6 @@
     } catch (err) {
       return {};
     }
-  }
-
-  // A scene link opened from outside the site, not a reload or Back: that visitor gets no tips.
-  function landedFromSceneLink() {
-    if (!/^#(bldr|map|movie)\//.test(global.location.hash)) return false;
-    var nav = global.performance.getEntriesByType ? global.performance.getEntriesByType("navigation")[0] : null;
-    if (nav && nav.type !== "navigate") return false;
-    try {
-      if (document.referrer && new URL(document.referrer).origin === global.location.origin) return false;
-    } catch (err) {
-    }
-    return true;
   }
 
   function save() {
@@ -101,14 +92,21 @@
     return !framed && !!view && !active && !isDone(id);
   }
 
-  // True once `id` has been asked for SHOW_DELAY_MS without a drop in between.
+  // True once `id` has been asked for its wait without a drop in between.
   function waitedFor(id) {
+    var delay = (TIPS[id] && TIPS[id].wait) || SHOW_DELAY_MS;
     var w = waiting[id];
     if (!w) {
       w = waiting[id] = { since: Date.now(), timer: null };
-      w.timer = setTimeout(function () { w.timer = null; notify(); }, SHOW_DELAY_MS);
+      w.timer = setTimeout(function () { w.timer = null; notify(); }, delay);
     }
-    return Date.now() - w.since >= SHOW_DELAY_MS;
+    return Date.now() - w.since >= delay;
+  }
+
+  // A fact that holds a value rather than a time.
+  function remember(id, value) {
+    store[id] = value;
+    save();
   }
 
   // The page calls this when the condition for `id` stops holding: its wait starts over.
@@ -118,16 +116,22 @@
     delete waiting[id];
   }
 
-  // Call while the tip's condition holds: true once it has waited and nothing else is showing.
+  // Call while the tip's condition holds: true once it has waited. No other tip open is part of every
+  // condition, so a wait starts over once the open tip is gone.
   function ready(id) {
     if (framed || !view || isDone(id)) return false;
-    return waitedFor(id) && !active;
+    if (active) {
+      drop(id);
+      return false;
+    }
+    return waitedFor(id);
   }
 
   // anchor: an element, a viewport point {x, y}, or null for no arrow at the top of the window.
   function show(id, anchor, onOk) {
     if (!ready(id) || !anchorVisible(anchor)) return false;
     active = { id: id, anchor: anchor, onOk: onOk || null };
+    Object.keys(waiting).forEach(drop);
     textEl.textContent = TIPS[id].text;
     okButton.textContent = TIPS[id].ok;
     popover.hidden = false;
@@ -246,6 +250,8 @@
     ready: ready,
     done: done,
     doneAt: doneAt,
+    remember: remember,
+    recall: function (id) { return store[id]; },
     canShow: canShow,
     showing: function () { return active ? active.id : null; },
     follow: follow,
