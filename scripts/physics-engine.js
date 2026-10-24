@@ -9,7 +9,9 @@
   var DENSITY = 1;
   var LINE_LINEAR_DENSITY = 8; // mass per unit length of a line body
   // Collision/click thickness of a line: not physical, so not in mass or inertia.
-  var LINE_THICKNESS = 20;
+  var LINE_THICKNESS = 30;
+  // A port hole's oval is this thick; two port holes still meet as lines.
+  var PORTHOLE_THICKNESS = 20;
 
   // ---- Port holes: a pair of lines whose fronts are joined. The front half of the oval lets a chain
   // leader through, and it leaves the other port hole with its velocity and offset carried over into
@@ -97,7 +99,7 @@
   // ---- Mutual Gravity: every body attracts every other by inverse square. Gravitational mass
   // is NOT body.mass (anchors have invMass 0 but must pull): shape-derived, anchors 10x denser.
   var ANCHORED_GRAVITY_DENSITY = 10;
-  // Tuned so an anchored default circle (radius 30) pulls at about GRAVITY from 300px.
+  // Tuned so an anchored radius-30 circle pulls at about GRAVITY from 300px.
   var MUTUAL_GRAVITY_CONSTANT = 2500;
 
   function gravitationalMass(body) {
@@ -957,7 +959,7 @@
   // reach (half-length + half-thickness), b the half-thickness; the arcs' radius R follows.
   var PORTHOLE_TIP_RADIUS = 5;
   function portholeOval(length) {
-    var b = LINE_THICKNESS / 2, r = PORTHOLE_TIP_RADIUS, a = length / 2 + b;
+    var b = PORTHOLE_THICKNESS / 2, r = PORTHOLE_TIP_RADIUS, a = length / 2 + b;
     var R = ((a - r) * (a - r) + b * b - r * r) / (2 * (b - r));
     return { a: a, b: b, r: r, R: R, cy: R - b, ax: a - r };
   }
@@ -1595,7 +1597,7 @@
         var s0 = dx0 * a0.tx + dy0 * a0.ty, s1 = dx1 * a1.tx + dy1 * a1.ty;
         var sCross = s0 + (s1 - s0) * lambda;
         // Anywhere the body could have touched the front: the capsule's reach plus the body's own.
-        if (Math.abs(sCross) > P.length / 2 + LINE_THICKNESS / 2 + halfExtent(O)) continue;
+        if (Math.abs(sCross) > P.length / 2 + PORTHOLE_THICKNESS / 2 + halfExtent(O)) continue;
         var tStar = lambda * dt, tau = dt - tStar;
         // Both port holes as they stood at the crossing instant.
         var Ps = portholeStateAt(P, startP, u[portals[k]], lambda), Qs = portholeStateAt(Q, startPose[portals[1 - k]], u[portals[1 - k]], lambda);
@@ -2141,6 +2143,7 @@
     hingeAssemblies: hingeAssemblies,
     translateSpringGroup: translateSpringGroup,
     LINE_THICKNESS: LINE_THICKNESS,
+    PORTHOLE_THICKNESS: PORTHOLE_THICKNESS,
     EDGE_MODES: EDGE_MODES,
     FRAME_SHORT_SIDE: FRAME_SHORT_SIDE,
     frameFor: frameFor,

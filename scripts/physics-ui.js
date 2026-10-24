@@ -169,15 +169,15 @@
   var rotationHandleDrag = null; // { bodyIndex, angleOffset }
   // Shorter drags count as a click and place the default-size shape.
   var CLICK_DRAG_THRESHOLD = 6;
-  var DEFAULT_CIRCLE_RADIUS = 30;
-  var DEFAULT_LINE_LENGTH = 140;
+  var DEFAULT_CIRCLE_RADIUS = 45;
+  var DEFAULT_LINE_LENGTH = 182;
   var DEFAULT_PORTHOLE_LENGTH = 200;
-  // The phone layout shows the frame much smaller, so a click places shapes this much bigger there.
-  var MOBILE_DEFAULT_SIZE_SCALE = 2.5;
+  // The phone layout shows the frame much smaller, so a click places shapes bigger there.
+  var MOBILE_CIRCLE_RADIUS = 75;
+  var MOBILE_LINE_LENGTH = 350;
   var MOBILE_PORTHOLE_LENGTH = 350;
   function defaultSize(size, mobileSize) {
-    if (!(window.LayoutMode && window.LayoutMode.isMobile())) return size;
-    return mobileSize || size * MOBILE_DEFAULT_SIZE_SCALE;
+    return window.LayoutMode && window.LayoutMode.isMobile() ? mobileSize : size;
   }
   // Bounds the on-canvas resize handle's drag to a sane range.
   var RADIUS_MIN = 5, RADIUS_MAX = 300;
@@ -308,17 +308,15 @@
     } else if (body.type === "porthole") {
       drawPorthole(ctx, body.x, body.y, body.angle, body.length, body.color, { selected: selected, anchored: body.isAnchored });
     } else {
-      var endpoints = PhysicsEngine.getLineEndpoints(body);
+      var endpoints = PhysicsEngine.getLineEndpoints(body), outline = ctx.lineWidth;
       ctx.lineCap = "round";
       ctx.beginPath();
       ctx.moveTo(endpoints[0].x, endpoints[0].y);
       ctx.lineTo(endpoints[1].x, endpoints[1].y);
-      if (selected) {
-        ctx.lineWidth = PhysicsEngine.LINE_THICKNESS + 4 * screenPx;
-        ctx.strokeStyle = p.selected;
-        ctx.stroke();
-      }
-      ctx.lineWidth = PhysicsEngine.LINE_THICKNESS;
+      // The outline sits on the capsule's edge, as a circle's does.
+      ctx.lineWidth = PhysicsEngine.LINE_THICKNESS + outline;
+      ctx.stroke();
+      ctx.lineWidth = PhysicsEngine.LINE_THICKNESS - outline;
       ctx.strokeStyle = body.isAnchored ? p.anchoredFill : p.bodyFill;
       ctx.stroke();
     }
@@ -434,8 +432,8 @@
     var dx = endPoint.x - start.x, dy = endPoint.y - start.y;
     var dist = Math.sqrt(dx * dx + dy * dy);
     if (dist < CLICK_DRAG_THRESHOLD * screenPx) {
-      if (shape.tool === "circle") return { x: start.x, y: start.y, radius: defaultSize(DEFAULT_CIRCLE_RADIUS), angle: 0, length: 0 };
-      return { x: start.x, y: start.y, radius: 0, angle: 0, length: defaultSize(DEFAULT_LINE_LENGTH) };
+      if (shape.tool === "circle") return { x: start.x, y: start.y, radius: defaultSize(DEFAULT_CIRCLE_RADIUS, MOBILE_CIRCLE_RADIUS), angle: 0, length: 0 };
+      return { x: start.x, y: start.y, radius: 0, angle: 0, length: defaultSize(DEFAULT_LINE_LENGTH, MOBILE_LINE_LENGTH) };
     }
     if (shape.tool === "circle") return { x: start.x, y: start.y, radius: dist, angle: 0, length: 0 };
     return { x: (start.x + endPoint.x) / 2, y: (start.y + endPoint.y) / 2, radius: 0, angle: Math.atan2(dy, dx), length: dist };
@@ -2677,13 +2675,13 @@
   }
 
   btnSampleDoublePendulum.addEventListener("click", function () {
-    loadSample("samples/double_pendulum.json?v=m189", "Double Pendulum");
+    loadSample("samples/double_pendulum.json?v=m192", "Double Pendulum");
   });
   btnSamplePinball.addEventListener("click", function () {
-    loadSample("samples/pinball.json?v=m189", "Pinball");
+    loadSample("samples/pinball.json?v=m192", "Pinball");
   });
   btnSampleBinaryStar.addEventListener("click", function () {
-    loadSample("samples/binary_star.json?v=m189", "Binary Star");
+    loadSample("samples/binary_star.json?v=m192", "Binary Star");
   });
   function clearScene() {
     sharedFrame = null;

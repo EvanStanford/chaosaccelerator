@@ -6194,7 +6194,7 @@
   function drawHoverBody(spec, row, colorOverride, hollow) {
     var pal = ColorBlind.palette();
     var fill = colorOverride ? colorOverride.fill : (spec.isAnchored ? pal.anchoredFill : pal.bodyFill);
-    var stroke = colorOverride ? colorOverride.stroke : (spec.type === "circle" ? (spec.isAnchored ? pal.anchoredStroke : pal.bodyStroke) : fill);
+    var stroke = colorOverride ? colorOverride.stroke : (spec.isAnchored ? pal.anchoredStroke : pal.bodyStroke);
     hoverCtx.fillStyle = fill;
     if (hollow) {
       var outline = colorOverride ? colorOverride.fill : stroke;
@@ -6250,11 +6250,15 @@
         hoverCtx.lineTo(row.x + hx, row.y + hy);
         hoverCtx.stroke();
       } else {
-        hoverCtx.lineWidth = PhysicsEngine.LINE_THICKNESS;
+        // The outline on the capsule's edge, as a circle's.
+        hoverCtx.lineWidth = PhysicsEngine.LINE_THICKNESS + 2;
         hoverCtx.strokeStyle = stroke;
         hoverCtx.beginPath();
         hoverCtx.moveTo(row.x - hx, row.y - hy);
         hoverCtx.lineTo(row.x + hx, row.y + hy);
+        hoverCtx.stroke();
+        hoverCtx.lineWidth = PhysicsEngine.LINE_THICKNESS - 2;
+        hoverCtx.strokeStyle = fill;
         hoverCtx.stroke();
       }
     }

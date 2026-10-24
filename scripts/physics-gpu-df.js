@@ -11,7 +11,8 @@
   function d(n) { return PhysicsDF.num(n); }
 
   // physics-gpu.js's constants, prefixed so a df shader can include both libraries.
-  var LINE_THICKNESS = 20;
+  var LINE_THICKNESS = global.PhysicsEngine.LINE_THICKNESS;
+  var PORTHOLE_THICKNESS = global.PhysicsEngine.PORTHOLE_THICKNESS;
   var LINE_PARALLEL_EPS = 0.05;
   var RESTITUTION_THRESHOLD = 30;
   var POSITION_SLOP = 0.01;
@@ -147,6 +148,7 @@
     "",
     "const MF DF_LINE_THICKNESS = " + d(LINE_THICKNESS) + ";",
     "const MF DF_HALF_LINE_THICKNESS = " + d(LINE_THICKNESS * 0.5) + ";",
+    "const MF DF_HALF_PORTHOLE_THICKNESS = " + d(PORTHOLE_THICKNESS * 0.5) + ";",
     "const MF DF_LINE_PARALLEL_EPS = " + d(LINE_PARALLEL_EPS) + ";",
     "const MF DF_LINE_END_SHARE = " + d(LINE_END_SHARE) + ";",
     "const MF DF_RESTITUTION_THRESHOLD = " + d(RESTITUTION_THRESHOLD) + ";",
@@ -722,7 +724,7 @@
     "struct DOval { MF a; MF b; MF r; MF R; MF cy; MF ax; };",
     "DOval dfPortholeOval(MF halfLen) {",
     "  DOval o;",
-    "  o.b = DF_HALF_LINE_THICKNESS; o.r = DF_PORTHOLE_TIP_RADIUS; o.a = dfAdd(halfLen, o.b);",
+    "  o.b = DF_HALF_PORTHOLE_THICKNESS; o.r = DF_PORTHOLE_TIP_RADIUS; o.a = dfAdd(halfLen, o.b);",
     "  MF ar = dfSub(o.a, o.r);",
     "  o.R = dfDiv(dfSub(dfAdd(dfSqr(ar), dfSqr(o.b)), dfSqr(o.r)), dfMulPow2(dfSub(o.b, o.r), 2.0));",
     "  o.cy = dfSub(o.R, o.b); o.ax = ar;",

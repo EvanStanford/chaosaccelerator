@@ -319,7 +319,7 @@
 
   addTest(
     "Two lines found crossed are pushed apart the shorter way, toward where each one mostly lies (JS, float32, double-float)",
-    "crossed segments have no closest-point direction, so the push is out the shorter way toward the side each line mostly lies on: a rod whose end has dipped 15px past a floor's center line goes back up 35px, in either body order",
+    "crossed segments have no closest-point direction, so the push is out the shorter way toward the side each line mostly lies on: a rod whose end has dipped 15px past a floor's center line goes back up 15px plus a line's thickness, in either body order",
     function () {
       // The rod's lower end is 15px past the floor's center line; the rest of it is above.
       function scene(rodFirst) {
@@ -332,10 +332,11 @@
         return { up: up, pen: c.penetration, end: PhysicsEngine.runTrajectory(scene(rodFirst), 30, DT)[29][rodFirst ? 0 : 1].y };
       });
       var gpu = ["f32", "df"].map(function (precision) { return rowY(PhysicsGPU.runSceneOnGPU(scene(false), 30, precision)[29][1]); });
-      var pass = results.every(function (r) { return r.up && Math.abs(r.pen - 35) < 1e-9 && r.end < 600; }) && gpu.every(function (y) { return y < 600; }) && Math.abs(gpu[1] - results[0].end) < 1e-6;
+      var want = 15 + PhysicsEngine.LINE_THICKNESS;
+      var pass = results.every(function (r) { return r.up && Math.abs(r.pen - want) < 1e-9 && r.end < 600; }) && gpu.every(function (y) { return y < 600; }) && Math.abs(gpu[1] - results[0].end) < 1e-6;
       return {
         pass: pass,
-        detail: "floor first / rod first: pushed up " + results[0].up + " / " + results[1].up + " by " + results[0].pen.toFixed(2) + "px (want 15 + 20); rod center 30 steps later at y=" +
+        detail: "floor first / rod first: pushed up " + results[0].up + " / " + results[1].up + " by " + results[0].pen.toFixed(2) + "px (want " + want + "); rod center 30 steps later at y=" +
           results[0].end.toFixed(2) + " / " + results[1].end.toFixed(2) + " (the floor's line is 600); on the GPU f32 " + gpu[0].toFixed(2) + ", df " + gpu[1].toFixed(2),
       };
     }
@@ -345,9 +346,9 @@
     "A rod near a long floor is never pushed through it, tilted or flat (JS, float32, double-float)",
     "near-parallel lines are touching only where their ends are within a thickness, each end with the floor's normal and its own depth: a rod tilted a few hundredths of a radian 15px clear of a 2000px floor has no contact, one touching has two pushing it up, and random drops onto long floors never end past them",
     function () {
-      var floor = PhysicsEngine.createLine(500, 750, 2000, 0, true);
-      // Low ends 35px above the floor's center line (15px clear) and 13.9px above it (touching).
-      var clear = PhysicsEngine.createLine(900, 712, 140, -0.04, false), touch = PhysicsEngine.createLine(900, 734, 140, -0.03, false);
+      var floor = PhysicsEngine.createLine(500, 750, 2000, 0, true), T = PhysicsEngine.LINE_THICKNESS;
+      // Low ends 15px clear of the floor and 6.1px into it.
+      var clear = PhysicsEngine.createLine(900, 732 - T, 140, -0.04, false), touch = PhysicsEngine.createLine(900, 754 - T, 140, -0.03, false);
       var cleared = !PhysicsEngine.collidePair(clear, floor, DT) && !PhysicsEngine.collidePair(floor, clear, DT);
       var cs = PhysicsEngine.collidePair(touch, floor, DT) || [];
       // Its low end is 6.1px in; the other, 4.2px higher, 1.9px.
@@ -452,10 +453,11 @@
     "near-parallel lines touch at each end of their overlap with the normal of the side that end lies on and its own depth, the two contacts are solved together, and their push turns the line whose end it is: at friction 0.3 a level 150px rod dropped 2px onto a 3000px floor rests without moving sideways in either body order, one resting on an end at a slight tilt levels out, a 600px rod dropped on a 200px line stays centered on it, and a rod resting 20px off center on a free 300px plank leaves the plank level in either order. A rod dropped 2px at a 0.01 tilt rocks on its ends, since friction does not slow spin, but does not drift and its ends slow down every 5 s",
     function () {
       function line(x, y, len, tilt, anchored) { return PhysicsEngine.createLine(x, y, len, tilt, anchored); }
+      var T = PhysicsEngine.LINE_THICKNESS;
       function onFloor(len, tilt, lift, floorLen) {
-        return function () { return [line(600, 580 - Math.sin(Math.abs(tilt)) * len / 2 - lift, len, tilt, false), line(600, 600, floorLen, 0, true)]; };
+        return function () { return [line(600, 600 - T - Math.sin(Math.abs(tilt)) * len / 2 - lift, len, tilt, false), line(600, 600, floorLen, 0, true)]; };
       }
-      function onPlank() { return [line(620, 560, 150, 0, false), line(600, 580, 300, 0, false), line(600, 600, 2000, 0, true)]; }
+      function onPlank() { return [line(620, 600 - 2 * T, 150, 0, false), line(600, 600 - T, 300, 0, false), line(600, 600, 2000, 0, true)]; }
       // Name, the bodies with the rod first, listed the other way round, settles flat (else rocks down).
       var cases = [["level, rod first", onFloor(150, 0, 2, 3000), false, true], ["level, floor first", onFloor(150, 0, 2, 3000), true, true],
         ["tilted 0.004 on its low end", onFloor(150, 0.004, 0, 3000), false, true], ["600px rod on a 200px line", onFloor(600, 0, 2, 200), false, true],
@@ -4041,8 +4043,9 @@
       var onArc = PhysicsEngine.collidePair(ph(0), ball(495, 409, 5), DT);
       var onTip = PhysicsEngine.collidePair(ph(0), ball(513, 400, 5), DT);
       var swept = PhysicsEngine.collidePair(ph(0), ball(400, 460, 10, 0, -3000), DT);
-      var lineOff = PhysicsEngine.collidePair(ph(0), line(400, 425, 100, 0), DT);
-      var lineOn = PhysicsEngine.collidePair(ph(0), line(400, 418, 100, 0), DT);
+      var halfT = PhysicsEngine.LINE_THICKNESS / 2;
+      var lineOff = PhysicsEngine.collidePair(ph(0), line(400, 415 + halfT, 100, 0), DT);
+      var lineOn = PhysicsEngine.collidePair(ph(0), line(400, 408 + halfT, 100, 0), DT);
       var moving = ph(0, false); moving.vx = 500;
       var inFrame = PhysicsEngine.collidePair(moving, ball(400, 419, 10, 500, 0), DT);
       var arcLen = Math.sqrt(95 * 95 + (9 + o.cy) * (9 + o.cy));
@@ -4173,7 +4176,7 @@
     "A rod coming out beside the exit port hole's tip meets the same contacts in JS, float32 and double-float",
     "port hole-line contact is the same nearest-point test and predicted touch in all three spellings: a 160px rod dropped 105px off the orange one's center comes out by the green one's tip partly behind its center line, and for three such drops the path after the pass matches JS within 1e-6px in double-float and 0.05px in float32",
     function () {
-      var drops = ["105:100", "97.2059:156.6176", "-108.6765:141.9118"], STEPS = 90, pass = true, detail = [];
+      var drops = ["105:158", "92.7059:156.6176", "-108.6765:141.9118"], STEPS = 90, pass = true, detail = [];
       drops.forEach(function (at) {
         var authored = ShareUrl.decode("#bldr/v:1.0,body:po:0:-150:0:200!;pg:350:250:3.1416:200!;ln:" + at + ":1.4:160,edge:infi,step:90,frmw:1080,frmh:913").scene;
         var scene = PhysicsCoords.toEngineJSON(authored, authored);
@@ -4196,10 +4199,10 @@
     "a line not yet touching a port hole gets a contact only when its nearest point, carried along by its motion, reaches the oval within the step: seven rods at 600px/s to the cap, four of them spinning at 5.5 to 9.3 rad/s, that clear the oval by 3 to 12.5px fly on as they do with collisions off, with no contact in any spelling",
     function () {
       // Port hole angle; rod length, angle and spin; velocity; position.
-      var passes = [[0.00671, 104.24, 2.93899, 0, -569.62, 221.68, 495.506, 204.492], [1.61291, 65.243, 1.82952, 0, -775.81, 13.958, 676.248, 492.717],
-        [2.11329, 155.67, 2.0789, 0, -803.08, -66.685, 671.045, 523.583], [2.84855, 71.719, 0.68877, -5.5287, -1019.28, 2065.96, 801.488, -213.484],
-        [1.75454, 80.023, 0.12291, -8.5112, 1823.44, -644.109, -180.926, 404.294], [2.39571, 120.67, 2.09145, 6.0473, -1476.35, 1696.19, 914.955, -89.92],
-        [2.4737, 147.51, 1.15089, -9.2878, -1176.97, -2062.81, 628.674, 1063.18]];
+      var passes = [[0.00671, 104.24, 2.93899, 0, -569.62, 221.68, 491.876, 201.054], [1.61291, 65.243, 1.82952, 0, -775.81, 13.958, 678.046, 497.383],
+        [2.11329, 155.67, 2.0789, 0, -803.08, -66.685, 672.73, 528.29], [2.84855, 71.719, 0.68877, -5.5287, -1019.28, 2065.96, 806.267, -212.013],
+        [1.75454, 80.023, 0.12291, -8.5112, 1823.44, -644.109, -182.593, 399.58], [2.39571, 120.67, 2.09145, 6.0473, -1476.35, 1696.19, 919.14, -87.183],
+        [2.4737, 147.51, 1.15089, -9.2878, -1176.97, -2062.81, 625.65, 1067.162]];
       var STEPS = 40, pass = true, detail = [];
       passes.forEach(function (p) {
         function scene(collide) {
@@ -4215,7 +4218,7 @@
           for (var q = 0; q < 20; q++) for (var u = 0; u <= 20; u++) {
             var f = q / 20, ang = a.angle + (b.angle - a.angle) * f, l = (u / 20 - 0.5) * p[1];
             var wx = a.x + (b.x - a.x) * f + Math.cos(ang) * l - 400, wy = a.y + (b.y - a.y) * f + Math.sin(ang) * l - 400;
-            clear = Math.min(clear, PhysicsEngine.portholeFeature(o, wx * cs + wy * sn, wy * cs - wx * sn).d - 10);
+            clear = Math.min(clear, PhysicsEngine.portholeFeature(o, wx * cs + wy * sn, wy * cs - wx * sn).d - PhysicsEngine.LINE_THICKNESS / 2);
           }
         }
         var runs = { js: PhysicsEngine.runTrajectory(scene(true), STEPS, DT), f32: PhysicsGPU.runSceneOnGPU(scene(true), STEPS, "f32"), df: PhysicsGPU.runSceneOnGPU(scene(true), STEPS, "df") };

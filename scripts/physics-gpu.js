@@ -8,7 +8,8 @@
 
   var MAX_BODIES = 6;
 
-  var LINE_THICKNESS = 20;
+  var LINE_THICKNESS = global.PhysicsEngine.LINE_THICKNESS;
+  var PORTHOLE_THICKNESS = global.PhysicsEngine.PORTHOLE_THICKNESS;
   var LINE_PARALLEL_EPS = 0.05;
   var RESTITUTION_THRESHOLD = 30;
   var VELOCITY_ITERATIONS = 8;
@@ -62,6 +63,7 @@
     "struct ClosestPair { vec2 c1; vec2 c2; };",
     "",
     "const float LINE_THICKNESS = " + fnum(LINE_THICKNESS) + ";",
+    "const float PORTHOLE_THICKNESS = " + fnum(PORTHOLE_THICKNESS) + ";",
     "const float LINE_PARALLEL_EPS = " + fnum(LINE_PARALLEL_EPS) + ";",
     "const float LINE_END_SHARE = " + fnum(LINE_END_SHARE) + ";",
     "const float RESTITUTION_THRESHOLD = " + fnum(RESTITUTION_THRESHOLD) + ";",
@@ -584,7 +586,7 @@
     "struct Oval { float a; float b; float r; float R; float cy; float ax; };",
     "Oval portholeOval(float halfLen) {",
     "  Oval o;",
-    "  o.b = LINE_THICKNESS * 0.5; o.r = PORTHOLE_TIP_RADIUS; o.a = halfLen + o.b;",
+    "  o.b = PORTHOLE_THICKNESS * 0.5; o.r = PORTHOLE_TIP_RADIUS; o.a = halfLen + o.b;",
     "  o.R = ((o.a - o.r) * (o.a - o.r) + o.b * o.b - o.r * o.r) / (2.0 * (o.b - o.r));",
     "  o.cy = o.R - o.b; o.ax = o.a - o.r;",
     "  return o;",
@@ -2185,7 +2187,7 @@
             lines.push("    phLam" + t + " = dfDiv(phF0" + t + ", dfSub(phF0" + t + ", phF1" + t + "));");
             lines.push("    MF phS0 = dv2Dot(phD0" + t + ", " + tS + ");");
             lines.push("    phSx" + t + " = dfAdd(phS0, dfMul(dfSub(phS1" + t + ", phS0), phLam" + t + "));");
-            lines.push("    phCross" + t + " = !dfGreater(dfAbs(phSx" + t + "), dfAdd(dfAdd(BODY" + pi + "_HALF, DF_HALF_LINE_THICKNESS), BODY" + oi + "_HALF));");
+            lines.push("    phCross" + t + " = !dfGreater(dfAbs(phSx" + t + "), dfAdd(dfAdd(BODY" + pi + "_HALF, DF_HALF_PORTHOLE_THICKNESS), BODY" + oi + "_HALF));");
             lines.push("  }");
           } else {
             lines.push("  vec2 phD0" + t + " = phS" + oi + " - " + startC + ";");
@@ -2197,7 +2199,7 @@
             lines.push("    phLam" + t + " = phF0" + t + " / (phF0" + t + " - phF1" + t + ");");
             lines.push("    float phS0 = dot(phD0" + t + ", " + tS + ");");
             lines.push("    phSx" + t + " = phS0 + (phS1" + t + " - phS0) * phLam" + t + ";");
-            lines.push("    phCross" + t + " = abs(phSx" + t + ") <= BODY" + pi + "_HALF + LINE_THICKNESS * 0.5 + BODY" + oi + "_HALF;");
+            lines.push("    phCross" + t + " = abs(phSx" + t + ") <= BODY" + pi + "_HALF + PORTHOLE_THICKNESS * 0.5 + BODY" + oi + "_HALF;");
             lines.push("  }");
           }
         });
