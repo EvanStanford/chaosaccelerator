@@ -172,6 +172,13 @@
   var DEFAULT_CIRCLE_RADIUS = 30;
   var DEFAULT_LINE_LENGTH = 140;
   var DEFAULT_PORTHOLE_LENGTH = 200;
+  // The phone layout shows the frame much smaller, so a click places shapes this much bigger there.
+  var MOBILE_DEFAULT_SIZE_SCALE = 2.5;
+  var MOBILE_PORTHOLE_LENGTH = 350;
+  function defaultSize(size, mobileSize) {
+    if (!(window.LayoutMode && window.LayoutMode.isMobile())) return size;
+    return mobileSize || size * MOBILE_DEFAULT_SIZE_SCALE;
+  }
   // Bounds the on-canvas resize handle's drag to a sane range.
   var RADIUS_MIN = 5, RADIUS_MAX = 300;
   var LENGTH_MIN = 10, LENGTH_MAX = 800;
@@ -427,8 +434,8 @@
     var dx = endPoint.x - start.x, dy = endPoint.y - start.y;
     var dist = Math.sqrt(dx * dx + dy * dy);
     if (dist < CLICK_DRAG_THRESHOLD * screenPx) {
-      if (shape.tool === "circle") return { x: start.x, y: start.y, radius: DEFAULT_CIRCLE_RADIUS, angle: 0, length: 0 };
-      return { x: start.x, y: start.y, radius: 0, angle: 0, length: DEFAULT_LINE_LENGTH };
+      if (shape.tool === "circle") return { x: start.x, y: start.y, radius: defaultSize(DEFAULT_CIRCLE_RADIUS), angle: 0, length: 0 };
+      return { x: start.x, y: start.y, radius: 0, angle: 0, length: defaultSize(DEFAULT_LINE_LENGTH) };
     }
     if (shape.tool === "circle") return { x: start.x, y: start.y, radius: dist, angle: 0, length: 0 };
     return { x: (start.x + endPoint.x) / 2, y: (start.y + endPoint.y) / 2, radius: 0, angle: Math.atan2(dy, dx), length: dist };
@@ -1498,7 +1505,7 @@
     if (!color || !canAddBody()) return;
     var w = scene.frameWidth, h = scene.frameHeight;
     var place = PORTHOLE_PLACEMENT[color];
-    scene.bodies.push(PhysicsEngine.createPorthole(w / 2, h * place.y, DEFAULT_PORTHOLE_LENGTH, place.angle, color, false));
+    scene.bodies.push(PhysicsEngine.createPorthole(w / 2, h * place.y, defaultSize(DEFAULT_PORTHOLE_LENGTH, MOBILE_PORTHOLE_LENGTH), place.angle, color, false));
     AppTips.done("add-object");
     setActiveTool("select");
     refreshMappingUI();
@@ -2670,13 +2677,13 @@
   }
 
   btnSampleDoublePendulum.addEventListener("click", function () {
-    loadSample("samples/double_pendulum.json?v=m186", "Double Pendulum");
+    loadSample("samples/double_pendulum.json?v=m189", "Double Pendulum");
   });
   btnSamplePinball.addEventListener("click", function () {
-    loadSample("samples/pinball.json?v=m186", "Pinball");
+    loadSample("samples/pinball.json?v=m189", "Pinball");
   });
   btnSampleBinaryStar.addEventListener("click", function () {
-    loadSample("samples/binary_star.json?v=m186", "Binary Star");
+    loadSample("samples/binary_star.json?v=m189", "Binary Star");
   });
   function clearScene() {
     sharedFrame = null;

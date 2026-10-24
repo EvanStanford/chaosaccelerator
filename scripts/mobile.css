@@ -397,12 +397,17 @@ html.layout-mobile #panel.scroll-more::after {
   margin-top: calc(-36px - var(--panel-gap));
 }
 
+/* One height in both modes, so switching mode never reshapes the scene area (and so the frame). */
 html.layout-mobile-portrait #panel {
   --panel-gap: 16px;
-  max-height: 45dvh;
+  height: 45dvh;
   padding: 14px 14px calc(14px + var(--safe-bottom)) 14px;
   gap: var(--panel-gap);
   overscroll-behavior: contain;
+}
+/* Simple Mode has less to show: its sections spread out to fill that height. */
+html.simple-mode.layout-mobile-portrait #panel > .panel-section {
+  margin-block: auto;
 }
 html.layout-mobile-landscape #panel {
   --panel-gap: 14px;
