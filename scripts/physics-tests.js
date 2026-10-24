@@ -1161,6 +1161,23 @@
     }
   );
 
+  addTest(
+    "A scene's frame takes the builder area's shape, its short side 1080",
+    "PhysicsEngine.frameFor: the builder's frame is the shape of its canvas area on screen but not its size in pixels, so the same shape gives the same frame on any screen, and the shorter side is always FRAME_SHORT_SIDE",
+    function () {
+      var cases = [[1600, 900, 1920, 1080], [1190, 861, 1493, 1080], [2380, 1722, 1493, 1080], [800, 800, 1080, 1080], [412, 600, 1080, 1573], [206, 300, 1080, 1573]];
+      var wrong = cases.filter(function (c) {
+        var f = PhysicsEngine.frameFor(c[0], c[1]);
+        return f.frameWidth !== c[2] || f.frameHeight !== c[3];
+      });
+      return {
+        pass: wrong.length === 0 && PhysicsEngine.FRAME_SHORT_SIDE === 1080,
+        detail: cases.map(function (c) { var f = PhysicsEngine.frameFor(c[0], c[1]); return c[0] + "x" + c[1] + " -> " + f.frameWidth + "x" + f.frameHeight; }).join("; ") +
+          (wrong.length ? "; WRONG for " + wrong.length : ""),
+      };
+    }
+  );
+
   // ---- Pac-Man frame wrapping (opt-in via scene.frameWidth/frameHeight) ----
   addTest(
     "Pac-Man wrap: a body crossing any edge reappears on the opposite side, velocity unchanged",
@@ -2437,7 +2454,7 @@
     };
   }
 
-  // Ball dropped between two static walls; same shape as samples/pinball.json.
+  // Ball dropped between two static walls.
   function buildDeepZoomScene() {
     return {
       bodies: [

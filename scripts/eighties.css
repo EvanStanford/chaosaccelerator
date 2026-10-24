@@ -6,7 +6,7 @@
 /* Saira, Latin subset, every weight in one variable file (SIL OFL, assets/fonts/OFL.txt). */
 @font-face {
   font-family: "Saira";
-  src: url("../assets/fonts/saira-latin.woff2?v=m166") format("woff2");
+  src: url("../assets/fonts/saira-latin.woff2?v=m186") format("woff2");
   font-weight: 100 900;
   font-display: swap;
 }
@@ -173,6 +173,8 @@ body.eighties { font-family: var(--font); background: var(--bg); }
 .tagline-float { display: none; flex: none; margin: 0 0 clamp(8px, 2vh, 20px); font-size: 15px; }
 @media (max-aspect-ratio: 3/4) {
   .tagline-float { display: block; }
+  /* The sun's top just under the top of the screen. */
+  :root { --horizon: calc(var(--sun-r) * (1 - var(--sun-sink)) + 12px + env(safe-area-inset-top, 0px)); }
 }
 /* Two posts from the board down to the horizon. */
 .billboard-posts {
@@ -251,6 +253,27 @@ body.eighties { font-family: var(--font); background: var(--bg); }
 /* Wrapped credits would run under the watermark. */
 @media (max-width: 640px) {
   .eighties .foot { padding-bottom: calc(var(--corner-bottom) + 22px - max(10px, env(safe-area-inset-bottom, 0px))); }
+}
+/* Phones: credits on two lines. */
+@media (max-width: 640px) and (max-aspect-ratio: 3/4) {
+  .eighties .credits { display: flex; flex-direction: column-reverse; }
+  .credits-sep { display: none; }
+}
+/* Tall phones: the tour as tall as its slides, dots just under them, spare height above the credits. */
+@media (max-width: 640px) and (max-aspect-ratio: 3/4) and (min-height: 740px) {
+  .eighties .tour { flex: none; margin-top: 3vh; container-type: inline-size; }
+  /* Height cap fitted to what sits above and below the tour. */
+  .eighties .tour { --slide-w: min(100cqw - 2 * var(--room), 780px, (72vh - 366px) * 16 / 9); }
+  .eighties .tour { --slide-w: min(100cqw - 2 * var(--room), 780px, (72dvh - 366px) * 16 / 9); }
+  .eighties .tour-track { align-items: flex-start; }
+  .eighties .foot { display: contents; }
+  .eighties .carousel-dots { flex: none; margin-top: 8px; }
+  .eighties .credits {
+    flex: none;
+    margin-top: auto;
+    padding-top: 10px;
+    padding-bottom: calc(var(--corner-bottom) + 36px - max(10px, env(safe-area-inset-bottom, 0px)));
+  }
 }
 
 /* ---- The corner menu ---- */

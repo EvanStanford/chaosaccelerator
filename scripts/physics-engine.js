@@ -1431,6 +1431,15 @@
     return false;
   }
 
+  // A scene built in a w x h screen area gets a frame of that shape whose short side is this long.
+  var FRAME_SHORT_SIDE = 1080;
+  function frameFor(w, h) {
+    var aspect = w / h;
+    return aspect >= 1
+      ? { frameWidth: Math.round(FRAME_SHORT_SIDE * aspect), frameHeight: FRAME_SHORT_SIDE }
+      : { frameWidth: FRAME_SHORT_SIDE, frameHeight: Math.round(FRAME_SHORT_SIDE / aspect) };
+  }
+
   // ---- Edge modes (all share frameWidth/frameHeight):
   //   "sticky"   run ends at an edge (engine still wraps; PhysicsHingeGeometry.findWrapStopStep)
   //   "wrap"     Pac-Man: leaving one edge reappears at the opposite
@@ -2133,6 +2142,8 @@
     translateSpringGroup: translateSpringGroup,
     LINE_THICKNESS: LINE_THICKNESS,
     EDGE_MODES: EDGE_MODES,
+    FRAME_SHORT_SIDE: FRAME_SHORT_SIDE,
+    frameFor: frameFor,
     DEFAULT_EDGE_MODE: DEFAULT_EDGE_MODE,
     edgeModeOf: edgeModeOf,
     wrapsAtEdges: wrapsAtEdges,

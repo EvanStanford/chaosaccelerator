@@ -412,9 +412,25 @@ html.simple-mode #panel .tool-btn:is([data-tool="line"], [data-tool="porthole"],
 html.simple-mode #panel .collapsible,
 html.simple-mode #simulation-section,
 html.simple-mode #btn-speed,
-html.simple-mode #speed-popup {
+html.simple-mode #speed-popup,
+html.simple-mode #samples-section h2,
+html.simple-mode #hover-playback-controls,
+html.simple-mode #btn-sample-double-pendulum,
+html.simple-mode #btn-sample-binary-star,
+html:not(.simple-mode) .simple-mode-only {
   display: none !important;
 }
+#hover-preview > #hover-mute {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: rgba(12, 13, 17, 0.75);
+}
+#hover-preview > #hover-mute:hover { background: var(--bg-input); }
+/* Simple Mode samples: Clear All, then the one sample, on one row. */
+html.simple-mode #samples-section { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+html.simple-mode #samples-section > :is(.tool-grid, .editor-actions) { display: contents; }
+html.simple-mode #btn-clear-all { order: -1; }
 
 /* ---- Toasts (app-message.js): opacity-animated, never [hidden] ---- */
 .app-toast {

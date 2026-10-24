@@ -805,6 +805,12 @@ input[type="range"] {
 #btn-inspect-clear-all {
   margin-top: 10px;
 }
+#inspect-list #btn-inspect-clear-all {
+  flex: none;
+  margin: 0;
+  padding: 2px 10px;
+  font-size: 12px;
+}
 
 #inspect-list {
   list-style: none;

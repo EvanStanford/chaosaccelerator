@@ -3,8 +3,8 @@
   "bodies": [
     {
       "type": "circle",
-      "x": -132.1042,
-      "y": 321.4385,
+      "x": 0,
+      "y": 156.3252,
       "angle": 0.0021,
       "isAnchored": false,
       "radius": 30,
@@ -13,23 +13,34 @@
       "w": 0
     },
     {
-      "type": "line",
-      "x": -334,
-      "y": -173.5,
-      "angle": -0.7679,
+      "type": "circle",
+      "x": -108.5,
+      "y": 90.793,
+      "angle": 0,
       "isAnchored": true,
-      "length": 479,
+      "radius": 30,
       "vx": 0,
       "vy": 0,
       "w": 0
     },
     {
-      "type": "line",
-      "x": 260,
-      "y": -160.5,
-      "angle": 0.6632,
+      "type": "circle",
+      "x": 116.4336,
+      "y": 89.5195,
+      "angle": 0,
       "isAnchored": true,
-      "length": 505,
+      "radius": 30,
+      "vx": 0,
+      "vy": 0,
+      "w": 0
+    },
+    {
+      "type": "circle",
+      "x": 0,
+      "y": -78.7656,
+      "angle": 0,
+      "isAnchored": true,
+      "radius": 82.8054,
       "vx": 0,
       "vy": 0,
       "w": 0
@@ -48,7 +59,8 @@
     "body": 0,
     "property": "y"
   },
-  "frameWidth": 1192,
-  "frameHeight": 809,
-  "edgeMode": "wrap"
+  "frameWidth": 1143,
+  "frameHeight": 964,
+  "edgeMode": "sticky",
+  "simulationSteps": 250
 }

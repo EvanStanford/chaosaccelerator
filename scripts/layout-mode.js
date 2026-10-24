@@ -61,7 +61,7 @@
     if (challengeVelocityInputs) root.classList.add("challenge-velocity-inputs");
     var challengeSheet = document.createElement("link");
     challengeSheet.rel = "stylesheet";
-    challengeSheet.href = "challenges/challenge-frame.css?v=m166";
+    challengeSheet.href = "challenges/challenge-frame.css?v=m186";
     document.head.appendChild(challengeSheet);
   }
 
@@ -172,4 +172,30 @@
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", startChromeWatch);
   else startChromeWatch();
+
+  // .scroll-more on the editor panel and the dock sheet while content is hidden below.
+  function startScrollMoreWatch() {
+    ["panel", "grid-dock-sheet"].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      function update() {
+        el.classList.toggle("scroll-more", el.scrollHeight - el.scrollTop - el.clientHeight > 2);
+      }
+      el.addEventListener("scroll", update, { passive: true });
+      if (global.ResizeObserver) {
+        var ro = new ResizeObserver(update);
+        ro.observe(el);
+        Array.prototype.forEach.call(el.children, function (child) { ro.observe(child); });
+        if (global.MutationObserver) {
+          new MutationObserver(function () {
+            Array.prototype.forEach.call(el.children, function (child) { ro.observe(child); });
+            update();
+          }).observe(el, { childList: true });
+        }
+      }
+      update();
+    });
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", startScrollMoreWatch);
+  else startScrollMoreWatch();
 })(window);

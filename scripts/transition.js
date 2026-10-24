@@ -343,7 +343,8 @@
     } else {
       leaveMap();
     }
-    var instant = prefersReducedMotion() || transitionsDisabled();
+    // No animation either way while the builder is letterboxed.
+    var instant = prefersReducedMotion() || transitionsDisabled() || global.PhysicsUI.isLetterboxed();
     var direction = which === "grid" ? "forward" : "reverse";
     var full = !introSeen(direction);
     var fragment = null;

@@ -6,16 +6,18 @@
   "use strict";
 
   // ok: the colored button. "OK" when the page passes an action for it, "Got it" when it only closes.
+  // mobile: text and ok used instead in the small-window layout. above: always above its anchor.
   // wait: how long the condition must hold first, when not SHOW_DELAY_MS.
   var TIPS = {
-    "add-object": { text: "Add an object to your simulation", ok: "OK" },
+    "add-object": { text: "Add an object to your simulation", ok: "OK", wait: 6000 },
     "place-object": { text: "Click the grid to place the object", ok: "Got it" },
     "anchor-object": { text: "Try anchoring an object to prevent it from falling", ok: "OK" },
     "try-play": { text: "Try playing your scene", ok: "OK" },
     "set-input": { text: "Choose an object as the input", ok: "OK" },
     "set-output": { text: "Choose an object as the output", ok: "OK" },
-    "fractalize": { text: "Click Fractal-ize to see what map your scene creates", ok: "OK" },
-    "map-intro": { text: "Each pixel is a different simulation! Click on a pixel to view the simulation.", ok: "Got it" },
+    "fractalize": { text: "Click Fractal-ize to see what fractal your scene creates", ok: "OK" },
+    "map-intro": { text: "Each pixel is a different simulation! Click on a pixel to view the simulation.", ok: "Got it",
+      mobile: { text: "Each pixel is a different simulation! Click Inspect (Point) and then click the map.", ok: "OK", above: true } },
     "velocity-speed-cap": { text: "Radial lines are an artifact of the maximum speed cap.", ok: "Got it" },
     "zoom-in": { text: "Try zooming in on interesting sections of the map", ok: "Got it" },
     "color-zoom": { text: "Try Color Zoom to highlight subtle color differences", ok: "OK" },
@@ -130,10 +132,11 @@
   // anchor: an element, a viewport point {x, y}, or null for no arrow at the top of the window.
   function show(id, anchor, onOk) {
     if (!ready(id) || !anchorVisible(anchor)) return false;
-    active = { id: id, anchor: anchor, onOk: onOk || null };
+    var tip = TIPS[id].mobile && global.LayoutMode && global.LayoutMode.isMobile() ? TIPS[id].mobile : TIPS[id];
+    active = { id: id, anchor: anchor, onOk: onOk || null, above: !!tip.above };
     Object.keys(waiting).forEach(drop);
-    textEl.textContent = TIPS[id].text;
-    okButton.textContent = TIPS[id].ok;
+    textEl.textContent = tip.text;
+    okButton.textContent = tip.ok;
     popover.hidden = false;
     position();
     return true;
@@ -178,7 +181,7 @@
     var rect = anchorRect(anchor);
     var centerX = rect.left + rect.width / 2;
     var left = clamp(anchor.getBoundingClientRect ? rect.left : centerX - width / 2, 12, global.innerWidth - width - 12);
-    var above = rect.bottom + 10 + height > global.innerHeight - 12 && rect.top - 10 - height >= 12;
+    var above = active.above || (rect.bottom + 10 + height > global.innerHeight - 12 && rect.top - 10 - height >= 12);
     popover.classList.toggle("tip-above", above);
     popover.style.top = clamp(above ? rect.top - 10 - height : rect.bottom + 10, 12, Math.max(12, global.innerHeight - height - 12)) + "px";
     popover.style.left = left + "px";

@@ -249,6 +249,8 @@ select:disabled { opacity: 0.5; }
   gap: 8px;
   margin-top: 10px;
 }
+/* Clear All sized like a tool button. */
+#samples-section .editor-actions { display: grid; grid-template-columns: 1fr 1fr; }
 
 .field-row {
   display: flex;
@@ -280,6 +282,10 @@ select:disabled { opacity: 0.5; }
   display: flex;
   align-items: center;
   justify-content: center;
+}
+/* A shared scene of another shape: black bars around its frame (resizeCanvas). */
+#canvas-area.letterboxed {
+  background: #000;
 }
 
 /* Floats over the scene, positioned against #canvas-area so it stays centered in both
@@ -414,6 +420,7 @@ html:has(#perf-readout-checkbox:checked) #editor-perf-readout {
 #physics-canvas {
   display: block;
   cursor: default;
+  background: #0c0d11;
 }
 #physics-canvas.tool-select { cursor: default; }
 #physics-canvas.tool-circle,

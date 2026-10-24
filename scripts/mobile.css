@@ -214,7 +214,8 @@ html.input-coarse .movie-field-arrows button {
 html.input-coarse button {
   min-height: 40px;
 }
-html.input-coarse .tool-btn {
+html.input-coarse .tool-btn,
+html.input-coarse #btn-clear-all {
   min-height: 44px;
 }
 html.input-coarse .icon-button {
@@ -375,16 +376,39 @@ html.layout-mobile .fractalize-btn {
   padding: 12px 28px;
 }
 
+html.layout-mobile #step-readout {
+  display: none;
+}
+
+/* A fade along the bottom while there is more to scroll (layout-mode.js sets .scroll-more). */
+html.layout-mobile :is(#panel, #grid-dock-sheet).scroll-more::after {
+  content: "";
+  position: sticky;
+  bottom: 0;
+  display: block;
+  flex: none;
+  height: 36px;
+  margin-top: -36px;
+  background: linear-gradient(transparent, var(--bg-panel));
+  pointer-events: none;
+}
+/* The panel's flex gap would add space before the fade. */
+html.layout-mobile #panel.scroll-more::after {
+  margin-top: calc(-36px - var(--panel-gap));
+}
+
 html.layout-mobile-portrait #panel {
+  --panel-gap: 16px;
   max-height: 45dvh;
   padding: 14px 14px calc(14px + var(--safe-bottom)) 14px;
-  gap: 16px;
+  gap: var(--panel-gap);
   overscroll-behavior: contain;
 }
 html.layout-mobile-landscape #panel {
+  --panel-gap: 14px;
   width: calc(268px + var(--safe-left));
   padding: 12px 12px 12px calc(12px + var(--safe-left));
-  gap: 14px;
+  gap: var(--panel-gap);
   overscroll-behavior: contain;
 }
 

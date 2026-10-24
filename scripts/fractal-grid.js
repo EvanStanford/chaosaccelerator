@@ -2106,6 +2106,12 @@
       AppTips.drop("map-intro");
       return false;
     }
+    // Touch has no hover: point at Inspect (Point), and OK arms it.
+    if (global.LayoutMode && global.LayoutMode.isMobile()) {
+      return AppTips.show("map-intro", btnInspectPoint, function () {
+        if (inspectArmMode !== "point") btnInspectPoint.click();
+      });
+    }
     var rect = canvas.getBoundingClientRect();
     return AppTips.show("map-intro", { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
   }
@@ -3138,7 +3144,25 @@
     }, INSPECT_TOAST_VISIBLE_MS);
   }
 
-  var INSPECT_ROW_GROUP_GLYPH = { line: "┊", grid: "⊞" };
+  var INSPECT_ROW_GROUP_GLYPH = { grid: "⊞" };
+  // A line row's icon: five overlapping dots up a diagonal, red to blue.
+  function inspectLineIcon() {
+    var svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("viewBox", "0 0 18 28");
+    svg.setAttribute("width", "18");
+    svg.setAttribute("height", "28");
+    for (var i = 0; i < 5; i++) {
+      var dot = document.createElementNS(SVG_NS, "circle");
+      dot.setAttribute("cx", String(4 + i * 2.5));
+      dot.setAttribute("cy", String(23 - i * 4.5));
+      dot.setAttribute("r", "3.6");
+      dot.setAttribute("fill", ColorBlind.on() ? inspectLinePointColor(i, 5).fill : "hsl(" + i * 60 + ", 100%, 50%)");
+      dot.setAttribute("stroke", "#000");
+      dot.setAttribute("stroke-width", "0.8");
+      svg.appendChild(dot);
+    }
+    return svg;
+  }
 
   // Decimal places for a millionth of a pixel at the view's zoom (ShareUrl.centerDecimals).
   function viewPlaces() { return ShareUrl.centerDecimals(view.scale); }
@@ -3165,7 +3189,8 @@
     } else {
       icon.className = "inspect-row-icon";
       icon.setAttribute("aria-hidden", "true");
-      icon.textContent = INSPECT_ROW_GROUP_GLYPH[type];
+      if (type === "line") icon.appendChild(inspectLineIcon());
+      else icon.textContent = INSPECT_ROW_GROUP_GLYPH[type];
     }
     var coords = document.createElement("div");
     coords.className = "inspect-coords-group";
@@ -3181,19 +3206,26 @@
     return li;
   }
 
+  // Newest first; Clear All stands in for the top row's remove button.
+  var clearAllHome = btnInspectClearAll.parentNode, clearAllNext = btnInspectClearAll.nextSibling;
   function updateInspectList() {
     inspectListEl.innerHTML = "";
+    var rows = [];
     inspectedGroups.forEach(function (group, i) {
       var corners = group.type === "point" ? [group.points[0].worldPoint] : [group.startWorld, group.endWorld];
-      inspectListEl.appendChild(inspectRow(group.type, group.type === "point" ? group.points[0].color.fill : null,
+      rows.push(inspectRow(group.type, group.type === "point" ? group.points[0].color.fill : null,
         corners, group.places, function () { removeInspectedGroup(i); }));
     });
     [lockJob].concat(lockQueue).forEach(function (job) {
       if (!job) return;
       var d = job.describe[0];
-      inspectListEl.appendChild(inspectRow(job.type, job.colorOf(0).fill, job.type === "point" ? job.worldPoints : [d.a, d.b],
+      rows.push(inspectRow(job.type, job.colorOf(0).fill, job.type === "point" ? job.worldPoints : [d.a, d.b],
         d.places, function () { dropLockJob(job); }));
     });
+    rows.reverse();
+    if (rows.length) rows[0].replaceChild(btnInspectClearAll, rows[0].lastChild);
+    else clearAllHome.insertBefore(btnInspectClearAll, clearAllNext);
+    rows.forEach(function (row) { inspectListEl.appendChild(row); });
   }
 
   // ---- Separation plot: how spread out every inspected run is, frame by frame ----
@@ -5702,6 +5734,14 @@
     hoverMuteBtn.setAttribute("aria-label", volume <= 0 ? "Unmute" : "Mute");
   }
   hoverMuteBtn.addEventListener("click", function () { PhysicsSound.toggleMute(); });
+  // Simple Mode hides the playback row; Mute moves onto the preview's corner.
+  var hoverMuteHome = hoverMuteBtn.parentNode, hoverMuteNext = hoverMuteBtn.nextSibling;
+  function placeHoverMute() {
+    if (global.AppMode.isSimple()) document.getElementById("hover-preview").appendChild(hoverMuteBtn);
+    else hoverMuteHome.insertBefore(hoverMuteBtn, hoverMuteNext);
+  }
+  placeHoverMute();
+  global.AppMode.onChange(placeHoverMute);
   gridSoundVolumeSlider.addEventListener("input", function () {
     PhysicsSound.setVolume(Number(gridSoundVolumeSlider.value) / 100);
   });
@@ -8764,7 +8804,13 @@
     syncMapToInspection();
   }
 
-  evolutionInspectCheckbox.addEventListener("change", function () { setMapFollowsInspect(evolutionInspectCheckbox.checked); });
+  evolutionInspectCheckbox.addEventListener("change", function () {
+    setMapFollowsInspect(evolutionInspectCheckbox.checked);
+    // Switching Playback on presses its play button.
+    if (evolutionInspectCheckbox.checked && !gridPlayPauseBtn.disabled && gridPlayPauseBtn.getAttribute("aria-label") === "Play") {
+      gridPlayPauseBtn.click();
+    }
+  });
 
   function previewOwnsTimeline() {
     return hasFloatColorBuffer && mapFollowsInspect() && (inspectMenu.isOpen() || inspectedGroups.length > 0) && playbackHasSession
@@ -10650,9 +10696,8 @@
     if (!anyOpen || global.LayoutMode.orientation() !== "portrait") {
       dockSheetEl.style.height = "";
     } else {
-      dockSheetEl.style.height = "auto";
-      var cap = Math.max(140, Math.round(gridViewEl.clientHeight * DOCK_MAX_SHARE) - dockTabsEl.offsetHeight);
-      dockSheetEl.style.height = Math.min(dockSheetEl.scrollHeight, cap) + "px";
+      // One fixed height for every card, so switching tabs never resizes the map.
+      dockSheetEl.style.height = Math.max(140, Math.round(gridViewEl.clientHeight * DOCK_MAX_SHARE) - dockTabsEl.offsetHeight) + "px";
     }
     // Now, not when the ResizeObserver gets to it: the frame between would stretch the old picture.
     pinViewCornerOnResize = !!pin;

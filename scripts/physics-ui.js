@@ -8,7 +8,7 @@
   // Default only: simulationSteps travels with the scene (links, autosave, grid handoff).
   var DEFAULT_SIMULATION_STEPS = 1000;
   // A first visit's empty scene. A link or save without a duration still means the default above.
-  var NEW_SCENE_SIMULATION_STEPS = 400;
+  var NEW_SCENE_SIMULATION_STEPS = 250;
   // Notches match fractal-grid.js's slider notch-for-notch.
   var SIMULATION_STEPS_PER_NOTCH = 100;
   var SIMULATION_STEPS_MAX_NOTCHES = 50;
@@ -138,9 +138,9 @@
     xInput: null,
     yInput: null,
     output: null,
-    // Wrap edges. Synced to the canvas while editing, frozen once Play/Send locks a run.
-    frameWidth: 0,
-    frameHeight: 0,
+    // Wrap edges: the canvas area's shape (resizeCanvas), or a shared scene's own. Square until the first resize.
+    frameWidth: PhysicsEngine.FRAME_SHORT_SIDE,
+    frameHeight: PhysicsEngine.FRAME_SHORT_SIDE,
     // Stop-at-edge vs wrap: serialized with the scene, since it changes how Output reads.
     edgeMode: PhysicsEngine.DEFAULT_EDGE_MODE,
     // Share of speed lost per second (PhysicsEngine.frictionOf clamps it); the slider holds it in percent.
@@ -177,14 +177,22 @@
   var LENGTH_MIN = 10, LENGTH_MAX = 800;
   var rafId = null;
   var dpr = 1;
-  // 1 while editing; while playing, how much the locked frame is scaled to fit canvasArea.
+  // CSS px per frame unit: the frame scaled to fit canvasArea.
   var displayScale = 1;
+  // The frame this window gives a scene built here: PhysicsEngine.frameFor of the canvas area.
+  var windowFrame = null;
+  // A shared scene's own frame, kept (letterboxed) while it is in the builder; null: the frame follows the window.
+  var sharedFrame = null;
+  // One screen pixel in frame units. Handles, outlines and hit pads are sized in screen pixels;
+  // 1 while drawing a picture into another canvas (drawInto).
+  var screenPx = 1;
 
   function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
 
+  // A pointer event's position in frame units.
   function canvasPoint(e) {
     var rect = canvas.getBoundingClientRect();
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    return { x: (e.clientX - rect.left) / displayScale, y: (e.clientY - rect.top) / displayScale };
   }
 
   // ---- Rendering ----
@@ -194,20 +202,20 @@
   var GRID_STEP = 50, GRID_COLOR = "rgba(255,255,255,0.05)";
   function drawGrid(w, h) {
     var originX = w / 2, originY = h / 2;
-    ctx.lineWidth = 1;
+    ctx.lineWidth = screenPx;
     ctx.strokeStyle = GRID_COLOR;
     ctx.beginPath();
     for (var x = originX % GRID_STEP; x < w; x += GRID_STEP) {
-      ctx.moveTo(Math.round(x) + 0.5, 0); ctx.lineTo(Math.round(x) + 0.5, h);
+      ctx.moveTo(x, 0); ctx.lineTo(x, h);
     }
     for (var y = originY % GRID_STEP; y < h; y += GRID_STEP) {
-      ctx.moveTo(0, Math.round(y) + 0.5); ctx.lineTo(w, Math.round(y) + 0.5);
+      ctx.moveTo(0, y); ctx.lineTo(w, y);
     }
     ctx.stroke();
   }
 
-  // Planet Mode's sky. Stars are hashed per cell counted from the frame center, so a resize
-  // uncovers more sky without moving any star.
+  // Planet Mode's sky, in screen pixels. Stars are hashed per cell counted from the frame center, so a
+  // resize uncovers more sky without moving any star.
   var STAR_CELL = 64;
   var STAR_TWINKLE_MS = 2600;
   var starTwinkleStart = -Infinity, starTwinkleFrame = 0;
@@ -217,21 +225,21 @@
     return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
   }
   function drawStars(w, h) {
-    var originX = w / 2, originY = h / 2;
+    var originX = w / 2, originY = h / 2, cell = STAR_CELL * screenPx;
     var t = (performance.now() - starTwinkleStart) / STAR_TWINKLE_MS;
     var twinkling = t < 1;
     var fade = (1 - t) * (1 - t);
     ctx.save();
-    for (var cy = Math.floor(-originY / STAR_CELL); cy * STAR_CELL < h - originY; cy++) {
-      for (var cx = Math.floor(-originX / STAR_CELL); cx * STAR_CELL < w - originX; cx++) {
+    for (var cy = Math.floor(-originY / cell); cy * cell < h - originY; cy++) {
+      for (var cx = Math.floor(-originX / cell); cx * cell < w - originX; cx++) {
         var count = Math.floor(starRandom(cx, cy, 0) * 3);
         for (var k = 0; k < count; k++) {
           var s = 6 * k;
-          var x = originX + (cx + starRandom(cx, cy, s + 1)) * STAR_CELL;
-          var y = originY + (cy + starRandom(cx, cy, s + 2)) * STAR_CELL;
+          var x = originX + (cx + starRandom(cx, cy, s + 1)) * cell;
+          var y = originY + (cy + starRandom(cx, cy, s + 2)) * cell;
           var m = starRandom(cx, cy, s + 3);
           var alpha = 0.25 + 0.65 * m * m * m;
-          var radius = 0.5 + 0.8 * m * m;
+          var radius = (0.5 + 0.8 * m * m) * screenPx;
           if (twinkling) {
             // Each star fades in at its own moment, flickers, and settles on its static brightness at t = 1.
             var phase = starRandom(cx, cy, s + 4);
@@ -267,10 +275,10 @@
     });
   }
 
-  // Playback-only display floor; physics keeps the real radius (the grid preview does the same).
+  // Playback-only display floor in screen px; physics keeps the real radius (the grid preview does the same).
   var MIN_PLAYBACK_DISPLAY_RADIUS = 15;
   function playbackDisplayRadius(radius) {
-    return isPlaying ? Math.max(radius, MIN_PLAYBACK_DISPLAY_RADIUS) : radius;
+    return isPlaying ? Math.max(radius, MIN_PLAYBACK_DISPLAY_RADIUS * screenPx) : radius;
   }
 
   function drawBody(body, selected) {
@@ -278,7 +286,7 @@
     var p = ColorBlind.palette();
     ctx.fillStyle = body.isAnchored ? p.anchoredFill : p.bodyFill;
     ctx.strokeStyle = selected ? p.selected : (body.isAnchored ? p.anchoredStroke : p.bodyStroke);
-    ctx.lineWidth = selected ? 3 : 2;
+    ctx.lineWidth = (selected ? 3 : 2) * screenPx;
     if (body.type === "circle") {
       var drawRadius = playbackDisplayRadius(body.radius);
       ctx.beginPath();
@@ -288,7 +296,7 @@
       ctx.moveTo(body.x, body.y);
       ctx.lineTo(body.x + Math.cos(body.angle) * drawRadius, body.y + Math.sin(body.angle) * drawRadius);
       ctx.strokeStyle = "rgba(255,255,255,0.35)";
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = 1.5 * screenPx;
       ctx.stroke();
     } else if (body.type === "porthole") {
       drawPorthole(ctx, body.x, body.y, body.angle, body.length, body.color, { selected: selected, anchored: body.isAnchored });
@@ -299,7 +307,7 @@
       ctx.moveTo(endpoints[0].x, endpoints[0].y);
       ctx.lineTo(endpoints[1].x, endpoints[1].y);
       if (selected) {
-        ctx.lineWidth = PhysicsEngine.LINE_THICKNESS + 4;
+        ctx.lineWidth = PhysicsEngine.LINE_THICKNESS + 4 * screenPx;
         ctx.strokeStyle = p.selected;
         ctx.stroke();
       }
@@ -395,7 +403,7 @@
       c.lineWidth = PORTHOLE_RIM + opts.underlay.width; c.strokeStyle = opts.underlay.color; c.stroke();
     }
     if (opts.selected) {
-      c.lineWidth = PORTHOLE_RIM + 6; c.strokeStyle = p.selected; c.stroke();
+      c.lineWidth = PORTHOLE_RIM + 6 * screenPx; c.strokeStyle = p.selected; c.stroke();
     }
     // An anchored port hole's rim is the anchored gray; its light keeps the port hole's color.
     c.lineWidth = PORTHOLE_RIM; c.strokeStyle = opts.anchored && !opts.paint ? p.anchoredFill : paint; c.stroke();
@@ -418,7 +426,7 @@
     var start = shape.start;
     var dx = endPoint.x - start.x, dy = endPoint.y - start.y;
     var dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist < CLICK_DRAG_THRESHOLD) {
+    if (dist < CLICK_DRAG_THRESHOLD * screenPx) {
       if (shape.tool === "circle") return { x: start.x, y: start.y, radius: DEFAULT_CIRCLE_RADIUS, angle: 0, length: 0 };
       return { x: start.x, y: start.y, radius: 0, angle: 0, length: DEFAULT_LINE_LENGTH };
     }
@@ -432,8 +440,8 @@
     var p = ColorBlind.palette();
     ctx.strokeStyle = p.selected;
     ctx.fillStyle = p.selectedWash;
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6, 4]);
+    ctx.lineWidth = 2 * screenPx;
+    ctx.setLineDash([6 * screenPx, 4 * screenPx]);
     if (shape.tool === "circle") {
       ctx.beginPath();
       ctx.arc(params.x, params.y, params.radius, 0, Math.PI * 2);
@@ -441,7 +449,7 @@
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.beginPath();
-      ctx.arc(shape.start.x, shape.start.y, 3, 0, Math.PI * 2);
+      ctx.arc(shape.start.x, shape.start.y, 3 * screenPx, 0, Math.PI * 2);
       ctx.fillStyle = p.selected;
       ctx.fill();
     } else {
@@ -470,7 +478,7 @@
   }
 
   // ---- Starting-velocity arrows (the Set Velocity tool) ----
-  // Starting speed per pixel of drag; at 1 the engine's speed cap is beyond a canvas-wide drag.
+  // Starting speed per frame unit of drag; at 1 the engine's speed cap is beyond a frame-wide drag.
   var VELOCITY_DRAG_SCALE = 1;
   var VELOCITY_ARROW_MIN_SPEED = 1;
 
@@ -493,15 +501,15 @@
     var len = speed / VELOCITY_DRAG_SCALE;
     var ux = vx / speed, uy = vy / speed;
     var tipX = x + ux * len, tipY = y + uy * len;
-    var head = Math.min(14, Math.max(6, len * 0.25));
+    var head = Math.min(14 * screenPx, Math.max(6 * screenPx, len * 0.25));
     var perpX = -uy, perpY = ux;
 
     ctx.save();
     ctx.strokeStyle = ColorBlind.palette().velocity;
     ctx.fillStyle = ColorBlind.palette().velocity;
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = 2.5 * screenPx;
     ctx.lineCap = "round";
-    if (isPreview) ctx.setLineDash([6, 4]); // dashed only while the drag is still live
+    if (isPreview) ctx.setLineDash([6 * screenPx, 4 * screenPx]); // dashed only while the drag is still live
     ctx.beginPath();
     ctx.moveTo(x, y);
     ctx.lineTo(tipX - ux * head * 0.6, tipY - uy * head * 0.6);
@@ -539,17 +547,17 @@
   function drawHinge(hinge, grabbed, bodies) {
     var p = PhysicsEngine.getHingeWorldPoint(hinge, bodies || scene.bodies);
     ctx.beginPath();
-    ctx.arc(p.x, p.y, HINGE_RADIUS, 0, Math.PI * 2);
+    ctx.arc(p.x, p.y, HINGE_RADIUS * screenPx, 0, Math.PI * 2);
     ctx.fillStyle = ColorBlind.palette().selected;
     ctx.fill();
     ctx.strokeStyle = ColorBlind.palette().selectedDark;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2 * screenPx;
     ctx.stroke();
     if (grabbed) {
       ctx.beginPath();
-      ctx.arc(p.x, p.y, HINGE_RADIUS + 5, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, (HINGE_RADIUS + 5) * screenPx, 0, Math.PI * 2);
       ctx.strokeStyle = ColorBlind.palette().selected;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 2 * screenPx;
       ctx.stroke();
     }
   }
@@ -560,20 +568,20 @@
     var p = PhysicsEngine.getHingeWorldPoint(hinge, scene.bodies);
     ctx.save();
     ctx.globalAlpha = 0.6;
-    ctx.setLineDash([4, 4]);
+    ctx.setLineDash([4 * screenPx, 4 * screenPx]);
     ctx.strokeStyle = ColorBlind.palette().selected;
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 1.5 * screenPx;
     ctx.beginPath();
     ctx.moveTo(p.x, p.y);
     ctx.lineTo(drag.current.x, drag.current.y);
     ctx.stroke();
     ctx.setLineDash([]);
     ctx.beginPath();
-    ctx.arc(drag.current.x, drag.current.y, HINGE_RADIUS, 0, Math.PI * 2);
+    ctx.arc(drag.current.x, drag.current.y, HINGE_RADIUS * screenPx, 0, Math.PI * 2);
     ctx.fillStyle = ColorBlind.palette().selected;
     ctx.fill();
     ctx.strokeStyle = ColorBlind.palette().selectedDark;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2 * screenPx;
     ctx.stroke();
     ctx.restore();
   }
@@ -591,25 +599,25 @@
     var mx = (p.a.x + p.b.x) / 2, my = (p.a.y + p.b.y) / 2;
     ctx.save();
     ctx.globalAlpha = 0.6;
-    ctx.setLineDash([4, 4]);
+    ctx.setLineDash([4 * screenPx, 4 * screenPx]);
     ctx.strokeStyle = ColorBlind.palette().selected;
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 1.5 * screenPx;
     ctx.beginPath();
     ctx.moveTo(mx, my);
     ctx.lineTo(drag.current.x, drag.current.y);
     ctx.stroke();
     ctx.restore();
     var half = { x: (p.b.x - p.a.x) / 2, y: (p.b.y - p.a.y) / 2 };
-    var scale = Math.min(1, 30 / Math.max(1, Math.sqrt(half.x * half.x + half.y * half.y)));
+    var scale = Math.min(1, 30 * screenPx / Math.max(1, Math.sqrt(half.x * half.x + half.y * half.y)));
     drawSpringShape(
       { x: drag.current.x - half.x * scale, y: drag.current.y - half.y * scale },
       { x: drag.current.x + half.x * scale, y: drag.current.y + half.y * scale },
-      spring.stiffness, 60, false, 0.6);
+      spring.stiffness, 60 * screenPx, false, 0.6);
   }
 
   // Hinge dot under this point, or -1; last-drawn first. Half the bodies' touch slop: a hinge sits on a body.
   function hitTestHinge(px, py) {
-    var r = HINGE_RADIUS + HINGE_HIT_PAD + pointerSlop / 2;
+    var r = (HINGE_RADIUS + HINGE_HIT_PAD) * screenPx + pointerSlop / 2;
     for (var i = scene.hinges.length - 1; i >= 0; i--) {
       var p = PhysicsEngine.getHingeWorldPoint(scene.hinges[i], scene.bodies);
       var dx = px - p.x, dy = py - p.y;
@@ -620,6 +628,7 @@
 
   // ---- Springs ----
   // Thickness is stiffness (log scale); coil count follows REST length, so stretch reads as open coils.
+  // Sizes below are screen pixels.
   var SPRING_COIL_AMPLITUDE = 8;   // half the zigzag's width
   var SPRING_COIL_PITCH = 16;      // one full zig-and-zag per this much REST length
   var SPRING_COIL_MAX_PITCH = 44;  // ...but never drawn more open than this, however far it is stretched
@@ -645,13 +654,13 @@
     ctx.moveTo(a.x, a.y);
     if (len < 1e-6) return;
     var ux = dx / len, uy = dy / len, px = -uy, py = ux;
-    var lead = Math.min(SPRING_LEAD, len * 0.2);
-    var coils = clamp(Math.max(Math.round(restLength / SPRING_COIL_PITCH), Math.ceil(len / SPRING_COIL_MAX_PITCH)), 6, 40);
+    var lead = Math.min(SPRING_LEAD * screenPx, len * 0.2);
+    var coils = clamp(Math.max(Math.round(restLength / (SPRING_COIL_PITCH * screenPx)), Math.ceil(len / (SPRING_COIL_MAX_PITCH * screenPx))), 6, 40);
     var span = len - 2 * lead;
     ctx.lineTo(a.x + ux * lead, a.y + uy * lead);
     for (var k = 0; k < coils * 2; k++) {
       var along = lead + span * (k + 0.5) / (coils * 2);
-      var side = (k % 2 === 0 ? 1 : -1) * SPRING_COIL_AMPLITUDE;
+      var side = (k % 2 === 0 ? 1 : -1) * SPRING_COIL_AMPLITUDE * screenPx;
       ctx.lineTo(a.x + ux * along + px * side, a.y + uy * along + py * side);
     }
     ctx.lineTo(b.x - ux * lead, b.y - uy * lead);
@@ -664,10 +673,10 @@
     color = color || ColorBlind.palette().spring;
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
-    var width = springLineWidth(stiffness);
+    var width = springLineWidth(stiffness) * screenPx;
     traceSpringPath(a, b, restLength);
     if (selected) {
-      ctx.lineWidth = width + 4;
+      ctx.lineWidth = width + 4 * screenPx;
       ctx.strokeStyle = ColorBlind.palette().selected;
       ctx.stroke();
     }
@@ -676,7 +685,7 @@
     ctx.stroke();
     [a, b].forEach(function (p) {
       ctx.beginPath();
-      ctx.arc(p.x, p.y, Math.max(3.5, width * 0.9), 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, Math.max(3.5 * screenPx, width * 0.9), 0, Math.PI * 2);
       ctx.fillStyle = selected ? ColorBlind.palette().selected : color;
       ctx.fill();
     });
@@ -693,17 +702,18 @@
     ctx.save();
     ctx.strokeStyle = ColorBlind.palette().selected;
     ctx.globalAlpha = 0.85;
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([3, 4]);
+    ctx.lineWidth = 1.5 * screenPx;
+    ctx.setLineDash([3 * screenPx, 4 * screenPx]);
     ctx.beginPath();
     ctx.moveTo(b.x, b.y);
     ctx.lineTo(rx, ry);
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = 2.5 * screenPx;
+    var tick = 13 * screenPx;
     ctx.beginPath();
-    ctx.moveTo(rx + uy * 13, ry - ux * 13);
-    ctx.lineTo(rx - uy * 13, ry + ux * 13);
+    ctx.moveTo(rx + uy * tick, ry - ux * tick);
+    ctx.lineTo(rx - uy * tick, ry + ux * tick);
     ctx.stroke();
     ctx.restore();
   }
@@ -716,7 +726,7 @@
 
   // Spring under this point, or -1: distance to the chord out to the zigzag's half-width; half touch slop.
   function hitTestSpring(px, py) {
-    var reach = SPRING_COIL_AMPLITUDE + SPRING_HIT_PAD + pointerSlop / 2;
+    var reach = (SPRING_COIL_AMPLITUDE + SPRING_HIT_PAD) * screenPx + pointerSlop / 2;
     for (var i = scene.springs.length - 1; i >= 0; i--) {
       var p = PhysicsEngine.getSpringWorldPoints(scene.springs[i], scene.bodies);
       var dx = p.b.x - p.a.x, dy = p.b.y - p.a.y;
@@ -733,7 +743,7 @@
     var hit = hitTestTopmost(x, y);
     if (hit < 0) return { body: null, local: { x: x, y: y }, world: { x: x, y: y } };
     var body = scene.bodies[hit];
-    var snap = SPRING_CENTER_SNAP + pointerSlop / 2;
+    var snap = SPRING_CENTER_SNAP * screenPx + pointerSlop / 2;
     var ox = x - body.x, oy = y - body.y;
     if (ox * ox + oy * oy <= snap * snap) return { body: hit, local: { x: 0, y: 0 }, world: { x: body.x, y: body.y } };
     var local = PhysicsEngine.worldToLocal(ox, oy, body.angle);
@@ -756,7 +766,7 @@
     var start = draw.start, end = pickSpringEnd(endPoint.x, endPoint.y);
     var dx = end.world.x - start.world.x, dy = end.world.y - start.world.y;
     var length = Math.sqrt(dx * dx + dy * dy);
-    if (length < CLICK_DRAG_THRESHOLD) {
+    if (length < CLICK_DRAG_THRESHOLD * screenPx) {
       AppMessage.toast("Spring too short");
       return;
     }
@@ -790,6 +800,7 @@
 
   // ---- Radius/Length drag handle ----
   // Gap from shape edge to handle center, per shape: a line's end reads closer than a curved edge.
+  // Handle sizes here and below are screen pixels.
   var RESIZE_HANDLE_GAP_CIRCLE = 32;
   var RESIZE_HANDLE_GAP_LINE = 52;
   var RESIZE_HANDLE_LENGTH = 34; // capsule long axis
@@ -817,7 +828,7 @@
       var ref = handlePivot(bodyIndex);
       // Fixed 45 degrees up-right (screen space).
       var dirX = Math.SQRT1_2, dirY = -Math.SQRT1_2;
-      var dist = body.radius + RESIZE_HANDLE_GAP_CIRCLE;
+      var dist = body.radius + RESIZE_HANDLE_GAP_CIRCLE * screenPx;
       return { refX: ref.x, refY: ref.y, dirX: dirX, dirY: dirY, x: ref.x + dirX * dist, y: ref.y + dirY * dist };
     }
 
@@ -834,7 +845,7 @@
       sign = dPos >= dNeg ? 1 : -1;
     }
     var dirX2 = axisX * sign, dirY2 = axisY * sign;
-    var dist2 = half + RESIZE_HANDLE_GAP_LINE;
+    var dist2 = half + RESIZE_HANDLE_GAP_LINE * screenPx;
     return { refX: body.x, refY: body.y, dirX: dirX2, dirY: dirY2, x: body.x + dirX2 * dist2, y: body.y + dirY2 * dist2 };
   }
 
@@ -873,6 +884,7 @@
     ctx.save();
     ctx.translate(geo.x, geo.y);
     ctx.rotate(Math.atan2(geo.dirY, geo.dirX));
+    ctx.scale(screenPx, screenPx);
 
     drawHandleCapsuleBase(halfLen, halfWid);
 
@@ -909,8 +921,8 @@
     var dx = px - geo.x, dy = py - geo.y;
     var localX = dx * geo.dirX + dy * geo.dirY;
     var localY = -dx * geo.dirY + dy * geo.dirX;
-    var halfLen = RESIZE_HANDLE_LENGTH / 2 + RESIZE_HANDLE_HIT_PAD + pointerSlop;
-    var halfWid = RESIZE_HANDLE_WIDTH / 2 + RESIZE_HANDLE_HIT_PAD + pointerSlop;
+    var halfLen = (RESIZE_HANDLE_LENGTH / 2 + RESIZE_HANDLE_HIT_PAD) * screenPx + pointerSlop;
+    var halfWid = (RESIZE_HANDLE_WIDTH / 2 + RESIZE_HANDLE_HIT_PAD) * screenPx + pointerSlop;
     return Math.abs(localX) <= halfLen && Math.abs(localY) <= halfWid;
   }
 
@@ -923,12 +935,12 @@
     var proj = (p.x - geo.refX) * geo.dirX + (p.y - geo.refY) * geo.dirY;
 
     if (body.type === "circle") {
-      var newRadius = clamp(proj - RESIZE_HANDLE_GAP_CIRCLE, RADIUS_MIN, RADIUS_MAX);
+      var newRadius = clamp(proj - RESIZE_HANDLE_GAP_CIRCLE * screenPx, RADIUS_MIN, RADIUS_MAX);
       applyBodyEditPreservingHinge(scene, bodyIndex, true, function () {
         body.radius = newRadius; PhysicsEngine.computeMass(body);
       });
     } else {
-      var newLength = clamp((proj - RESIZE_HANDLE_GAP_LINE) * 2, LENGTH_MIN, LENGTH_MAX);
+      var newLength = clamp((proj - RESIZE_HANDLE_GAP_LINE * screenPx) * 2, LENGTH_MIN, LENGTH_MAX);
       applyBodyEditPreservingHinge(scene, bodyIndex, true, function () {
         body.length = newLength; PhysicsEngine.computeMass(body);
       });
@@ -955,7 +967,7 @@
     if (!resizeGeo) return null;
 
     var resizeDist = Math.hypot(resizeGeo.x - resizeGeo.refX, resizeGeo.y - resizeGeo.refY);
-    var dist = resizeDist + RESIZE_HANDLE_LENGTH / 2 + ROTATION_HANDLE_GAP + RESIZE_HANDLE_LENGTH / 2;
+    var dist = resizeDist + (RESIZE_HANDLE_LENGTH / 2 + ROTATION_HANDLE_GAP + RESIZE_HANDLE_LENGTH / 2) * screenPx;
     var tanX = -resizeGeo.dirY, tanY = resizeGeo.dirX;
     return {
       refX: resizeGeo.refX, refY: resizeGeo.refY,
@@ -973,6 +985,7 @@
     ctx.save();
     ctx.translate(geo.x, geo.y);
     ctx.rotate(Math.atan2(geo.tanY, geo.tanX));
+    ctx.scale(screenPx, screenPx);
 
     drawHandleCapsuleBase(halfLen, halfWid);
 
@@ -1014,8 +1027,8 @@
     var dx = px - geo.x, dy = py - geo.y;
     var localX = dx * geo.tanX + dy * geo.tanY;
     var localY = -dx * geo.tanY + dy * geo.tanX;
-    var halfLen = RESIZE_HANDLE_LENGTH / 2 + RESIZE_HANDLE_HIT_PAD + pointerSlop;
-    var halfWid = RESIZE_HANDLE_WIDTH / 2 + RESIZE_HANDLE_HIT_PAD + pointerSlop;
+    var halfLen = (RESIZE_HANDLE_LENGTH / 2 + RESIZE_HANDLE_HIT_PAD) * screenPx + pointerSlop;
+    var halfWid = (RESIZE_HANDLE_WIDTH / 2 + RESIZE_HANDLE_HIT_PAD) * screenPx + pointerSlop;
     return Math.abs(localX) <= halfLen && Math.abs(localY) <= halfWid;
   }
 
@@ -1045,12 +1058,12 @@
     var resizeGeo = resizeHandleGeometry(bodyIndex);
     if (!resizeGeo) return null; // this body's type has no resize handle to chain onto
 
-    var farEdge = Math.hypot(resizeGeo.x - resizeGeo.refX, resizeGeo.y - resizeGeo.refY) + RESIZE_HANDLE_LENGTH / 2;
+    var farEdge = Math.hypot(resizeGeo.x - resizeGeo.refX, resizeGeo.y - resizeGeo.refY) + RESIZE_HANDLE_LENGTH / 2 * screenPx;
     if (rotationHandleSupported(body)) {
       var rotGeo = rotationHandleGeometry(bodyIndex);
-      farEdge = Math.hypot(rotGeo.x - rotGeo.refX, rotGeo.y - rotGeo.refY) + RESIZE_HANDLE_LENGTH / 2;
+      farEdge = Math.hypot(rotGeo.x - rotGeo.refX, rotGeo.y - rotGeo.refY) + RESIZE_HANDLE_LENGTH / 2 * screenPx;
     }
-    var dist = farEdge + ANCHOR_ICON_GAP + ANCHOR_ICON_RADIUS;
+    var dist = farEdge + (ANCHOR_ICON_GAP + ANCHOR_ICON_RADIUS) * screenPx;
     return { x: resizeGeo.refX + resizeGeo.dirX * dist, y: resizeGeo.refY + resizeGeo.dirY * dist };
   }
 
@@ -1058,8 +1071,10 @@
     var geo = anchorIconGeometry(bodyIndex);
     if (!geo) return;
     ctx.save();
+    ctx.translate(geo.x, geo.y);
+    ctx.scale(screenPx, screenPx);
     ctx.beginPath();
-    ctx.arc(geo.x, geo.y, ANCHOR_ICON_RADIUS, 0, Math.PI * 2);
+    ctx.arc(0, 0, ANCHOR_ICON_RADIUS, 0, Math.PI * 2);
     ctx.fillStyle = ColorBlind.palette().selected;
     ctx.strokeStyle = ColorBlind.palette().selectedDark;
     ctx.lineWidth = 2;
@@ -1070,7 +1085,7 @@
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     // The glyph's bitmap sits a couple px left of center (emoji-font quirk): nudged right.
-    ctx.fillText("⚓", geo.x + 2, geo.y + 1);
+    ctx.fillText("⚓", 2, 1);
     ctx.restore();
   }
 
@@ -1078,7 +1093,7 @@
     var geo = anchorIconGeometry(bodyIndex);
     if (!geo) return false;
     var dx = px - geo.x, dy = py - geo.y;
-    var r = ANCHOR_ICON_RADIUS + ANCHOR_ICON_HIT_PAD + pointerSlop;
+    var r = (ANCHOR_ICON_RADIUS + ANCHOR_ICON_HIT_PAD) * screenPx + pointerSlop;
     return dx * dx + dy * dy <= r * r;
   }
 
@@ -1090,7 +1105,7 @@
   var DELETE_ZONE_TOOLBAR_GAP = 14; // clear air between the transport's bottom edge and the zone's
 
   // Below the playback transport, measured since its height varies (step readout, speed label).
-  // Frame units = CSS px from the canvas's top-left while editing, same as canvasPoint.
+  // In frame units, like canvasPoint; the sizes above are screen pixels.
   function deleteZoneTop() {
     var y = DELETE_ZONE_TOP_MARGIN;
     if (playbackToolbar) {
@@ -1101,8 +1116,8 @@
       }
     }
     // On a frame too short for both, keep the zone reachable inside it.
-    var armed = DELETE_ZONE_RADIUS * DELETE_ZONE_ARMED_SCALE;
-    return Math.min(y, Math.max(armed, (scene.frameHeight || 0) - armed));
+    var armed = DELETE_ZONE_RADIUS * DELETE_ZONE_ARMED_SCALE * screenPx;
+    return Math.min(y * screenPx, Math.max(armed, (scene.frameHeight || 0) - armed));
   }
 
   function deleteZoneCenter() {
@@ -1113,24 +1128,24 @@
   var DELETE_ZONE_HIT_PAD = 6;
   function isOverDeleteZone(px, py) {
     var zone = deleteZoneCenter();
-    var r = DELETE_ZONE_RADIUS + DELETE_ZONE_HIT_PAD;
+    var r = (DELETE_ZONE_RADIUS + DELETE_ZONE_HIT_PAD) * screenPx;
     var dx = px - zone.x, dy = py - zone.y;
     return dx * dx + dy * dy <= r * r;
   }
 
   function drawDeleteZone(armed) {
     var zone = deleteZoneCenter();
-    var r = DELETE_ZONE_RADIUS * (armed ? DELETE_ZONE_ARMED_SCALE : 1);
+    var r = DELETE_ZONE_RADIUS * (armed ? DELETE_ZONE_ARMED_SCALE : 1) * screenPx;
     ctx.save();
     ctx.beginPath();
     ctx.arc(zone.x, zone.y, r, 0, Math.PI * 2);
     ctx.fillStyle = armed ? ColorBlind.palette().dangerArmed : ColorBlind.palette().danger;
     ctx.fill();
     ctx.strokeStyle = "rgba(0, 0, 0, 0.25)";
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2 * screenPx;
     ctx.stroke();
     ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 3 * screenPx;
     ctx.lineCap = "round";
     var s = r * 0.4;
     ctx.beginPath();
@@ -1151,10 +1166,10 @@
 
   // Tip on the frame edge pointing at an off-screen body; tail grows with distance.
   function drawOffscreenArrow(pointer, color) {
-    var inset = 3;
+    var inset = 3 * screenPx;
     var tipX = pointer.tipX - pointer.dirX * inset;
     var tipY = pointer.tipY - pointer.dirY * inset;
-    var head = Math.min(13, Math.max(7, pointer.length * 0.35));
+    var head = Math.min(13 * screenPx, Math.max(7 * screenPx, pointer.length * 0.35));
     var tailX = tipX - pointer.dirX * pointer.length;
     var tailY = tipY - pointer.dirY * pointer.length;
     var perpX = -pointer.dirY, perpY = pointer.dirX;
@@ -1162,7 +1177,7 @@
     ctx.save();
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 3 * screenPx;
     ctx.lineCap = "round";
     ctx.beginPath();
     ctx.moveTo(tailX, tailY);
@@ -1199,16 +1214,16 @@
       drawOffscreenArrow(pointer, body.isAnchored ? ColorBlind.palette().anchoredStroke : ColorBlind.palette().bodyStroke);
     });
 
-    ctx.font = "bold 12px Saira, sans-serif";
+    ctx.font = "bold " + 12 * screenPx + "px Saira, sans-serif";
     ctx.textAlign = "center";
     Object.keys(byBody).forEach(function (key) {
       var group = byBody[key];
       var body = scene.bodies[key];
-      var spacing = 13;
+      var spacing = 13 * screenPx;
       var startOffset = -((group.length - 1) * spacing) / 2;
       group.forEach(function (e, i) {
         ctx.fillStyle = e.color;
-        ctx.fillText(e.label, body.x + startOffset + i * spacing, body.y - 18);
+        ctx.fillText(e.label, body.x + startOffset + i * spacing, body.y - 18 * screenPx);
       });
     });
   }
@@ -1236,8 +1251,7 @@
     }
 
     // Drawing works in frame space; this transform is the only place it meets canvas pixels.
-    var w = scene.frameWidth || canvasArea.clientWidth || 1;
-    var h = scene.frameHeight || canvasArea.clientHeight || 1;
+    var w = scene.frameWidth, h = scene.frameHeight;
     var renderScale = displayScale * dpr;
     ctx.setTransform(renderScale, 0, 0, renderScale, 0, 0);
     ctx.clearRect(0, 0, w, h);
@@ -1272,24 +1286,34 @@
     }
   }
 
-  // isPlaying gates the frame sync (Play/Send-to-Grid lock it). Also gated on a nonzero
-  // size: this page shares a document with the grid view, and display:none reports 0x0.
+  // A frame not of the window's shape (a shared scene's, or one Play froze before a resize) is letterboxed.
+  function letterboxed() {
+    return !!windowFrame && (windowFrame.frameWidth !== scene.frameWidth || windowFrame.frameHeight !== scene.frameHeight);
+  }
+
+  // Origin is the frame center (physics-coords.js): a new frame shifts the scene so it holds still relative to the middle.
+  function setFrame(frame) {
+    var dx = (frame.frameWidth - scene.frameWidth) / 2, dy = (frame.frameHeight - scene.frameHeight) / 2;
+    scene.frameWidth = frame.frameWidth;
+    scene.frameHeight = frame.frameHeight;
+    translateWholeScene(dx, dy);
+  }
+
+  // The frame takes the canvas area's shape unless a shared scene keeps its own, and is scaled to fit. One of the
+  // area's own shape fills it; any other is letterboxed. isPlaying freezes the frame. Skipped at zero size: this
+  // page shares a document with the grid view, and display:none reports 0x0.
   function resizeCanvas() {
     dpr = Math.min(window.devicePixelRatio || 1, 2);
-    if (!isPlaying && canvasArea.clientWidth > 0 && canvasArea.clientHeight > 0) {
-      // Origin is the frame center (physics-coords.js): shift the scene so it holds still relative to the middle.
-      var prevW = scene.frameWidth, prevH = scene.frameHeight;
-      scene.frameWidth = canvasArea.clientWidth;
-      scene.frameHeight = canvasArea.clientHeight;
-      translateWholeScene(
-        (scene.frameWidth - prevW) / 2,
-        (scene.frameHeight - prevH) / 2);
-    }
-    var fw = scene.frameWidth || canvasArea.clientWidth || 1;
-    var fh = scene.frameHeight || canvasArea.clientHeight || 1;
-    // "Contain" fit: preserves the locked frame's aspect ratio; 1 while editing.
-    displayScale = Math.min(canvasArea.clientWidth / fw, canvasArea.clientHeight / fh) || 1;
-    var cssW = fw * displayScale, cssH = fh * displayScale;
+    var areaW = canvasArea.clientWidth, areaH = canvasArea.clientHeight;
+    if (!(areaW > 0 && areaH > 0)) { render(); return; }
+    windowFrame = PhysicsEngine.frameFor(areaW, areaH);
+    if (!isPlaying) setFrame(sharedFrame || windowFrame);
+    displayScale = Math.min(areaW / scene.frameWidth, areaH / scene.frameHeight);
+    screenPx = 1 / displayScale;
+    var fills = !letterboxed();
+    canvasArea.classList.toggle("letterboxed", !fills);
+    var cssW = fills ? areaW : scene.frameWidth * displayScale;
+    var cssH = fills ? areaH : scene.frameHeight * displayScale;
     canvas.style.width = cssW + "px";
     canvas.style.height = cssH + "px";
     var w = Math.round(cssW * dpr);
@@ -1315,8 +1339,8 @@
 
   // ---- Hit testing (topmost first = end of array first, matching paint order) ----
 
-  // Extra reach past a shape's edge for a press: 0 for a mouse, more for a fingertip.
-  // Set per press from the pointer type.
+  // Extra reach past a shape's edge for a press, in frame units: 0 for a mouse, more for a fingertip.
+  // Set per press from the pointer type; TOUCH_HIT_SLOP is screen pixels.
   var TOUCH_HIT_SLOP = 14;
   var pointerSlop = 0;
   var HIT_RING = [[1, 0], [0.7071, 0.7071], [0, 1], [-0.7071, 0.7071], [-1, 0], [-0.7071, -0.7071], [0, -1], [0.7071, -0.7071]];
@@ -1472,7 +1496,7 @@
     var present = portholesPresent();
     var color = PhysicsEngine.PORTHOLE_COLORS.filter(function (c) { return !present[c]; })[0];
     if (!color || !canAddBody()) return;
-    var w = scene.frameWidth || canvasArea.clientWidth || 1, h = scene.frameHeight || canvasArea.clientHeight || 1;
+    var w = scene.frameWidth, h = scene.frameHeight;
     var place = PORTHOLE_PLACEMENT[color];
     scene.bodies.push(PhysicsEngine.createPorthole(w / 2, h * place.y, DEFAULT_PORTHOLE_LENGTH, place.angle, color, false));
     AppTips.done("add-object");
@@ -1636,7 +1660,7 @@
     // A click on the scene while playing is the Reset button; it starts no edit.
     if (isPlaying) { resetToInitialScene(); return; }
     activePointerId = e.pointerId;
-    pointerSlop = e.pointerType === "touch" ? TOUCH_HIT_SLOP : 0;
+    pointerSlop = e.pointerType === "touch" ? TOUCH_HIT_SLOP * screenPx : 0;
     try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* already gone: the window listeners still see it */ }
     var p = canvasPoint(e);
 
@@ -2368,12 +2392,20 @@
     return Math.round(n * 10000) / 10000;
   }
 
-  // The frame an authored scene is loaded INTO (see PhysicsCoords.toEngineJSON); the fallback covers the very first load.
+  // The frame an authored scene is loaded into: the scene's current one.
   function liveFrame() {
-    return {
-      frameWidth: scene.frameWidth || canvasArea.clientWidth || 0,
-      frameHeight: scene.frameHeight || canvasArea.clientHeight || 0,
-    };
+    return { frameWidth: scene.frameWidth, frameHeight: scene.frameHeight };
+  }
+  function ownFrame() {
+    return windowFrame || liveFrame();
+  }
+  // A link's scene keeps its own frame when it has bodies and its frame is not this window's; null otherwise.
+  function linkFrame(authored) {
+    var frame = { frameWidth: Number(authored.frameWidth), frameHeight: Number(authored.frameHeight) };
+    if (!(frame.frameWidth > 0 && frame.frameHeight > 0)) throw new Error("it doesn't say how big the scene's frame is");
+    var own = ownFrame();
+    var same = frame.frameWidth === own.frameWidth && frame.frameHeight === own.frameHeight;
+    return authored.bodies && authored.bodies.length && !same ? frame : null;
   }
 
   // Moves the whole scene rigidly, world-anchored hinge/spring ends included (translateBodyPreservingHinges moves one assembly).
@@ -2605,7 +2637,7 @@
   function finishSceneReplace() {
     refreshMappingUI();
     selectBody(-1);
-    resizeCanvas(); // re-syncs frameWidth/frameHeight to the live canvas size, same as on initial load
+    resizeCanvas(); // re-syncs the frame to the window, or to a shared scene's own
   }
 
   function loadSample(url, label) {
@@ -2625,7 +2657,11 @@
         return res.json();
       })
       .then(function (parsed) {
-        applySceneData(parseSceneData(PhysicsCoords.toEngineJSON(parsed, liveFrame())));
+        var frame = ownFrame();
+        var data = parseSceneData(PhysicsCoords.toEngineJSON(parsed, frame));
+        sharedFrame = null;
+        setFrame(frame);
+        applySceneData(data);
         finishSceneReplace();
       })
       .catch(function (err) {
@@ -2634,15 +2670,16 @@
   }
 
   btnSampleDoublePendulum.addEventListener("click", function () {
-    loadSample("samples/double_pendulum.json", "Double Pendulum");
+    loadSample("samples/double_pendulum.json?v=m186", "Double Pendulum");
   });
   btnSamplePinball.addEventListener("click", function () {
-    loadSample("samples/pinball.json", "Pinball");
+    loadSample("samples/pinball.json?v=m186", "Pinball");
   });
   btnSampleBinaryStar.addEventListener("click", function () {
-    loadSample("samples/binary_star.json", "Binary Star");
+    loadSample("samples/binary_star.json?v=m186", "Binary Star");
   });
   function clearScene() {
+    sharedFrame = null;
     scene.bodies = [];
     scene.hinges = [];
     scene.springs = [];
@@ -2686,7 +2723,11 @@
     try {
       var shared = ShareUrl.decode(location.hash);
       if (!shared || !shared.scene) return false;
-      applySceneData(parseSceneData(PhysicsCoords.toEngineJSON(shared.scene, liveFrame())));
+      var kept = linkFrame(shared.scene), frame = kept || ownFrame();
+      var data = parseSceneData(PhysicsCoords.toEngineJSON(shared.scene, frame));
+      sharedFrame = kept;
+      setFrame(frame);
+      applySceneData(data);
       sharedSceneIdentity = true;
       return true;
     } catch (err) {
@@ -2821,7 +2862,7 @@
         t = PhysicsHingeGeometry.wrapIntoRange(value, rangeMax) / rangeMax;
       }
     }
-    canvasArea.style.backgroundColor = outputColorForNormalized(t, outputHueRange(scene.output.property));
+    canvas.style.backgroundColor = outputColorForNormalized(t, outputHueRange(scene.output.property));
   }
 
   // ---- The Output's color key ----
@@ -2834,7 +2875,7 @@
     var prop = scene.output && scene.output.property;
     return prop === "x" || prop === "y" ? prop : null;
   }
-  // Drawn by render() in frame space, so it hugs the FRAME (letterboxed while playing).
+  // Drawn by render() in frame space, so it hugs the frame.
   function drawOutputKeyBorder(w, h) {
     var axis = outputKeyAxis();
     if (!axis || !(w > 0 && h > 0)) return;
@@ -2850,7 +2891,7 @@
     } catch (err) {
       return; // a browser whose canvas can't parse oklch(): no key, rather than a wrong one
     }
-    var b = OUTPUT_KEY_BORDER_PX / (displayScale || 1);
+    var b = OUTPUT_KEY_BORDER_PX * screenPx;
     ctx.save();
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, w, b);
@@ -2859,7 +2900,7 @@
     ctx.fillRect(w - b, b, b, h - 2 * b);
     // Ruler ticks: the two sides the color changes ALONG are ticked across their thickness; the others
     // get one line down the middle, which also sets the interval (stretched so a whole number fit).
-    var px = 1 / (displayScale || 1);
+    var px = screenPx;
     var length = axis === "y" ? h : w, span = axis === "y" ? w : h;
     var first = b / 2, last = length - b / 2;
     var intervals = Math.max(1, Math.round((last - first) / (b / 2)));
@@ -2891,7 +2932,7 @@
     if (scene.edgeMode === "wrap") value = PhysicsHingeGeometry.wrapIntoRange(value, length);
     // Off the frame (edges off): nothing on the border is level with it.
     if (value < 0 || value > length) return;
-    var px = 1 / (displayScale || 1);
+    var px = screenPx;
     ctx.save();
     ctx.globalAlpha = 0.8;
     ctx.strokeStyle = "#ffffff";
@@ -2927,7 +2968,7 @@
     if (!isFinite(along) || !isFinite(across)) return;
     if (scene.edgeMode === "wrap") along = PhysicsHingeGeometry.wrapIntoRange(along, length);
     if (along < 0 || along > length) return; // no line to sit on: see drawOutputKeyBorderPointer
-    var px = 1 / (displayScale || 1);
+    var px = screenPx;
     ctx.save();
     ctx.globalAlpha = 0.9;
     ctx.fillStyle = "#ffffff";
@@ -2947,7 +2988,7 @@
     if (!output || output.property !== "angle" || PhysicsEngine.isPairOutput(output)) return;
     var body = scene.bodies[output.body];
     if (!body) return;
-    var px = 1 / (displayScale || 1); // one screen pixel, in frame units
+    var px = screenPx;
     var reach = body.type === "circle" ? playbackDisplayRadius(body.radius) : body.length / 2;
     var radius = reach + OUTPUT_KEY_RING_GAP_PX * px;
     ctx.save();
@@ -3302,10 +3343,10 @@
     stepCount = 0;
     playbackClockSteps = 0;
     stepReadout.textContent = "";
-    canvasArea.style.backgroundColor = "";
+    canvas.style.backgroundColor = "";
     playbackProgressSlider.disabled = true;
     playbackProgressSlider.value = playbackProgressSlider.min || "1";
-    // resizeCanvas(), not render(): re-syncs the frame and un-letterboxes the canvas now that isPlaying is false.
+    // resizeCanvas(), not render(): re-syncs the frame, which playing froze.
     resizeCanvas();
   }
 
@@ -3382,8 +3423,8 @@
   // Order matters: the frame must be known before the scene is restored, and the scene must be
   // populated BEFORE the first resizeCanvas(), whose render() auto-saves and would overwrite the real save with an empty scene.
   if (canvasArea.clientWidth > 0 && canvasArea.clientHeight > 0) {
-    scene.frameWidth = canvasArea.clientWidth;
-    scene.frameHeight = canvasArea.clientHeight;
+    windowFrame = PhysicsEngine.frameFor(canvasArea.clientWidth, canvasArea.clientHeight);
+    setFrame(windowFrame);
   }
   // A first visit starts empty: the tool tips walk through building a scene.
   if (!loadSceneFromLink()) loadPersistedScene();
@@ -3401,7 +3442,20 @@
 
   // ---- What the transition needs from the editor ----
   // transition.js draws the editor's BODIES, tiled, into its own canvas: none of the editing chrome.
-  // drawBody() draws into this module's `ctx`, so the context is swapped rather than the drawing duplicated.
+  // drawBody() draws into this module's `ctx`, so the context is swapped rather than the drawing duplicated,
+  // and screenPx is 1: a picture's outlines scale with it.
+  function drawInto(targetCtx, draw) {
+    var previous = ctx, previousPx = screenPx;
+    ctx = targetCtx;
+    screenPx = 1;
+    try {
+      draw();
+    } finally {
+      ctx = previous;
+      screenPx = previousPx;
+    }
+  }
+
   global.PhysicsUI = {
     // The editor's grid into someone else's canvas, ruled across [x0, x1] x [y0, y1] of a frame this big.
     drawGridOver: function (targetCtx, frameWidth, frameHeight, x0, y0, x1, y1) {
@@ -3418,51 +3472,37 @@
       targetCtx.stroke();
     },
     drawSceneBodies: function (targetCtx, bodies) {
-      var previous = ctx;
-      ctx = targetCtx;
-      try {
+      drawInto(targetCtx, function () {
         for (var i = 0; i < bodies.length; i++) drawBody(bodies[i], false);
-      } finally {
-        ctx = previous;
-      }
+      });
     },
     // A port hole into someone else's canvas (the map's replay).
-    drawPorthole: drawPorthole,
+    drawPorthole: function (c, x, y, angle, length, color, opts) {
+      drawInto(c, function () { drawPorthole(c, x, y, angle, length, color, opts); });
+    },
     // One spring into someone else's canvas, drawn as the editor draws it; `color` is optional (an inspected point's hue).
     drawSpringBetween: function (targetCtx, a, b, stiffness, restLength, color) {
-      var previous = ctx;
-      ctx = targetCtx;
-      try {
-        drawSpringShape(a, b, stiffness, restLength, false, 1, color);
-      } finally {
-        ctx = previous;
-      }
+      drawInto(targetCtx, function () { drawSpringShape(a, b, stiffness, restLength, false, 1, color); });
     },
     // Every hinge pin of a scene, as the editor draws them.
     drawSceneHinges: function (targetCtx, sceneToDraw) {
-      var previous = ctx;
-      ctx = targetCtx;
-      try {
+      drawInto(targetCtx, function () {
         (sceneToDraw.hinges || []).forEach(function (h) { drawHinge(h, false, sceneToDraw.bodies); });
-      } finally {
-        ctx = previous;
-      }
+      });
     },
     // Every spring of a scene whose bodies are where they should be drawn.
     drawSceneSprings: function (targetCtx, sceneToDraw) {
-      var previous = ctx;
-      ctx = targetCtx;
-      try {
+      drawInto(targetCtx, function () {
         PhysicsEngine.sceneSprings(sceneToDraw).forEach(function (sp) {
           var p = PhysicsEngine.getSpringWorldPoints(sp, sceneToDraw.bodies);
           drawSpringShape(p.a, p.b, sp.stiffness, sp.restLength, false);
         });
-      } finally {
-        ctx = previous;
-      }
+      });
     },
     // A copy, so the transition stepping it forward can't disturb the editor's.
     currentScene: function () { return PhysicsEngine.cloneScene(scene); },
+    // The builder <-> map animation is skipped while this is true.
+    isLetterboxed: letterboxed,
     // For the address bar (transition.js): the authored JSON; null during a run, when scene.bodies is an animation frame.
     shareScene: function () {
       return isPlaying ? null : PhysicsCoords.toAuthoredJSON(serializeScene());
@@ -3470,7 +3510,7 @@
     // Why a link's scene can't be used, or null; how transition.js finds out, since on load the scene is already in.
     sharedSceneProblem: function (authored) {
       try {
-        parseSceneData(PhysicsCoords.toEngineJSON(authored, liveFrame()));
+        parseSceneData(PhysicsCoords.toEngineJSON(authored, linkFrame(authored) || ownFrame()));
         return null;
       } catch (err) {
         return err.message;
@@ -3478,13 +3518,17 @@
     },
     // A link opened while the page is up (pasted address, or Back). Returns why it was refused, or null.
     loadSharedScene: function (authored) {
-      var data;
+      var data, kept, frame;
       try {
-        data = parseSceneData(PhysicsCoords.toEngineJSON(authored, liveFrame()));
+        kept = linkFrame(authored);
+        frame = kept || ownFrame();
+        data = parseSceneData(PhysicsCoords.toEngineJSON(authored, frame));
       } catch (err) {
         return err.message;
       }
       resetToInitialScene(); // a run in progress belongs to the scene being replaced
+      sharedFrame = kept;
+      setFrame(frame);
       applySceneData(data);
       sharedSceneIdentity = true;
       finishSceneReplace();
