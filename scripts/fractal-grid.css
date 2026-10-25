@@ -325,6 +325,16 @@ button.secondary:hover { background: var(--bg-input); }
   align-items: center;
   gap: 10px;
 }
+#grid-view #btn-reset-view {
+  flex: none;
+  font-size: 12px;
+  padding: 5px 10px;
+}
+#grid-view #zoom-readout {
+  flex: 1;
+  margin: 0;
+  white-space: normal;
+}
 
 .tool-grid {
   display: grid;
