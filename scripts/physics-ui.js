@@ -2688,13 +2688,13 @@
   }
 
   btnSampleDoublePendulum.addEventListener("click", function () {
-    loadSample("samples/double_pendulum.json?v=m204", "Double Pendulum");
+    loadSample("samples/double_pendulum.json?v=m206", "Double Pendulum");
   });
   btnSamplePinball.addEventListener("click", function () {
-    loadSample("samples/pinball.json?v=m204", "Pinball");
+    loadSample("samples/pinball.json?v=m206", "Pinball");
   });
   btnSampleBinaryStar.addEventListener("click", function () {
-    loadSample("samples/binary_star.json?v=m204", "Binary Star");
+    loadSample("samples/binary_star.json?v=m206", "Binary Star");
   });
   function clearScene() {
     sharedFrame = null;
@@ -2828,16 +2828,20 @@
   function outputColorForNormalized(t, hueRange) {
     // Color Blind Support's scales are the map's own: cyclic for a wrapping range, sequential otherwise.
     if (ColorBlind.on()) return ColorBlind.css((hueRange || 360) === 360 ? ColorBlind.cyclic(t) : ColorBlind.sequential(t));
+    // The map's flip and fade to black at the end most runs pile up at (PhysicsEngine.outputColorEnds).
+    var ends = PhysicsEngine.outputColorEnds(scene);
+    if (ends.flip) t = 1 - t;
     var hue = (hueRange || 360) * (1 - t);
-    return "oklch(60% 0.136 " + hue.toFixed(2) + ")";
+    var fade = ends.fadeAt < 0 ? 1 : Math.min(1, Math.abs(t - ends.fadeAt) / PhysicsEngine.OUTPUT_FADE_SPAN);
+    return "oklch(" + (60 * fade).toFixed(2) + "% " + (0.136 * fade).toFixed(4) + " " + hue.toFixed(2) + ")";
   }
 
-  // The map's rule: a range that does not wrap (lifespan; x/y unless the edges wrap) stops at 300
+  // The map's rule: a range that does not wrap (all but Rotation, and x/y unless the edges wrap) stops at 300
   // degrees so the key's ends are two colors (fractal-grid.js: isCircularOutput, HUE_RANGE_MAX).
   function outputHueRange(prop) {
-    if (prop === "lifespan" || prop === "warps" || prop === "totalRotation") return 300;
+    if (prop === "angle") return 360;
     if (prop === "x" || prop === "y") return scene.edgeMode === "wrap" ? 360 : 300;
-    return 360;
+    return 300;
   }
   // Where a POSITION lands in its color range: wrapped into the frame, held in it by Sticky Edges, or with the edges off squashed into it.
   function positionOutputT(prop, value) {
@@ -3054,7 +3058,7 @@
   }
   function updateOutputKeyControls() {
     var prop = scene.output ? scene.output.property : "";
-    var state = prop + "|" + (prop === "x" || prop === "y" ? scene.edgeMode : "");
+    var state = prop + "|" + scene.edgeMode + "|" + !!scene.mutualGravity;
     if (state === outputKeyControlsState) return;
     outputKeyControlsState = state;
     var gradient = prop ? outputKeyGradient(prop) : "";

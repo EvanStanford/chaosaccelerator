@@ -770,6 +770,7 @@
     var rangeMax = outputRangeMax(sceneToCompile, outProp);
     // Circular outputs use the full 360; capped ranges stop at 300 so the ends differ.
     var isCircularOutput = outProp === "angle" || ((outProp === "x" || outProp === "y") && sceneToCompile.edgeMode === "wrap");
+    var sceneColorEnds = PhysicsEngine.outputColorEnds(sceneToCompile);
     var hueRangeMax = isCircularOutput ? 360 : 300;
     // Read bodyN (the loop mutates it) at the pass's precision: folding in float32 first wastes the df budget.
     function emitBodyValue(name, bodyIdx, prop) {
@@ -1099,6 +1100,10 @@
       // repeats the ramp 10x, saturation 40%-100% across full t to tell repeats apart.
       "const float HUE_RANGE_MAX = " + PhysicsGPU.fnum(hueRangeMax) + ";",
       "const bool CIRCULAR_OUTPUT = " + isCircularOutput + ";",
+      // PhysicsEngine.outputColorEnds: which way the scale runs, and the end that fades to black.
+      "const bool FLIP_SCALE = " + sceneColorEnds.flip + ";",
+      "const float FADE_AT = " + PhysicsGPU.fnum(sceneColorEnds.fadeAt) + ";",
+      "const float FADE_SPAN = " + PhysicsGPU.fnum(PhysicsEngine.OUTPUT_FADE_SPAN) + ";",
       "float frameSigmoid(float v) {",
       "  return 1.0 / (1.0 + exp(" + PhysicsGPU.fnum(-PhysicsEngine.OUTPUT_SIGMOID_STEEPNESS) + " * (v - 0.5)));",
       "}",
@@ -1123,6 +1128,7 @@
       "    color = colorBlindRamp(mod(t * 10.0, 1.0));",
       "    return mix(vec3(dot(color, vec3(0.2126, 0.7152, 0.0722))), color, t * 0.6 + 0.4);",
       "  }",
+      "  if (FLIP_SCALE) t = 1.0 - t;",
       "  if (u_colorZoom) {",
       "    float tZoom = mod(t * 10.0, 1.0);",
       "    float hue = HUE_RANGE_MAX * (1.0 - tZoom);",
@@ -1131,7 +1137,9 @@
       "  } else {",
       "    color = rainbow(t);",
       "  }",
-      "  return u_lowSaturation ? lowSaturate(color) : color;",
+      "  if (u_lowSaturation) color = lowSaturate(color);",
+      "  if (FADE_AT >= 0.0) color *= clamp(abs(t - FADE_AT) / FADE_SPAN, 0.0, 1.0);",
+      "  return color;",
       "}",
       "",
 
@@ -1182,7 +1190,7 @@
       "  alpha *= 1.0 - smoothstep(0.5, 1.5, slope);",
       "  alpha *= smoothstep(CONTOUR_SLOPE_FLOOR, CONTOUR_SLOPE_FLOOR * 3.0, slope);",
       // Off the scale's dark end, which would vanish on the black.
-      "  return (u_colorBlind != 0 ? cbSequential(u_colorBlind, 0.2 + 0.8 * t) : rainbow(t)) * alpha;",
+      "  return (u_colorBlind != 0 ? cbSequential(u_colorBlind, 0.2 + 0.8 * t) : rainbow(FLIP_SCALE ? 1.0 - t : t)) * alpha;",
       "}",
       "",
     ]);
@@ -1766,6 +1774,7 @@
   }
   var isCircularOutput = computeIsCircularOutput();
   var hueRangeMaxValue = isCircularOutput ? 360 : 300;
+  var colorEnds = PhysicsEngine.outputColorEnds(scene);
   quadBuffer = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
@@ -5900,20 +5909,28 @@
     return Math.max(activeReplay ? activeReplay.effectiveMaxStep : 1, lockedClockCeiling(inspectedGroups));
   }
 
+  // colorMap's fade to black at the common end (colorEnds), for a t already flipped.
+  function outputFade(t) {
+    return colorEnds.fadeAt < 0 ? 1 : Math.min(1, Math.abs(t - colorEnds.fadeAt) / PhysicsEngine.OUTPUT_FADE_SPAN);
+  }
+
   // A JS copy of colorMap's hue (hueRangeMaxValue: 360 for a wrapping Output, 300 for a capped one).
   // OKLCH, not HSL, for this animated window: HSL lightness isn't perceptually uniform, so a sweeping
-  // hue would flash. Under Color Zoom the hue repeats 10x; chroma/lightness stay fixed.
+  // hue would flash. Under Color Zoom the hue repeats 10x; chroma/lightness stay fixed but for the fade.
   function hoverOutputColor(t) {
     if (ColorBlind.on()) return colorBlindOutputColor(t);
+    if (colorEnds.flip) t = 1 - t;
     var hue = colorZoomEnabled ? hueRangeMaxValue * (1 - (t * 10 % 1)) : hueRangeMaxValue * (1 - t);
-    return "oklch(60% 0.136 " + hue.toFixed(2) + ")";
+    var fade = outputFade(t);
+    return "oklch(" + (60 * fade).toFixed(2) + "% " + (0.136 * fade).toFixed(4) + " " + hue.toFixed(2) + ")";
   }
 
   // The exact grid color (colorMap's HSL): only for the FINAL frozen frame, where nothing flashes and
   // the swatch can match the pixel. In a derived display mode it still shows the value's own color.
   function hoverOutputColorFinal(t) {
     if (ColorBlind.on()) return colorBlindOutputColor(t);
-    var hue, sat;
+    if (colorEnds.flip) t = 1 - t;
+    var hue, sat, fade = outputFade(t);
     if (colorZoomEnabled) {
       hue = hueRangeMaxValue * (1 - (t * 10 % 1));
       sat = t * 0.6 + 0.4;
@@ -5921,8 +5938,9 @@
       hue = hueRangeMaxValue * (1 - t);
       sat = 1;
     }
-    if (lowSaturationEnabled) return lowSaturate(hslToRgb(hue, sat, 0.5));
-    return "hsl(" + hue.toFixed(2) + ", " + (sat * 100).toFixed(2) + "%, 50%)";
+    if (lowSaturationEnabled) return lowSaturate(hslToRgb(hue, sat, 0.5), fade);
+    // Below 50% HSL lightness scales the color, as the shader's multiply does.
+    return "hsl(" + hue.toFixed(2) + ", " + (sat * 100).toFixed(2) + "%, " + (50 * fade).toFixed(2) + "%)";
   }
 
   // The shader's colorMap under Color Blind Support, for the swatch and the animated window alike.
@@ -5952,7 +5970,7 @@
 
   // The shader's lowSaturate, line for line; see the GLSL for why the browser's oklab() is not used.
   var LOW_SAT_L = 0.70, LOW_SAT_C = 0.20, LOW_SAT_KEEP = 0.5;
-  function lowSaturate(srgb) {
+  function lowSaturate(srgb, fade) {
     var lin = srgb.map(function (v) { return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
     var lms = [
       0.4122214708 * lin[0] + 0.5363325363 * lin[1] + 0.0514459929 * lin[2],
@@ -5977,7 +5995,7 @@
       -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s,
     ].map(function (v) {
       v = Math.min(1, Math.max(0, v));
-      return Math.round(255 * (v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055));
+      return Math.round(255 * fade * (v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055));
     });
     return "rgb(" + out.join(", ") + ")";
   }
@@ -9047,6 +9065,7 @@
     // Whether Output WRAPS decides hue range, superlative neighbor distance and circular stats.
     isCircularOutput = computeIsCircularOutput();
     hueRangeMaxValue = isCircularOutput ? 360 : 300;
+    colorEnds = PhysicsEngine.outputColorEnds(scene);
     relabelSuperlativeExtremeButtons();
     sceneCoordinateSpan = computeSceneCoordinateSpan();
     // Compiled against the OLD scene, builds in flight included; requestPass rebuilds lazily.

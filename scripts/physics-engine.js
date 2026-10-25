@@ -1467,6 +1467,21 @@
     return 1 / (1 + Math.exp(-OUTPUT_SIGMOID_STEEPNESS * (v - 0.5)));
   }
 
+  // Outputs whose runs pile up at one end of the range: that end gets one color, fading to black over
+  // the last OUTPUT_FADE_SPAN of the scale. The color scale runs purple (0) to red (1); counts pile up at 0.
+  var OUTPUT_FADE_SPAN = 0.05;
+  var OUTPUT_COMMON_END_RED = false;
+  // { flip: draw 1 - t, fadeAt: the drawn t that fades to black, or -1 for none }.
+  function outputColorEnds(scene) {
+    var prop = scene.output && scene.output.property;
+    var atZero = prop === "bounces" || prop === "warps";
+    var edge = edgeModeOf(scene);
+    var piles = atZero || prop === "lifespan" || prop === "distance" ||
+      (prop === "y" && !scene.mutualGravity && (edge === "sticky" || edge === "infinite"));
+    if (!piles) return { flip: false, fadeAt: -1 };
+    return { flip: atZero === OUTPUT_COMMON_END_RED, fadeAt: OUTPUT_COMMON_END_RED ? 1 : 0 };
+  }
+
   function wrapCoord(v, span) {
     if (v > span) return v - span;
     if (v < 0) return v + span;
@@ -2153,6 +2168,8 @@
     collisionsEnabled: collisionsEnabled,
     OUTPUT_SIGMOID_STEEPNESS: OUTPUT_SIGMOID_STEEPNESS,
     frameSigmoid: frameSigmoid,
+    OUTPUT_FADE_SPAN: OUTPUT_FADE_SPAN,
+    outputColorEnds: outputColorEnds,
     MAX_SPEED: MAX_SPEED,
     MUTUAL_GRAVITY_MAX_SPEED: MUTUAL_GRAVITY_MAX_SPEED,
     speedCapFor: speedCapFor,
