@@ -48,6 +48,18 @@
   // A tip shows only once its condition has held this long, so the user can get there first.
   var SHOW_DELAY_MS = 3000;
   var waiting = {}; // id -> { since, timer }
+  // No tip shows until the screen has gone untouched this long, apart from each tip's own wait.
+  var IDLE_MS = 2000;
+  var lastInteraction = 0, idleTimer = null;
+  ["pointerdown", "keydown", "wheel", "touchstart"].forEach(function (type) {
+    document.addEventListener(type, function () { lastInteraction = Date.now(); }, { capture: true, passive: true });
+  });
+  function idle() {
+    var left = lastInteraction + IDLE_MS - Date.now();
+    if (left <= 0) return true;
+    if (!idleTimer) idleTimer = setTimeout(function () { idleTimer = null; notify(); }, left + 20);
+    return false;
+  }
 
   function load() {
     try {
@@ -126,16 +138,24 @@
       drop(id);
       return false;
     }
-    return waitedFor(id);
+    var waited = waitedFor(id);
+    return idle() && waited;
   }
 
   // anchor: an element, a viewport point {x, y}, or null for no arrow at the top of the window.
-  function show(id, anchor, onOk) {
-    if (!ready(id) || !anchorVisible(anchor)) return false;
-    var tip = TIPS[id].mobile && global.LayoutMode && global.LayoutMode.isMobile() ? TIPS[id].mobile : TIPS[id];
+  // now: shown at once, even if answered before, replacing any open tip; only "Don't show any more tips" stops it.
+  function show(id, anchor, onOk, now) {
+    if (now) {
+      if (framed || !view || store.all || !anchorVisible(anchor)) return false;
+      if (active) hidePopover();
+    } else if (!ready(id) || !anchorVisible(anchor)) {
+      return false;
+    }
+    var mobile = global.LayoutMode && global.LayoutMode.isMobile();
+    var tip = TIPS[id].mobile && mobile ? TIPS[id].mobile : TIPS[id];
     active = { id: id, anchor: anchor, onOk: onOk || null, above: !!tip.above };
     Object.keys(waiting).forEach(drop);
-    textEl.textContent = tip.text;
+    textEl.textContent = mobile ? tip.text.replace(/\bClick/g, "Tap").replace(/\bclick/g, "tap") : tip.text;
     okButton.textContent = tip.ok;
     popover.hidden = false;
     position();
@@ -199,10 +219,35 @@
   global.addEventListener("resize", follow);
   document.addEventListener("scroll", follow, true);
 
+  // OK has already pressed the tip's button, so the next tap on that button is ignored instead of undoing it.
+  var swallowNextTap = null;
+  function stopSwallowing() {
+    if (!swallowNextTap) return;
+    document.removeEventListener("click", swallowNextTap, true);
+    swallowNextTap = null;
+  }
+  function swallowNextTapOn(el) {
+    stopSwallowing();
+    swallowNextTap = function (e) {
+      var label = e.target.closest && e.target.closest("label");
+      if (el.contains(e.target) || (label && label.contains(el))) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+      stopSwallowing();
+    };
+    // After this click has finished, or it would swallow itself.
+    setTimeout(function () { if (swallowNextTap) document.addEventListener("click", swallowNextTap, true); });
+  }
+
   okButton.addEventListener("click", function () {
     var onOk = active && active.onOk;
+    var anchor = active && active.anchor;
     if (active) done(active.id);
-    if (onOk) onOk();
+    if (onOk) {
+      onOk();
+      if (anchor && anchor.getBoundingClientRect) swallowNextTapOn(anchor);
+    }
   });
   offButton.addEventListener("click", function () {
     done("all");
@@ -235,6 +280,7 @@
   function setView(which) {
     if (which === view) return;
     view = which;
+    stopSwallowing();
     if (active) hidePopover();
     Object.keys(waiting).forEach(drop);
     if (which === "grid") {

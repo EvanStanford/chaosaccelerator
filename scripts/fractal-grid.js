@@ -2025,7 +2025,10 @@
     }
     return PRECISION_LADDER[PRECISION_LADDER.length - 1];
   }
-  function autoPrecision() { return precisionForSpacing(worldPixelSpacing()); }
+  // The builder/map transition zooms through one pixel to the default framing: pick precision for where it ends.
+  var transitionScaleFloor = 0;
+  function precisionSpacing() { return Math.max(view.scale, transitionScaleFloor) / referenceHeightPx(); }
+  function autoPrecision() { return precisionForSpacing(precisionSpacing()); }
   function pickPrecision() {
     return precisionMode === "auto" ? autoPrecision() : precisionMode;
   }
@@ -2162,7 +2165,7 @@
   var DF_PREWARM_FACTOR = 16;
   function prewarmPasses() {
     if (precisionMode !== "auto") return;
-    precisionReady(precisionForSpacing(worldPixelSpacing() / DF_PREWARM_FACTOR));
+    precisionReady(precisionForSpacing(precisionSpacing() / DF_PREWARM_FACTOR));
   }
 
   // The hover replay's program, built as soon as the map draws at an extended precision, so its pipeline build
@@ -3815,7 +3818,10 @@
           inspectedGroups.push({ type: "point", points: [entry], places: places });
           added = true;
         });
-        if (added && !linkItem) AppTips.done("inspected-point");
+        if (added && !linkItem) {
+          AppTips.done("inspected-point");
+          AppTips.done("map-intro");
+        }
         return added;
       },
     };
@@ -3939,6 +3945,7 @@
     btnInspectGrid.classList.toggle("inspect-armed", mode === "grid");
   }
   btnInspectPoint.addEventListener("click", function () {
+    AppTips.done("map-intro");
     if (reservedPointCount() >= MAX_INSPECT_POINTS) return;
     armInspect("point");
   });
@@ -5501,7 +5508,7 @@
 
   colorZoomCheckbox.addEventListener("change", function () {
     colorZoomEnabled = colorZoomCheckbox.checked;
-    if (colorZoomEnabled && AppTips.showing() === "color-zoom") AppTips.done("color-zoom");
+    if (colorZoomEnabled) AppTips.done("color-zoom");
     // Color Zoom only changes Standard's ramp, so land on Standard; in the change event so keyboard and Reset View go through it too.
     setDisplayMode(DISPLAY_MODES[0]);
     markDirty();
@@ -6026,7 +6033,8 @@
     updateProgressSliderPosition();
     previewEmpty = true;
     // Asked fresh each time: a tablet can gain or lose a mouse.
-    hoverEmptyState.textContent = message || (hoverPreviewSuppressed() ? "Click a point on the map to inspect it."
+    hoverEmptyState.textContent = message || (hoverPreviewSuppressed()
+      ? (global.LayoutMode && global.LayoutMode.isMobile() ? "Tap" : "Click") + " a point on the map to inspect it."
       : global.LayoutMode && !global.LayoutMode.canHover()
       ? "Press Inspect (Point), then tap the map to see that spot\u2019s simulation"
       : "Hover over the map to inspect a point.");
@@ -9000,11 +9008,13 @@
   global.FractalGrid.defaultScale = function () { return DEFAULT_SCALE; };
   global.FractalGrid.setScale = function (scale) {
     view.scale = scale;
+    transitionScaleFloor = DEFAULT_SCALE;
     // The readout is driven by the user's zoom handlers, so a programmatic zoom must update it.
     updateZoomReadout();
     markDirty();
   };
   global.FractalGrid.resetView = function () {
+    transitionScaleFloor = 0;
     setViewCenter(DEFAULT_CENTER.x, DEFAULT_CENTER.y);
     view.scale = DEFAULT_SCALE;
     updateZoomReadout();

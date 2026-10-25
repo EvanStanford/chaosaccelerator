@@ -62,5 +62,5 @@
   "frameWidth": 1143,
   "frameHeight": 964,
   "edgeMode": "sticky",
-  "simulationSteps": 250
+  "simulationSteps": 800
 }

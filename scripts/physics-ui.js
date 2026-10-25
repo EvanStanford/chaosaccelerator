@@ -8,7 +8,7 @@
   // Default only: simulationSteps travels with the scene (links, autosave, grid handoff).
   var DEFAULT_SIMULATION_STEPS = 1000;
   // A first visit's empty scene. A link or save without a duration still means the default above.
-  var NEW_SCENE_SIMULATION_STEPS = 250;
+  var NEW_SCENE_SIMULATION_STEPS = 800;
   // Notches match fractal-grid.js's slider notch-for-notch.
   var SIMULATION_STEPS_PER_NOTCH = 100;
   var SIMULATION_STEPS_MAX_NOTCHES = 50;
@@ -1115,10 +1115,10 @@
     var y = DELETE_ZONE_TOP_MARGIN;
     if (playbackToolbar) {
       var bar = playbackToolbar.getBoundingClientRect();
-      if (bar.height > 0) {
-        y = Math.max(y, bar.bottom - canvas.getBoundingClientRect().top +
-          DELETE_ZONE_TOOLBAR_GAP + DELETE_ZONE_RADIUS * DELETE_ZONE_ARMED_SCALE);
-      }
+      var below = bar.bottom - canvas.getBoundingClientRect().top;
+      // A transport above the frame (mobile) leaves the top edge clear: sit just inside it.
+      if (bar.height > 0 && below <= 0) y = DELETE_ZONE_RADIUS * DELETE_ZONE_ARMED_SCALE + 2;
+      else if (bar.height > 0) y = Math.max(y, below + DELETE_ZONE_TOOLBAR_GAP + DELETE_ZONE_RADIUS * DELETE_ZONE_ARMED_SCALE);
     }
     // On a frame too short for both, keep the zone reachable inside it.
     var armed = DELETE_ZONE_RADIUS * DELETE_ZONE_ARMED_SCALE * screenPx;
@@ -1768,27 +1768,32 @@
     } else if (activeTool === "input-velocity") {
       // Same shortcut for vx/vy. Rejects an anchored object: its velocity is never read.
       var hit5 = hitTestTopmost(p.x, p.y);
+      // A rejected pick keeps the tool, so the next tap can try another object.
       if (hit5 >= 0 && scene.bodies[hit5].isAnchored) {
         AppMessage.toast("Anchored objects cannot have a velocity");
-      } else if (hit5 >= 0) {
-        scene.xInput = { body: hit5, property: "vx" };
-        scene.yInput = { body: hit5, property: "vy" };
-        AppTips.done("set-input");
-        refreshMappingUI();
+      } else {
+        if (hit5 >= 0) {
+          scene.xInput = { body: hit5, property: "vx" };
+          scene.yInput = { body: hit5, property: "vy" };
+          AppTips.done("set-input");
+          refreshMappingUI();
+        }
+        setActiveTool("select");
       }
-      setActiveTool("select");
       render();
     } else if (activeTool === "output") {
       // Shortcut for the common Output: this object's Center Y. Anchored would be a constant.
       var hit4 = hitTestTopmost(p.x, p.y);
       if (hit4 >= 0 && scene.bodies[hit4].isAnchored) {
         AppMessage.toast("Output can't be an anchored object");
-      } else if (hit4 >= 0) {
-        scene.output = { body: hit4, property: "y" };
-        AppTips.done("set-output");
-        refreshMappingUI();
+      } else {
+        if (hit4 >= 0) {
+          scene.output = { body: hit4, property: "y" };
+          AppTips.done("set-output");
+          refreshMappingUI();
+        }
+        setActiveTool("select");
       }
-      setActiveTool("select");
       render();
     }
   });
@@ -2329,6 +2334,13 @@
     hintHighlighted.forEach(function (el) { el.classList.add("highlight-hint"); });
   }
 
+  // Mobile: the toolbox scrolls, so bring a glowing button into view.
+  function scrollPanelTo(el, instant) {
+    if (!el || !global.LayoutMode || !global.LayoutMode.isMobile()) return;
+    var box = panelEl.getBoundingClientRect(), r = el.getBoundingClientRect();
+    panelEl.scrollTo({ top: panelEl.scrollTop + r.top - box.top - (box.height - r.height) / 2, behavior: instant ? "auto" : "smooth" });
+  }
+
   function hideNotReadyHint() {
     btnSendToGrid.classList.remove("not-ready");
     sendToGridErrorEl.textContent = "";
@@ -2353,6 +2365,7 @@
     var readiness = gridReadiness();
     if (!readiness.ready) {
       showNotReadyHint(readiness);
+      scrollPanelTo(hintHighlighted[0]);
       if (notReadyClickTimer) clearTimeout(notReadyClickTimer);
       notReadyClickTimer = setTimeout(function () {
         notReadyClickTimer = null;
@@ -2675,13 +2688,13 @@
   }
 
   btnSampleDoublePendulum.addEventListener("click", function () {
-    loadSample("samples/double_pendulum.json?v=m192", "Double Pendulum");
+    loadSample("samples/double_pendulum.json?v=m202", "Double Pendulum");
   });
   btnSamplePinball.addEventListener("click", function () {
-    loadSample("samples/pinball.json?v=m192", "Pinball");
+    loadSample("samples/pinball.json?v=m202", "Pinball");
   });
   btnSampleBinaryStar.addEventListener("click", function () {
-    loadSample("samples/binary_star.json?v=m192", "Binary Star");
+    loadSample("samples/binary_star.json?v=m202", "Binary Star");
   });
   function clearScene() {
     sharedFrame = null;
@@ -3303,6 +3316,12 @@
     if (isAdvancing) {
       pausePlayback();
       return;
+    }
+    // Nothing to play: point at + Circle instead.
+    if (!isPlaying && scene.bodies.length === 0) {
+      var circleBtn = toolButton("circle");
+      scrollPanelTo(circleBtn, true);
+      if (AppTips.show("add-object", circleBtn, function () { setActiveTool("circle"); }, true)) return;
     }
     if (!isPlaying) {
       if (!startPlaybackFromScratch()) return;

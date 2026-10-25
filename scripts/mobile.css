@@ -387,21 +387,23 @@ html.layout-mobile :is(#panel, #grid-dock-sheet).scroll-more::after {
   bottom: 0;
   display: block;
   flex: none;
-  height: 36px;
-  margin-top: -36px;
+  height: 48px;
+  margin-top: -48px;
   background: linear-gradient(transparent, var(--bg-panel));
   pointer-events: none;
 }
-/* The panel's flex gap would add space before the fade. */
+/* The panel's flex gap would add space before the fade; its bottom padding would lift it off the edge. */
 html.layout-mobile #panel.scroll-more::after {
-  margin-top: calc(-36px - var(--panel-gap));
+  bottom: calc(-1 * var(--panel-pad-bottom));
+  margin-top: calc(-48px - var(--panel-gap));
 }
 
 /* One height in both modes, so switching mode never reshapes the scene area (and so the frame). */
 html.layout-mobile-portrait #panel {
   --panel-gap: 16px;
+  --panel-pad-bottom: calc(14px + var(--safe-bottom));
   height: 45dvh;
-  padding: 14px 14px calc(14px + var(--safe-bottom)) 14px;
+  padding: 14px 14px var(--panel-pad-bottom) 14px;
   gap: var(--panel-gap);
   overscroll-behavior: contain;
 }
@@ -411,6 +413,7 @@ html.simple-mode.layout-mobile-portrait #panel > .panel-section {
 }
 html.layout-mobile-landscape #panel {
   --panel-gap: 14px;
+  --panel-pad-bottom: 12px;
   width: calc(268px + var(--safe-left));
   padding: 12px 12px 12px calc(12px + var(--safe-left));
   gap: var(--panel-gap);
