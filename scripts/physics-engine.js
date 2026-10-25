@@ -1,6 +1,6 @@
 // CPAL-1.0 License. See chaosaccelerator.com/license.html
 
-// Pure, DOM-free 2D rigid body engine: circles, capsule lines, port holes, pin hinges,
+// Pure, DOM-free 2D rigid body engine: circles, capsule lines, portals, pin hinges,
 // springs, anchors. A scene is plain data { bodies, hinges, springs, ... } and
 // step(scene, dt) mutates it in place.
 (function (global) {
@@ -10,16 +10,16 @@
   var LINE_LINEAR_DENSITY = 8; // mass per unit length of a line body
   // Collision/click thickness of a line: not physical, so not in mass or inertia.
   var LINE_THICKNESS = 30;
-  // A port hole's oval is this thick; two port holes still meet as lines.
-  var PORTHOLE_THICKNESS = 20;
+  // A portal's oval is this thick; two portals still meet as lines.
+  var PORTAL_THICKNESS = 20;
 
-  // ---- Port holes: a pair of lines whose fronts are joined. The front half of the oval lets a chain
-  // leader through, and it leaves the other port hole with its velocity and offset carried over into
-  // that port hole's frame. The back half, and a lone port hole, bounce.
-  var PORTHOLE_COLORS = ["orange", "green"];
+  // ---- Portals: a pair of lines whose fronts are joined. The front half of the oval lets a chain
+  // leader through, and it leaves the other portal with its velocity and offset carried over into
+  // that portal's frame. The back half, and a lone portal, bounce.
+  var PORTAL_COLORS = ["orange", "green"];
 
   // Tangent along the line; the front normal points up the screen at angle 0.
-  function portholeAxes(angle) {
+  function portalAxes(angle) {
     var c = Math.cos(angle), s = Math.sin(angle);
     return { tx: c, ty: s, nx: s, ny: -c };
   }
@@ -232,7 +232,7 @@
     }
   }
 
-  // The acceleration on port hole chain member m at (x, y) from outside its chain, the part that does
+  // The acceleration on portal chain member m at (x, y) from outside its chain, the part that does
   // not turn with it: gravity, or every body outside `members` pulling from its step-start pose.
   function outsideAcceleration(scene, m, members, x, y, poses) {
     if (!scene.mutualGravity) return { x: 0, y: GRAVITY };
@@ -419,10 +419,10 @@
     return { groups: groups, groupOf: groupOf };
   }
 
-  // ---- Port hole chains: bodies joined by hinges or springs go through together, led by the lowest
+  // ---- Portal chains: bodies joined by hinges or springs go through together, led by the lowest
   // free member that is no hinge child. A chain pinned or sprung to the background, or holding an
-  // anchor or a port hole, never goes through. Every body gets a group; a lone body leads its own.
-  function portholeGroups(scene) {
+  // anchor or a portal, never goes through. Every body gets a group; a lone body leads its own.
+  function portalGroups(scene) {
     var n = scene.bodies.length, find = linkedRoot(scene), i;
     var worldLinked = {}, isHingeChild = {};
     scene.hinges.forEach(function (h) { if (h.bodyA === null) worldLinked[h.bodyB] = true; else isHingeChild[h.bodyB] = true; });
@@ -432,17 +432,17 @@
       var root = find(i), g = byRoot[root];
       if (!g) g = byRoot[root] = { members: [], tethered: false, leader: -1 };
       g.members.push(i);
-      if (scene.bodies[i].isAnchored || worldLinked[i] || scene.bodies[i].type === "porthole") g.tethered = true;
+      if (scene.bodies[i].isAnchored || worldLinked[i] || scene.bodies[i].type === "portal") g.tethered = true;
       else if (g.leader === -1 && !isHingeChild[i]) g.leader = i;
       groupOf[i] = g;
     }
     return groupOf;
   }
 
-  // The two port holes' indices, or null: with one or none placed, a port hole is a line.
-  function portholePair(bodies) {
+  // The two portals' indices, or null: with one or none placed, a portal is a line.
+  function portalPair(bodies) {
     var found = [];
-    for (var i = 0; i < bodies.length; i++) if (bodies[i].type === "porthole") found.push(i);
+    for (var i = 0; i < bodies.length; i++) if (bodies[i].type === "portal") found.push(i);
     return found.length === 2 ? found : null;
   }
 
@@ -478,8 +478,8 @@
     return b;
   }
 
-  function createPorthole(x, y, length, angle, color, isAnchored) {
-    var b = { type: "porthole", color: color, x: x, y: y, angle: angle || 0, length: length, vx: 0, vy: 0, w: 0, isAnchored: !!isAnchored };
+  function createPortal(x, y, length, angle, color, isAnchored) {
+    var b = { type: "portal", color: color, x: x, y: y, angle: angle || 0, length: length, vx: 0, vy: 0, w: 0, isAnchored: !!isAnchored };
     computeMass(b);
     return b;
   }
@@ -542,7 +542,7 @@
   }
 
   // ---- Collision detection. Normals point A -> B (first argument to second); lines are capsules,
-  // a port hole is its oval (portholeOval). ----
+  // a portal is its oval (portalOval). ----
 
   // Sweep primitives: earliest t in [0,dt] at which a moving point reaches distance R, or -1.
 
@@ -955,37 +955,37 @@
     return closesFast(touching[0], lineA, lineB) ? touching.concat(swept) : swept;
   }
 
-  // ---- Port hole outline: two big arcs and two tip circles, tangent where they meet. a is a tip's
+  // ---- Portal outline: two big arcs and two tip circles, tangent where they meet. a is a tip's
   // reach (half-length + half-thickness), b the half-thickness; the arcs' radius R follows.
-  var PORTHOLE_TIP_RADIUS = 5;
-  function portholeOval(length) {
-    var b = PORTHOLE_THICKNESS / 2, r = PORTHOLE_TIP_RADIUS, a = length / 2 + b;
+  var PORTAL_TIP_RADIUS = 5;
+  function portalOval(length) {
+    var b = PORTAL_THICKNESS / 2, r = PORTAL_TIP_RADIUS, a = length / 2 + b;
     var R = ((a - r) * (a - r) + b * b - r * r) / (2 * (b - r));
     return { a: a, b: b, r: r, R: R, cy: R - b, ax: a - r };
   }
 
   // Feature circles: 0 the back arc, 1 the front arc, 2 the left tip, 3 the right tip.
-  function portholeFeatureCircle(o, kind) {
+  function portalFeatureCircle(o, kind) {
     if (kind === 0) return { kind: 0, cx: 0, cy: -o.cy, radius: o.R };
     if (kind === 1) return { kind: 1, cx: 0, cy: o.cy, radius: o.R };
     if (kind === 2) return { kind: 2, cx: -o.ax, cy: 0, radius: o.r };
     return { kind: 3, cx: o.ax, cy: 0, radius: o.r };
   }
 
-  // The feature owning a local point (x along the port hole, y toward its back): a tip past the
+  // The feature owning a local point (x along the portal, y toward its back): a tip past the
   // junction rays, else the arc on the point's side. d is the signed distance to the outline.
-  function portholeFeature(o, px, py) {
+  function portalFeature(o, px, py) {
     var f;
-    if (Math.abs(px) * o.cy > o.ax * (Math.abs(py) + o.cy)) f = portholeFeatureCircle(o, px < 0 ? 2 : 3);
-    else f = portholeFeatureCircle(o, py < 0 ? 1 : 0);
+    if (Math.abs(px) * o.cy > o.ax * (Math.abs(py) + o.cy)) f = portalFeatureCircle(o, px < 0 ? 2 : 3);
+    else f = portalFeatureCircle(o, py < 0 ? 1 : 0);
     var dx = px - f.cx, dy = py - f.cy;
     f.dist = Math.sqrt(dx * dx + dy * dy);
     f.d = f.dist - f.radius;
     return f;
   }
 
-  // The port hole's frame: x along it, y toward its back.
-  function portholeFrame(ph) {
+  // The portal's frame: x along it, y toward its back.
+  function portalFrame(ph) {
     var cs = Math.cos(ph.angle), sn = Math.sin(ph.angle);
     return {
       toLocal: function (wx, wy) { return { x: wx * cs + wy * sn, y: wy * cs - wx * sn }; },
@@ -993,26 +993,26 @@
     };
   }
 
-  // Port hole = A (its oval, carried along at its velocity), circle = B. Swept in the port hole's
+  // Portal = A (its oval, carried along at its velocity), circle = B. Swept in the portal's
   // frame: the earliest sweep onto a feature circle whose hit point that feature owns.
-  function collidePortholeCircle(ph, circle, dt) {
-    var o = portholeOval(ph.length), fr = portholeFrame(ph);
+  function collidePortalCircle(ph, circle, dt) {
+    var o = portalOval(ph.length), fr = portalFrame(ph);
     var p0 = fr.toLocal(circle.x - ph.x, circle.y - ph.y);
     var v = fr.toLocal(circle.vx - ph.vx, circle.vy - ph.vy);
     var tHit = 0;
-    if (portholeFeature(o, p0.x, p0.y).d >= circle.radius) {
+    if (portalFeature(o, p0.x, p0.y).d >= circle.radius) {
       var best = -1;
       for (var kind = 0; kind < 4; kind++) {
-        var fc = portholeFeatureCircle(o, kind);
+        var fc = portalFeatureCircle(o, kind);
         var t = sweepPointSphere(p0.x, p0.y, v.x, v.y, fc.cx, fc.cy, fc.radius + circle.radius, dt);
         if (t < 0 || (best >= 0 && t >= best)) continue;
-        if (portholeFeature(o, p0.x + v.x * t, p0.y + v.y * t).kind === kind) best = t;
+        if (portalFeature(o, p0.x + v.x * t, p0.y + v.y * t).kind === kind) best = t;
       }
       if (best < 0) return null;
       tHit = best;
     }
     var px = p0.x + v.x * tHit, py = p0.y + v.y * tHit;
-    var f = portholeFeature(o, px, py);
+    var f = portalFeature(o, px, py);
     var nx = f.dist > 1e-9 ? (px - f.cx) / f.dist : 0, ny = f.dist > 1e-9 ? (py - f.cy) / f.dist : 1;
     var n = fr.toWorld(nx, ny), s = fr.toWorld(f.cx + nx * f.radius, f.cy + ny * f.radius);
     return [{
@@ -1025,23 +1025,23 @@
     }];
   }
 
-  var PORTHOLE_LINE_STEPS = 2;
+  var PORTAL_LINE_STEPS = 2;
 
-  // Port hole = A (its oval), line = B (its capsule). The segment's nearest point to the oval is an
+  // Portal = A (its oval), line = B (its capsule). The segment's nearest point to the oval is an
   // endpoint or the foot of a feature circle's center, when that feature owns the foot. One contact: touching,
   // or that point reaching the oval within the step, at that instant.
-  function collidePortholeLine(ph, line, dt) {
-    var o = portholeOval(ph.length), fr = portholeFrame(ph);
+  function collidePortalLine(ph, line, dt) {
+    var o = portalOval(ph.length), fr = portalFrame(ph);
     var ends = getLineEndpoints(line);
     var e0 = fr.toLocal(ends[0].x - ph.x, ends[0].y - ph.y), e1 = fr.toLocal(ends[1].x - ph.x, ends[1].y - ph.y);
     var bestQ = null, bestF = null;
     function consider(q, f) { if (!bestF || f.d < bestF.d) { bestQ = q; bestF = f; } }
-    consider(e0, portholeFeature(o, e0.x, e0.y));
-    consider(e1, portholeFeature(o, e1.x, e1.y));
+    consider(e0, portalFeature(o, e0.x, e0.y));
+    consider(e1, portalFeature(o, e1.x, e1.y));
     for (var kind = 0; kind < 4; kind++) {
-      var fc = portholeFeatureCircle(o, kind);
+      var fc = portalFeatureCircle(o, kind);
       var q = closestPointOnSegment(e0, e1, { x: fc.cx, y: fc.cy });
-      var f = portholeFeature(o, q.x, q.y);
+      var f = portalFeature(o, q.x, q.y);
       if (f.kind === kind) consider(q, f);
     }
     var half = LINE_THICKNESS / 2, tHit = 0, m;
@@ -1052,13 +1052,13 @@
       // Newton steps on that point's gap as it moves, from below since the oval is convex; a near miss
       // ends them moving away or past the step, with no contact.
       var q = bestQ, f = bestF;
-      for (var it = 0; it < PORTHOLE_LINE_STEPS && f.d - half > POSITION_SLOP; it++) {
+      for (var it = 0; it < PORTAL_LINE_STEPS && f.d - half > POSITION_SLOP; it++) {
         var along = -(v.x * (q.x - f.cx) + v.y * (q.y - f.cy));
         if (!(along > 0)) return null;
         tHit += (f.d - half) * f.dist / along;
         if (!(tHit < dt)) return null;
         q = { x: bestQ.x + v.x * tHit, y: bestQ.y + v.y * tHit };
-        f = portholeFeature(o, q.x, q.y);
+        f = portalFeature(o, q.x, q.y);
       }
       if (f.d - half > POSITION_SLOP) return null;
       nx = (q.x - f.cx) / f.dist; ny = (q.y - f.cy) / f.dist;
@@ -1089,17 +1089,17 @@
   }
 
   // A and B are PROBE bodies (velocity advanced by this step's gravity: see step()); tHit in [0, dt].
-  // A port hole meets a circle or a line as its oval; two port holes meet as capsules.
+  // A portal meets a circle or a line as its oval; two portals meet as capsules.
   function collidePair(A, B, dt) {
     var aRound = A.type === "circle", bRound = B.type === "circle";
-    var aPort = A.type === "porthole", bPort = B.type === "porthole";
+    var aPort = A.type === "portal", bPort = B.type === "portal";
     if (aRound && bRound) return collideCircleCircle(A, B, dt);
-    if (aPort && bRound) return collidePortholeCircle(A, B, dt);
-    if (bPort && aRound) return flipContacts(collidePortholeCircle(B, A, dt));
+    if (aPort && bRound) return collidePortalCircle(A, B, dt);
+    if (bPort && aRound) return flipContacts(collidePortalCircle(B, A, dt));
     if (!aRound && bRound) return collideLineCircle(A, B, dt);
     if (aRound) return flipContacts(collideLineCircle(B, A, dt));
-    if (aPort && !bPort) return collidePortholeLine(A, B, dt);
-    if (bPort && !aPort) return flipContacts(collidePortholeLine(B, A, dt));
+    if (aPort && !bPort) return collidePortalLine(A, B, dt);
+    if (bPort && !aPort) return flipContacts(collidePortalLine(B, A, dt));
     return collideLineLine(A, B, dt);
   }
 
@@ -1539,7 +1539,7 @@
       return "Cumulative Rotation reads one body, but a second is set";
     }
     if (output.property === "warps" && isPairOutput(output)) {
-      return "Port Hole Warp Count reads one body, but a second is set";
+      return "Portal Warp Count reads one body, but a second is set";
     }
     return null;
   }
@@ -1576,15 +1576,15 @@
     return sum / indices.length;
   }
 
-  // A chain leader whose center was in front of a port hole's center line at the step's start and
+  // A chain leader whose center was in front of a portal's center line at the step's start and
   // behind it at the end, crossing within its reach, leaves through the other one. The crossing point
   // scales with the length ratio; the rest of the step's travel past it is kept as is, and velocities
-  // turn with the port holes, so the exit continues the entry. The share of the step past the crossing
+  // turn with the portals, so the exit continues the entry. The share of the step past the crossing
   // is then re-integrated on the exit side (outside forces from there, the chain's own turned with it),
   // or the exit's gravity would start up to a step late, by an amount that saws with the start.
-  // A port hole as it stood part-way through the step: pose, velocity and spin interpolated
+  // A portal as it stood part-way through the step: pose, velocity and spin interpolated
   // between the step's start and end. An anchored one does not move.
-  function portholeStateAt(P, start, u, lambda) {
+  function portalStateAt(P, start, u, lambda) {
     if (P.isAnchored) return { x: P.x, y: P.y, angle: P.angle, vx: 0, vy: 0, w: 0 };
     return {
       x: start.x + (P.x - start.x) * lambda, y: start.y + (P.y - start.y) * lambda, angle: start.angle + (P.angle - start.angle) * lambda,
@@ -1596,7 +1596,7 @@
     return { x: S.vx - S.w * (y - S.y), y: S.vy + S.w * (x - S.x) };
   }
 
-  function applyPortholeTransports(scene, portals, groupOf, startPose, u, acc, dt, maxSpeed, friction, warpFlags) {
+  function applyPortalTransports(scene, portals, groupOf, startPose, u, acc, dt, maxSpeed, friction, warpFlags) {
     var bodies = scene.bodies;
     for (var i = 0; i < bodies.length; i++) {
       var g = groupOf[i];
@@ -1604,7 +1604,7 @@
       for (var k = 0; k < 2; k++) {
         var P = bodies[portals[k]], Q = bodies[portals[1 - k]], O = bodies[i];
         var startP = startPose[portals[k]], startO = startPose[i];
-        var a0 = portholeAxes(startP.angle), a1 = portholeAxes(P.angle);
+        var a0 = portalAxes(startP.angle), a1 = portalAxes(P.angle);
         var dx0 = startO.x - startP.x, dy0 = startO.y - startP.y, dx1 = O.x - P.x, dy1 = O.y - P.y;
         var f0 = dx0 * a0.nx + dy0 * a0.ny, f1 = dx1 * a1.nx + dy1 * a1.ny;
         if (!(f0 >= 0 && f1 < 0)) continue;
@@ -1612,11 +1612,11 @@
         var s0 = dx0 * a0.tx + dy0 * a0.ty, s1 = dx1 * a1.tx + dy1 * a1.ty;
         var sCross = s0 + (s1 - s0) * lambda;
         // Anywhere the body could have touched the front: the capsule's reach plus the body's own.
-        if (Math.abs(sCross) > P.length / 2 + PORTHOLE_THICKNESS / 2 + halfExtent(O)) continue;
+        if (Math.abs(sCross) > P.length / 2 + PORTAL_THICKNESS / 2 + halfExtent(O)) continue;
         var tStar = lambda * dt, tau = dt - tStar;
-        // Both port holes as they stood at the crossing instant.
-        var Ps = portholeStateAt(P, startP, u[portals[k]], lambda), Qs = portholeStateAt(Q, startPose[portals[1 - k]], u[portals[1 - k]], lambda);
-        var ap = portholeAxes(Ps.angle), aq = portholeAxes(Qs.angle);
+        // Both portals as they stood at the crossing instant.
+        var Ps = portalStateAt(P, startP, u[portals[k]], lambda), Qs = portalStateAt(Q, startPose[portals[1 - k]], u[portals[1 - k]], lambda);
+        var ap = portalAxes(Ps.angle), aq = portalAxes(Qs.angle);
         // The crossing point on the exit side, and the turn taking P's inward normal onto Q's outward one.
         var crossX = Qs.x - sCross * Q.length / P.length * aq.tx, crossY = Qs.y - sCross * Q.length / P.length * aq.ty;
         var cs = -(aq.tx * ap.tx + aq.ty * ap.ty), sn = -(ap.tx * aq.ty - ap.ty * aq.tx);
@@ -1632,7 +1632,7 @@
           var extOut = outsideAcceleration(scene, m, g.members, exitStarX, exitStarY, startPose);
           var inX = a.x - extIn.x, inY = a.y - extIn.y;
           var outX = inX * cs - inY * sn + extOut.x, outY = inX * sn + inY * cs + extOut.y;
-          // Velocity and spin are kept relative to the port holes' own motion at the member's spot.
+          // Velocity and spin are kept relative to the portals' own motion at the member's spot.
           var fin = frameVelocityAt(Ps, starX, starY), fout = frameVelocityAt(Qs, exitStarX, exitStarY);
           // Two legs split at the crossing, turned there or not: their difference is what the step's
           // whole-step velocity got wrong.
@@ -1693,17 +1693,17 @@
       probes[i] = Object.assign({}, bodies[i], { vx: vFull[i].x, vy: vFull[i].y, w: spin });
     }
 
-    // Port holes: with both placed, a chain leader's center may pass the front of one and leave
+    // Portals: with both placed, a chain leader's center may pass the front of one and leave
     // through the other at the end of the step; its contacts on that front are dropped.
-    var portals = portholePair(bodies);
-    var passGroup = portals ? portholeGroups(scene) : null;
+    var portals = portalPair(bodies);
+    var passGroup = portals ? portalGroups(scene) : null;
     var startPose = portals ? bodies.map(function (b) { return { x: b.x, y: b.y, angle: b.angle, w: b.w }; }) : null;
-    function onPortholeFront(c) {
-      var pi = bodies[c.a].type === "porthole" ? c.a : (bodies[c.b].type === "porthole" ? c.b : -1);
+    function onPortalFront(c) {
+      var pi = bodies[c.a].type === "portal" ? c.a : (bodies[c.b].type === "portal" ? c.b : -1);
       if (pi === -1) return false;
       var oi = pi === c.a ? c.b : c.a;
       if (passGroup[oi].leader !== oi || passGroup[oi].tethered) return false;
-      var r = pi === c.a ? c.rA : c.rB, axes = portholeAxes(startPose[pi].angle);
+      var r = pi === c.a ? c.rA : c.rB, axes = portalAxes(startPose[pi].angle);
       return r.x * axes.nx + r.y * axes.ny > 0;
     }
 
@@ -1720,7 +1720,7 @@
         }
       }
     }
-    if (portals && contacts.length) contacts = contacts.filter(function (c) { return !onPortholeFront(c); });
+    if (portals && contacts.length) contacts = contacts.filter(function (c) { return !onPortalFront(c); });
 
     // Earliest contact instant per body; dt when none (leg 1 is the whole step, leg 2 a no-op).
     var bodyTHit = new Array(bodies.length).fill(dt);
@@ -1742,7 +1742,7 @@
     // Opt-in per-body edge wrap this step: 1 along x, 2 along y (the trajectory's wrapX/wrapY).
     var wrapFlags = opts.wrapFlags;
     if (wrapFlags) for (i = 0; i < bodies.length; i++) wrapFlags[i] = 0;
-    // Opt-in per-body "went through a port hole this step" (the trajectory's warped).
+    // Opt-in per-body "went through a portal this step" (the trajectory's warped).
     var warpFlags = opts.warpFlags;
     if (warpFlags) for (i = 0; i < bodies.length; i++) warpFlags[i] = false;
     // Opt-in raw pair list for runTrajectory's per-pair contacts. Refilled in place.
@@ -1825,7 +1825,7 @@
       }
     }
 
-    if (portals) applyPortholeTransports(scene, portals, passGroup, startPose, u, acc, dt, maxSpeed, friction, warpFlags);
+    if (portals) applyPortalTransports(scene, portals, passGroup, startPose, u, acc, dt, maxSpeed, friction, warpFlags);
 
     // Edge wrapping, last (matches the GLSL). A spring group, else a hinge assembly, wraps as one by its
     // leader's center, unless it is tethered or held.
@@ -1910,7 +1910,7 @@
 
   // runTrajectory: rows[i] is every body's {x, y, angle, wrapX, wrapY, warped, contacts} after i+1 steps, like
   // PhysicsGPU.runSceneOnGPU's: the wrap flags say the body crossed that frame edge in that step, warped that
-  // it went through a port hole, and contacts has bit j set when it touched body j in that step. Uses a private clone.
+  // it went through a portal, and contacts has bit j set when it touched body j in that step. Uses a private clone.
   function runTrajectory(scene, steps, dt) {
     var sim = cloneScene(scene);
     // A scene straight from JSON has no invMass/invInertia; stepping without them yields NaN.
@@ -1948,7 +1948,7 @@
     return bounceCountsFromTrajectory(runTrajectory(scene, steps, dt), bodyIndex);
   }
 
-  // counts[i] is how many times the body has gone through a port hole by the end of step i+1.
+  // counts[i] is how many times the body has gone through a portal by the end of step i+1.
   function warpCountsFromTrajectory(rows, bodyIndex) {
     var counts = new Array(rows.length), count = 0;
     for (var i = 0; i < rows.length; i++) {
@@ -1958,7 +1958,7 @@
     return counts;
   }
 
-  // Steps (0-indexed) in which some body went through a port hole: the warp sound's triggers.
+  // Steps (0-indexed) in which some body went through a portal: the warp sound's triggers.
   function warpEventsFromTrajectory(rows) {
     var events = [];
     for (var i = 0; i < rows.length; i++) {
@@ -1972,7 +1972,7 @@
   // turns[i] is the body's rotation in radians from `scene` to the end of step i+1, less each warp's own
   // turn, which the rows give only at the step's end: the way through that leaves the smaller turn.
   function rotationsFromTrajectory(scene, rows, bodyIndex) {
-    var portals = portholePair(scene.bodies);
+    var portals = portalPair(scene.bodies);
     var turns = new Array(rows.length), total = 0, prev = scene.bodies[bodyIndex].angle;
     for (var i = 0; i < rows.length; i++) {
       var r = rows[i][bodyIndex], turn = r.angle - prev;
@@ -2114,15 +2114,15 @@
     runTrajectory: runTrajectory,
     createCircle: createCircle,
     createLine: createLine,
-    createPorthole: createPorthole,
-    PORTHOLE_COLORS: PORTHOLE_COLORS,
-    PORTHOLE_TIP_RADIUS: PORTHOLE_TIP_RADIUS,
-    portholeOval: portholeOval,
-    portholeFeature: portholeFeature,
+    createPortal: createPortal,
+    PORTAL_COLORS: PORTAL_COLORS,
+    PORTAL_TIP_RADIUS: PORTAL_TIP_RADIUS,
+    portalOval: portalOval,
+    portalFeature: portalFeature,
     collidePair: collidePair,
-    portholeAxes: portholeAxes,
-    portholeGroups: portholeGroups,
-    portholePair: portholePair,
+    portalAxes: portalAxes,
+    portalGroups: portalGroups,
+    portalPair: portalPair,
     computeOutputValue: computeOutputValue,
     outputBodyIndices: outputBodyIndices,
     isPairOutput: isPairOutput,
@@ -2158,7 +2158,7 @@
     hingeAssemblies: hingeAssemblies,
     translateSpringGroup: translateSpringGroup,
     LINE_THICKNESS: LINE_THICKNESS,
-    PORTHOLE_THICKNESS: PORTHOLE_THICKNESS,
+    PORTAL_THICKNESS: PORTAL_THICKNESS,
     EDGE_MODES: EDGE_MODES,
     FRAME_SHORT_SIDE: FRAME_SHORT_SIDE,
     frameFor: frameFor,

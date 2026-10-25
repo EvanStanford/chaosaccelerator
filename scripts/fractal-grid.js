@@ -695,12 +695,12 @@
   }
 
   // Trick Shot (challenges/): the events a pixel's Output body must start with to be in the goal region,
-  // from the page's ?goal= (layout-mode.js), as { body, warp } (warp: in through that port hole, else a
+  // from the page's ?goal= (layout-mode.js), as { body, warp } (warp: in through that portal, else a
   // bounce off that body). Null unless the scene can play it.
   function challengeGoalOrder(sceneToCompile, outputBodies) {
     var tokens = global.LayoutMode && global.LayoutMode.challengeGoal();
     if (!tokens || outputBodies.length !== 1) return null;
-    var portals = PhysicsEngine.portholePair(sceneToCompile.bodies) || [];
+    var portals = PhysicsEngine.portalPair(sceneToCompile.bodies) || [];
     var order = tokens.map(function (t) { return { body: Number(t.replace("w", "")), warp: t.charAt(0) === "w" }; });
     for (var i = 0; i < order.length; i++) {
       var e = order[i];
@@ -718,7 +718,7 @@
     lines.push("  return -1;", "}");
     return lines;
   }
-  // Per step: a partner touched now and not last step is a bounce, then a pass through a port hole; each
+  // Per step: a partner touched now and not last step is a bounce, then a pass through a portal; each
   // must be the next one wanted. Events the order never names are ignored. goalNext counts the matches,
   // -1 once the order is broken; goalMask is last step's partners as bits.
   function goalStepLines(order) {
@@ -759,8 +759,8 @@
     var isTotalRotation = outProp === "totalRotation";
     var isCount = isBounces || isWarps;
     var isRunTally = isLifespan || isCount;
-    // Only a scene with both port holes placed can warp.
-    var hasPortals = !!PhysicsEngine.portholePair(sceneToCompile.bodies);
+    // Only a scene with both portals placed can warp.
+    var hasPortals = !!PhysicsEngine.portalPair(sceneToCompile.bodies);
     var goalOrder = challengeGoalOrder(sceneToCompile, outputBodies);
     var goalLines = goalOrder ? goalDeclarationLines(goalOrder) : [];
     var goalWarps = !!goalOrder && goalOrder.some(function (e) { return e.warp; });
@@ -871,7 +871,7 @@
         // bestFrac: how far into this step the first crossing came, 2.0 for none. fracHi carries the pass's precision.
         lines.push("    float bestFrac = 2.0;");
         lines.push("    " + B.scalar + " bestFracHi = " + B.zero + ";");
-        // The step's own wrap flags: a port hole moves a body as far as a wrap would. Both axes can
+        // The step's own wrap flags: a portal moves a body as far as a wrap would. Both axes can
         // wrap in one step (a corner): each is solved and the earlier crossing wins.
         watchedIndices.forEach(function (idx) {
           [["X", "x", fullW], ["Y", "y", fullH]].forEach(function (a) {
@@ -1236,7 +1236,7 @@
     ];
 
     // ---- FTLE: the moving bodies' state difference between two neighboring starts ----
-    // Per body: position, velocity * FTLE_VELOCITY_SECONDS, and for a line or port hole the
+    // Per body: position, velocity * FTLE_VELOCITY_SECONDS, and for a line or portal the
     // same two for its end relative to its center. Twin of ftleMotionDelta in JS.
     var bodyPrefix = df ? "dbody" : "body";
     var ftleBodies = [];
@@ -6223,8 +6223,8 @@
         hoverCtx.strokeStyle = outline;
         hoverCtx.lineWidth = HOLLOW_OUTLINE_WIDTH;
         hoverCtx.stroke();
-      } else if (spec.type === "porthole") {
-        drawHoverPorthole(spec, row, colorOverride);
+      } else if (spec.type === "portal") {
+        drawHoverPortal(spec, row, colorOverride);
       } else {
         var ox = Math.cos(row.angle) * row.half, oy = Math.sin(row.angle) * row.half;
         strokeHollow(function () {
@@ -6243,8 +6243,8 @@
       hoverCtx.arc(row.x, row.y, Math.max(row.half, MIN_DISPLAY_RADIUS), 0, Math.PI * 2);
       hoverCtx.fill();
       hoverCtx.stroke();
-    } else if (spec.type === "porthole") {
-      drawHoverPorthole(spec, row, colorOverride);
+    } else if (spec.type === "portal") {
+      drawHoverPortal(spec, row, colorOverride);
     } else {
       var hx = Math.cos(row.angle) * row.half;
       var hy = Math.sin(row.angle) * row.half;
@@ -6278,9 +6278,9 @@
     }
   }
 
-  // A port hole's oval, under the same dark ring every outline gets over the picture.
-  function drawHoverPorthole(spec, row, colorOverride) {
-    PhysicsUI.drawPorthole(hoverCtx, row.x, row.y, row.angle, row.half * 2, spec.color, {
+  // A portal's oval, under the same dark ring every outline gets over the picture.
+  function drawHoverPortal(spec, row, colorOverride) {
+    PhysicsUI.drawPortal(hoverCtx, row.x, row.y, row.angle, row.half * 2, spec.color, {
       anchored: spec.isAnchored,
       paint: colorOverride ? colorOverride.fill : undefined,
       underlay: { width: 2 * HOLLOW_UNDERLAY_EXTRA, color: HOLLOW_UNDERLAY },
@@ -6308,7 +6308,7 @@
 
   // An entry's bodies at `step`, capped to its effectiveMaxStep, where Sticky Edges' stop shows. A slowed movie of
   // the Inspect tab asks for steps in between: each body then on a straight line from one step to the next (to the
-  // stop on the last), and null for one that jumps there, through a port hole or round a wrapped edge.
+  // stop on the last), and null for one that jumps there, through a portal or round a wrapped edge.
   function inspectedRowAt(entry, step) {
     var rows = entry.trajectory, last = entry.effectiveMaxStep - 1, stop = entry.wrapOverride;
     var s = Math.min(step, last), s0 = Math.floor(s), t = s - s0;
@@ -6977,7 +6977,7 @@
     if (prop === "distance") return "Distance Apart";
     if (prop === "lifespan") return "Scene lifespan";
     if (prop === "bounces") return "Bounce Count";
-    if (prop === "warps") return "Port Hole Warp Count";
+    if (prop === "warps") return "Portal Warp Count";
     if (prop === "totalRotation") return "Cumulative Rotation";
     return prop;
   }

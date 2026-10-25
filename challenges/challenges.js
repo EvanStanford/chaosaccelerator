@@ -87,8 +87,8 @@
     writeStore(SOLVED_KEY, solved);
   }
 
-  // A goal event is a body number (a bounce off it) or "w" and a port hole's number (in through it).
-  function portholeColors(scene) {
+  // A goal event is a body number (a bounce off it) or "w" and a portal's number (in through it).
+  function portalColors(scene) {
     var m = /(?:^|,)body:([^,]*)/.exec(scene), colors = {};
     (m ? m[1].split(";") : []).forEach(function (b, i) {
       if (/^po:/.test(b)) colors[i] = "orange";
@@ -98,13 +98,13 @@
   }
   function eventText(token, colors) {
     if (token.charAt(0) !== "w") return token;
-    var name = ColorBlind.palette().portholeName;
+    var name = ColorBlind.palette().portalName;
     return colors[Number(token.slice(1))] === "green" ? name.green + " to " + name.orange : name.orange + " to " + name.green;
   }
   function orderText(c) {
-    var goal = c.goal.map(String), colors = portholeColors(c.scene);
+    var goal = c.goal.map(String), colors = portalColors(c.scene);
     var repeated = goal.length > 1 && goal.every(function (t) { return t === goal[0]; });
-    if (repeated && goal[0].charAt(0) === "w") return "Through the port holes " + eventText(goal[0], colors) + ", " + goal.length + " times";
+    if (repeated && goal[0].charAt(0) === "w") return "Through the portals " + eventText(goal[0], colors) + ", " + goal.length + " times";
     if (repeated) return "Bounce on body " + goal[0] + ", " + goal.length + " times";
     return "Bounce order: " + goal.map(function (t) { return eventText(t, colors); }).join(", ");
   }
@@ -477,7 +477,13 @@
         if (typeof b === "number" && keep.indexOf(b) === -1 && keep.length < max) keep.push(b);
       });
     });
-    for (i = 0; i < s.bodies.length && keep.length < max; i++) if (keep.indexOf(i) === -1) keep.push(i);
+    // Portals come in pairs: both or neither.
+    var pair = s.bodies.map(function (b, k) { return b.type === "portal" ? k : -1; }).filter(function (k) { return k !== -1; });
+    for (i = 0; i < s.bodies.length && keep.length < max; i++) {
+      if (keep.indexOf(i) !== -1) continue;
+      if (pair.indexOf(i) === -1) keep.push(i);
+      else if (pair.length === 2 && keep.indexOf(pair[0]) === -1 && keep.indexOf(pair[1]) === -1 && keep.length + 2 <= max) keep.push(pair[0], pair[1]);
+    }
     keep.sort(function (a, b) { return a - b; });
     function at(b) { var k = keep.indexOf(b); return k === -1 ? null : k; }
     function mapping(m) {

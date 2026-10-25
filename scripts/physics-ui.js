@@ -96,8 +96,8 @@
       { key: "vy", label: "Starting Y Velocity" },
     ],
   };
-  // A port hole has a line's shape, so a line's properties.
-  PROPERTIES_BY_TYPE.porthole = PROPERTIES_BY_TYPE.line;
+  // A portal has a line's shape, so a line's properties.
+  PROPERTIES_BY_TYPE.portal = PROPERTIES_BY_TYPE.line;
   // Output-only: bounces, rotation and warps are accumulated over a run.
   var OUTPUT_PROPERTIES = [
     { key: "x", label: "Center X" },
@@ -105,7 +105,7 @@
     { key: "angle", label: "Rotation" },
     { key: "totalRotation", label: "Cumulative Rotation" },
     { key: "bounces", label: "Bounce Count" },
-    { key: "warps", label: "Port Hole Warp Count" },
+    { key: "warps", label: "Portal Warp Count" },
   ];
   var OUTPUT_PAIR_PROPERTIES = [
     { key: "x", label: "Average X" },
@@ -113,12 +113,12 @@
     { key: "angle", label: "Average Rotation" },
     { key: "distance", label: "Distance Apart" },
   ];
-  // Cumulative Rotation needs a body that moves; Port Hole Warp Count one that can go through a placed pair.
+  // Cumulative Rotation needs a body that moves; Portal Warp Count one that can go through a placed pair.
   function outputPropertiesFor(output) {
     if (PhysicsEngine.isPairOutput(output)) return OUTPUT_PAIR_PROPERTIES;
     var body = output && scene.bodies[output.body];
     if (!body) return OUTPUT_PROPERTIES;
-    var canWarp = !body.isAnchored && body.type !== "porthole" && !!PhysicsEngine.portholePair(scene.bodies);
+    var canWarp = !body.isAnchored && body.type !== "portal" && !!PhysicsEngine.portalPair(scene.bodies);
     return OUTPUT_PROPERTIES.filter(function (p) {
       if (p.key === "totalRotation") return !body.isAnchored;
       if (p.key === "warps") return canWarp;
@@ -171,11 +171,11 @@
   var CLICK_DRAG_THRESHOLD = 6;
   var DEFAULT_CIRCLE_RADIUS = 45;
   var DEFAULT_LINE_LENGTH = 182;
-  var DEFAULT_PORTHOLE_LENGTH = 200;
+  var DEFAULT_PORTAL_LENGTH = 200;
   // The phone layout shows the frame much smaller, so a click places shapes bigger there.
   var MOBILE_CIRCLE_RADIUS = 75;
   var MOBILE_LINE_LENGTH = 350;
-  var MOBILE_PORTHOLE_LENGTH = 350;
+  var MOBILE_PORTAL_LENGTH = 350;
   function defaultSize(size, mobileSize) {
     return window.LayoutMode && window.LayoutMode.isMobile() ? mobileSize : size;
   }
@@ -305,8 +305,8 @@
       ctx.strokeStyle = "rgba(255,255,255,0.35)";
       ctx.lineWidth = 1.5 * screenPx;
       ctx.stroke();
-    } else if (body.type === "porthole") {
-      drawPorthole(ctx, body.x, body.y, body.angle, body.length, body.color, { selected: selected, anchored: body.isAnchored });
+    } else if (body.type === "portal") {
+      drawPortal(ctx, body.x, body.y, body.angle, body.length, body.color, { selected: selected, anchored: body.isAnchored });
     } else {
       var endpoints = PhysicsEngine.getLineEndpoints(body), outline = ctx.lineWidth;
       ctx.lineCap = "round";
@@ -323,35 +323,35 @@
     ctx.restore();
   }
 
-  // A port hole, the look Evan picked from rendered options: a 5px rim in its color around a black
+  // A portal, the look Evan picked from rendered options: a 5px rim in its color around a black
   // center, the center bulging 2px past the rim over the middle of the front, the side that takes
-  // bodies in. The rim is an ellipse stroked along its own inset path; PhysicsEngine.portholeOval is
+  // bodies in. The rim is an ellipse stroked along its own inset path; PhysicsEngine.portalOval is
   // the two-arc fit of this outline that the physics bounces off. Local coordinates: x along the
-  // port hole, y toward its back.
-  var PORTHOLE_RIM = 5;
-  var PORTHOLE_BULGE = 2;
-  var PORTHOLE_BULGE_SPAN = 0.9;
+  // portal, y toward its back.
+  var PORTAL_RIM = 5;
+  var PORTAL_BULGE = 2;
+  var PORTAL_BULGE_SPAN = 0.9;
   // Light out of the front. The oval is a circle seen off axis, and the streaks stand on its rim at
   // equal steps of angle around that circle, so in this view they bunch toward the ends; the ones on
   // the far side rise across the black and out over the front. Each reaches a random 60-100% of
   // HEIGHT past the front edge, from a fixed sequence so nothing flickers. The middle ones stand
-  // square to the port hole; toward the ends they fan outward, FAN_MAX degrees * (x/a)^FAN.
-  var PORTHOLE_STREAK_HEIGHT = 25;
-  var PORTHOLE_STREAK_SPACING = 44; // circumference per streak
-  var PORTHOLE_STREAK_FAN = 2;
-  var PORTHOLE_STREAK_FAN_MAX = 45;
-  function portholeStreaks(o) {
-    var rx = o.a - PORTHOLE_RIM / 2, ry = o.b - PORTHOLE_RIM / 2;
-    var count = Math.max(4, Math.round(2 * Math.PI * o.a / PORTHOLE_STREAK_SPACING));
+  // square to the portal; toward the ends they fan outward, FAN_MAX degrees * (x/a)^FAN.
+  var PORTAL_STREAK_HEIGHT = 25;
+  var PORTAL_STREAK_SPACING = 44; // circumference per streak
+  var PORTAL_STREAK_FAN = 2;
+  var PORTAL_STREAK_FAN_MAX = 45;
+  function portalStreaks(o) {
+    var rx = o.a - PORTAL_RIM / 2, ry = o.b - PORTAL_RIM / 2;
+    var count = Math.max(4, Math.round(2 * Math.PI * o.a / PORTAL_STREAK_SPACING));
     var seed = 20261009, list = [];
     function next() { seed = (seed * 48271) % 2147483647; return seed / 2147483647; }
     for (var i = 0; i < count; i++) {
       // A third of a step off, so no two streaks share an x.
       var th = 2 * Math.PI * (i + 1 / 3) / count;
       var x = rx * Math.cos(th), y = ry * Math.sin(th), u = x / o.a;
-      var tilt = PORTHOLE_STREAK_FAN_MAX * Math.PI / 180 * Math.pow(Math.abs(u), PORTHOLE_STREAK_FAN) * (u < 0 ? -1 : 1);
+      var tilt = PORTAL_STREAK_FAN_MAX * Math.PI / 180 * Math.pow(Math.abs(u), PORTAL_STREAK_FAN) * (u < 0 ? -1 : 1);
       var front = -o.b * Math.sqrt(Math.max(0, 1 - u * u));
-      var h = (y - front) / Math.cos(tilt) + PORTHOLE_STREAK_HEIGHT * (0.6 + 0.4 * next());
+      var h = (y - front) / Math.cos(tilt) + PORTAL_STREAK_HEIGHT * (0.6 + 0.4 * next());
       list.push({ x: x, y: y, h: h, w: 0.8 + 0.9 * next(), k: 0.6 + 0.4 * next(), tilt: tilt });
     }
     return list;
@@ -370,7 +370,7 @@
     function ch(i) { var v = parseInt(m[1].slice(i, i + 2), 16); return Math.round(v + (255 - v) * amount); }
     return "rgb(" + ch(0) + "," + ch(2) + "," + ch(4) + ")";
   }
-  function drawPortholeStreaks(c, streaks, paint, light) {
+  function drawPortalStreaks(c, streaks, paint, light) {
     c.lineCap = "round";
     for (var i = 0; i < streaks.length; i++) {
       var s = streaks[i];
@@ -385,44 +385,44 @@
       c.lineWidth = s.w; c.globalAlpha = 1; c.stroke();
     }
   }
-  function portholeRimPath(c, o) {
+  function portalRimPath(c, o) {
     c.beginPath();
-    c.ellipse(0, 0, o.a - PORTHOLE_RIM / 2, o.b - PORTHOLE_RIM / 2, 0, 0, Math.PI * 2);
+    c.ellipse(0, 0, o.a - PORTAL_RIM / 2, o.b - PORTAL_RIM / 2, 0, 0, Math.PI * 2);
     c.closePath();
   }
   // opts: selected, anchored (a gray rim), paint (a color override), underlay {width, color} (a ring outside the outline).
   // Layered as a circle on the floor seen from its near side, the bulge on the far rim: the streaks
   // born on the bulge's half go under the bulge, the ones born on the near half over everything.
-  function drawPorthole(c, x, y, angle, length, color, opts) {
+  function drawPortal(c, x, y, angle, length, color, opts) {
     opts = opts || {};
-    var o = PhysicsEngine.portholeOval(length);
+    var o = PhysicsEngine.portalOval(length);
     var p = ColorBlind.palette();
-    var paint = opts.paint || p.porthole[color] || p.porthole.orange;
-    var light = lighten(paint, 0.45), streaks = portholeStreaks(o);
+    var paint = opts.paint || p.portal[color] || p.portal.orange;
+    var light = lighten(paint, 0.45), streaks = portalStreaks(o);
     var far = streaks.filter(function (s) { return s.y <= 0; }), near = streaks.filter(function (s) { return s.y > 0; });
     c.save();
     c.translate(x, y);
     c.rotate(angle);
-    portholeRimPath(c, o);
+    portalRimPath(c, o);
     if (opts.underlay) {
-      c.lineWidth = PORTHOLE_RIM + opts.underlay.width; c.strokeStyle = opts.underlay.color; c.stroke();
+      c.lineWidth = PORTAL_RIM + opts.underlay.width; c.strokeStyle = opts.underlay.color; c.stroke();
     }
     if (opts.selected) {
-      c.lineWidth = PORTHOLE_RIM + 6 * screenPx; c.strokeStyle = p.selected; c.stroke();
+      c.lineWidth = PORTAL_RIM + 6 * screenPx; c.strokeStyle = p.selected; c.stroke();
     }
-    // An anchored port hole's rim is the anchored gray; its light keeps the port hole's color.
-    c.lineWidth = PORTHOLE_RIM; c.strokeStyle = opts.anchored && !opts.paint ? p.anchoredFill : paint; c.stroke();
+    // An anchored portal's rim is the anchored gray; its light keeps the portal's color.
+    c.lineWidth = PORTAL_RIM; c.strokeStyle = opts.anchored && !opts.paint ? p.anchoredFill : paint; c.stroke();
     c.fillStyle = "#000"; c.fill();
-    drawPortholeStreaks(c, far, paint, light);
+    drawPortalStreaks(c, far, paint, light);
     c.save();
     c.beginPath();
-    c.rect(-o.a - 10, -o.b - PORTHOLE_BULGE - 10, 2 * o.a + 20, o.b + PORTHOLE_BULGE + 10);
+    c.rect(-o.a - 10, -o.b - PORTAL_BULGE - 10, 2 * o.a + 20, o.b + PORTAL_BULGE + 10);
     c.clip();
     c.beginPath();
-    c.ellipse(0, 0, o.a * PORTHOLE_BULGE_SPAN, o.b + PORTHOLE_BULGE, 0, 0, Math.PI * 2);
+    c.ellipse(0, 0, o.a * PORTAL_BULGE_SPAN, o.b + PORTAL_BULGE, 0, 0, Math.PI * 2);
     c.fillStyle = "#000"; c.fill();
     c.restore();
-    drawPortholeStreaks(c, near, paint, light);
+    drawPortalStreaks(c, near, paint, light);
     c.restore();
   }
 
@@ -813,7 +813,7 @@
   var RESIZE_HANDLE_HIT_PAD = 6; // grabbable area extends this far past the visual capsule
 
   function resizeHandleSupported(body) {
-    return !!body && (body.type === "circle" || body.type === "line" || body.type === "porthole");
+    return !!body && (body.type === "circle" || body.type === "line" || body.type === "portal");
   }
 
   // Pivot for resize/rotate (what applyBodyEditPreservingHinge keeps fixed): hinge world point if any, else center.
@@ -953,7 +953,7 @@
     render();
   }
 
-  // ---- Rotation drag handle (lines and port holes; a circle has no angle) ----
+  // ---- Rotation drag handle (lines and portals; a circle has no angle) ----
   // Same ray as the resize handle, farther out, turned 90 degrees: it drags along an arc around the pivot.
   var ROTATION_HANDLE_GAP = 14; // beyond the resize handle's own far edge
   // Cosmetic only: a true-scale arc over ~30px would look straight.
@@ -1391,7 +1391,7 @@
   toolButtons.forEach(function (btn) {
     btn.addEventListener("click", function () {
       var tool = btn.getAttribute("data-tool");
-      if (tool === "porthole") { addPorthole(); return; }
+      if (tool === "portal") { addPortals(); return; }
       setActiveTool(tool);
     });
   });
@@ -1485,36 +1485,52 @@
     return true;
   }
 
-  // ---- Port holes ----
-  // The button places the orange one (facing up), then the green one (facing down), and is spent
-  // once both exist; deleting either brings it back for that color.
-  var btnPorthole = document.querySelector('.tool-btn[data-tool="porthole"]');
-  var PORTHOLE_PLACEMENT = { orange: { y: 0.4, angle: 0 }, green: { y: 0.6, angle: Math.PI } };
+  // ---- Portals ----
+  // The builder holds both portals or neither: the button places the pair and is spent while they
+  // exist, deleting one deletes both, and a scene loaded with one gets the other.
+  var btnPortal = document.querySelector('.tool-btn[data-tool="portal"]');
+  // From the frame center, engine space (y down): either side of center, tilted 45 degrees.
+  var PORTAL_PLACEMENT = { orange: { dx: -240, dy: 30, angle: Math.PI / 4 }, green: { dx: 240, dy: 30, angle: -Math.PI / 4 } };
 
-  function portholesPresent() {
+  function portalsPresent() {
     var present = {};
-    scene.bodies.forEach(function (b) { if (b.type === "porthole") present[b.color] = true; });
+    scene.bodies.forEach(function (b) { if (b.type === "portal") present[b.color] = true; });
     return present;
   }
 
-  function addPorthole() {
-    var present = portholesPresent();
-    var color = PhysicsEngine.PORTHOLE_COLORS.filter(function (c) { return !present[c]; })[0];
-    if (!color || !canAddBody()) return;
-    var w = scene.frameWidth, h = scene.frameHeight;
-    var place = PORTHOLE_PLACEMENT[color];
-    scene.bodies.push(PhysicsEngine.createPorthole(w / 2, h * place.y, defaultSize(DEFAULT_PORTHOLE_LENGTH, MOBILE_PORTHOLE_LENGTH), place.angle, color, false));
+  function placePortal(color) {
+    var place = PORTAL_PLACEMENT[color];
+    scene.bodies.push(PhysicsEngine.createPortal(scene.frameWidth / 2 + place.dx, scene.frameHeight / 2 + place.dy,
+      defaultSize(DEFAULT_PORTAL_LENGTH, MOBILE_PORTAL_LENGTH), place.angle, color, false));
+  }
+
+  function addPortals() {
+    if (Object.keys(portalsPresent()).length) return;
+    if (scene.bodies.length + 2 > PhysicsGPU.MAX_BODIES) {
+      AppMessage.toast("Cannot add more objects, object limit hit.");
+      return;
+    }
+    PhysicsEngine.PORTAL_COLORS.forEach(placePortal);
     AppTips.done("add-object");
     setActiveTool("select");
     refreshMappingUI();
     selectBody(scene.bodies.length - 1);
   }
 
-  function refreshPortholeButton() {
-    var count = Object.keys(portholesPresent()).length;
-    btnPorthole.classList.toggle("porthole-one", count === 1);
-    btnPorthole.classList.toggle("porthole-two", count >= 2);
-    btnPorthole.disabled = count >= 2;
+  // A scene with one portal gets the other, if the body limit allows; else the lone one goes.
+  function pairUpPortals() {
+    var present = portalsPresent(), colors = Object.keys(present);
+    if (colors.length !== 1) return;
+    var missing = PhysicsEngine.PORTAL_COLORS.filter(function (c) { return !present[c]; })[0];
+    if (scene.bodies.length < PhysicsGPU.MAX_BODIES) { placePortal(missing); return; }
+    var lone = scene.bodies.findIndex(function (b) { return b.type === "portal"; });
+    removeBody(lone);
+  }
+
+  function refreshPortalButton() {
+    var placed = Object.keys(portalsPresent()).length > 0;
+    btnPortal.classList.toggle("portals-placed", placed);
+    btnPortal.disabled = placed;
   }
 
   function addHingeAt(x, y) {
@@ -1628,12 +1644,18 @@
     render();
   }
 
+  function removeBody(index) {
+    PhysicsEngine.deleteBody(scene, index);
+    scene.xInput = reindexMappingAfterDelete(scene.xInput, index);
+    scene.yInput = reindexMappingAfterDelete(scene.yInput, index);
+    scene.output = reindexMappingAfterDelete(scene.output, index);
+  }
+
   function deleteSelectedBody() {
     if (selectedIndex < 0) return;
-    PhysicsEngine.deleteBody(scene, selectedIndex);
-    scene.xInput = reindexMappingAfterDelete(scene.xInput, selectedIndex);
-    scene.yInput = reindexMappingAfterDelete(scene.yInput, selectedIndex);
-    scene.output = reindexMappingAfterDelete(scene.output, selectedIndex);
+    // A portal goes with its pair, the later index first so the earlier one stays put.
+    var pair = scene.bodies[selectedIndex].type === "portal" ? PhysicsEngine.portalPair(scene.bodies) : null;
+    (pair ? [pair[1], pair[0]] : [selectedIndex]).forEach(removeBody);
     selectedIndex = -1;
     refreshMappingUI();
     render();
@@ -2108,7 +2130,7 @@
   // ---- X / Y input mapping ----
 
   function bodyOptionLabel(body, index) {
-    return "Body " + index + " (" + (body.type === "porthole" ? ColorBlind.palette().portholeName[body.color] + " port hole" : body.type) + ")";
+    return "Body " + index + " (" + (body.type === "portal" ? ColorBlind.palette().portalName[body.color] + " portal" : body.type) + ")";
   }
 
   function propsListFor(bodyIndex) {
@@ -2174,7 +2196,7 @@
     populatePropertySelect(yInputPropertySelect, scene.yInput ? scene.yInput.body : null, scene.yInput ? scene.yInput.property : null);
     populateBodySelect(outputBodySelect, scene.output, true);
     refreshOutputPairUI();
-    refreshPortholeButton();
+    refreshPortalButton();
   }
 
   function reindexMappingAfterDelete(mapping, deletedIndex) {
@@ -2453,7 +2475,7 @@
         var out = { type: b.type, x: roundNum(b.x), y: roundNum(b.y), angle: roundNum(b.angle), isAnchored: !!b.isAnchored };
         if (b.type === "circle") out.radius = roundNum(b.radius);
         else out.length = roundNum(b.length);
-        if (b.type === "porthole") out.color = b.color;
+        if (b.type === "portal") out.color = b.color;
         out.vx = roundNum(b.vx);
         out.vy = roundNum(b.vy);
         out.w = roundNum(b.w);
@@ -2507,13 +2529,13 @@
         if (b.angle !== undefined) body.angle = Number(b.angle);
       } else if (b.type === "line") {
         body = PhysicsEngine.createLine(Number(b.x), Number(b.y), Number(b.length), Number(b.angle) || 0, !!b.isAnchored);
-      } else if (b.type === "porthole") {
-        if (PhysicsEngine.PORTHOLE_COLORS.indexOf(b.color) === -1) {
-          throw new Error('bodies[' + i + "]: a port hole's color must be \"orange\" or \"green\"");
+      } else if (b.type === "portal" || b.type === "porthole") { // porthole: what older saved scenes call it
+        if (PhysicsEngine.PORTAL_COLORS.indexOf(b.color) === -1) {
+          throw new Error('bodies[' + i + "]: a portal's color must be \"orange\" or \"green\"");
         }
-        body = PhysicsEngine.createPorthole(Number(b.x), Number(b.y), Number(b.length), Number(b.angle) || 0, b.color, !!b.isAnchored);
+        body = PhysicsEngine.createPortal(Number(b.x), Number(b.y), Number(b.length), Number(b.angle) || 0, b.color, !!b.isAnchored);
       } else {
-        throw new Error('bodies[' + i + "]: type must be \"circle\", \"line\" or \"porthole\"");
+        throw new Error('bodies[' + i + "]: type must be \"circle\", \"line\" or \"portal\"");
       }
       // An anchored body's velocity would make it a moving wall in the contact solver (see computeMass).
       if (!body.isAnchored) {
@@ -2523,11 +2545,11 @@
       }
       return body;
     });
-    var portholeSeen = {};
+    var portalSeen = {};
     newBodies.forEach(function (b, i) {
-      if (b.type !== "porthole") return;
-      if (portholeSeen[b.color]) throw new Error("bodies[" + i + "]: only one " + b.color + " port hole is allowed.");
-      portholeSeen[b.color] = true;
+      if (b.type !== "portal") return;
+      if (portalSeen[b.color]) throw new Error("bodies[" + i + "]: only one " + b.color + " portal is allowed.");
+      portalSeen[b.color] = true;
     });
 
     var newHinges = [];
@@ -2636,6 +2658,7 @@
     scene.xInput = data.xInput;
     scene.yInput = data.yInput;
     scene.output = data.output;
+    pairUpPortals();
     scene.edgeMode = data.edgeMode;
     scene.friction = PhysicsEngine.frictionOf(data);
     scene.mutualGravity = !!data.mutualGravity;
@@ -2688,13 +2711,13 @@
   }
 
   btnSampleDoublePendulum.addEventListener("click", function () {
-    loadSample("samples/double_pendulum.json?v=m206", "Double Pendulum");
+    loadSample("samples/double_pendulum.json?v=m207", "Double Pendulum");
   });
   btnSamplePinball.addEventListener("click", function () {
-    loadSample("samples/pinball.json?v=m206", "Pinball");
+    loadSample("samples/pinball.json?v=m207", "Pinball");
   });
   btnSampleBinaryStar.addEventListener("click", function () {
-    loadSample("samples/binary_star.json?v=m206", "Binary Star");
+    loadSample("samples/binary_star.json?v=m207", "Binary Star");
   });
   function clearScene() {
     sharedFrame = null;
@@ -2808,7 +2831,7 @@
   var outputTallies = null;
   // Steps (0-indexed) at which a pair started touching: the bounce sound's triggers, whatever the Output.
   var bounceEvents = [];
-  // Steps (0-indexed) in which something went through a port hole.
+  // Steps (0-indexed) in which something went through a portal.
   var warpEvents = [];
 
   // The property's exact range (mirrors fractal-grid.js): x/y wrap into [0, frame); mod(angle, TAU)
@@ -3072,7 +3095,7 @@
     });
   }
 
-  // Color Blind Support changed: the Output's colors, port hole names in the menus, and everything drawn.
+  // Color Blind Support changed: the Output's colors, portal names in the menus, and everything drawn.
   ColorBlind.onChange(function () {
     outputKeyControlsState = null;
     refreshMappingUI();
@@ -3505,9 +3528,9 @@
         for (var i = 0; i < bodies.length; i++) drawBody(bodies[i], false);
       });
     },
-    // A port hole into someone else's canvas (the map's replay).
-    drawPorthole: function (c, x, y, angle, length, color, opts) {
-      drawInto(c, function () { drawPorthole(c, x, y, angle, length, color, opts); });
+    // A portal into someone else's canvas (the map's replay).
+    drawPortal: function (c, x, y, angle, length, color, opts) {
+      drawInto(c, function () { drawPortal(c, x, y, angle, length, color, opts); });
     },
     // One spring into someone else's canvas, drawn as the editor draws it; `color` is optional (an inspected point's hue).
     drawSpringBetween: function (targetCtx, a, b, stiffness, restLength, color) {

@@ -40,7 +40,7 @@
   })();
 
   // Inside a challenge frame (challenges/): "?goal=1.0.w2" is a Trick Shot, bounce off body 1, then body 0,
-  // then in through port hole body 2; "?rose=1" is Rose Plot Targets; "?lyap=1" a Lyapunov challenge,
+  // then in through portal body 2; "?rose=1" is Rose Plot Targets; "?lyap=1" a Lyapunov challenge,
   // "&fric=0" keeping friction off and "&vin=1" velocity inputs only. The classes trim the map's cards (challenges/challenge-frame.css).
   var search = global.location.search || "";
   var challengeGoal = (function () {
@@ -61,7 +61,7 @@
     if (challengeVelocityInputs) root.classList.add("challenge-velocity-inputs");
     var challengeSheet = document.createElement("link");
     challengeSheet.rel = "stylesheet";
-    challengeSheet.href = "challenges/challenge-frame.css?v=m206";
+    challengeSheet.href = "challenges/challenge-frame.css?v=m207";
     document.head.appendChild(challengeSheet);
   }
 

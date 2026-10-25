@@ -64,10 +64,8 @@ html[data-color-blind="monochrome"] .stats-status-stale { color: #bebebe; }
 html[data-color-blind="monochrome"] .app-toast { color: #dedede; }
 
 html[data-color-blind="monochrome"] .tool-btn:hover { background: #1a1a1a; }
-html[data-color-blind="monochrome"] .tool-btn.porthole-one,
-html[data-color-blind="monochrome"] .tool-btn.porthole-one:hover { background: linear-gradient(to right, #555555 50%, var(--bg-input) 50%); }
-html[data-color-blind="monochrome"] .tool-btn.porthole-two,
-html[data-color-blind="monochrome"] .tool-btn.porthole-two:hover { background: #555555; border-color: #9e9e9e; }
+html[data-color-blind="monochrome"] .tool-btn.portals-placed,
+html[data-color-blind="monochrome"] .tool-btn.portals-placed:hover { background: #555555; border-color: #9e9e9e; }
 html[data-color-blind="monochrome"] button.tool-btn.input-set { background: #5a5a5a; border-color: #8a8a8a; }
 html[data-color-blind="monochrome"] button.tool-btn.input-set:hover { background: #666666; }
 html[data-color-blind="monochrome"] .tool-btn.highlight-hint {

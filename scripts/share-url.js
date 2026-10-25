@@ -27,10 +27,10 @@
   var DEFAULT_EDGE = "sticky";
   var DEFAULT_MOVIE_SIZE = { width: 1280, height: 720 };
 
-  // A port hole's code carries its color.
-  var TYPE_CODES = { circle: "ci", line: "ln", "porthole orange": "po", "porthole green": "pg" };
-  var SIZE_FIELDS = { circle: "radius", line: "length", porthole: "length" };
-  function shapeKey(b) { return b.type === "porthole" ? "porthole " + b.color : b.type; }
+  // A portal's code carries its color.
+  var TYPE_CODES = { circle: "ci", line: "ln", "portal orange": "po", "portal green": "pg" };
+  var SIZE_FIELDS = { circle: "radius", line: "length", portal: "length" };
+  function shapeKey(b) { return b.type === "portal" ? "portal " + b.color : b.type; }
   var PROPERTY_CODES = {
     x: "x", y: "y", angle: "ang", radius: "rad", length: "len", vx: "vx", vy: "vy",
     bounces: "bnce", distance: "dist", lifespan: "life", totalRotation: "turn", warps: "warp",
@@ -227,7 +227,7 @@
       angle: parseNum(parts[3], what + "'s angle"),
       isAnchored: anchored,
     };
-    if (type === "porthole") body.color = shape.split(" ")[1];
+    if (type === "portal") body.color = shape.split(" ")[1];
     var size = parseNum(parts[4], what + "'s size");
     if (!(size > 0)) throw new Error(what + "'s size must be more than zero");
     body[SIZE_FIELDS[type]] = size;
@@ -323,11 +323,11 @@
     if (fields.body === undefined) return null;
     if (fields.edge !== undefined && !EDGES_BY_CODE[fields.edge]) throw new Error("edge is not a known mode: \"" + fields.edge + "\"");
     var bodies = splitList(fields.body).map(decodeBody);
-    var portholes = {};
+    var portals = {};
     bodies.forEach(function (b, i) {
-      if (b.type !== "porthole") return;
-      if (portholes[b.color]) throw new Error("body " + (i + 1) + " is a second " + b.color + " port hole");
-      portholes[b.color] = true;
+      if (b.type !== "portal") return;
+      if (portals[b.color]) throw new Error("body " + (i + 1) + " is a second " + b.color + " portal");
+      portals[b.color] = true;
     });
     return {
       mutualGravity: fields.mgrv === undefined ? false : parseBool(fields.mgrv, "mgrv"),

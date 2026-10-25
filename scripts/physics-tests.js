@@ -3862,16 +3862,16 @@
     }
   );
 
-    // ---- Port holes: what enters the front of one leaves the other, continuous in every state ----
+    // ---- Portals: what enters the front of one leaves the other, continuous in every state ----
 
   // The orange one faces up at (400, 400), the green one faces down at (400, 700) unless `down` says otherwise; both anchored.
-  function portholeScene(bodies, down) {
+  function portalScene(bodies, down) {
     down = down || {};
     return {
       mutualGravity: false,
       bodies: [
-        PhysicsEngine.createPorthole(400, 400, 200, 0, "orange", true),
-        PhysicsEngine.createPorthole(down.x === undefined ? 400 : down.x, down.y === undefined ? 700 : down.y,
+        PhysicsEngine.createPortal(400, 400, 200, 0, "orange", true),
+        PhysicsEngine.createPortal(down.x === undefined ? 400 : down.x, down.y === undefined ? 700 : down.y,
           down.length || 200, down.angle === undefined ? Math.PI : down.angle, "green", true),
       ].concat(bodies),
       hinges: [], springs: [], frameWidth: 1200, frameHeight: 900, edgeMode: "infinite",
@@ -3882,11 +3882,11 @@
   }
 
   addTest(
-    "A port hole pair is transparent: a ball that enters one comes out of the other on the path it was on",
+    "A portal pair is transparent: a ball that enters one comes out of the other on the path it was on",
     "the orange one faces up at (400, 400), the green one down at (400, 700): a ball through both is a ball that skipped 300px. The crossing point, the overshoot past the center line and the velocity all carry over, so from the crossing step on the run equals a port-hole-free fall shifted by (0, 300), to rounding",
     function () {
       function ball() { var b = PhysicsEngine.createCircle(410, 200, 10, false); b.vx = 3; return b; }
-      var withPort = portholeScene([ball()]), without = plainScene([ball()]);
+      var withPort = portalScene([ball()]), without = plainScene([ball()]);
       var crossedAt = -1, worst = 0, speedErr = 0;
       for (var i = 0; i < 90; i++) {
         PhysicsEngine.step(withPort, DT);
@@ -3898,18 +3898,18 @@
       }
       return {
         pass: crossedAt > 0 && worst < 1e-6 && speedErr < 1e-6,
-        detail: "came out of the green port hole at step " + crossedAt + "; worst position difference from the shifted plain fall " +
+        detail: "came out of the green portal at step " + crossedAt + "; worst position difference from the shifted plain fall " +
           worst.toExponential(2) + "px, velocity " + speedErr.toExponential(2) + "px/s",
       };
     }
   );
 
   addTest(
-    "A port hole turns what passes it: in straight down, out straight right, the offset and overshoot kept in the exit's frame",
-    "the velocity is re-expressed relative to the exit port hole, so a ball falling into an up-facing one leaves a right-facing one moving right at the speed it had when it crossed. The crossing point maps along the exit's line (20px right of center in becomes 20px toward its start end, the turn being rigid), the overshoot past the center line comes out in front of it, and the share of the step spent past the crossing gets its gravity on the exit side: that share of a step's fall, straight down again, plus the travel it drove. With friction on, that share is the exit leg's own decayed gain, worked out apart from the entry leg's",
+    "A portal turns what passes it: in straight down, out straight right, the offset and overshoot kept in the exit's frame",
+    "the velocity is re-expressed relative to the exit portal, so a ball falling into an up-facing one leaves a right-facing one moving right at the speed it had when it crossed. The crossing point maps along the exit's line (20px right of center in becomes 20px toward its start end, the turn being rigid), the overshoot past the center line comes out in front of it, and the share of the step spent past the crossing gets its gravity on the exit side: that share of a step's fall, straight down again, plus the travel it drove. With friction on, that share is the exit leg's own decayed gain, worked out apart from the entry leg's",
     function () {
       function at(friction) {
-        var scene = portholeScene([PhysicsEngine.createCircle(420, 200, 10, false)], { x: 800, y: 300, angle: Math.PI / 2 });
+        var scene = portalScene([PhysicsEngine.createCircle(420, 200, 10, false)], { x: 800, y: 300, angle: Math.PI / 2 });
         var plain = plainScene([PhysicsEngine.createCircle(420, 200, 10, false)]);
         scene.friction = friction; plain.friction = friction;
         var ball = scene.bodies[2], after = null, fall = null, before = null;
@@ -3919,7 +3919,7 @@
           PhysicsEngine.step(plain, DT);
           if (ball.x > 600) { after = { x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy }; fall = plain.bodies[0]; }
         }
-        if (!after) return { pass: false, detail: "the ball never came out of the right-facing port hole" };
+        if (!after) return { pass: false, detail: "the ball never came out of the right-facing portal" };
         // The plain fall is the entry-side step: the crossing instant, the overshoot past the line, and the end velocity.
         var tau = DT * (1 - (400 - before) / (fall.y - before)), over = fall.y - 400, k = PhysicsEngine.frictionRate(scene);
         // The exit leg's own gain, decayed over its own share of the step.
@@ -3940,7 +3940,7 @@
 
   // Bisects the start height of the ball at bodies[2] to the boundary where its crossing moves a step, and
   // compares the two sides after N steps.
-  function portholeTooth(name, build, N) {
+  function portalTooth(name, build, N) {
     function run(startY) {
       var scene = build(startY), ball = scene.bodies[2], out = -1;
       for (var i = 0; i < N; i++) {
@@ -3962,19 +3962,19 @@
   }
 
   addTest(
-    "A port hole pass is continuous where the crossing moves from one step to the next",
+    "A portal pass is continuous where the crossing moves from one step to the next",
     "reported from the map as a sawtooth: the crossing step's travel was integrated whole on the entry side and then turned, so the exit side's gravity began at the next step boundary, up to a step late by an amount that grew as the start moved and reset when the crossing jumped a step. Each scene bisects the start height to the exact tooth, then compares the two sides of it after the same number of steps: under gravity, under Mutual Gravity (the outside pull taken from each side of the warp), and for a sprung pair (its own force turned with it)",
     function () {
       var exit = { x: 800, y: 300, angle: Math.PI / 2 };
       var results = [
-        portholeTooth("gravity", function (y) { return portholeScene([PhysicsEngine.createCircle(420, y, 10, false)], exit); }, 60),
-        portholeTooth("mutual gravity", function (y) {
-          var s = portholeScene([PhysicsEngine.createCircle(420, y, 10, false)], exit);
+        portalTooth("gravity", function (y) { return portalScene([PhysicsEngine.createCircle(420, y, 10, false)], exit); }, 60),
+        portalTooth("mutual gravity", function (y) {
+          var s = portalScene([PhysicsEngine.createCircle(420, y, 10, false)], exit);
           s.mutualGravity = true;
           return s;
         }, 60),
-        portholeTooth("sprung pair", function (y) {
-          var s = portholeScene([PhysicsEngine.createCircle(420, y, 10, false), PhysicsEngine.createCircle(420, y - 90, 10, false)], exit);
+        portalTooth("sprung pair", function (y) {
+          var s = portalScene([PhysicsEngine.createCircle(420, y, 10, false), PhysicsEngine.createCircle(420, y - 90, 10, false)], exit);
           s.springs.push({ bodyA: 2, bodyB: 3, localAnchorA: { x: 0, y: 0 }, localAnchorB: { x: 0, y: 0 }, stiffness: 5000, restLength: 90 });
           return s;
         }, 60),
@@ -3984,14 +3984,14 @@
   );
 
   addTest(
-    "Port Hole Warp Count and Cumulative Rotation read off a run count each pass and leave out the port holes' own turn",
-    "a spinning ball dropped through a pair turned a quarter apart keeps its spin, so its rotation is spin times time; the logged angle also jumps by the turn between the two port holes, which is where it came out, not rotation. The GPU log carries the warp bits the map and Inspect read",
+    "Portal Warp Count and Cumulative Rotation read off a run count each pass and leave out the portals' own turn",
+    "a spinning ball dropped through a pair turned a quarter apart keeps its spin, so its rotation is spin times time; the logged angle also jumps by the turn between the two portals, which is where it came out, not rotation. The GPU log carries the warp bits the map and Inspect read",
     function () {
       var spin = 3, steps = 150;
       function scene() {
         var ball = PhysicsEngine.createCircle(420, 250, 10, false);
         ball.w = spin;
-        return portholeScene([ball], { x: 800, y: 300, angle: Math.PI / 2 });
+        return portalScene([ball], { x: 800, y: 300, angle: Math.PI / 2 });
       }
       var want = spin * steps * DT, pass = true, parts = [];
       function check(label, rows) {
@@ -4015,8 +4015,8 @@
   );
 
   addTest(
-    "The whole front face lets a ball through, the thin ends included; the back and a lone port hole bounce",
-    "the front half of the oval, nothing less: a ball meeting the front near a tip goes through like one meeting the middle, a ball that clears the tip entirely touches nothing, a ball onto the back bounces, and so does one onto the only port hole in the scene",
+    "The whole front face lets a ball through, the thin ends included; the back and a lone portal bounce",
+    "the front half of the oval, nothing less: a ball meeting the front near a tip goes through like one meeting the middle, a ball that clears the tip entirely touches nothing, a ball onto the back bounces, and so does one onto the only portal in the scene",
     function () {
       function drop(scene, ballIndex) {
         var lowest = -Infinity, bounced = false, warped = false, prevVy = 0, prevY = scene.bodies[ballIndex].y;
@@ -4030,14 +4030,14 @@
         }
         return { stayedAbove: lowest < 400, bounced: bounced, warped: warped };
       }
-      var back = portholeScene([PhysicsEngine.createCircle(400, 200, 10, false)]);
+      var back = portalScene([PhysicsEngine.createCircle(400, 200, 10, false)]);
       back.bodies[0].angle = Math.PI; // faces down: the ball from above meets its back
       var onBack = drop(back, 2);
       // 112px off center: past the 110px tip, but the ball's own 10px reaches the tip's front.
-      var onEnd = drop(portholeScene([PhysicsEngine.createCircle(512, 200, 10, false)]), 2);
+      var onEnd = drop(portalScene([PhysicsEngine.createCircle(512, 200, 10, false)]), 2);
       // 125px: past all of that, touching nothing.
-      var clear = drop(portholeScene([PhysicsEngine.createCircle(525, 200, 10, false)]), 2);
-      var lone = portholeScene([PhysicsEngine.createCircle(400, 200, 10, false)]);
+      var clear = drop(portalScene([PhysicsEngine.createCircle(525, 200, 10, false)]), 2);
+      var lone = portalScene([PhysicsEngine.createCircle(400, 200, 10, false)]);
       lone.bodies.splice(1, 1);
       var alone = drop(lone, 1);
       var ok = onBack.stayedAbove && onBack.bounced && !onBack.warped && onEnd.warped && !onEnd.bounced &&
@@ -4046,20 +4046,20 @@
         pass: ok,
         detail: "onto the back: bounced=" + onBack.bounced + " warped=" + onBack.warped + "; onto a rounded end's front: warped=" + onEnd.warped +
           " bounced=" + onEnd.bounced + "; clear of the end: warped=" + clear.warped + " bounced=" + clear.bounced + " fell past=" + !clear.stayedAbove +
-          "; lone port hole: bounced=" + alone.bounced,
+          "; lone portal: bounced=" + alone.bounced,
       };
     }
   );
 
   addTest(
-    "A port hole's outline is its oval: a ball or a line meets the drawn shape, not a capsule",
-    "the outline is two big arcs and two tip circles of half the thickness (PhysicsEngine.portholeOval), within a pixel of the approved ellipse: over the thin part near an end a ball touches nothing where a capsule would have held it, a ball onto the arc gets the arc's normal, a ball at a tip the tip's, a line across the back rests on the arc, a sweep lands on the arc at the crossing instant, and a moving port hole sees the same contact in its own frame",
+    "A portal's outline is its oval: a ball or a line meets the drawn shape, not a capsule",
+    "the outline is two big arcs and two tip circles of half the thickness (PhysicsEngine.portalOval), within a pixel of the approved ellipse: over the thin part near an end a ball touches nothing where a capsule would have held it, a ball onto the arc gets the arc's normal, a ball at a tip the tip's, a line across the back rests on the arc, a sweep lands on the arc at the crossing instant, and a moving portal sees the same contact in its own frame",
     function () {
-      function ph(angle, anchored) { var p = PhysicsEngine.createPorthole(400, 400, 200, angle, "orange", anchored === undefined ? true : anchored); PhysicsEngine.computeMass(p); return p; }
+      function ph(angle, anchored) { var p = PhysicsEngine.createPortal(400, 400, 200, angle, "orange", anchored === undefined ? true : anchored); PhysicsEngine.computeMass(p); return p; }
       function ball(x, y, r, vx, vy) { var b = PhysicsEngine.createCircle(x, y, r, false); b.vx = vx || 0; b.vy = vy || 0; PhysicsEngine.computeMass(b); return b; }
       function line(x, y, len, angle) { var l = PhysicsEngine.createLine(x, y, len, angle, false); PhysicsEngine.computeMass(l); return l; }
       function near(a, b, tol) { return Math.abs(a - b) <= tol; }
-      var o = PhysicsEngine.portholeOval(200);
+      var o = PhysicsEngine.portalOval(200);
       var backAt95 = -o.cy + Math.sqrt(o.R * o.R - 95 * 95);
       var clear = PhysicsEngine.collidePair(ph(0), ball(495, 414, 5), DT);
       var onArc = PhysicsEngine.collidePair(ph(0), ball(495, 409, 5), DT);
@@ -4080,17 +4080,17 @@
       return {
         pass: ok,
         detail: "back arc 95px along sits " + backAt95.toFixed(2) + "px behind the center line; ball over the thin end: " + (clear ? "HELD" : "free") +
-          "; onto the arc: " + arcOk + "; at the tip: " + tipOk + "; swept: " + sweptOk + "; line across the back: " + lineOk + "; moving port hole: " + frameOk,
+          "; onto the arc: " + arcOk + "; at the tip: " + tipOk + "; swept: " + sweptOk + "; line across the back: " + lineOk + "; moving portal: " + frameOk,
       };
     }
   );
 
   addTest(
-    "JS engine and GPU compiler agree on a bounce off a port hole's back, in float32 and double-float",
-    "the oval is written three times (physics-engine.js, and the float32 and multi-float spellings): a ball onto the back arc near an end, where the oval sits 5px lower than a capsule would, and a line dropped across the other port hole's back exercise the swept circle test and the segment test in each",
+    "JS engine and GPU compiler agree on a bounce off a portal's back, in float32 and double-float",
+    "the oval is written three times (physics-engine.js, and the float32 and multi-float spellings): a ball onto the back arc near an end, where the oval sits 5px lower than a capsule would, and a line dropped across the other portal's back exercise the swept circle test and the segment test in each",
     function () {
       function scene() {
-        var s = portholeScene([PhysicsEngine.createCircle(485, 300, 10, false), PhysicsEngine.createLine(430, 640, 80, 0, false)]);
+        var s = portalScene([PhysicsEngine.createCircle(485, 300, 10, false), PhysicsEngine.createLine(430, 640, 80, 0, false)]);
         s.bodies[0].angle = Math.PI; // faces down: the ball from above meets its back
         s.xInput = null; s.yInput = null; s.output = { body: 2, property: "y" };
         return s;
@@ -4118,16 +4118,16 @@
   );
 
   addTest(
-    "A fast rod meeting a lone port hole bounces off it, front or back (JS, float32, double-float)",
-    "a line not yet touching a port hole gets a contact when its nearest point, carried along by its motion, reaches the oval within the step: 2000px/s rods hitting the front (spinning at 25 rad/s) and the back stop short of the center line in all three spellings, and of 200 random rods at 200-2000px/s, spinning up to 10 rad/s, at most 15 end past the far face (a rod that turns another part in first, or that a hit spins hard, can still get through)",
+    "A fast rod meeting a lone portal bounces off it, front or back (JS, float32, double-float)",
+    "a line not yet touching a portal gets a contact when its nearest point, carried along by its motion, reaches the oval within the step: 2000px/s rods hitting the front (spinning at 25 rad/s) and the back stop short of the center line in all three spellings, and of 200 random rods at 200-2000px/s, spinning up to 10 rad/s, at most 15 end past the far face (a rod that turns another part in first, or that a hit spins hard, can still get through)",
     function () {
-      function ph() { return PhysicsEngine.createPorthole(400, 400, 200, 0, "orange", true); }
+      function ph() { return PhysicsEngine.createPortal(400, 400, 200, 0, "orange", true); }
       function scene() {
         var a = PhysicsEngine.createLine(400, 150, 120, 0.3, false), b = PhysicsEngine.createLine(400, 650, 120, -0.2, false);
         a.vy = PhysicsEngine.MAX_SPEED; a.w = 25; b.vy = -PhysicsEngine.MAX_SPEED;
         return { bodies: [ph(), a, b], hinges: [], edgeMode: "infinite" };
       }
-      // Deepest past the center line, toward the far face, while over the port hole: the front rod (1)
+      // Deepest past the center line, toward the far face, while over the portal: the front rod (1)
       // came from above, the back rod (2) from below.
       function deepest(rows) {
         var p = ph(), worst = -Infinity;
@@ -4143,7 +4143,7 @@
       function rnd() { seed = (seed * 16807) % 2147483647; return seed / 2147483647; }
       var through = 0, TRIALS = 200;
       for (var i = 0; i < TRIALS; i++) {
-        var tilt = (rnd() - 0.5) * 6, len = 20 + rnd() * 300, speed = 200 + rnd() * 1800, hole = PhysicsEngine.createPorthole(0, 0, 150 + rnd() * 300, tilt, "orange", true);
+        var tilt = (rnd() - 0.5) * 6, len = 20 + rnd() * 300, speed = 200 + rnd() * 1800, hole = PhysicsEngine.createPortal(0, 0, 150 + rnd() * 300, tilt, "orange", true);
         var nx = -Math.sin(tilt), ny = Math.cos(tilt), along = (rnd() - 0.5) * hole.length * 0.8, off = 60 + len / 2 + rnd() * 100, from = rnd() < 0.5 ? 1 : -1;
         var rod = PhysicsEngine.createLine(Math.cos(tilt) * along - nx * off * from, Math.sin(tilt) * along - ny * off * from, len, rnd() * Math.PI, false);
         rod.vx = nx * speed * from; rod.vy = ny * speed * from; rod.w = (rnd() - 0.5) * 20;
@@ -4164,16 +4164,16 @@
   );
 
   addTest(
-    "A line going through a port hole pair keeps its offset and comes out the other one (JS, float32, double-float)",
-    "a leader partway through the orange port hole's front has no contact with it, so four rods (140 to 300px, tilted up to 0.3 rad, up to 60px off center) warp on the same step in all three spellings, drift under 1px before it, and come out of the green one at their own offset",
+    "A line going through a portal pair keeps its offset and comes out the other one (JS, float32, double-float)",
+    "a leader partway through the orange portal's front has no contact with it, so four rods (140 to 300px, tilted up to 0.3 rad, up to 60px off center) warp on the same step in all three spellings, drift under 1px before it, and come out of the green one at their own offset",
     function () {
       function scene(len, tilt, off) {
-        var o = PhysicsEngine.createPorthole(400, 400, 200, 0, "orange", true), g = PhysicsEngine.createPorthole(1200, 300, 200, Math.PI, "green", true);
+        var o = PhysicsEngine.createPortal(400, 400, 200, 0, "orange", true), g = PhysicsEngine.createPortal(1200, 300, 200, Math.PI, "green", true);
         var rod = PhysicsEngine.createLine(400 + off, 360 - len / 2 * Math.cos(tilt), len, Math.PI / 2 + tilt, false);
         rod.vy = 600;
         return { bodies: [o, g, rod], hinges: [], edgeMode: "infinite" };
       }
-      // Length, tilt from upright and offset along the port hole; each lands on the front.
+      // Length, tilt from upright and offset along the portal; each lands on the front.
       var cases = [[140, 0.1, 60], [200, -0.25, -30], [300, 0.3, 40], [300, 0, 0]], detail = [], pass = true;
       cases.forEach(function (c) {
         var runs = { js: PhysicsEngine.runTrajectory(scene(c[0], c[1], c[2]), 40, DT), f32: PhysicsGPU.runSceneOnGPU(scene(c[0], c[1], c[2]), 40, "f32"), df: PhysicsGPU.runSceneOnGPU(scene(c[0], c[1], c[2]), 40, "df") };
@@ -4195,8 +4195,8 @@
   );
 
   addTest(
-    "A rod coming out beside the exit port hole's tip meets the same contacts in JS, float32 and double-float",
-    "port hole-line contact is the same nearest-point test and predicted touch in all three spellings: a 160px rod dropped 105px off the orange one's center comes out by the green one's tip partly behind its center line, and for three such drops the path after the pass matches JS within 1e-6px in double-float and 0.05px in float32",
+    "A rod coming out beside the exit portal's tip meets the same contacts in JS, float32 and double-float",
+    "portal-line contact is the same nearest-point test and predicted touch in all three spellings: a 160px rod dropped 105px off the orange one's center comes out by the green one's tip partly behind its center line, and for three such drops the path after the pass matches JS within 1e-6px in double-float and 0.05px in float32",
     function () {
       var drops = ["105:158", "92.7059:156.6176", "-108.6765:141.9118"], STEPS = 90, pass = true, detail = [];
       drops.forEach(function (at) {
@@ -4217,10 +4217,10 @@
   );
 
   addTest(
-    "A rod passing close by a lone port hole without touching it keeps its path (JS, float32, double-float)",
-    "a line not yet touching a port hole gets a contact only when its nearest point, carried along by its motion, reaches the oval within the step: seven rods at 600px/s to the cap, four of them spinning at 5.5 to 9.3 rad/s, that clear the oval by 3 to 12.5px fly on as they do with collisions off, with no contact in any spelling",
+    "A rod passing close by a lone portal without touching it keeps its path (JS, float32, double-float)",
+    "a line not yet touching a portal gets a contact only when its nearest point, carried along by its motion, reaches the oval within the step: seven rods at 600px/s to the cap, four of them spinning at 5.5 to 9.3 rad/s, that clear the oval by 3 to 12.5px fly on as they do with collisions off, with no contact in any spelling",
     function () {
-      // Port hole angle; rod length, angle and spin; velocity; position.
+      // Portal angle; rod length, angle and spin; velocity; position.
       var passes = [[0.00671, 104.24, 2.93899, 0, -569.62, 221.68, 491.876, 201.054], [1.61291, 65.243, 1.82952, 0, -775.81, 13.958, 678.046, 497.383],
         [2.11329, 155.67, 2.0789, 0, -803.08, -66.685, 672.73, 528.29], [2.84855, 71.719, 0.68877, -5.5287, -1019.28, 2065.96, 806.267, -212.013],
         [1.75454, 80.023, 0.12291, -8.5112, 1823.44, -644.109, -182.593, 399.58], [2.39571, 120.67, 2.09145, 6.0473, -1476.35, 1696.19, 919.14, -87.183],
@@ -4228,19 +4228,19 @@
       var STEPS = 40, pass = true, detail = [];
       passes.forEach(function (p) {
         function scene(collide) {
-          var ph = PhysicsEngine.createPorthole(400, 400, 200, p[0], "orange", true), rod = PhysicsEngine.createLine(p[6], p[7], p[1], p[2], false);
+          var ph = PhysicsEngine.createPortal(400, 400, 200, p[0], "orange", true), rod = PhysicsEngine.createLine(p[6], p[7], p[1], p[2], false);
           rod.w = p[3]; rod.vx = p[4]; rod.vy = p[5];
           return { bodies: [ph, rod], hinges: [], springs: [], edgeMode: "infinite", collisionsEnabled: collide };
         }
         var free = PhysicsEngine.runTrajectory(scene(false), STEPS, DT);
         // Its clearance on that free path, sampled along the rod and through each step.
-        var o = PhysicsEngine.portholeOval(200), cs = Math.cos(p[0]), sn = Math.sin(p[0]), clear = Infinity;
+        var o = PhysicsEngine.portalOval(200), cs = Math.cos(p[0]), sn = Math.sin(p[0]), clear = Infinity;
         for (var s = 0; s < STEPS; s++) {
           var a = s ? free[s - 1][1] : { x: p[6], y: p[7], angle: p[2] }, b = free[s][1];
           for (var q = 0; q < 20; q++) for (var u = 0; u <= 20; u++) {
             var f = q / 20, ang = a.angle + (b.angle - a.angle) * f, l = (u / 20 - 0.5) * p[1];
             var wx = a.x + (b.x - a.x) * f + Math.cos(ang) * l - 400, wy = a.y + (b.y - a.y) * f + Math.sin(ang) * l - 400;
-            clear = Math.min(clear, PhysicsEngine.portholeFeature(o, wx * cs + wy * sn, wy * cs - wx * sn).d - PhysicsEngine.LINE_THICKNESS / 2);
+            clear = Math.min(clear, PhysicsEngine.portalFeature(o, wx * cs + wy * sn, wy * cs - wx * sn).d - PhysicsEngine.LINE_THICKNESS / 2);
           }
         }
         var runs = { js: PhysicsEngine.runTrajectory(scene(true), STEPS, DT), f32: PhysicsGPU.runSceneOnGPU(scene(true), STEPS, "f32"), df: PhysicsGPU.runSceneOnGPU(scene(true), STEPS, "df") };
@@ -4260,10 +4260,10 @@
   );
 
   addTest(
-    "A wider exit port hole spreads the crossing point by the length ratio, and leaves the speed alone",
-    "20px off center into a 200px port hole comes out 40px off center of a 400px one, on the far side of its center (the turn is rigid); the overshoot past the line and the velocity are carried over unscaled",
+    "A wider exit portal spreads the crossing point by the length ratio, and leaves the speed alone",
+    "20px off center into a 200px portal comes out 40px off center of a 400px one, on the far side of its center (the turn is rigid); the overshoot past the line and the velocity are carried over unscaled",
     function () {
-      var scene = portholeScene([PhysicsEngine.createCircle(420, 200, 10, false)], { length: 400 });
+      var scene = portalScene([PhysicsEngine.createCircle(420, 200, 10, false)], { length: 400 });
       var plain = plainScene([PhysicsEngine.createCircle(420, 200, 10, false)]);
       var ball = scene.bodies[2], after = null, fall = null;
       for (var i = 0; i < 90 && !after; i++) {
@@ -4283,17 +4283,17 @@
 
   addTest(
     "A chain tied to the background bounces off the front; a free chain goes through whole, led by its first body",
-    "a port hole takes a body only when nothing holds it to the background: a world hinge or spring anywhere in its chain, or an anchored member, keeps it out. A free chain follows its leader, the lowest member that is no hinge child, and is carried as one piece; a trailing member reaching the front on its own bounces like anything else",
+    "a portal takes a body only when nothing holds it to the background: a world hinge or spring anywhere in its chain, or an anchored member, keeps it out. A free chain follows its leader, the lowest member that is no hinge child, and is carried as one piece; a trailing member reaching the front on its own bounces like anything else",
     function () {
       // A ball sprung to a point above it, dropped onto the front: tethered, so the front is a wall.
-      var tied = portholeScene([PhysicsEngine.createCircle(400, 300, 10, false)]);
+      var tied = portalScene([PhysicsEngine.createCircle(400, 300, 10, false)]);
       tied.springs.push({ bodyA: null, bodyB: 2, localAnchorA: { x: 400, y: 100 }, localAnchorB: { x: 0, y: 0 }, stiffness: 5000, restLength: 300 });
       var tiedLowest = -Infinity;
       for (var i = 0; i < 120; i++) { PhysicsEngine.step(tied, DT); tiedLowest = Math.max(tiedLowest, tied.bodies[2].y); }
       // Two balls joined by a spring, the leader (the lower index) below: it crosses and takes the other along.
       function pair() { return [PhysicsEngine.createCircle(400, 300, 10, false), PhysicsEngine.createCircle(400, 200, 10, false)]; }
       var spring = { bodyA: 0, bodyB: 1, localAnchorA: { x: 0, y: 0 }, localAnchorB: { x: 0, y: 0 }, stiffness: 5000, restLength: 100 };
-      var free = portholeScene(pair()), plain = plainScene(pair());
+      var free = portalScene(pair()), plain = plainScene(pair());
       free.springs.push({ bodyA: 2, bodyB: 3, localAnchorA: { x: 0, y: 0 }, localAnchorB: { x: 0, y: 0 }, stiffness: 5000, restLength: 100 });
       plain.springs.push(spring);
       var carried = null;
@@ -4309,7 +4309,7 @@
         }
       }
       // The same pair the other way up: the trailing member meets the front first and bounces.
-      var trailing = portholeScene([PhysicsEngine.createCircle(400, 200, 10, false), PhysicsEngine.createCircle(400, 300, 10, false)]);
+      var trailing = portalScene([PhysicsEngine.createCircle(400, 200, 10, false), PhysicsEngine.createCircle(400, 300, 10, false)]);
       trailing.springs.push({ bodyA: 2, bodyB: 3, localAnchorA: { x: 0, y: 0 }, localAnchorB: { x: 0, y: 0 }, stiffness: 5000, restLength: 100 });
       var trailingLowest = -Infinity;
       for (var k = 0; k < 36; k++) { PhysicsEngine.step(trailing, DT); trailingLowest = Math.max(trailingLowest, trailing.bodies[3].y); }
@@ -4324,11 +4324,11 @@
   );
 
   addTest(
-    "JS engine and GPU compiler agree on a port hole pass, in float32 and double-float",
+    "JS engine and GPU compiler agree on a portal pass, in float32 and double-float",
     "the front test, the crossing test and the exit mapping are written three times (physics-engine.js, and the float32 and multi-float spellings in generateStepOnceGLSL): a turn through a right-facing exit exercises every term of the mapping, and a float32 stage left in the df chain shows up as an error ~1000x larger",
     function () {
       function scene() {
-        var s = portholeScene([PhysicsEngine.createCircle(420, 200, 10, false)], { x: 800, y: 300, angle: Math.PI / 2 });
+        var s = portalScene([PhysicsEngine.createCircle(420, 200, 10, false)], { x: 800, y: 300, angle: Math.PI / 2 });
         s.xInput = null; s.yInput = null; s.output = { body: 2, property: "y" };
         return s;
       }
@@ -4347,18 +4347,18 @@
       var cameOut = js.bodies[2].x > 800;
       return {
         pass: cameOut && worst < 0.01 && dfErr < 1e-6 && dfErr * 20 < f32Err,
-        detail: "ball out of the right-facing port hole=" + cameOut + "; float32 trajectory within " + worst.toFixed(5) + "px of JS over " + STEPS +
+        detail: "ball out of the right-facing portal=" + cameOut + "; float32 trajectory within " + worst.toFixed(5) + "px of JS over " + STEPS +
           " steps; the grid shader's end state: df off by " + dfErr.toExponential(2) + "px, float32 by " + f32Err.toExponential(2) + "px",
       };
     }
   );
 
   addTest(
-    "JS engine and GPU compiler agree on a port hole pass under Mutual Gravity, with a sprung pair",
-    "the exit-side re-integration tells a chain's own forces (turned with it) from the outside pull (taken at each side of the warp, from every body outside the chain): the shader builds that pull from its own Mutual Gravity terms, so a sprung pair drawn into an anchored port hole has to come out where the JS engine puts it, in float32 and double-float",
+    "JS engine and GPU compiler agree on a portal pass under Mutual Gravity, with a sprung pair",
+    "the exit-side re-integration tells a chain's own forces (turned with it) from the outside pull (taken at each side of the warp, from every body outside the chain): the shader builds that pull from its own Mutual Gravity terms, so a sprung pair drawn into an anchored portal has to come out where the JS engine puts it, in float32 and double-float",
     function () {
       function scene() {
-        var s = portholeScene([PhysicsEngine.createCircle(420, 230, 10, false), PhysicsEngine.createCircle(420, 150, 10, false)], { x: 800, y: 300, angle: Math.PI / 2 });
+        var s = portalScene([PhysicsEngine.createCircle(420, 230, 10, false), PhysicsEngine.createCircle(420, 150, 10, false)], { x: 800, y: 300, angle: Math.PI / 2 });
         s.mutualGravity = true;
         s.springs.push({ bodyA: 2, bodyB: 3, localAnchorA: { x: 0, y: 0 }, localAnchorB: { x: 0, y: 0 }, stiffness: 5000, restLength: 80 });
         s.xInput = null; s.yInput = null; s.output = { body: 2, property: "y" };
@@ -4384,8 +4384,8 @@
     }
   );
 
-  // A port hole turning in place: hinged to the background at its center, set spinning.
-  function spinPorthole(scene, index, angle, w) {
+  // A portal turning in place: hinged to the background at its center, set spinning.
+  function spinPortal(scene, index, angle, w) {
     var p = scene.bodies[index];
     p.isAnchored = false; p.angle = angle; p.w = w;
     scene.hinges.push({ bodyA: null, bodyB: index, localAnchorA: { x: p.x, y: p.y }, localAnchorB: { x: 0, y: 0 } });
@@ -4394,13 +4394,13 @@
   }
 
   addTest(
-    "A moving exit port hole hands over its own motion: what leaves it carries the spot's velocity, and its spin",
-    "velocity and spin are kept relative to the port holes as they stood at the crossing instant, so a spinning exit (hinged at its center, turning at 3 rad/s) adds the velocity of the spot the ball leaves from, w x r, to what a still exit standing at that instant's angle gives, moves the landing by that velocity over the rest of the step, and hands the ball its spin. A still pair adds nothing, so every earlier scene is untouched",
+    "A moving exit portal hands over its own motion: what leaves it carries the spot's velocity, and its spin",
+    "velocity and spin are kept relative to the portals as they stood at the crossing instant, so a spinning exit (hinged at its center, turning at 3 rad/s) adds the velocity of the spot the ball leaves from, w x r, to what a still exit standing at that instant's angle gives, moves the landing by that velocity over the rest of the step, and hands the ball its spin. A still pair adds nothing, so every earlier scene is untouched",
     function () {
       var OMEGA = 3, STEPS = 60;
       function scene(angle, spinning) {
-        var s = portholeScene([PhysicsEngine.createCircle(420, 200, 10, false)], { x: 800, y: 300, angle: angle });
-        if (spinning) spinPorthole(s, 1, angle, OMEGA);
+        var s = portalScene([PhysicsEngine.createCircle(420, 200, 10, false)], { x: 800, y: 300, angle: angle });
+        if (spinning) spinPortal(s, 1, angle, OMEGA);
         s.bodies.forEach(PhysicsEngine.computeMass);
         return s;
       }
@@ -4439,11 +4439,11 @@
   );
 
   addTest(
-    "A port hole that sweeps over a resting ball throws it out of the other at the sweep's speed, spinning the other way",
-    "the entry side of the same rule: what comes out is the ball's velocity relative to the spot that crossed it. Reported from a map with a swinging port hole: a ball it swept up came out of the still one at its own near-zero speed, pointing back into the face it had just left, and the pair traded it back and forth for twenty steps",
+    "A portal that sweeps over a resting ball throws it out of the other at the sweep's speed, spinning the other way",
+    "the entry side of the same rule: what comes out is the ball's velocity relative to the spot that crossed it. Reported from a map with a swinging portal: a ball it swept up came out of the still one at its own near-zero speed, pointing back into the face it had just left, and the pair traded it back and forth for twenty steps",
     function () {
       var OMEGA = 3, STEPS = 30;
-      var s = spinPorthole(portholeScene([PhysicsEngine.createCircle(480, 400, 10, false)]), 0, 0.9 * Math.PI, OMEGA);
+      var s = spinPortal(portalScene([PhysicsEngine.createCircle(480, 400, 10, false)]), 0, 0.9 * Math.PI, OMEGA);
       var ball = s.bodies[2], green = s.bodies[1], passAt = -1, outward = 0, awayAfter = true, lastF = 0;
       for (var i = 0; i < STEPS; i++) {
         var bx = ball.x, by = ball.y;
@@ -4462,17 +4462,17 @@
   );
 
   addTest(
-    "JS engine and GPU compiler agree on a pass through a moving port hole, in float32 and double-float",
-    "the port holes' own velocity at the crossing spots, and the spin handed over, are written three times as well: a spinning entry and a spinning exit, each hinged at its center, exercise the subtraction and the addition in both shader spellings",
+    "JS engine and GPU compiler agree on a pass through a moving portal, in float32 and double-float",
+    "the portals' own velocity at the crossing spots, and the spin handed over, are written three times as well: a spinning entry and a spinning exit, each hinged at its center, exercise the subtraction and the addition in both shader spellings",
     function () {
       var OMEGA = 3;
       function exitSpins() {
-        var s = spinPorthole(portholeScene([PhysicsEngine.createCircle(420, 200, 10, false)], { x: 800, y: 300, angle: Math.PI / 2 }), 1, Math.PI / 2, OMEGA);
+        var s = spinPortal(portalScene([PhysicsEngine.createCircle(420, 200, 10, false)], { x: 800, y: 300, angle: Math.PI / 2 }), 1, Math.PI / 2, OMEGA);
         s.xInput = null; s.yInput = null; s.output = { body: 2, property: "y" };
         return s;
       }
       function entrySpins() {
-        var s = spinPorthole(portholeScene([PhysicsEngine.createCircle(480, 400, 10, false)]), 0, 0.9 * Math.PI, OMEGA);
+        var s = spinPortal(portalScene([PhysicsEngine.createCircle(480, 400, 10, false)]), 0, 0.9 * Math.PI, OMEGA);
         s.xInput = null; s.yInput = null; s.output = { body: 2, property: "y" };
         return s;
       }
@@ -4499,8 +4499,8 @@
     }
   );
 
-  // Reported from the map: two free port holes sprung together, spinning and accelerating, and a fast ball.
-  function sprungPortholeScene(mutualGravity) {
+  // Reported from the map: two free portals sprung together, spinning and accelerating, and a fast ball.
+  function sprungPortalScene(mutualGravity) {
     var authored = ShareUrl.decode("#map/v:1.0,body:ci:-188.9961:222.414:0:30;po:-292.1328:-62.0696:-.028:131.4327;pg:187.1642:309.2142:-.0684:133.4833,sprg:1:2:66.2561:-.4076:-64.1772:.052:5300:140,xinp:0.vx,yinp:0.vy,outp:0.y,edge:infi,mgrv:t,coll:f,step:50,frmw:1003,frmh:1092").scene;
     var scene = PhysicsCoords.toEngineJSON(authored, authored);
     scene.bodies.forEach(PhysicsEngine.computeMass);
@@ -4509,7 +4509,7 @@
   }
 
   // Bisects along a map segment to the boundary where the pass moves a step, and compares the two sides.
-  function movingPortholeSides(scene) {
+  function movingPortalSides(scene) {
     var STEPS = 50, A = [1382.46685, 534.076349], B = [2055.203987, 528.069767];
     function run(t) {
       var s = PhysicsGridCodegen.computeOffsetSceneNumeric(scene, A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t), ball = s.bodies[0], passStep = -1;
@@ -4528,10 +4528,10 @@
   }
 
   addTest(
-    "A pass through a moving port hole is continuous where the crossing moves from one step to the next",
-    "reported from the map as a sawtooth 50px tall after 50 steps: the hand-over took the port holes' velocity, spin and turn from the end of the step, while they spin at 6 rad/s and gain 20px/s a step from their spring, so the handed-over velocity was off by the time left after the crossing, resetting at each step. Both port holes are now taken as they stood at the crossing instant and what passes flies from its exit spot for the rest of the step. Bisected to the boundary where the pass moves a step, the two sides must agree to rounding with the spring alone. Under Mutual Gravity the ball's own pull on the port holes is still taken from where it started the step, which leaves a small mismatch",
+    "A pass through a moving portal is continuous where the crossing moves from one step to the next",
+    "reported from the map as a sawtooth 50px tall after 50 steps: the hand-over took the portals' velocity, spin and turn from the end of the step, while they spin at 6 rad/s and gain 20px/s a step from their spring, so the handed-over velocity was off by the time left after the crossing, resetting at each step. Both portals are now taken as they stood at the crossing instant and what passes flies from its exit spot for the rest of the step. Bisected to the boundary where the pass moves a step, the two sides must agree to rounding with the spring alone. Under Mutual Gravity the ball's own pull on the portals is still taken from where it started the step, which leaves a small mismatch",
     function () {
-      var spring = movingPortholeSides(sprungPortholeScene(false)), mutual = movingPortholeSides(sprungPortholeScene(true));
+      var spring = movingPortalSides(sprungPortalScene(false)), mutual = movingPortalSides(sprungPortalScene(true));
       function show(r) { return r ? "pass " + r.steps + ": the sides differ by " + r.dp.toExponential(2) + "px and " + r.dv.toExponential(2) + "px/s" : "no boundary found"; }
       return {
         pass: !!spring && !!mutual && spring.dp < 1e-6 && spring.dv < 1e-6 && mutual.dp < 1.5,
@@ -4541,11 +4541,11 @@
   );
 
   addTest(
-    "JS engine and GPU compiler agree on a pass between two moving port holes, in float32 and double-float",
-    "the crossing-instant state of both port holes (pose, velocity and spin interpolated through the step, the turn between them, the exit spot) and the flight from that spot are in both shader spellings as well: the reported sprung pair under Mutual Gravity, collisions off, followed through the pass at one map point",
+    "JS engine and GPU compiler agree on a pass between two moving portals, in float32 and double-float",
+    "the crossing-instant state of both portals (pose, velocity and spin interpolated through the step, the turn between them, the exit spot) and the flight from that spot are in both shader spellings as well: the reported sprung pair under Mutual Gravity, collisions off, followed through the pass at one map point",
     function () {
       var STEPS = 25, WX = 1700, WY = 530;
-      var scene = sprungPortholeScene(true);
+      var scene = sprungPortalScene(true);
       var js = PhysicsGridCodegen.computeOffsetSceneNumeric(scene, WX, WY);
       var traj = PhysicsGPU.runCompiledTrajectoryOnGPU(PhysicsGridCodegen.compileHoverTrajectoryGLSL(scene, WX, WY, STEPS, "f32"), STEPS);
       var worst = 0, passAt = -1;
@@ -4568,7 +4568,7 @@
 
   addTest(
     "Friction takes the slider's share of speed each second, settles toward a terminal speed under gravity, and at 0 is the engine with no field at all",
-    "scene.friction is the share of speed lost per second: a body coasting at 1000px/s for 60 steps at 50% keeps 500px/s to rounding, its fall approaches a terminal speed by the same exponential, and 0 steps bit for bit like a scene with no friction key through a bounce and a port hole pass. The engine clamps the field and reads garbage as 0",
+    "scene.friction is the share of speed lost per second: a body coasting at 1000px/s for 60 steps at 50% keeps 500px/s to rounding, its fall approaches a terminal speed by the same exponential, and 0 steps bit for bit like a scene with no friction key through a bounce and a portal pass. The engine clamps the field and reads garbage as 0",
     function () {
       var f = 0.5, k = -Math.log(1 - f), E = Math.exp(-k * DT), phi = -Math.expm1(-k * DT) / (k * DT);
       var coast = plainScene([PhysicsEngine.createCircle(100, 100, 10, false)]);
@@ -4577,7 +4577,7 @@
       var wantVx = 1000, wantVy = 0;
       for (var n = 0; n < 60; n++) { wantVx = wantVx * E; wantVy = wantVy * E + PhysicsEngine.GRAVITY * DT * phi; }
       function build(withKey) {
-        var s = portholeScene([PhysicsEngine.createCircle(420, 200, 10, false), PhysicsEngine.createCircle(300, 100, 12, false), PhysicsEngine.createLine(300, 500, 300, 0.1, true)], { x: 800, y: 300, angle: Math.PI / 2 });
+        var s = portalScene([PhysicsEngine.createCircle(420, 200, 10, false), PhysicsEngine.createCircle(300, 100, 12, false), PhysicsEngine.createLine(300, 500, 300, 0.1, true)], { x: 800, y: 300, angle: Math.PI / 2 });
         if (withKey) s.friction = 0;
         return s;
       }
@@ -4601,7 +4601,7 @@
 
   addTest(
     "A friction leg composes: a step split anywhere gives the whole step, a leg run backwards undoes it, and a zero-length leg is the identity",
-    "the leg is the exact solution of dv/dt = a - k v, so the two legs either side of a contact, or the entry and exit legs of a port hole pass, add up to one leg below the speed cap, and a hit body's second leg, which runs backwards once the hit is past mid-step, must undo exactly what the first overran. tRest is 0 for every untouched body every step, so dt = 0 must hand the velocity back untouched, not NaN",
+    "the leg is the exact solution of dv/dt = a - k v, so the two legs either side of a contact, or the entry and exit legs of a portal pass, add up to one leg below the speed cap, and a hit body's second leg, which runs backwards once the hit is past mid-step, must undo exactly what the first overran. tRest is 0 for every untouched body every step, so dt = 0 must hand the velocity back untouched, not NaN",
     function () {
       var seed = 7, worst = 0, worstBack = 0, identity = true;
       function rnd() { seed = (seed * 48271) % 2147483647; return seed / 2147483647; }
@@ -4623,7 +4623,7 @@
     "Friction reaches every shader build and every copy of a scene, and at 0 leaves the shader text without it",
     "the rate is threaded by hand into each libraryGLSL call (the builder's Play trajectory, the map's grid preamble, the hover and Inspect trajectory); a missed one compiles and runs frictionless, so Play, the map and Inspect would quietly disagree. cloneScene, the share link and the authored JSON must keep the field as well, since the bounce tally and the sounds step a clone",
     function () {
-      var scene = portholeScene([PhysicsEngine.createCircle(420, 200, 10, false)], { x: 800, y: 300, angle: Math.PI / 2 });
+      var scene = portalScene([PhysicsEngine.createCircle(420, 200, 10, false)], { x: 800, y: 300, angle: Math.PI / 2 });
       scene.xInput = { body: 2, property: "x" }; scene.yInput = { body: 2, property: "y" }; scene.output = { body: 2, property: "y" };
       var bare = PhysicsEngine.cloneScene(scene);
       delete bare.friction;
@@ -4663,7 +4663,7 @@
   );
 
   addTest(
-    "JS engine and GPU compiler agree with friction on: a bounce, and a pass between two moving port holes, in float32 and double-float",
+    "JS engine and GPU compiler agree with friction on: a bounce, and a pass between two moving portals, in float32 and double-float",
     "the leg is spelled three times (physics-engine.js, and the float32 and multi-float advanceVelocity): a ball bouncing on a tilted line exercises the split legs, and the reported sprung pair the entry and exit legs of a transport whose velocity map is affine; the multi-float series and its precomputed whole-step factors must land where Math.expm1 puts the JS engine",
     function () {
       function bounce() {
@@ -4681,7 +4681,7 @@
         worst = Math.max(worst, dist(js.bodies[1].x, js.bodies[1].y, traj[i][1].x, traj[i][1].y));
       }
       var dfErr = gridResidualAtPoint(bounce(), STEPS, 0, 0, "df", 1, cpuStateAt(bounce(), 0, 0, STEPS, 1)).err;
-      var scene = sprungPortholeScene(false);
+      var scene = sprungPortalScene(false);
       scene.friction = 0.3;
       var S2 = 25, WX = 1700, WY = 530, js2 = PhysicsGridCodegen.computeOffsetSceneNumeric(scene, WX, WY);
       var traj2 = PhysicsGPU.runCompiledTrajectoryOnGPU(PhysicsGridCodegen.compileHoverTrajectoryGLSL(scene, WX, WY, S2, "f32"), S2), worst2 = 0, passAt = -1;
@@ -4695,7 +4695,7 @@
       return {
         pass: bounced && worst < 0.01 && dfErr < 1e-6 && passAt > 0 && worst2 < 0.05 && dfErr2 < 1e-5,
         detail: "bounce (happened=" + bounced + "): float32 within " + worst.toFixed(5) + "px of JS over " + STEPS + " steps, the df end state off by " + dfErr.toExponential(2) +
-          "px; moving port holes: pass at step " + passAt + ", float32 within " + worst2.toFixed(5) + "px over " + S2 + " steps, df off by " + dfErr2.toExponential(2) + "px",
+          "px; moving portals: pass at step " + passAt + ", float32 within " + worst2.toFixed(5) + "px over " + S2 + " steps, df off by " + dfErr2.toExponential(2) + "px",
       };
     }
   );
@@ -4739,25 +4739,25 @@
   );
 
   addTest(
-    "With friction on, a port hole pass is still continuous where the crossing moves from one step to the next",
+    "With friction on, a portal pass is still continuous where the crossing moves from one step to the next",
     "the speed lost is worked out for the share of the step before the crossing and the share after, each on its own side's velocity, the way gravity already is; bisected to the boundary under gravity, under Mutual Gravity, for a sprung pair and through the reported moving pair, the two sides agree as closely as they do without friction",
     function () {
       var F = 0.3, exit = { x: 800, y: 300, angle: Math.PI / 2 };
       function withFriction(s) { s.friction = F; return s; }
       var results = [
-        portholeTooth("gravity", function (y) { return withFriction(portholeScene([PhysicsEngine.createCircle(420, y, 10, false)], exit)); }, 70),
-        portholeTooth("mutual gravity", function (y) {
-          var s = withFriction(portholeScene([PhysicsEngine.createCircle(420, y, 10, false)], exit));
+        portalTooth("gravity", function (y) { return withFriction(portalScene([PhysicsEngine.createCircle(420, y, 10, false)], exit)); }, 70),
+        portalTooth("mutual gravity", function (y) {
+          var s = withFriction(portalScene([PhysicsEngine.createCircle(420, y, 10, false)], exit));
           s.mutualGravity = true;
           return s;
         }, 70),
-        portholeTooth("sprung pair", function (y) {
-          var s = withFriction(portholeScene([PhysicsEngine.createCircle(420, y, 10, false), PhysicsEngine.createCircle(420, y - 90, 10, false)], exit));
+        portalTooth("sprung pair", function (y) {
+          var s = withFriction(portalScene([PhysicsEngine.createCircle(420, y, 10, false), PhysicsEngine.createCircle(420, y - 90, 10, false)], exit));
           s.springs.push({ bodyA: 2, bodyB: 3, localAnchorA: { x: 0, y: 0 }, localAnchorB: { x: 0, y: 0 }, stiffness: 5000, restLength: 90 });
           return s;
         }, 70),
       ];
-      var moving = movingPortholeSides(withFriction(sprungPortholeScene(false)));
+      var moving = movingPortalSides(withFriction(sprungPortalScene(false)));
       var movingOk = !!moving && moving.dp < 1e-6 && moving.dv < 1e-6;
       return {
         pass: results.every(function (r) { return r.pass; }) && movingOk,
@@ -4841,11 +4841,11 @@
   );
 
   addTest(
-    "The fractal grid's per-pixel codegen carries a free hinged chain through a port hole as one piece",
+    "The fractal grid's per-pixel codegen carries a free hinged chain through a portal as one piece",
     "the grid builds each pixel's scene symbolically (generateGridInitialStateGLSL) and steps it with the shared loop, with the chain's transport emitted per member: a hinged pair of lines, the parent leading and the child trailing above it, has to be carried through the turned exit as one piece and match the JS engine for that pixel. Compared through the steps around the pass: a trailing member lands behind the exit and meets its back, and the hinge solver's reply to that is not what this test is about",
     function () {
       var STEPS = 80, WORLD_X = 9, AFTER = 8;
-      var scene = portholeScene([
+      var scene = portalScene([
         PhysicsEngine.createLine(400, 200, 60, 0, false),
         PhysicsEngine.createLine(400, 140, 60, 0, false),
       ], { x: 800, y: 300, angle: Math.PI / 2 });
@@ -4880,16 +4880,16 @@
   );
 
   addTest(
-    "A port hole pass is not an edge: Sticky Edges play on through it, and still stop at a real edge later",
-    "reported from the map: a replay froze at the pass. The sticky stop, in the grid shader and in findWrapStopStep alike, took any jump of over half the frame in one step for an edge wrap, and a port hole moves a body that far. Both now read the step's own wrap flags (PhysicsEngine.step's wrapFlags, the shader's g_wrapDx/Dy, carried in the trajectory's sentinel column), so a pass is a pass and the run goes on until the ball really leaves the frame",
+    "A portal pass is not an edge: Sticky Edges play on through it, and still stop at a real edge later",
+    "reported from the map: a replay froze at the pass. The sticky stop, in the grid shader and in findWrapStopStep alike, took any jump of over half the frame in one step for an edge wrap, and a portal moves a body that far. Both now read the step's own wrap flags (PhysicsEngine.step's wrapFlags, the shader's g_wrapDx/Dy, carried in the trajectory's sentinel column), so a pass is a pass and the run goes on until the ball really leaves the frame",
     function () {
       // The reported scene: the pass jumps 554px across an 1104px frame; the ball then drifts off the left edge.
       var scene = {
         mutualGravity: false, edgeMode: "sticky", frameWidth: 1104, frameHeight: 862,
         bodies: [
           PhysicsEngine.createCircle(279.19, 240.21, 30, false),
-          PhysicsEngine.createPorthole(429.38, 644.51, 262.1112, 0.2538, "orange", true),
-          PhysicsEngine.createPorthole(808.16, 562.04, 79.2456, 5.3053, "green", true),
+          PhysicsEngine.createPortal(429.38, 644.51, 262.1112, 0.2538, "orange", true),
+          PhysicsEngine.createPortal(808.16, 562.04, 79.2456, 5.3053, "green", true),
         ],
         hinges: [], springs: [], xInput: null, yInput: null, output: { body: 0, property: "y" },
       };
@@ -4924,20 +4924,20 @@
   );
 
   addTest(
-    "A shared link carries both port holes with their colors, and refuses a second of either",
-    "share-url.js: a port hole's shape code is its color (po, pg), so the editor can tell which one is missing; two of a color would leave the pair undefined",
+    "A shared link carries both portals with their colors, and refuses a second of either",
+    "share-url.js: a portal's shape code is its color (po, pg), so the editor can tell which one is missing; two of a color would leave the pair undefined",
     function () {
-      var scene = portholeScene([PhysicsEngine.createCircle(420, 200, 10, false)]);
+      var scene = portalScene([PhysicsEngine.createCircle(420, 200, 10, false)]);
       scene.xInput = null; scene.yInput = null; scene.output = null;
       var back = ShareUrl.decode("#" + ShareUrl.encode({ page: "bldr", scene: scene })).scene;
-      var ports = back.bodies.filter(function (b) { return b.type === "porthole"; });
+      var ports = back.bodies.filter(function (b) { return b.type === "portal"; });
       var colors = ports.map(function (b) { return b.color; }).join(",");
       var sameShape = ports.every(function (b) { return b.length === 200 && b.isAnchored; });
       var refused = null;
       try { ShareUrl.decode("#bldr/v:1.0,body:po:0:0:0:200!;po:0:300:3.1416:200!,frmw:900,frmh:600"); } catch (err) { refused = err.message; }
       return {
         pass: colors === "orange,green" && sameShape && /second/.test(refused || ""),
-        detail: "port holes came back as " + colors + " with their length and anchoring=" + sameShape + "; two orange ones: " + (refused ? "refused (" + refused + ")" : "ACCEPTED"),
+        detail: "portals came back as " + colors + " with their length and anchoring=" + sameShape + "; two orange ones: " + (refused ? "refused (" + refused + ")" : "ACCEPTED"),
       };
     }
   );
@@ -5032,7 +5032,7 @@
         ["one body, no bodyB key at all", { body: 1, property: "y" }],
         ["bounce count", { body: 2, bodyB: null, property: "bounces" }],
         ["cumulative rotation", { body: 2, bodyB: null, property: "totalRotation" }],
-        ["port hole warps", { body: 2, property: "warps" }],
+        ["portal warps", { body: 2, property: "warps" }],
         ["pair average", { body: 0, bodyB: 2, property: "x" }],
         ["distance", { body: 0, bodyB: 2, property: "distance" }],
       ];
@@ -6003,10 +6003,10 @@
   );
 
   addTest(
-    "Grid playback: a port hole scene's state round trip is exact",
-    "a pass through a port hole rewrites positions, angles and velocities from the step's own start positions: none of it needs carrying between draws, and a saved-and-reloaded run must land on the same bits",
+    "Grid playback: a portal scene's state round trip is exact",
+    "a pass through a portal rewrites positions, angles and velocities from the step's own start positions: none of it needs carrying between draws, and a saved-and-reloaded run must land on the same bits",
     function () {
-      var scene = portholeScene([PhysicsEngine.createCircle(420, 200, 10, false)], { x: 800, y: 300, angle: Math.PI / 2 });
+      var scene = portalScene([PhysicsEngine.createCircle(420, 200, 10, false)], { x: 800, y: 300, angle: Math.PI / 2 });
       scene.xInput = { body: 2, property: "x" }; scene.yInput = null; scene.output = { body: 2, property: "y" };
       return comparePlaybackLegs(scene, "f32", 90, [20, 30, 40], 8);
     }
@@ -6058,8 +6058,8 @@
         { type: "line", x: -334, y: -173.5, angle: -0.7679, isAnchored: true, length: 479, vx: 0, vy: 0, w: 0 },
         { type: "line", x: 0, y: 0, angle: 3.1416, isAnchored: false, length: 95.5, vx: 12.5, vy: 0, w: 0 },
         { type: "circle", x: 410.0625, y: 288.125, angle: 0, isAnchored: false, radius: 18.5, vx: 0, vy: 44, w: -0.12 },
-        { type: "porthole", color: "orange", x: 120, y: -40, angle: 0, isAnchored: true, length: 220, vx: 0, vy: 0, w: 0 },
-        { type: "porthole", color: "green", x: -300, y: 180, angle: 2.2, isAnchored: false, length: 160, vx: 0, vy: 0, w: 0.2 },
+        { type: "portal", color: "orange", x: 120, y: -40, angle: 0, isAnchored: true, length: 220, vx: 0, vy: 0, w: 0 },
+        { type: "portal", color: "green", x: -300, y: 180, angle: 2.2, isAnchored: false, length: 160, vx: 0, vy: 0, w: 0.2 },
       ],
       hinges: [
         { bodyA: null, bodyB: 0, localAnchorA: { x: -188, y: 51.5 }, localAnchorB: { x: -70, y: 1 } },

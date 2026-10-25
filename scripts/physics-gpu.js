@@ -9,7 +9,7 @@
   var MAX_BODIES = 6;
 
   var LINE_THICKNESS = global.PhysicsEngine.LINE_THICKNESS;
-  var PORTHOLE_THICKNESS = global.PhysicsEngine.PORTHOLE_THICKNESS;
+  var PORTAL_THICKNESS = global.PhysicsEngine.PORTAL_THICKNESS;
   var LINE_PARALLEL_EPS = 0.05;
   var RESTITUTION_THRESHOLD = 30;
   var VELOCITY_ITERATIONS = 8;
@@ -63,7 +63,7 @@
     "struct ClosestPair { vec2 c1; vec2 c2; };",
     "",
     "const float LINE_THICKNESS = " + fnum(LINE_THICKNESS) + ";",
-    "const float PORTHOLE_THICKNESS = " + fnum(PORTHOLE_THICKNESS) + ";",
+    "const float PORTAL_THICKNESS = " + fnum(PORTAL_THICKNESS) + ";",
     "const float LINE_PARALLEL_EPS = " + fnum(LINE_PARALLEL_EPS) + ";",
     "const float LINE_END_SHARE = " + fnum(LINE_END_SHARE) + ";",
     "const float RESTITUTION_THRESHOLD = " + fnum(RESTITUTION_THRESHOLD) + ";",
@@ -581,19 +581,19 @@
     "  return result;",
     "}",
     "",
-    "// ---- Port hole outline (PhysicsEngine.portholeOval): two big arcs and two tip circles ----",
-    "const float PORTHOLE_TIP_RADIUS = " + fnum(global.PhysicsEngine.PORTHOLE_TIP_RADIUS) + ";",
+    "// ---- Portal outline (PhysicsEngine.portalOval): two big arcs and two tip circles ----",
+    "const float PORTAL_TIP_RADIUS = " + fnum(global.PhysicsEngine.PORTAL_TIP_RADIUS) + ";",
     "struct Oval { float a; float b; float r; float R; float cy; float ax; };",
-    "Oval portholeOval(float halfLen) {",
+    "Oval portalOval(float halfLen) {",
     "  Oval o;",
-    "  o.b = PORTHOLE_THICKNESS * 0.5; o.r = PORTHOLE_TIP_RADIUS; o.a = halfLen + o.b;",
+    "  o.b = PORTAL_THICKNESS * 0.5; o.r = PORTAL_TIP_RADIUS; o.a = halfLen + o.b;",
     "  o.R = ((o.a - o.r) * (o.a - o.r) + o.b * o.b - o.r * o.r) / (2.0 * (o.b - o.r));",
     "  o.cy = o.R - o.b; o.ax = o.a - o.r;",
     "  return o;",
     "}",
     "// kind: 0 the back arc, 1 the front arc, 2 the left tip, 3 the right tip.",
     "struct Feature { int kind; vec2 c; float radius; float dist; float d; };",
-    "Feature portholeFeatureCircle(Oval o, int kind) {",
+    "Feature portalFeatureCircle(Oval o, int kind) {",
     "  Feature f;",
     "  f.kind = kind;",
     "  if (kind == 0) { f.c = vec2(0.0, -o.cy); f.radius = o.R; }",
@@ -603,43 +603,43 @@
     "  f.dist = 0.0; f.d = 0.0;",
     "  return f;",
     "}",
-    "// The feature owning a local point (x along the port hole, y toward its back): a tip past",
+    "// The feature owning a local point (x along the portal, y toward its back): a tip past",
     "// the junction rays, else the arc on the point's side. d is the signed distance to the outline.",
-    "Feature portholeFeature(Oval o, vec2 p) {",
+    "Feature portalFeature(Oval o, vec2 p) {",
     "  int kind = abs(p.x) * o.cy > o.ax * (abs(p.y) + o.cy) ? (p.x < 0.0 ? 2 : 3) : (p.y < 0.0 ? 1 : 0);",
-    "  Feature f = portholeFeatureCircle(o, kind);",
+    "  Feature f = portalFeatureCircle(o, kind);",
     "  f.dist = length(p - f.c);",
     "  f.d = f.dist - f.radius;",
     "  return f;",
     "}",
-    "vec2 portholeToLocal(vec2 w, float sn, float cs) { return vec2(w.x * cs + w.y * sn, w.y * cs - w.x * sn); }",
+    "vec2 portalToLocal(vec2 w, float sn, float cs) { return vec2(w.x * cs + w.y * sn, w.y * cs - w.x * sn); }",
     "",
-    "void portholeSweep(Oval o, vec2 p0, vec2 v, int kind, float radius, inout float best) {",
-    "  Feature fc = portholeFeatureCircle(o, kind);",
+    "void portalSweep(Oval o, vec2 p0, vec2 v, int kind, float radius, inout float best) {",
+    "  Feature fc = portalFeatureCircle(o, kind);",
     "  float t = sweepPointSphere(p0, v, fc.c, fc.radius + radius, DT);",
     "  if (t < 0.0 || (best >= 0.0 && t >= best)) return;",
-    "  if (portholeFeature(o, p0 + v * t).kind == kind) best = t;",
+    "  if (portalFeature(o, p0 + v * t).kind == kind) best = t;",
     "}",
-    "// Port hole = A (its oval, moving with it), circle = B, swept in the port hole's frame: the",
+    "// Portal = A (its oval, moving with it), circle = B, swept in the portal's frame: the",
     "// earliest sweep onto a feature circle whose hit point that feature owns.",
-    "Contact collidePortholeCircle(Body ph, float halfLen, Body circle, float radius) {",
-    "  Oval o = portholeOval(halfLen);",
+    "Contact collidePortalCircle(Body ph, float halfLen, Body circle, float radius) {",
+    "  Oval o = portalOval(halfLen);",
     "  float cs = cos(ph.angle), sn = sin(ph.angle);",
-    "  vec2 p0 = portholeToLocal(vec2(circle.x - ph.x, circle.y - ph.y), sn, cs);",
-    "  vec2 v = portholeToLocal(vec2(circle.vx - ph.vx, circle.vy - ph.vy), sn, cs);",
+    "  vec2 p0 = portalToLocal(vec2(circle.x - ph.x, circle.y - ph.y), sn, cs);",
+    "  vec2 v = portalToLocal(vec2(circle.vx - ph.vx, circle.vy - ph.vy), sn, cs);",
     "  Contact c = noContact();",
     "  float tHit = 0.0;",
-    "  if (portholeFeature(o, p0).d >= radius) {",
+    "  if (portalFeature(o, p0).d >= radius) {",
     "    float best = -1.0;",
-    "    portholeSweep(o, p0, v, 0, radius, best);",
-    "    portholeSweep(o, p0, v, 1, radius, best);",
-    "    portholeSweep(o, p0, v, 2, radius, best);",
-    "    portholeSweep(o, p0, v, 3, radius, best);",
+    "    portalSweep(o, p0, v, 0, radius, best);",
+    "    portalSweep(o, p0, v, 1, radius, best);",
+    "    portalSweep(o, p0, v, 2, radius, best);",
+    "    portalSweep(o, p0, v, 3, radius, best);",
     "    if (best < 0.0) return c;",
     "    tHit = best;",
     "  }",
     "  vec2 p = p0 + v * tHit;",
-    "  Feature f = portholeFeature(o, p);",
+    "  Feature f = portalFeature(o, p);",
     "  vec2 nl = f.dist > 1e-9 ? (p - f.c) / f.dist : vec2(0.0, 1.0);",
     "  vec2 n = rotateBy(nl, sn, cs);",
     "  vec2 s = rotateBy(f.c + nl * f.radius, sn, cs);",
@@ -653,50 +653,50 @@
     "  return c;",
     "}",
     "",
-    "void portholeFoot(Oval o, vec2 e0, vec2 e1, int kind, inout vec2 bestQ, inout Feature bestF) {",
-    "  Feature fc = portholeFeatureCircle(o, kind);",
+    "void portalFoot(Oval o, vec2 e0, vec2 e1, int kind, inout vec2 bestQ, inout Feature bestF) {",
+    "  Feature fc = portalFeatureCircle(o, kind);",
     "  vec2 q = closestPointOnSegment(e0, e1, fc.c);",
-    "  Feature f = portholeFeature(o, q);",
+    "  Feature f = portalFeature(o, q);",
     "  if (f.kind == kind && f.d < bestF.d) { bestQ = q; bestF = f; }",
     "}",
-    "// One of PhysicsEngine.collidePortholeLine's Newton steps on the gap of point q0 moving at v in the port",
+    "// One of PhysicsEngine.collidePortalLine's Newton steps on the gap of point q0 moving at v in the port",
     "// hole's frame, now at q with feature f; tHit at DT is a miss.",
-    "void portholeLineStep(Oval o, vec2 q0, vec2 v, inout float tHit, inout vec2 q, inout Feature f) {",
+    "void portalLineStep(Oval o, vec2 q0, vec2 v, inout float tHit, inout vec2 q, inout Feature f) {",
     "  float gap = f.d - LINE_THICKNESS * 0.5;",
     "  if (gap <= POSITION_SLOP || tHit >= DT) return;",
     "  float along = -dot(v, q - f.c);",
     "  tHit = along > 0.0 ? tHit + gap * f.dist / along : DT;",
     "  if (tHit >= DT) return;",
     "  q = q0 + v * tHit;",
-    "  f = portholeFeature(o, q);",
+    "  f = portalFeature(o, q);",
     "}",
-    "// Port hole = A (its oval), line = B (its capsule): PhysicsEngine.collidePortholeLine. The segment's nearest",
+    "// Portal = A (its oval), line = B (its capsule): PhysicsEngine.collidePortalLine. The segment's nearest",
     "// point to the oval, touching or reaching it within the step. One contact.",
-    "ContactPair collidePortholeLine(Body ph, float halfLen, Body line, float halfLenB) {",
-    "  Oval o = portholeOval(halfLen);",
+    "ContactPair collidePortalLine(Body ph, float halfLen, Body line, float halfLenB) {",
+    "  Oval o = portalOval(halfLen);",
     "  float cs = cos(ph.angle), sn = sin(ph.angle);",
     "  vec2 phC = vec2(ph.x, ph.y);",
-    "  vec2 e0 = portholeToLocal(lineEndpoint0(line, halfLenB) - phC, sn, cs);",
-    "  vec2 e1 = portholeToLocal(lineEndpoint1(line, halfLenB) - phC, sn, cs);",
+    "  vec2 e0 = portalToLocal(lineEndpoint0(line, halfLenB) - phC, sn, cs);",
+    "  vec2 e1 = portalToLocal(lineEndpoint1(line, halfLenB) - phC, sn, cs);",
     "  ContactPair result;",
     "  result.c0 = noContact();",
     "  result.c1 = noContact();",
     "  vec2 bestQ = e0;",
-    "  Feature bestF = portholeFeature(o, e0);",
-    "  Feature f1 = portholeFeature(o, e1);",
+    "  Feature bestF = portalFeature(o, e0);",
+    "  Feature f1 = portalFeature(o, e1);",
     "  if (f1.d < bestF.d) { bestQ = e1; bestF = f1; }",
-    "  portholeFoot(o, e0, e1, 0, bestQ, bestF);",
-    "  portholeFoot(o, e0, e1, 1, bestQ, bestF);",
-    "  portholeFoot(o, e0, e1, 2, bestQ, bestF);",
-    "  portholeFoot(o, e0, e1, 3, bestQ, bestF);",
+    "  portalFoot(o, e0, e1, 0, bestQ, bestF);",
+    "  portalFoot(o, e0, e1, 1, bestQ, bestF);",
+    "  portalFoot(o, e0, e1, 2, bestQ, bestF);",
+    "  portalFoot(o, e0, e1, 3, bestQ, bestF);",
     "  float halfT = LINE_THICKNESS * 0.5, tHit = 0.0;",
     "  vec2 q = bestQ;",
     "  Feature f = bestF;",
     "  if (bestF.d >= halfT) {",
     "    vec2 qw = rotateBy(bestQ, sn, cs), r = phC + qw - vec2(line.x, line.y);",
-    "    vec2 v = portholeToLocal(vec2(line.vx - line.w * r.y - ph.vx + ph.w * qw.y, line.vy + line.w * r.x - ph.vy - ph.w * qw.x), sn, cs);",
-    "    portholeLineStep(o, bestQ, v, tHit, q, f);",
-    "    portholeLineStep(o, bestQ, v, tHit, q, f);",
+    "    vec2 v = portalToLocal(vec2(line.vx - line.w * r.y - ph.vx + ph.w * qw.y, line.vy + line.w * r.x - ph.vy - ph.w * qw.x), sn, cs);",
+    "    portalLineStep(o, bestQ, v, tHit, q, f);",
+    "    portalLineStep(o, bestQ, v, tHit, q, f);",
     "    if (tHit >= DT || f.d - halfT > POSITION_SLOP) return result;",
     "  }",
     "  vec2 nl = f.dist > 1e-9 ? (q - f.c) / f.dist : vec2(0.0, 1.0);",
@@ -1152,7 +1152,7 @@
   // flags { contactBody, touchBody, pairContacts, warpBody, warpFrom, warpBits }: g_contactN for that one
   // body (the map's Bounce Count), g_touchK per other body for that one (the goal order), g_pairContacts,
   // every pair's contact as a bit (the trajectory log), g_warp and g_warpTurn, whether that one body went
-  // through a port hole and the turn the crossing gave it, with warpFrom g_warpFrom, the port hole it went
+  // through a portal and the turn the crossing gave it, with warpFrom g_warpFrom, the portal it went
   // in by (the goal order), and g_warpBits, every body's warp as a bit (the trajectory log); none by default.
   function generateStepOnceGLSL(n, consts, pairs, hingeAnchors, frame, precision, mutualGravity, collisions, springs, flags) {
     var df = global.PhysicsDF.isExtended(precision);
@@ -1189,7 +1189,7 @@
       contactType: "DContact", contactPairType: "DContactPair",
       collideCircleCircle: "dfCollideCircleCircle", collideLineCircle: "dfCollideLineCircle",
       collideLineLine: "dfCollideLineLine",
-      collidePortholeCircle: "dfCollidePortholeCircle", collidePortholeLine: "dfCollidePortholeLine",
+      collidePortalCircle: "dfCollidePortalCircle", collidePortalLine: "dfCollidePortalLine",
       solveHingeVelocity: "dfSolveHingeVelocity", solveHingePosition: "dfSolveHingePosition",
     } : {
       body: "body", bodyType: "Body", scalarType: "float", vecType: "vec2",
@@ -1213,14 +1213,14 @@
       contactType: "Contact", contactPairType: "ContactPair",
       collideCircleCircle: "collideCircleCircle", collideLineCircle: "collideLineCircle",
       collideLineLine: "collideLineLine",
-      collidePortholeCircle: "collidePortholeCircle", collidePortholeLine: "collidePortholeLine",
+      collidePortalCircle: "collidePortalCircle", collidePortalLine: "collidePortalLine",
       solveHingeVelocity: "solveHingeVelocity", solveHingePosition: "solveHingePosition",
     };
     function B(i) { return E.body + i; }
 
-    // ---- Port holes (PhysicsEngine.step's rules): both placed, and the chain leaders they take ----
-    var portals = PE.portholePair(consts);
-    var passGroup = portals ? PE.portholeGroups({
+    // ---- Portals (PhysicsEngine.step's rules): both placed, and the chain leaders they take ----
+    var portals = PE.portalPair(consts);
+    var passGroup = portals ? PE.portalGroups({
       bodies: consts,
       hinges: hingeAnchors.map(function (hg) { return { bodyA: hg.aIsWorld ? null : hg.a, bodyB: hg.b }; }),
       springs: springList.map(function (sp) { return { bodyA: sp.aIsWorld ? null : sp.a, bodyB: sp.b }; }),
@@ -1229,7 +1229,7 @@
     if (portals) for (var li = 0; li < n; li++) if (passGroup[li].leader === li && !passGroup[li].tethered) leaders.push(li);
     if (!leaders.length) portals = null;
     var phLit = df ? global.PhysicsDF.num : fnum;
-    // A port hole's tangent (the line's direction) and front normal (t.y, -t.x). An anchored one's
+    // A portal's tangent (the line's direction) and front normal (t.y, -t.x). An anchored one's
     // frame is per run (df: once, into a global); a movable one's per step, at the start and the end.
     function phT(idx, end) {
       if (consts[idx].isAnchored) return df ? "g_dfPhT" + idx : "phT" + idx;
@@ -1757,7 +1757,7 @@
     function isShaken(idx) { return shakeBodies.indexOf(idx) !== -1; }
 
     // Probes: real position, velocity vFull, so swept tests match leg 1's motion. A line swept against
-    // another line or a port hole also turns at leg 1's spin.
+    // another line or a portal also turns at leg 1's spin.
     var linePaired = {};
     pairs.forEach(function (pair) {
       if (consts[pair[0]].type !== "circle" && consts[pair[1]].type !== "circle") { linePaired[pair[0]] = true; linePaired[pair[1]] = true; }
@@ -1782,7 +1782,7 @@
         lines.push("  DSegment seg" + idx + " = dfLineSegment(probe" + idx + ", BODY" + idx + "_HALF);");
       });
     }
-    // Port hole frames at the step's start, and where every free body began.
+    // Portal frames at the step's start, and where every free body began.
     if (portals) {
       portals.forEach(function (idx) {
         if (consts[idx].isAnchored) {
@@ -1805,28 +1805,28 @@
     // df sweeps against an anchored segment skip its zero velocity; float32 folds it.
     function isStatic(idx) { return df && consts[idx].isAnchored; }
     function lineCircleCall(li, ci) {
-      if (consts[li].type === "porthole") {
-        // A port hole meets a circle as its oval; df reads the tangent off its segment and the reach off its half.
+      if (consts[li].type === "portal") {
+        // A portal meets a circle as its oval; df reads the tangent off its segment and the reach off its half.
         return df
-          ? (isStatic(li) ? "dfCollidePortholeCircleStatic" : E.collidePortholeCircle) + "(" + probeRef(li) + ", " + segExpr(li) + ", BODY" + li + "_HALF, " + probeRef(ci) + ", BODY" + ci + "_HALF)"
-          : E.collidePortholeCircle + "(" + probeRef(li) + ", BODY" + li + "_HALF, " + probeRef(ci) + ", BODY" + ci + "_HALF)";
+          ? (isStatic(li) ? "dfCollidePortalCircleStatic" : E.collidePortalCircle) + "(" + probeRef(li) + ", " + segExpr(li) + ", BODY" + li + "_HALF, " + probeRef(ci) + ", BODY" + ci + "_HALF)"
+          : E.collidePortalCircle + "(" + probeRef(li) + ", BODY" + li + "_HALF, " + probeRef(ci) + ", BODY" + ci + "_HALF)";
       }
       return (isStatic(li) ? "dfCollideLineCircleStatic" : E.collideLineCircle) + "(" + probeRef(li) + ", " + lineArg(li) + ", " + probeRef(ci) + ", BODY" + ci + "_HALF)";
     }
-    // A port hole meets a plain line as its oval (two port holes meet as capsules).
-    function portholeLineCall(pi, li) {
+    // A portal meets a plain line as its oval (two portals meet as capsules).
+    function portalLineCall(pi, li) {
       return df
-        ? E.collidePortholeLine + "(" + probeRef(pi) + ", " + segExpr(pi) + ", BODY" + pi + "_HALF, " + moves(pi) + ", " + probeRef(li) + ", " + segExpr(li) + ")"
-        : E.collidePortholeLine + "(" + probeRef(pi) + ", BODY" + pi + "_HALF, " + probeRef(li) + ", BODY" + li + "_HALF)";
+        ? E.collidePortalLine + "(" + probeRef(pi) + ", " + segExpr(pi) + ", BODY" + pi + "_HALF, " + moves(pi) + ", " + probeRef(li) + ", " + segExpr(li) + ")"
+        : E.collidePortalLine + "(" + probeRef(pi) + ", BODY" + pi + "_HALF, " + probeRef(li) + ", BODY" + li + "_HALF)";
     }
     // Only a line<->line pair can fill its second contact slot.
     function pairSlots(pair) {
       return consts[pair[0]].type !== "circle" && consts[pair[1]].type !== "circle" ? ["c0", "c1"] : ["c0"];
     }
-    // Pairs that meet in collideLineLine (two port holes meet as two lines); they solve both slots together.
+    // Pairs that meet in collideLineLine (two portals meet as two lines); they solve both slots together.
     function twoSlots(pair) {
       var tA = consts[pair[0]].type, tB = consts[pair[1]].type;
-      return tA !== "circle" && tB !== "circle" && (tA === "porthole") === (tB === "porthole");
+      return tA !== "circle" && tB !== "circle" && (tA === "portal") === (tB === "portal");
     }
 
     // Contacts are computed once per step and reused by every solver iteration.
@@ -1848,11 +1848,11 @@
         lines.push("  " + varName + "_raw.normal = " + E.negVec(varName + "_raw.normal") + ";");
         lines.push("  { " + E.vecType + " tmp_" + i + "_" + j + " = " + varName + "_raw.rA; " + varName + "_raw.rA = " + varName + "_raw.rB; " + varName + "_raw.rB = tmp_" + i + "_" + j + "; }");
         lines.push("  " + E.contactPairType + " " + varName + " = " + E.contactPairType + "(" + varName + "_raw, " + E.noContact + ");");
-      } else if (tA === "porthole" && tB !== "porthole") {
-        lines.push(detected(E.contactPairType, varName, portholeLineCall(i, j)));
-      } else if (tB === "porthole" && tA !== "porthole") {
-        // collidePortholeLine takes (port hole, line): swap rA/rB back and flip the normal.
-        lines.push(detected(E.contactPairType, varName, portholeLineCall(j, i)));
+      } else if (tA === "portal" && tB !== "portal") {
+        lines.push(detected(E.contactPairType, varName, portalLineCall(i, j)));
+      } else if (tB === "portal" && tA !== "portal") {
+        // collidePortalLine takes (portal, line): swap rA/rB back and flip the normal.
+        lines.push(detected(E.contactPairType, varName, portalLineCall(j, i)));
         lines.push("  " + varName + ".c0.normal = " + E.negVec(varName + ".c0.normal") + ";");
         lines.push("  { " + E.vecType + " tmp_" + i + "_" + j + " = " + varName + ".c0.rA; " + varName + ".c0.rA = " + varName + ".c0.rB; " + varName + ".c0.rB = tmp_" + i + "_" + j + "; }");
       } else {
@@ -1861,7 +1861,7 @@
         lines.push(detected(E.contactPairType, varName, E.collideLineLine + "(" + refI + ", " + lineArg(i) + halves[0] + ", " + refJ + ", " + lineArg(j) + halves[1] + ")"));
       }
     });
-    // A leader's contact on a port hole's front is no contact: its point (the port hole's lever arm)
+    // A leader's contact on a portal's front is no contact: its point (the portal's lever arm)
     // sits in front of the center line.
     if (portals) pairs.forEach(function (pair) {
       var pi = portals.indexOf(pair[0]) !== -1 ? pair[0] : (portals.indexOf(pair[1]) !== -1 ? pair[1] : -1);
@@ -2133,10 +2133,10 @@
     });
     if (solves) lines.push("  }");
 
-    // ---- Port holes: a leader that crossed a front band this step leaves through the other ----
+    // ---- Portals: a leader that crossed a front band this step leaves through the other ----
     // The crossing is read from the actual step (in front at its start, behind at its end) in the
-    // port hole's own frames at both ends; the mapping, and the re-integration of the step's share
-    // past the crossing on the exit side, are PhysicsEngine.applyPortholeTransports'.
+    // portal's own frames at both ends; the mapping, and the re-integration of the step's share
+    // past the crossing on the exit side, are PhysicsEngine.applyPortalTransports'.
     if (portals) {
       lines.push("");
       portals.forEach(function (idx) {
@@ -2187,7 +2187,7 @@
             lines.push("    phLam" + t + " = dfDiv(phF0" + t + ", dfSub(phF0" + t + ", phF1" + t + "));");
             lines.push("    MF phS0 = dv2Dot(phD0" + t + ", " + tS + ");");
             lines.push("    phSx" + t + " = dfAdd(phS0, dfMul(dfSub(phS1" + t + ", phS0), phLam" + t + "));");
-            lines.push("    phCross" + t + " = !dfGreater(dfAbs(phSx" + t + "), dfAdd(dfAdd(BODY" + pi + "_HALF, DF_HALF_PORTHOLE_THICKNESS), BODY" + oi + "_HALF));");
+            lines.push("    phCross" + t + " = !dfGreater(dfAbs(phSx" + t + "), dfAdd(dfAdd(BODY" + pi + "_HALF, DF_HALF_PORTAL_THICKNESS), BODY" + oi + "_HALF));");
             lines.push("  }");
           } else {
             lines.push("  vec2 phD0" + t + " = phS" + oi + " - " + startC + ";");
@@ -2199,7 +2199,7 @@
             lines.push("    phLam" + t + " = phF0" + t + " / (phF0" + t + " - phF1" + t + ");");
             lines.push("    float phS0 = dot(phD0" + t + ", " + tS + ");");
             lines.push("    phSx" + t + " = phS0 + (phS1" + t + " - phS0) * phLam" + t + ";");
-            lines.push("    phCross" + t + " = abs(phSx" + t + ") <= BODY" + pi + "_HALF + PORTHOLE_THICKNESS * 0.5 + BODY" + oi + "_HALF;");
+            lines.push("    phCross" + t + " = abs(phSx" + t + ") <= BODY" + pi + "_HALF + PORTAL_THICKNESS * 0.5 + BODY" + oi + "_HALF;");
             lines.push("  }");
           }
         });
@@ -2207,7 +2207,7 @@
           var pi = portals[k], qi = portals[1 - k], t = "_" + oi + "_" + pi;
           var members = passGroup[oi].members;
           var pMoves = !consts[pi].isAnchored, qMoves = !consts[qi].isAnchored;
-          // Each port hole as it stood at the crossing instant: pose, velocity and spin interpolated
+          // Each portal as it stood at the crossing instant: pose, velocity and spin interpolated
           // between the step's start and end. An anchored one is its constant self.
           function midState(idx, X) {
             if (consts[idx].isAnchored) return [];
@@ -2231,7 +2231,7 @@
           function midCenter(idx, X) { return consts[idx].isAnchored ? E.vec(B(idx) + ".x", B(idx) + ".y") : "ph" + X + "c"; }
           function midAngle(idx, X) { return consts[idx].isAnchored ? B(idx) + ".angle" : "ph" + X + "a"; }
           function midTangent(idx, X) { return consts[idx].isAnchored ? phT(idx, true) : "ph" + X + "t"; }
-          // A movable port hole's velocity at a member's spot; velocity and spin are kept relative to it.
+          // A movable portal's velocity at a member's spot; velocity and spin are kept relative to it.
           function frameVelocity(X, pos) {
             return df
               ? "dv2(dfSub(ph" + X + "v.x, dfMul(ph" + X + "w, dfSub(" + pos + ".y, ph" + X + "c.y))), dfAdd(ph" + X + "v.y, dfMul(ph" + X + "w, dfSub(" + pos + ".x, ph" + X + "c.x))))"

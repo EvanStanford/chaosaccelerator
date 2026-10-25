@@ -127,7 +127,7 @@
   var OFF = {
     bodyFill: "#3a63d1", bodyStroke: "#7ea0ff", anchoredFill: "#5a6178", anchoredStroke: "#7a8199",
     selected: "#ffcf4d", selectedDark: "#8a6d1a", selectedWash: "rgba(255, 207, 77, 0.15)",
-    porthole: { orange: "#ff8a1f", green: "#36d399" }, portholeName: { orange: "orange", green: "green" },
+    portal: { orange: "#ff8a1f", green: "#36d399" }, portalName: { orange: "orange", green: "green" },
     velocity: "#e06bff", spring: "#c8d3e6", hole: "#1b1e27",
     danger: "#ff5f56", dangerArmed: "#ff7a72",
     axisX: "#ff6b6b", axisY: "#6bafff", axisO: "#7ee0a0",
@@ -146,7 +146,7 @@
   var PALETTES = {
     off: OFF,
     "red-green": variant({
-      porthole: { orange: "#ff8a1f", green: "#2fa3ff" }, portholeName: { orange: "orange", green: "blue" },
+      portal: { orange: "#ff8a1f", green: "#2fa3ff" }, portalName: { orange: "orange", green: "blue" },
       velocity: "#ffffff", danger: "#d55e00", dangerArmed: "#e8743a",
       axisX: "#d55e00", axisO: "#f0e442", saddle: "#2f6fe0",
     }),
@@ -156,7 +156,7 @@
     monochrome: variant({
       bodyFill: "#8a8a8a", bodyStroke: "#c4c4c4", anchoredFill: "#4d4d4d", anchoredStroke: "#8a8a8a",
       selected: "#ffffff", selectedDark: "#555555", selectedWash: "rgba(255, 255, 255, 0.15)",
-      porthole: { orange: "#bebebe", green: "#636363" }, portholeName: { orange: "light", green: "dark" },
+      portal: { orange: "#bebebe", green: "#636363" }, portalName: { orange: "light", green: "dark" },
       velocity: "#9e9e9e", spring: "#c4c4c4", hole: "#1e1e1e",
       danger: "#555555", dangerArmed: "#808080",
       axisX: "#ffffff", axisY: "#dedede", axisO: "#bebebe",

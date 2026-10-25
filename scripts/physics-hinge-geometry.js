@@ -213,7 +213,7 @@
 
   // ---- "Stop on wrap": the instant a watched body's center reaches an edge ----
   // Scans a logged trajectory (per-step {x, y, angle, wrapX, wrapY} rows per body) for the first
-  // step where a watched body wrapped; the step itself says so, since a port hole moves a body as far.
+  // step where a watched body wrapped; the step itself says so, since a portal moves a body as far.
   // Returns null, or { step, tFrac, bodyIndex, x, y, angle }: step is the 1-indexed stepCount to stop
   // at, tFrac in [0, dt] is when within the next step the crossing happened, and x/y/angle are
   // bodyIndex's state at that instant, interpolated along that step. bodyIndex is targetBodyIndex,

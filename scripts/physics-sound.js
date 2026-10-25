@@ -1,6 +1,6 @@
 // CPAL-1.0 License. See chaosaccelerator.com/license.html
 
-// Sound effects: a bounce clave tick, a sticky-edge palm-muted pluck and a port hole shimmer, synthesized with Web Audio
+// Sound effects: a bounce clave tick, a sticky-edge palm-muted pluck and a portal shimmer, synthesized with Web Audio
 // oscillators so every voice can be pitched exactly. Shared by physics-ui.js and fractal-grid.js.
 (function (global) {
   "use strict";
@@ -151,7 +151,7 @@
     tone(c, now, "sawtooth", freq, 0.002, 0.18, 0.5, lp, out);
     noise(c, now, 0.001, 0.008, 0.2, 4000, out);
   }
-  // Port hole warp: a sine at 3x the note with a fast 28 Hz vibrato.
+  // Portal warp: a sine at 3x the note with a fast 28 Hz vibrato.
   function warpVoice(c, now, freq, out) {
     var osc = tone(c, now, "sine", freq * 3, 0.01, 0.3, 0.35, null, out);
     var lfo = c.createOscillator(), depth = c.createGain();
