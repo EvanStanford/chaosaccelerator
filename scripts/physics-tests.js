@@ -1378,7 +1378,7 @@
 
   addTest(
     "findWrapStopStep: interpolated value matches hand-derived kinematics exactly",
-    "sanity check on the actual formula, not just 'is it smooth', a circle already at MAX_SPEED (terminal velocity) when it crosses has a closed-form answer: boundary, MAX_SPEED*DT, independent of exactly which step notices",
+    "sanity check on the actual formula, not just 'is it smooth', a circle already at MAX_SPEED (terminal velocity) has a closed-form answer: it stops with its center on the edge, at the instant distance / MAX_SPEED, independent of exactly which step notices",
     function () {
       // Launched already at MAX_SPEED: gravity adds, the clamp removes, so it
       // descends at exactly MAX_SPEED whatever that constant is.
@@ -1389,16 +1389,17 @@
       };
       scene.bodies[0].vy = PhysicsEngine.MAX_SPEED;
       var result = runWrapStopStepAtPoint(scene, 0, 0, 500);
-      var expectedY = 1128 - PhysicsEngine.MAX_SPEED * DT; // boundary: MAX_SPEED * DT
-      var err = Math.abs(result.y - expectedY);
-      var detail = "interpolated y=" + result.y.toFixed(4) + ", hand-derived boundary-MAX_SPEED*DT=" + expectedY.toFixed(4) + ", error=" + err.toFixed(4) + "px";
-      return { pass: err < 0.01, detail: detail };
+      var err = Math.abs(result.y - 1128);
+      var steps = result.step + result.tFrac / DT, expectedSteps = (1128 - 50) / (PhysicsEngine.MAX_SPEED * DT);
+      var detail = "interpolated y=" + result.y.toFixed(4) + " (want the edge, 1128), error=" + err.toFixed(6) + "px; crossing at " + steps.toFixed(4) +
+        " steps, hand-derived " + expectedSteps.toFixed(4);
+      return { pass: err < 1e-6 && Math.abs(steps - expectedSteps) < 1e-6, detail: detail };
     }
   );
 
   addTest(
     "findWrapStopStep: GPU grid shader's inline wrap-stop agrees with the JS reference",
-    "fractal-grid.js's buildFragmentShader ports this same one-step-before-crossing interpolation into the per-pixel GLSL loop (using body.vx/vy directly instead of finite-differencing, since it has live velocity: see its own comment)",
+    "fractal-grid.js's step loop ports this same at-the-crossing interpolation into the per-pixel GLSL loop: from the last in-frame state to the step's own, with the wrap undone",
     function () {
       var scene = {
         bodies: [PhysicsEngine.createCircle(600, 1120, 20, false)],
@@ -1420,27 +1421,23 @@
           "  float BODY0_INV_INERTIA = " + PhysicsGPU.fnum(consts[0].invInertia) + ";",
           "  float BODY0_HALF = " + PhysicsGPU.fnum(PhysicsGPU.shapeHalf(consts, 0)) + ";",
           "  float frozenX = body0.x; float frozenY = body0.y; float frozenAngle = body0.angle;",
-          "  float prevFrozenX = 0.0; float prevFrozenY = 0.0; float prevFrozenAngle = 0.0;",
-          "  bool hasPrevFrozen = false; bool wrapStopped = false;",
+          "  bool wrapStopped = false;",
           "  for (int i = 0; i < 500; i++) {",
           "    if (wrapStopped) break;",
           "    " + stepOnceCall,
           "    if (g_wrapDx0 != 0.0 || g_wrapDy0 != 0.0) {",
           "      bool xCrossed = g_wrapDx0 != 0.0;",
-          "      float span = xCrossed ? " + fullW + " : " + fullH + ";",
-          "      float vAxis = xCrossed ? body0.vx : body0.vy;",
+          "      float wrapD = xCrossed ? g_wrapDx0 : g_wrapDy0;",
+          "      float boundary = wrapD < 0.0 ? (xCrossed ? " + fullW + " : " + fullH + ") : 0.0;",
           "      float prevAxis = xCrossed ? frozenX : frozenY;",
-          "      float boundary = vAxis > 0.0 ? span : 0.0;",
-          "      float tFrac = clamp((boundary - prevAxis) / vAxis, 0.0, DT);",
-          "      float tTarget = tFrac - DT;",
-          "      if (hasPrevFrozen) {",
-          "        float vx = (frozenX - prevFrozenX) / DT; float vy = (frozenY - prevFrozenY) / DT; float va = (frozenAngle - prevFrozenAngle) / DT;",
-          "        body0.x = frozenX + vx * tTarget; body0.y = frozenY + vy * tTarget; body0.angle = frozenAngle + va * tTarget;",
-          "      } else { body0.x = frozenX; body0.y = frozenY; body0.angle = frozenAngle; }",
+          "      float rawAxis = (xCrossed ? body0.x : body0.y) - wrapD;",
+          "      float frac = clamp((boundary - prevAxis) / (rawAxis - prevAxis), 0.0, 1.0);",
+          "      body0.x = frozenX + frac * (body0.x - g_wrapDx0 - frozenX);",
+          "      body0.y = frozenY + frac * (body0.y - g_wrapDy0 - frozenY);",
+          "      body0.angle = frozenAngle + frac * (body0.angle - frozenAngle);",
           "      wrapStopped = true;",
           "    } else {",
-          "      prevFrozenX = frozenX; prevFrozenY = frozenY; prevFrozenAngle = frozenAngle;",
-          "      frozenX = body0.x; frozenY = body0.y; frozenAngle = body0.angle; hasPrevFrozen = true;",
+          "      frozenX = body0.x; frozenY = body0.y; frozenAngle = body0.angle;",
           "    }",
           "  }",
           "  fragColor = vec4(body0.x, body0.y, body0.angle, 1.0);",

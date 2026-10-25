@@ -2688,13 +2688,13 @@
   }
 
   btnSampleDoublePendulum.addEventListener("click", function () {
-    loadSample("samples/double_pendulum.json?v=m202", "Double Pendulum");
+    loadSample("samples/double_pendulum.json?v=m203", "Double Pendulum");
   });
   btnSamplePinball.addEventListener("click", function () {
-    loadSample("samples/pinball.json?v=m202", "Pinball");
+    loadSample("samples/pinball.json?v=m203", "Pinball");
   });
   btnSampleBinaryStar.addEventListener("click", function () {
-    loadSample("samples/binary_star.json?v=m202", "Binary Star");
+    loadSample("samples/binary_star.json?v=m203", "Binary Star");
   });
   function clearScene() {
     sharedFrame = null;
@@ -2839,10 +2839,11 @@
     if (prop === "x" || prop === "y") return scene.edgeMode === "wrap" ? 360 : 300;
     return 360;
   }
-  // Where a POSITION lands in its color range: wrapped into the frame, or with the edges off squashed into it.
+  // Where a POSITION lands in its color range: wrapped into the frame, held in it by Sticky Edges, or with the edges off squashed into it.
   function positionOutputT(prop, value) {
     var rangeMax = outputRangeMax(prop);
     if (scene.edgeMode === "infinite") return PhysicsEngine.frameSigmoid(value / rangeMax);
+    if (PhysicsEngine.edgeModeOf(scene) === "sticky") return Math.min(1, Math.max(0, value / rangeMax));
     return PhysicsHingeGeometry.wrapIntoRange(value, rangeMax) / rangeMax;
   }
 

@@ -765,6 +765,8 @@
     var goalLines = goalOrder ? goalDeclarationLines(goalOrder) : [];
     var goalWarps = !!goalOrder && goalOrder.some(function (e) { return e.warp; });
     var isInfinitePosition = sceneToCompile.edgeMode === "infinite" && (outProp === "x" || outProp === "y" || isDistance);
+    // Sticky Edges stop a run with the center on an edge at most: the frame's two ends stay apart.
+    var isStickyPosition = PhysicsEngine.edgeModeOf(sceneToCompile) === "sticky" && (outProp === "x" || outProp === "y");
     var rangeMax = outputRangeMax(sceneToCompile, outProp);
     // Circular outputs use the full 360; capped ranges stop at 300 so the ends differ.
     var isCircularOutput = outProp === "angle" || ((outProp === "x" || outProp === "y") && sceneToCompile.edgeMode === "wrap");
@@ -815,8 +817,7 @@
     // "Stop on wrap": each pixel freezes the first step ANY watched body would cross
     // a frame edge. The discrete step index alone puts a spurious jump wherever
     // starting conditions cross a step boundary, so the exact sub-step instant is
-    // solved (as in collideCircleCircle's CCD) and every property extrapolated to one
-    // step BEFORE it; lifespan takes the instant itself.
+    // solved and every property interpolated to it along that step.
     var watchedIndices = PhysicsHingeGeometry.wrapWatchedBodyIndices(sceneToCompile);
     var outputIndices = isRunTally ? [] : outputBodies;
     var bounceInitLines = isBounces ? ["  float bounceCount = 0.0;", "  bool bounceTouching = false;"] : [];
@@ -856,11 +857,7 @@
           declarations.push("  " + B.scalar + " frozenX" + idx + " = " + bodyVar + idx + ".x;");
           declarations.push("  " + B.scalar + " frozenY" + idx + " = " + bodyVar + idx + ".y;");
           declarations.push("  " + B.scalar + " frozenAngle" + idx + " = " + bodyVar + idx + ".angle;");
-          declarations.push("  " + B.scalar + " prevFrozenX" + idx + " = " + B.zero + ";");
-          declarations.push("  " + B.scalar + " prevFrozenY" + idx + " = " + B.zero + ";");
-          declarations.push("  " + B.scalar + " prevFrozenAngle" + idx + " = " + B.zero + ";");
         });
-        declarations.push("  bool hasPrevFrozen = false;");
         declarations.push("  bool wrapStopped = false;");
         declarations.push("  float lifespanValue = " + loop.budget + ";");
         bounceInitLines.forEach(function (l) { declarations.push(l); });
@@ -870,53 +867,49 @@
         lines.push("  for (int i = 0; i < " + loop.bound + "; i++) {");
         lines.push("    " + stepOnceCall);
         bounceStepLines.forEach(function (l) { lines.push(l); });
-        // DT+1.0: above any real tFrac. tFracHi carries the pass's precision; bestTFrac is its float32 shadow.
-        lines.push("    float bestTFrac = DT + 1.0;");
-        lines.push("    " + B.scalar + " bestTFracHi = " + B.zero + ";");
+        // bestFrac: how far into this step the first crossing came, 2.0 for none. fracHi carries the pass's precision.
+        lines.push("    float bestFrac = 2.0;");
+        lines.push("    " + B.scalar + " bestFracHi = " + B.zero + ";");
         // The step's own wrap flags: a port hole moves a body as far as a wrap would.
         watchedIndices.forEach(function (idx) {
           lines.push("    {");
           lines.push("      if (g_wrapDx" + idx + " != 0.0 || g_wrapDy" + idx + " != 0.0) {");
           lines.push("        bool xCrossed = g_wrapDx" + idx + " != 0.0;");
-          lines.push("        float span = xCrossed ? " + fullW + " : " + fullH + ";");
-          lines.push("        " + B.scalar + " vAxisHi = xCrossed ? " + bodyVar + idx + ".vx : " + bodyVar + idx + ".vy;");
-          lines.push("        float vAxis = " + B.toFloat("vAxisHi") + ";");
+          lines.push("        float wrapD = xCrossed ? g_wrapDx" + idx + " : g_wrapDy" + idx + ";");
+          // Wrapped back by a span: it left past the far edge.
+          lines.push("        float boundary = wrapD < 0.0 ? (xCrossed ? " + fullW + " : " + fullH + ") : 0.0;");
           lines.push("        " + B.scalar + " prevAxis = xCrossed ? frozenX" + idx + " : frozenY" + idx + ";");
-          lines.push("        float boundary = vAxis > 0.0 ? span : 0.0;");
+          lines.push("        " + B.scalar + " rawAxis = " + B.sub("xCrossed ? " + bodyVar + idx + ".x : " + bodyVar + idx + ".y", B.fromFloat("wrapD")) + ";");
           if (df) {
-            lines.push("        MF tFracHi = dfClamp(dfDiv(dfSub(dfFromFloat(boundary), prevAxis), vAxisHi), DF_ZERO, DF_DT);");
-            lines.push("        float tFrac = dfToFloat(tFracHi);");
+            lines.push("        MF fracHi = dfClamp(dfDiv(dfSub(dfFromFloat(boundary), prevAxis), dfSub(rawAxis, prevAxis)), DF_ZERO, dfFromFloat(1.0));");
+            lines.push("        float frac = dfToFloat(fracHi);");
           } else {
-            lines.push("        float tFrac = clamp(((boundary) - (prevAxis)) / vAxis, 0.0, DT);");
-            lines.push("        float tFracHi = tFrac;");
+            lines.push("        float frac = clamp((boundary - prevAxis) / (rawAxis - prevAxis), 0.0, 1.0);");
+            lines.push("        float fracHi = frac;");
           }
-          lines.push("        if (tFrac < bestTFrac) { bestTFrac = tFrac; bestTFracHi = tFracHi; }");
+          lines.push("        if (frac < bestFrac) { bestFrac = frac; bestFracHi = fracHi; }");
           lines.push("      }");
           lines.push("    }");
         });
-        lines.push("    if (bestTFrac <= DT) {");
-        lines.push("      " + B.scalar + " tTarget = " + B.sub("bestTFracHi", df ? "DF_DT" : "DT") + ";");
-        lines.push("      lifespanValue = " + loop.stepIndex + " + bestTFrac / DT;");
+        lines.push("    if (bestFrac <= 1.0) {");
+        lines.push("      lifespanValue = " + loop.stepIndex + " + bestFrac;");
         outputIndices.forEach(function (out) {
-          function extrapolate(axis) {
-            var vel = B.mul(B.sub("frozen" + axis + out, "prevFrozen" + axis + out), df ? B.lit(1 / PhysicsGPU.FIXED_DT) : "(1.0 / DT)");
-            return B.add("frozen" + axis + out, B.mul(vel, "tTarget"));
+          // From the last in-frame state to this step's, with the wrap undone, at the crossing.
+          var leader = PhysicsHingeGeometry.wrapLeaderOf(sceneToCompile, out);
+          function atCrossing(axis, field, wrapVar) {
+            var now = bodyVar + out + "." + field;
+            var raw = wrapVar && leader >= 0 ? B.sub(now, B.fromFloat(wrapVar + leader)) : now;
+            return B.add("frozen" + axis + out, B.mul("bestFracHi", B.sub(raw, "frozen" + axis + out)));
           }
-          lines.push("      if (hasPrevFrozen) {");
-          lines.push("        " + bodyVar + out + ".x = " + extrapolate("X") + ";");
-          lines.push("        " + bodyVar + out + ".y = " + extrapolate("Y") + ";");
-          lines.push("        " + bodyVar + out + ".angle = " + extrapolate("Angle") + ";");
-          lines.push("      } else {");
-          lines.push("        " + bodyVar + out + ".x = frozenX" + out + "; " + bodyVar + out + ".y = frozenY" + out + "; " + bodyVar + out + ".angle = frozenAngle" + out + ";");
-          lines.push("      }");
+          lines.push("      " + bodyVar + out + ".x = " + atCrossing("X", "x", "g_wrapDx") + ";");
+          lines.push("      " + bodyVar + out + ".y = " + atCrossing("Y", "y", "g_wrapDy") + ";");
+          lines.push("      " + bodyVar + out + ".angle = " + atCrossing("Angle", "angle", null) + ";");
         });
         lines.push("      wrapStopped = true;");
         lines.push("    } else {");
         trackedIndices.forEach(function (idx) {
-          lines.push("      prevFrozenX" + idx + " = frozenX" + idx + "; prevFrozenY" + idx + " = frozenY" + idx + "; prevFrozenAngle" + idx + " = frozenAngle" + idx + ";");
           lines.push("      frozenX" + idx + " = " + bodyVar + idx + ".x; frozenY" + idx + " = " + bodyVar + idx + ".y; frozenAngle" + idx + " = " + bodyVar + idx + ".angle;");
         });
-        lines.push("      hasPrevFrozen = true;");
         lines.push("    }");
         lines.push("    if (wrapStopped) break;");
         lines.push("  }");
@@ -936,24 +929,17 @@
 
     // Loop state that outlives a draw (see playbackStateVariables). Only what cannot
     // be re-derived: each float costs bandwidth and, past 32 outputs, extra draws.
-    // frozen*, unread prevFrozen* (found as "body.field" text) and hasPrevFrozen are re-derived.
+    // frozen* are re-derived from the body.
     var loopStateVariables = [];
     var loopStateRestoreLines = [];
     if (isStickyLoop) {
       var stickyBodyVar = df ? "dbody" : "body";
       var outputText = outputLines.join("\n");
-      function outputReads(idx, field) {
-        return new RegExp("\\b" + stickyBodyVar + idx + "\\." + field + "\\b").test(outputText);
-      }
       trackedIndices.forEach(function (idx) {
         [["X", "x"], ["Y", "y"], ["Angle", "angle"]].forEach(function (f) {
           loopStateRestoreLines.push("frozen" + f[0] + idx + " = " + stickyBodyVar + idx + "." + f[1] + ";");
-          if (outputIndices.indexOf(idx) !== -1 && outputReads(idx, f[1])) {
-            loopStateVariables.push({ name: "prevFrozen" + f[0] + idx, type: df ? "df" : "float" });
-          }
         });
       });
-      loopStateRestoreLines.push("hasPrevFrozen = u_baseStep > 0;");
       loopStateVariables.push({ name: "wrapStopped", type: "bool" });
       if (/\blifespanValue\b/.test(outputText)) loopStateVariables.push({ name: "lifespanValue", type: "float" });
     }
@@ -994,7 +980,7 @@
         ? "  float t = clamp(outputValue / float(u_durationSteps), 0.0, 1.0);"
         : isInfinitePosition
           ? "  float t = frameSigmoid(" + B.toFloat(B.div("outputValue", B.fromFloat("OUTPUT_RANGE_MAX"))) + ");"
-          : isDistance
+          : isDistance || isStickyPosition
             ? "  float t = clamp(" + B.toFloat(B.div("outputValue", B.fromFloat("OUTPUT_RANGE_MAX"))) + ", 0.0, 1.0);"
             : "  float t = " + B.toFloat(B.div(B.mod("outputValue", "OUTPUT_RANGE_MAX"), B.fromFloat("OUTPUT_RANGE_MAX"))) + ";";
 
@@ -5996,7 +5982,7 @@
     return "rgb(" + out.join(", ") + ")";
   }
 
-  // Mirrors the shader's mod(outputValue, OUTPUT_RANGE_MAX) / OUTPUT_RANGE_MAX with the always-positive wrap.
+  // Mirrors the shader's tLine: mod(outputValue, OUTPUT_RANGE_MAX) / OUTPUT_RANGE_MAX with the always-positive wrap, unless it clamps.
   function outputColorT(v) {
     // Lifespan is clamped, not wrapped (its max means "ran the whole run"); Bounce Count scales by the grid's own u_bounceMax.
     if (isCountOutput) return Math.min(1, Math.max(0, v / bounceMaxValue));
@@ -6005,6 +5991,8 @@
     if (scene.output.property === "lifespan") return Math.min(1, Math.max(0, v / rangeMax));
     // Infinite Space: an unbounded coordinate is squashed by the shader's own curve, not wrapped.
     if (isInfinitePositionOutput) return PhysicsEngine.frameSigmoid(v / rangeMax);
+    var prop = scene.output.property;
+    if ((prop === "x" || prop === "y") && PhysicsEngine.edgeModeOf(scene) === "sticky") return Math.min(1, Math.max(0, v / rangeMax));
     return PhysicsHingeGeometry.wrapIntoRange(v, rangeMax) / rangeMax;
   }
 

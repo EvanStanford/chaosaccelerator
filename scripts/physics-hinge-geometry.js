@@ -203,21 +203,33 @@
     }
     return result;
   }
+  // The leader whose wrap carries body i across an edge, or -1 when nothing wraps it.
+  function wrapLeaderOf(scene, i) {
+    var groups = global.PhysicsEngine.springGroups(scene), assemblies = global.PhysicsEngine.hingeAssemblies(scene);
+    var group = groups ? groups.groupOf[i] : null;
+    if (group) return group.tethered ? -1 : group.leader;
+    return assemblies.groupOf[i].held ? -1 : assemblies.groupOf[i].leader;
+  }
 
-  // ---- "Stop on wrap": last good step before a watched body wraps ----
+  // ---- "Stop on wrap": the instant a watched body's center reaches an edge ----
   // Scans a logged trajectory (per-step {x, y, angle, wrapX, wrapY} rows per body) for the first
   // step where a watched body wrapped; the step itself says so, since a port hole moves a body as far.
-  // Returns null, or { step, tFrac, tTarget, bodyIndex, x, y, angle }: step is the 1-indexed
-  // stepCount to stop at, tFrac in [0, dt] is when within it the crossing happened, tTarget =
-  // tFrac - dt, and x/y/angle are bodyIndex's state ONE STEP BEFORE the continuous crossing instant
-  // (extrapolated by finite difference: a discrete logged sample would jump as the start sweeps
-  // past a step boundary). bodyIndex is targetBodyIndex, or the crossing body when that is null.
+  // Returns null, or { step, tFrac, bodyIndex, x, y, angle }: step is the 1-indexed stepCount to stop
+  // at, tFrac in [0, dt] is when within the next step the crossing happened, and x/y/angle are
+  // bodyIndex's state at that instant, interpolated along that step. bodyIndex is targetBodyIndex,
+  // or the crossing body when that is null.
   function findWrapStopStep(traj, watchedBodyIndices, targetBodyIndex, frameWidth, frameHeight, initialBodies, dt) {
     if (!frameWidth || !frameHeight) return null;
     // Start from the AUTHORED state, not traj[0], or a wrap on the very first step is invisible.
     var tracked = watchedBodyIndices.slice();
     if (targetBodyIndex !== null && tracked.indexOf(targetBodyIndex) === -1) tracked.push(targetBodyIndex);
-    var prev = {}, prevPrev = {};
+    var prev = {};
+    // A position this step carried across an edge, put back beside where it was.
+    function unwrapNear(v, ref, span) {
+      if (v - ref > span / 2) return v - span;
+      if (ref - v > span / 2) return v + span;
+      return v;
+    }
     tracked.forEach(function (idx) {
       var b = initialBodies[idx];
       prev[idx] = { x: b.x, y: b.y, angle: b.angle };
@@ -241,23 +253,17 @@
         if (best === null || tFrac < best.tFrac) best = { tFrac: tFrac, crossingBodyIndex: idx };
       }
       if (best !== null) {
-        var tTarget = best.tFrac - dt; // in [-dt, 0): one whole step before the crossing
         var effectiveTargetIndex = targetBodyIndex !== null ? targetBodyIndex : best.crossingBodyIndex;
-        var result = { step: i, tFrac: best.tFrac, tTarget: tTarget, bodyIndex: effectiveTargetIndex };
-        var tp1 = prev[effectiveTargetIndex], tp0 = prevPrev[effectiveTargetIndex];
-        if (tp0 === undefined) {
-          result.x = tp1.x; result.y = tp1.y; result.angle = tp1.angle;
-        } else {
-          var vx = (tp1.x - tp0.x) / dt, vy = (tp1.y - tp0.y) / dt, va = (tp1.angle - tp0.angle) / dt;
-          result.x = tp1.x + vx * tTarget;
-          result.y = tp1.y + vy * tTarget;
-          result.angle = tp1.angle + va * tTarget;
-        }
-        return result;
+        var from = prev[effectiveTargetIndex], to = traj[i][effectiveTargetIndex], f = best.tFrac / dt;
+        return {
+          step: i, tFrac: best.tFrac, bodyIndex: effectiveTargetIndex,
+          x: from.x + f * (unwrapNear(to.x, from.x, frameWidth) - from.x),
+          y: from.y + f * (unwrapNear(to.y, from.y, frameHeight) - from.y),
+          angle: from.angle + f * (to.angle - from.angle),
+        };
       }
       for (var k2 = 0; k2 < tracked.length; k2++) {
         var idx2 = tracked[k2];
-        prevPrev[idx2] = prev[idx2];
         prev[idx2] = traj[i][idx2];
       }
     }
@@ -301,6 +307,7 @@
     assemblyWrapDelta: assemblyWrapDelta,
     normalizeAllBodiesIntoFrame: normalizeAllBodiesIntoFrame,
     wrapWatchedBodyIndices: wrapWatchedBodyIndices,
+    wrapLeaderOf: wrapLeaderOf,
     findWrapStopStep: findWrapStopStep,
   };
 })(window);
