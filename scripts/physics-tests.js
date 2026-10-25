@@ -1398,6 +1398,34 @@
   );
 
   addTest(
+    "findWrapStopStep: a corner exit stops at whichever edge the center really reaches first",
+    "reported from the map (Contours drew a staircase near a corner): when both edges were crossed in one step, the stop always took the x edge, so a ball that had already left by the bottom reported a Y past the frame, and the output jumped where the step boundaries fell",
+    function () {
+      var W = 1418, H = 1080;
+      var ball = PhysicsEngine.createCircle(356, 766.93, 34.68, false);
+      ball.vx = -407.4174; ball.vy = 1.5897;
+      var base = { bodies: [ball], hinges: [], springs: [], frameWidth: W, frameHeight: H, edgeMode: "sticky", mutualGravity: false };
+      var edges = {}, maxJump = 0, worstX = 0, worstY = H, prev = null;
+      // Sweeps 12px of start (almost two steps of sideways travel) across the line between left and bottom exits.
+      for (var dx = 0; dx <= 12; dx += 0.05) {
+        var s = PhysicsEngine.cloneScene(base);
+        s.bodies[0].x += dx;
+        s.bodies.forEach(PhysicsEngine.computeMass);
+        var initial = [{ x: s.bodies[0].x, y: s.bodies[0].y, angle: s.bodies[0].angle }];
+        var stop = PhysicsHingeGeometry.findWrapStopStep(PhysicsEngine.runTrajectory(s, 200, DT), [0], 0, W, H, initial, DT);
+        edges[Math.abs(stop.x) < 1e-6 ? "left" : Math.abs(stop.y - H) < 1e-6 ? "bottom" : "other"] = true;
+        worstX = Math.min(worstX, stop.x);
+        worstY = Math.max(worstY, stop.y);
+        if (prev) maxJump = Math.max(maxJump, Math.hypot(stop.x - prev.x, stop.y - prev.y));
+        prev = stop;
+      }
+      var detail = "exits seen: " + Object.keys(edges).join(", ") + "; furthest past the edges: x " + worstX.toFixed(6) + ", y " + worstY.toFixed(6) +
+        " (frame " + W + " x " + H + "); largest change between starts 0.05px apart " + maxJump.toFixed(4) + "px";
+      return { pass: edges.left && edges.bottom && !edges.other && worstX > -1e-6 && worstY < H + 1e-6 && maxJump < 0.5, detail: detail };
+    }
+  );
+
+  addTest(
     "findWrapStopStep: GPU grid shader's inline wrap-stop agrees with the JS reference",
     "fractal-grid.js's step loop ports this same at-the-crossing interpolation into the per-pixel GLSL loop: from the last in-frame state to the step's own, with the wrap undone",
     function () {
@@ -1426,12 +1454,9 @@
           "    if (wrapStopped) break;",
           "    " + stepOnceCall,
           "    if (g_wrapDx0 != 0.0 || g_wrapDy0 != 0.0) {",
-          "      bool xCrossed = g_wrapDx0 != 0.0;",
-          "      float wrapD = xCrossed ? g_wrapDx0 : g_wrapDy0;",
-          "      float boundary = wrapD < 0.0 ? (xCrossed ? " + fullW + " : " + fullH + ") : 0.0;",
-          "      float prevAxis = xCrossed ? frozenX : frozenY;",
-          "      float rawAxis = (xCrossed ? body0.x : body0.y) - wrapD;",
-          "      float frac = clamp((boundary - prevAxis) / (rawAxis - prevAxis), 0.0, 1.0);",
+          "      float frac = 2.0;",
+          "      if (g_wrapDx0 != 0.0) frac = clamp(((g_wrapDx0 < 0.0 ? " + fullW + " : 0.0) - frozenX) / (body0.x - g_wrapDx0 - frozenX), 0.0, 1.0);",
+          "      if (g_wrapDy0 != 0.0) frac = min(frac, clamp(((g_wrapDy0 < 0.0 ? " + fullH + " : 0.0) - frozenY) / (body0.y - g_wrapDy0 - frozenY), 0.0, 1.0));",
           "      body0.x = frozenX + frac * (body0.x - g_wrapDx0 - frozenX);",
           "      body0.y = frozenY + frac * (body0.y - g_wrapDy0 - frozenY);",
           "      body0.angle = frozenAngle + frac * (body0.angle - frozenAngle);",

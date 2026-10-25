@@ -239,18 +239,20 @@
       for (var k = 0; k < watchedBodyIndices.length; k++) {
         var idx = watchedBodyIndices[k];
         var cur = traj[i][idx];
-        if (!cur.wrapX && !cur.wrapY) continue;
         var p1 = prev[idx];
-        // Undo the step's wrap correction (exactly +-span) so finite difference gives a real velocity.
-        var axis = cur.wrapX ? "x" : "y";
-        var span = axis === "x" ? frameWidth : frameHeight;
-        var rawDelta = cur[axis] - p1[axis];
-        var prewrap = rawDelta < 0 ? cur[axis] + span : cur[axis] - span;
-        var vAxis = (prewrap - p1[axis]) / dt;
-        var boundary = prewrap > span ? span : 0;
-        var tFrac = (boundary - p1[axis]) / vAxis;
-        tFrac = Math.max(0, Math.min(dt, tFrac)); // guard float roundoff
-        if (best === null || tFrac < best.tFrac) best = { tFrac: tFrac, crossingBodyIndex: idx };
+        // Both axes can wrap in one step (a corner): the earlier crossing wins.
+        for (var a = 0; a < 2; a++) {
+          var axis = a === 0 ? "x" : "y";
+          if (!(a === 0 ? cur.wrapX : cur.wrapY)) continue;
+          var span = a === 0 ? frameWidth : frameHeight;
+          // Undo the step's wrap correction (exactly +-span) to see where it really went.
+          var rawDelta = cur[axis] - p1[axis];
+          var prewrap = rawDelta < 0 ? cur[axis] + span : cur[axis] - span;
+          var boundary = prewrap > span ? span : 0;
+          var tFrac = dt * (boundary - p1[axis]) / (prewrap - p1[axis]);
+          tFrac = Math.max(0, Math.min(dt, tFrac)); // guard float roundoff
+          if (best === null || tFrac < best.tFrac) best = { tFrac: tFrac, crossingBodyIndex: idx };
+        }
       }
       if (best !== null) {
         var effectiveTargetIndex = targetBodyIndex !== null ? targetBodyIndex : best.crossingBodyIndex;

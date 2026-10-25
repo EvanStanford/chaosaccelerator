@@ -870,26 +870,26 @@
         // bestFrac: how far into this step the first crossing came, 2.0 for none. fracHi carries the pass's precision.
         lines.push("    float bestFrac = 2.0;");
         lines.push("    " + B.scalar + " bestFracHi = " + B.zero + ";");
-        // The step's own wrap flags: a port hole moves a body as far as a wrap would.
+        // The step's own wrap flags: a port hole moves a body as far as a wrap would. Both axes can
+        // wrap in one step (a corner): each is solved and the earlier crossing wins.
         watchedIndices.forEach(function (idx) {
-          lines.push("    {");
-          lines.push("      if (g_wrapDx" + idx + " != 0.0 || g_wrapDy" + idx + " != 0.0) {");
-          lines.push("        bool xCrossed = g_wrapDx" + idx + " != 0.0;");
-          lines.push("        float wrapD = xCrossed ? g_wrapDx" + idx + " : g_wrapDy" + idx + ";");
-          // Wrapped back by a span: it left past the far edge.
-          lines.push("        float boundary = wrapD < 0.0 ? (xCrossed ? " + fullW + " : " + fullH + ") : 0.0;");
-          lines.push("        " + B.scalar + " prevAxis = xCrossed ? frozenX" + idx + " : frozenY" + idx + ";");
-          lines.push("        " + B.scalar + " rawAxis = " + B.sub("xCrossed ? " + bodyVar + idx + ".x : " + bodyVar + idx + ".y", B.fromFloat("wrapD")) + ";");
-          if (df) {
-            lines.push("        MF fracHi = dfClamp(dfDiv(dfSub(dfFromFloat(boundary), prevAxis), dfSub(rawAxis, prevAxis)), DF_ZERO, dfFromFloat(1.0));");
-            lines.push("        float frac = dfToFloat(fracHi);");
-          } else {
-            lines.push("        float frac = clamp((boundary - prevAxis) / (rawAxis - prevAxis), 0.0, 1.0);");
-            lines.push("        float fracHi = frac;");
-          }
-          lines.push("        if (frac < bestFrac) { bestFrac = frac; bestFracHi = fracHi; }");
-          lines.push("      }");
-          lines.push("    }");
+          [["X", "x", fullW], ["Y", "y", fullH]].forEach(function (a) {
+            var wrapD = "g_wrapD" + a[1] + idx;
+            lines.push("    if (" + wrapD + " != 0.0) {");
+            // Wrapped back by a span: it left past the far edge.
+            lines.push("      float boundary = " + wrapD + " < 0.0 ? " + a[2] + " : 0.0;");
+            lines.push("      " + B.scalar + " rawAxis = " + B.sub(bodyVar + idx + "." + a[1], B.fromFloat(wrapD)) + ";");
+            var prevAxis = "frozen" + a[0] + idx;
+            if (df) {
+              lines.push("      MF fracHi = dfClamp(dfDiv(dfSub(dfFromFloat(boundary), " + prevAxis + "), dfSub(rawAxis, " + prevAxis + ")), DF_ZERO, dfFromFloat(1.0));");
+              lines.push("      float frac = dfToFloat(fracHi);");
+            } else {
+              lines.push("      float frac = clamp((boundary - " + prevAxis + ") / (rawAxis - " + prevAxis + "), 0.0, 1.0);");
+              lines.push("      float fracHi = frac;");
+            }
+            lines.push("      if (frac < bestFrac) { bestFrac = frac; bestFracHi = fracHi; }");
+            lines.push("    }");
+          });
         });
         lines.push("    if (bestFrac <= 1.0) {");
         lines.push("      lifespanValue = " + loop.stepIndex + " + bestFrac;");
