@@ -203,6 +203,34 @@
     }
     return result;
   }
+  // Sticky Edges: a moving body whose start x or y is an input starts at least this far inside the
+  // frame on that axis, with what wraps with it.
+  var STICKY_START_MARGIN = 0.1;
+  // [{ body, x, y }]: the wrap leaders with an input on their own x and/or y. Empty off Sticky Edges.
+  function stickyStartNudges(scene) {
+    if (global.PhysicsEngine.edgeModeOf(scene) !== "sticky" || !global.PhysicsEngine.wrapsAtEdges(scene)) return [];
+    var axes = {};
+    [scene.xInput, scene.yInput].forEach(function (m) {
+      if (!m || typeof m.body !== "number" || (m.property !== "x" && m.property !== "y")) return;
+      if (wrapLeaderOf(scene, m.body) !== m.body) return;
+      (axes[m.body] = axes[m.body] || {})[m.property] = true;
+    });
+    return Object.keys(axes).map(function (k) { return { body: Number(k), x: !!axes[k].x, y: !!axes[k].y }; });
+  }
+  // The numeric twin of generateGridInitialStateGLSL's nudge, run after normalizeAllBodiesIntoFrame.
+  function nudgeStickyStarts(scene) {
+    var m = STICKY_START_MARGIN;
+    stickyStartNudges(scene).forEach(function (n) {
+      var b = scene.bodies[n.body];
+      var dx = n.x ? Math.min(scene.frameWidth - m, Math.max(m, b.x)) - b.x : 0;
+      var dy = n.y ? Math.min(scene.frameHeight - m, Math.max(m, b.y)) - b.y : 0;
+      if (dx === 0 && dy === 0) return;
+      var groups = global.PhysicsEngine.springGroups(scene);
+      var group = (groups && groups.groupOf[n.body]) || global.PhysicsEngine.hingeAssemblies(scene).groupOf[n.body];
+      global.PhysicsEngine.translateSpringGroup(scene, group, dx, dy);
+    });
+  }
+
   // The leader whose wrap carries body i across an edge, or -1 when nothing wraps it.
   function wrapLeaderOf(scene, i) {
     var groups = global.PhysicsEngine.springGroups(scene), assemblies = global.PhysicsEngine.hingeAssemblies(scene);
@@ -310,6 +338,9 @@
     normalizeAllBodiesIntoFrame: normalizeAllBodiesIntoFrame,
     wrapWatchedBodyIndices: wrapWatchedBodyIndices,
     wrapLeaderOf: wrapLeaderOf,
+    STICKY_START_MARGIN: STICKY_START_MARGIN,
+    stickyStartNudges: stickyStartNudges,
+    nudgeStickyStarts: nudgeStickyStarts,
     findWrapStopStep: findWrapStopStep,
   };
 })(window);

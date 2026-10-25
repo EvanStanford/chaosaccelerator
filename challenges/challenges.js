@@ -885,9 +885,11 @@
     if (r.velocityInputs) parts.push("both inputs are velocities");
     if (r.maxBodies) parts.push("at most " + r.maxBodies + " objects");
     if (r.noWrap) parts.push("no Pac-Man Warp edges");
-    if (r.minSteps) parts.push("every run lasts at least " + r.minSteps + " frames, none stopping at an edge");
+    if (r.minSteps) parts.push("every run lasts at least " + r.minSteps + " steps, none stopping at an edge");
     if (r.nearby) parts.push("a short line (no longer than the screen's height at 100x zoom)");
-    return parts.length ? "Rules: " + parts.join(", ") + "." : "";
+    // The section's intro asks for a negative exponent; a level won above a number says so itself.
+    var goal = typeof c.above === "number" ? "Make the exponent above " + c.above + ". " : "";
+    return goal + (parts.length ? "Rules: " + parts.join(", ") + "." : "");
   }
   function isVelocity(mapping) { return !!mapping && (mapping.property === "vx" || mapping.property === "vy"); }
   // Why a result breaks the level's rules, or null. Every level inspects lines only.
@@ -899,7 +901,7 @@
     if (r.velocityInputs && !(isVelocity(scene.xInput) && isVelocity(scene.yInput))) return "Both inputs have to be velocities for this one.";
     if (r.maxBodies && scene.bodies.length > r.maxBodies) return "Use at most " + r.maxBodies + " objects for this one.";
     if (r.noWrap && scene.edgeMode === "wrap") return "Pac-Man Warp edges aren't allowed for this one.";
-    if (r.minSteps && !(result.shortest >= r.minSteps)) return "Every run has to last at least " + r.minSteps + " frames, none stopping at an edge, for this one.";
+    if (r.minSteps && !(result.shortest >= r.minSteps)) return "Every run has to last at least " + r.minSteps + " steps, none stopping at an edge, for this one.";
     if (r.nearby && !(result.gap <= NEARBY_GAP)) return "Draw a shorter line, no longer than the screen's height at 100x zoom.";
     return null;
   }

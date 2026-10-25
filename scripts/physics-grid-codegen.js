@@ -29,6 +29,7 @@
       absCos: function (a) { return "abs(cos(" + a + "))"; },
       absSin: function (a) { return "abs(sin(" + a + "))"; },
       mod: function (a, m) { return "mod(" + a + ", " + m + ")"; },
+      clamp: function (a, lo, hi) { return "clamp(" + a + ", " + lo + ", " + hi + ")"; },
       greater: function (a, b) { return "(" + a + ") > (" + b + ")"; },
       less: function (a, b) { return "(" + a + ") < (" + b + ")"; },
       toFloat: function (a) { return a; },
@@ -49,6 +50,7 @@
       absCos: function (a) { return "dfAbs(dfCos(" + a + "))"; },
       absSin: function (a) { return "dfAbs(dfSin(" + a + "))"; },
       mod: function (a, m) { return "dfMod(" + a + ", " + m + ")"; },
+      clamp: function (a, lo, hi) { return "dfClamp(" + a + ", " + lo + ", " + hi + ")"; },
       greater: function (a, b) { return "dfGreater(" + a + ", " + b + ")"; },
       less: function (a, b) { return "dfLess(" + a + ", " + b + ")"; },
       toFloat: function (a) { return "dfToFloat(" + a + ")"; },
@@ -293,6 +295,13 @@
       var frameWLit = B.lit(scene.frameWidth), frameHLit = B.lit(scene.frameHeight);
       // Spring groups settle as one (PhysicsEngine.springGroups); a tethered group stays put.
       var springGroups = PhysicsEngine.springGroups(scene), assemblies = PhysicsEngine.hingeAssemblies(scene);
+      // Sticky Edges: an input leader lands at least STICKY_START_MARGIN inside the frame (nudgeStickyStarts).
+      var nudge = {}, margin = PhysicsHingeGeometry.STICKY_START_MARGIN;
+      PhysicsHingeGeometry.stickyStartNudges(scene).forEach(function (n) { nudge[n.body] = n; });
+      function settled(v, span, nudged) {
+        var inFrame = B.mod(v, fnum(span));
+        return nudged ? B.clamp(inFrame, B.lit(margin), B.lit(span - margin)) : inFrame;
+      }
       for (var wi = 0; wi < n; wi++) {
         var springGroup = springGroups ? springGroups.groupOf[wi] : null;
         var assembly = assemblies.groupOf[wi];
@@ -332,8 +341,8 @@
           dxExpr = "(" + gone + (gone ? "(" + leaderPast.x + ")" : leaderPast.x) + ") ? (" + B.sub(B.mod(bx, frameW), bx) + ") : " + B.zero;
           dyExpr = "(" + gone + (gone ? "(" + leaderPast.y + ")" : leaderPast.y) + ") ? (" + B.sub(B.mod(by, frameH), by) + ") : " + B.zero;
         } else {
-          dxExpr = B.sub(B.mod(bx, frameW), bx);
-          dyExpr = B.sub(B.mod(by, frameH), by);
+          dxExpr = B.sub(settled(bx, scene.frameWidth, nudge[wi] && nudge[wi].x), bx);
+          dyExpr = B.sub(settled(by, scene.frameHeight, nudge[wi] && nudge[wi].y), by);
         }
         if (springGroup) {
           var gdx = num(dxExpr), gdy = num(dyExpr);
@@ -514,7 +523,10 @@
       result.bodies[t.body][t.property] += t.value;
     });
     // Settle into the frame by spring group (`true`), skipped under Infinite Space: must match generateGridInitialStateGLSL.
-    if (PhysicsEngine.wrapsAtEdges(result)) PhysicsHingeGeometry.normalizeAllBodiesIntoFrame(result, true);
+    if (PhysicsEngine.wrapsAtEdges(result)) {
+      PhysicsHingeGeometry.normalizeAllBodiesIntoFrame(result, true);
+      PhysicsHingeGeometry.nudgeStickyStarts(result);
+    }
     return result;
   }
 

@@ -214,7 +214,6 @@
     function resetAll() {
       try {
         localStorage.removeItem("physicsAppDismissedTips");
-        localStorage.removeItem(global.AppMode.STORE_KEY);
         localStorage.removeItem(global.ColorBlind.STORE_KEY);
       } catch (err) { /* nothing to clear */ }
       if (global.AppShell) global.AppShell.replayIntro();
@@ -1762,8 +1761,9 @@
   // Counts and Cumulative Rotation are scaled by the largest value in view (bounceMaxValue).
   var isCountOutput = isCountProperty(scene.output.property);
   var isTotalRotationOutput = scene.output.property === "totalRotation";
+  // The shader's isInfinitePosition: Distance Apart is squashed the same way.
   var isInfinitePositionOutput = scene.edgeMode === "infinite" &&
-    (scene.output.property === "x" || scene.output.property === "y");
+    (scene.output.property === "x" || scene.output.property === "y" || scene.output.property === "distance");
   var bounceMaxValue = 1;
   function isCountProperty(prop) { return prop === "bounces" || prop === "warps"; }
   function isViewScaledOutput() { return isCountOutput || isTotalRotationOutput; }
@@ -3017,8 +3017,8 @@
     while (inspectMarkerEls.length < flatPoints.length) {
       var el = document.createElement("div");
       el.className = "inspect-marker";
-      el.addEventListener("click", function () {
-        var slot = inspectMarkerEls.indexOf(el);
+      el.addEventListener("click", function (e) {
+        var slot = inspectMarkerEls.indexOf(e.currentTarget);
         if (slot === -1) return;
         if (inspectMarkerGroupIndex[slot] === -1) dropLockJob(lockJob);
         else removeInspectedGroup(inspectMarkerGroupIndex[slot]);
@@ -6010,7 +6010,7 @@
     // Infinite Space: an unbounded coordinate is squashed by the shader's own curve, not wrapped.
     if (isInfinitePositionOutput) return PhysicsEngine.frameSigmoid(v / rangeMax);
     var prop = scene.output.property;
-    if ((prop === "x" || prop === "y") && PhysicsEngine.edgeModeOf(scene) === "sticky") return Math.min(1, Math.max(0, v / rangeMax));
+    if (prop === "distance" || ((prop === "x" || prop === "y") && PhysicsEngine.edgeModeOf(scene) === "sticky")) return Math.min(1, Math.max(0, v / rangeMax));
     return PhysicsHingeGeometry.wrapIntoRange(v, rangeMax) / rangeMax;
   }
 
@@ -8800,7 +8800,9 @@
       if (on && !playbackHasSession) beginInspectOnlySession();
       else if (!on) showHoverEmpty();
     }
-    unlinkMapWhereItIs();
+    // Off, the map shows the Simulation Duration's final step, as with the card shut.
+    if (on) unlinkMapWhereItIs();
+    else freezeMapAtEnd();
     followPreviewIfOn();
     updateTimelineUI();
     refreshHoverPreview();
@@ -8973,7 +8975,8 @@
   updateTimelineUI();
   showHoverEmpty();
   // Inspect opens on arrival (it explains the colors), via a click's path. First arrival only: setScene re-opens.
-  setInspectOpen(true);
+  // A shared map link opens with every card shut.
+  if (global.AppMode.landedPage() !== "map") setInspectOpen(true);
   scheduleColorSpreadCheck(); // the default view (before any pan/zoom) can already qualify
 
   // `dirty` means "the view moved, start over"; refinement carries on across frames until the
@@ -9061,7 +9064,7 @@
     isCountOutput = isCountProperty(scene.output.property);
     isTotalRotationOutput = scene.output.property === "totalRotation";
     isInfinitePositionOutput = scene.edgeMode === "infinite" &&
-      (scene.output.property === "x" || scene.output.property === "y");
+      (scene.output.property === "x" || scene.output.property === "y" || scene.output.property === "distance");
     // Whether Output WRAPS decides hue range, superlative neighbor distance and circular stats.
     isCircularOutput = computeIsCircularOutput();
     hueRangeMaxValue = isCircularOutput ? 360 : 300;
@@ -9138,6 +9141,14 @@
     }
     [statsMenu, displayMenu, playbackMenu, movieMenu, challengesMenu, renderProgressMenu].forEach(function (menu) { menu.set(false); });
     if (inspectArmMode === "grid") disarmInspect();
+    // The Display card and speed buttons are hidden: back to the standard look at normal speed.
+    colorZoomEnabled = false;
+    colorZoomCheckbox.checked = false;
+    lowSaturationEnabled = false;
+    lowSaturationCheckbox.checked = false;
+    setDisplayMode(DISPLAY_MODES[0]);
+    setPlaybackSpeed(1);
+    markDirty();
     if (!inspectMenu.docked) setInspectOpen(true);
   });
   var movieHint = document.getElementById("movie-hint");

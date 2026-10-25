@@ -12,18 +12,15 @@
   var framed;
   try { framed = global.top !== global; } catch (err) { framed = true; }
 
-  // A scene link opened from outside the site, not a reload, Back or an on-site link.
+  // A scene link opened by navigating to it (a share, the gallery), not a reload or Back.
   function landedFromSceneLink() {
-    if (!/^#(bldr|map|movie)\//.test(global.location.hash)) return false;
+    if (!/^#(bldr|map|movie)\/./.test(global.location.hash)) return false;
     var nav = global.performance.getEntriesByType ? global.performance.getEntriesByType("navigation")[0] : null;
-    if (nav && nav.type !== "navigate") return false;
-    try {
-      if (document.referrer && new URL(document.referrer).origin === global.location.origin) return false;
-    } catch (err) {
-    }
-    return true;
+    return !nav || nav.type === "navigate";
   }
   var landed = !framed && landedFromSceneLink();
+  // "bldr", "map" or "movie": the page a share opened on.
+  var landedPage = landed ? /^#(\w+)\//.exec(global.location.hash)[1] : null;
 
   function save() {
     try {
@@ -83,6 +80,7 @@
     set: set,
     onChange: function (fn) { listeners.push(fn); },
     landedFromSceneLink: function () { return landed; },
+    landedPage: function () { return landedPage; },
     STORE_KEY: STORE_KEY,
   };
 })(window);

@@ -140,7 +140,7 @@
 .target-panel {
   position: absolute;
   right: 12px;
-  bottom: 12px;
+  bottom: 40px; /* clear of the map's watermark */
   width: 260px;
   padding: 10px;
   background: rgba(27, 30, 39, 0.94);
@@ -218,3 +218,6 @@
   .best-panel { top: auto; bottom: 12px; }
   .score { display: none; }
 }
+
+/* While a challenge plays, the map in the frame shows its own watermark. */
+body:has(#play-page:not([hidden])) > .watermark { display: none; }

@@ -21,6 +21,9 @@
     "    <li><a href=\"gallery/gallery.html\">\n" +
     "      <svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><g fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\"><rect x=\"3.25\" y=\"3.25\" width=\"7\" height=\"7\" rx=\"1.5\"></rect><rect x=\"13.75\" y=\"3.25\" width=\"7\" height=\"7\" rx=\"1.5\"></rect><rect x=\"3.25\" y=\"13.75\" width=\"7\" height=\"7\" rx=\"1.5\"></rect><rect x=\"13.75\" y=\"13.75\" width=\"7\" height=\"7\" rx=\"1.5\"></rect></g></svg>\n" +
     "      Gallery</a></li>\n" +
+    "    <li><a href=\"challenges/\">\n" +
+    "      <svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><g fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M4 13c0-4 3-8 7.5-8 3.5 0 5.5 1.5 7 3.5 1.8 1 2.6 3.5 1.5 5.5-.4 1.6-1.6 2.5-3 3-2.7 1.2-7.5.8-10-.5C4.8 15.8 4 14.6 4 13z\"></path><path d=\"M16.5 15.5c1.5-.3 2.8.5 3 1.8.2 1.2-.8 2.2-2.2 2.2\"></path><path d=\"m15.8 19.4.7 2.6\"></path><path d=\"M9.5 5.5c-.8 1.8-.5 3.4.7 4.7M13.5 6c-1 1.6-.9 3.2.3 4.6M6 12.5c1.6-.4 3 .2 4 1.6M11.5 12.5c1.4-.6 3-.2 4.2 1\"></path></g></svg>\n" +
+    "      Chaos Challenges</a></li>\n" +
     "    <li><a href=\"other.html\">\n" +
     "      <svg class=\"wide\" viewBox=\"0 7.75 24 8.5\" aria-hidden=\"true\"><path fill=\"currentColor\" d=\"M0 8.23H8.24A1.66 1.66 0 0 0 11.19 9.61L11.43 8.62 11.66 9.49A0.65 0.65 0 0 1 12.34 9.49L12.57 8.62 12.81 9.61A1.66 1.66 0 0 0 15.76 8.23H24Q21.69 8.97 19.73 12.7Q16.38 13.23 12 15.77Q7.62 13.23 4.27 12.7Q2.31 8.97 0 8.23Z\"></path></svg>\n" +
     "      Other Projects by Me</a></li>\n" +

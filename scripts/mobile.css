@@ -379,6 +379,10 @@ html.layout-mobile .fractalize-btn {
 html.layout-mobile #step-readout {
   display: none;
 }
+/* The phone dock has no Movie card, so its settings would do nothing. */
+html.layout-mobile :is(#movie-friction-field, #movie-center-lines-field) {
+  display: none;
+}
 
 /* A fade along the bottom while there is more to scroll (layout-mode.js sets .scroll-more). */
 html.layout-mobile :is(#panel, #grid-dock-sheet).scroll-more::after {

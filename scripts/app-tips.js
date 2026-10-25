@@ -37,8 +37,10 @@
   try { framed = global.top !== global; } catch (err) { framed = true; }
 
   var store = load();
-  // A visitor arriving on a scene link from outside the site gets no tips.
-  if (!framed && global.AppMode.landedFromSceneLink() && !store.all) {
+  // A visitor arriving on a scene link from outside the site gets no tips; the gallery's links are on site.
+  var fromSite = false;
+  try { fromSite = !!document.referrer && new URL(document.referrer).origin === global.location.origin; } catch (err) { /* treated as off site */ }
+  if (!framed && global.AppMode.landedFromSceneLink() && !fromSite && !store.all) {
     store.all = Date.now();
     save();
   }
@@ -159,15 +161,26 @@
     okButton.textContent = tip.ok;
     popover.hidden = false;
     position();
+    // Each tip shows at most once: however it goes away, it does not come back.
+    if (!store[id]) {
+      store[id] = Date.now();
+      save();
+      syncSettingsButton();
+    }
     return true;
   }
+
+  // Clicking the button a tip points at answers it.
+  document.addEventListener("click", function (e) {
+    if (active && active.anchor && active.anchor.contains && active.anchor.contains(e.target)) done(active.id);
+  }, true);
 
   function hidePopover() {
     popover.hidden = true;
     active = null;
   }
 
-  // Hides the tip on screen without answering it, so it can come back. With an id, only that tip.
+  // Hides the tip on screen. With an id, only that tip.
   function hide(id) {
     if (!active || (id && active.id !== id)) return;
     hidePopover();
@@ -210,7 +223,7 @@
       clamp(centerX - left - ARROW_SIZE / 2, CORNER_INSET, Math.max(CORNER_INSET, width - CORNER_INSET - ARROW_SIZE)) + "px");
   }
 
-  // A tip whose button scrolled out of sight waits to be shown again.
+  // A tip whose button scrolled out of sight is put away.
   function follow() {
     if (!active) return;
     if (anchorVisible(active.anchor)) position();

@@ -119,11 +119,9 @@
     var body = output && scene.bodies[output.body];
     if (!body) return OUTPUT_PROPERTIES;
     var canWarp = !body.isAnchored && body.type !== "portal" && !!PhysicsEngine.portalPair(scene.bodies);
-    return OUTPUT_PROPERTIES.filter(function (p) {
-      if (p.key === "totalRotation") return !body.isAnchored;
-      if (p.key === "warps") return canWarp;
-      return true;
-    });
+    // An anchored body never moves: of its own outputs only Bounce Count means anything.
+    if (body.isAnchored) return OUTPUT_PROPERTIES.filter(function (p) { return p.key === "bounces"; });
+    return OUTPUT_PROPERTIES.filter(function (p) { return p.key !== "warps" || canWarp; });
   }
 
   var scene = {
@@ -746,7 +744,8 @@
   // What a Spring-tool press/release landed on: a body (local point, snapped to center when close) or the background.
   function pickSpringEnd(x, y) {
     var hit = hitTestTopmost(x, y);
-    if (hit < 0) return { body: null, local: { x: x, y: y }, world: { x: x, y: y } };
+    // An anchored body never moves: an end on it is an end on the background.
+    if (hit < 0 || scene.bodies[hit].isAnchored) return { body: null, local: { x: x, y: y }, world: { x: x, y: y } };
     var body = scene.bodies[hit];
     var snap = SPRING_CENTER_SNAP * screenPx + pointerSlop / 2;
     var ox = x - body.x, oy = y - body.y;
@@ -1400,6 +1399,12 @@
   var SIMPLE_MODE_TOOLS = ["select", "circle", "anchor", "input", "output"];
   AppMode.onChange(function () {
     if (AppMode.isSimple() && SIMPLE_MODE_TOOLS.indexOf(activeTool) === -1) setActiveTool("select");
+    useSimpleModeDefaults();
+    if (AppMode.isSimple()) {
+      playbackSpeed = 1; // its button is hidden in Simple Mode
+      updateSpeedUI();
+    }
+    render();
   });
 
   // No Select button: any panel click that isn't a tool button backs out of the tool (canvas clicks excluded).
@@ -1531,6 +1536,32 @@
     var placed = Object.keys(portalsPresent()).length > 0;
     btnPortal.classList.toggle("portals-placed", placed);
     btnPortal.disabled = placed;
+  }
+
+  // A body just anchored keeps nothing that needs it to move: hinges, springs, velocity inputs and an
+  // Output that reads its motion. (computeMass already zeroed its velocity and spin.)
+  var MOVING_OUTPUTS = ["x", "y", "angle", "totalRotation", "warps"];
+  function dropMotionFrom(index) {
+    var dropped = [];
+    var touches = function (link) { return link.bodyA === index || link.bodyB === index; };
+    if (scene.hinges.some(touches)) dropped.push("hinges");
+    if (scene.springs.some(touches)) dropped.push("springs");
+    scene.hinges = scene.hinges.filter(function (h) { return !touches(h); });
+    scene.springs = scene.springs.filter(function (s) { return !touches(s); });
+    selectedSpring = -1;
+    ["xInput", "yInput"].forEach(function (key) {
+      var m = scene[key];
+      if (m && m.body === index && (m.property === "vx" || m.property === "vy")) {
+        scene[key] = null;
+        if (dropped.indexOf("velocity input") === -1) dropped.push("velocity input");
+      }
+    });
+    var out = scene.output;
+    if (out && out.body === index && !PhysicsEngine.isPairOutput(out) && MOVING_OUTPUTS.indexOf(out.property) !== -1) {
+      scene.output = null;
+      dropped.push("output");
+    }
+    if (dropped.length) AppMessage.toast("Anchored objects can't move, so its " + dropped.join(", ").replace(/, ([^,]*)$/, " and $1") + (dropped.length > 1 ? " were" : " was") + " removed");
   }
 
   function addHingeAt(x, y) {
@@ -1752,7 +1783,8 @@
         scene.bodies[hit2].isAnchored = !scene.bodies[hit2].isAnchored;
         AppTips.done("anchor-object");
         PhysicsEngine.computeMass(scene.bodies[hit2]);
-        refreshOutputPairUI();
+        if (scene.bodies[hit2].isAnchored) dropMotionFrom(hit2);
+        refreshMappingUI();
         render();
       }
       setActiveTool("select");
@@ -2056,7 +2088,7 @@
     // One-time nudges, not a lock: Planet Mode behaves with Collisions off and Infinite Space; off restores the defaults.
     scene.collisionsEnabled = !scene.mutualGravity;
     collisionsCheckbox.checked = scene.collisionsEnabled;
-    applyEdgeMode(scene.mutualGravity ? "infinite" : "wrap");
+    applyEdgeMode(scene.mutualGravity ? "infinite" : PhysicsEngine.DEFAULT_EDGE_MODE);
     if (scene.mutualGravity) twinkleStars();
   });
 
@@ -2134,15 +2166,21 @@
   }
 
   function propsListFor(bodyIndex) {
-    return PROPERTIES_BY_TYPE[scene.bodies[bodyIndex].type];
+    var body = scene.bodies[bodyIndex];
+    // An anchored body never moves, so a starting velocity means nothing.
+    return PROPERTIES_BY_TYPE[body.type].filter(function (p) { return !body.isAnchored || (p.key !== "vx" && p.key !== "vy"); });
   }
 
   // A Lyapunov challenge frame asking for velocity inputs (challenges/): the inputs offer nothing else.
   var velocityInputsOnly = !!(global.LayoutMode && global.LayoutMode.challengeVelocityInputs && global.LayoutMode.challengeVelocityInputs());
   function inputAllowed(key) { return !velocityInputsOnly || key === "vx" || key === "vy"; }
-  function firstInputKey(bodyIndex) {
+  // axis "x" or "y": that axis's center, else its velocity, else the first allowed.
+  function firstInputKey(bodyIndex, axis) {
     var props = propsListFor(bodyIndex);
     var allowed = props.filter(function (p) { return inputAllowed(p.key); });
+    var keys = allowed.map(function (p) { return p.key; });
+    if (keys.indexOf(axis) !== -1) return axis;
+    if (keys.indexOf("v" + axis) !== -1) return "v" + axis;
     return (allowed[0] || props[0]).key;
   }
 
@@ -2211,7 +2249,7 @@
       scene.xInput = null;
     } else {
       var bodyIndex = Number(xInputBodySelect.value);
-      scene.xInput = { body: bodyIndex, property: firstInputKey(bodyIndex) };
+      scene.xInput = { body: bodyIndex, property: firstInputKey(bodyIndex, "x") };
       AppTips.done("set-input");
     }
     populatePropertySelect(xInputPropertySelect, scene.xInput ? scene.xInput.body : null, scene.xInput ? scene.xInput.property : null);
@@ -2229,7 +2267,7 @@
       scene.yInput = null;
     } else {
       var bodyIndex = Number(yInputBodySelect.value);
-      scene.yInput = { body: bodyIndex, property: firstInputKey(bodyIndex) };
+      scene.yInput = { body: bodyIndex, property: firstInputKey(bodyIndex, "y") };
       AppTips.done("set-input");
     }
     populatePropertySelect(yInputPropertySelect, scene.yInput ? scene.yInput.body : null, scene.yInput ? scene.yInput.property : null);
@@ -2329,14 +2367,14 @@
     if (!scene.xInput || !scene.yInput) {
       return {
         ready: false,
-        message: "Try setting one of the bodies as input first",
+        message: "Try setting one of the objects as input first",
         highlight: [document.querySelector(velocityInputsOnly ? '[data-tool="input-velocity"]' : '[data-tool="input"]')],
       };
     }
     if (!scene.output) {
       return {
         ready: false,
-        message: "Try setting one of the bodies as output first",
+        message: "Try setting one of the objects as output first",
         highlight: [document.querySelector('[data-tool="output"]')],
       };
     }
@@ -2672,6 +2710,24 @@
     simulationStepsSlider.value = String(simulationStepsNotch(scene.simulationSteps));
     updateSimulationStepsReadout(scene.simulationSteps);
     playbackProgressSlider.max = String(scene.simulationSteps);
+    useSimpleModeDefaults();
+  }
+
+  // Simple Mode hides the Simulation section, so while it is on those settings are a new scene's.
+  function useSimpleModeDefaults() {
+    if (!AppMode.isSimple()) return;
+    scene.mutualGravity = false;
+    scene.collisionsEnabled = true;
+    scene.friction = 0;
+    scene.simulationSteps = NEW_SCENE_SIMULATION_STEPS;
+    mutualGravityCheckbox.checked = false;
+    collisionsCheckbox.checked = true;
+    syncFrictionUI();
+    simulationStepsSlider.value = String(simulationStepsNotch(scene.simulationSteps));
+    updateSimulationStepsReadout(scene.simulationSteps);
+    playbackProgressSlider.max = String(scene.simulationSteps);
+    scene.edgeMode = PhysicsEngine.DEFAULT_EDGE_MODE;
+    edgeModeSelect.value = scene.edgeMode;
   }
 
   // Common tail for anything replacing the whole scene: refresh panels that read scene state directly.
@@ -2711,13 +2767,13 @@
   }
 
   btnSampleDoublePendulum.addEventListener("click", function () {
-    loadSample("samples/double_pendulum.json?v=m207", "Double Pendulum");
+    loadSample("samples/double_pendulum.json?v=m210", "Double Pendulum");
   });
   btnSamplePinball.addEventListener("click", function () {
-    loadSample("samples/pinball.json?v=m207", "Pinball");
+    loadSample("samples/pinball.json?v=m210", "Pinball");
   });
   btnSampleBinaryStar.addEventListener("click", function () {
-    loadSample("samples/binary_star.json?v=m207", "Binary Star");
+    loadSample("samples/binary_star.json?v=m210", "Binary Star");
   });
   function clearScene() {
     sharedFrame = null;
@@ -2822,8 +2878,8 @@
 
   // Where playback stops this run: simulationSteps, or earlier if findWrapStopStep found a wrap.
   var effectiveMaxSteps = DEFAULT_SIMULATION_STEPS;
-  // The Output body's continuous x/y/angle for the FINAL frame of a wrap-stopped run (null otherwise):
-  // the last discrete sample is a discontinuous function of the starting conditions.
+  // The FINAL frame of a wrap-stopped run (null otherwise): every body's {x, y, angle} at the crossing
+  // instant, as the map takes it; the last discrete sample is a discontinuous function of the start.
   var wrapStopOverride = null;
   // Scene Lifespan's value for this run, constant across frames; simulationSteps if it never stopped early.
   var lifespanValue = DEFAULT_SIMULATION_STEPS;
@@ -2881,8 +2937,9 @@
     if (scene.output.property === "lifespan") {
       t = Math.min(1, Math.max(0, lifespanValue / rangeMax));
     } else if (scene.output.property === "distance") {
-      // Clamped, not wrapped: maximal separation is a real value.
-      t = Math.min(1, Math.max(0, outputValueAtFrame(trajectory[currentStepCount - 1], scene.output) / rangeMax));
+      // Clamped, not wrapped: maximal separation is a real value. Infinite Space squashes it, as the map does.
+      var apart = outputValueAtFrame(trajectory[currentStepCount - 1], scene.output) / rangeMax;
+      t = scene.edgeMode === "infinite" ? PhysicsEngine.frameSigmoid(apart) : Math.min(1, Math.max(0, apart));
     } else if (scene.output.property === "bounces" || scene.output.property === "warps") {
       var maxCount = outputTallies ? outputTallies[effectiveMaxSteps - 1] : 0;
       t = maxCount > 0 ? outputTallies[currentStepCount - 1] / maxCount : 0;
@@ -2892,14 +2949,13 @@
       for (var k = 0; outputTallies && k < effectiveMaxSteps; k++) maxTurn = Math.max(maxTurn, Math.abs(outputTallies[k]));
       var turn = outputTallies ? outputTallies[currentStepCount - 1] : 0;
       // The stopped final frame's angle is wrapStopOverride's.
-      if (wrapStopOverride && currentStepCount === effectiveMaxSteps && wrapStopOverride.bodyIndex === scene.output.body) {
-        turn += wrapStopOverride.angle - trajectory[currentStepCount - 1][scene.output.body].angle;
+      if (wrapStopOverride && currentStepCount === effectiveMaxSteps) {
+        turn += wrapStopOverride[scene.output.body].angle - trajectory[currentStepCount - 1][scene.output.body].angle;
       }
       t = maxTurn > 0 ? 0.5 + 0.5 * turn / maxTurn : 0.5;
     } else {
-      var value = (wrapStopOverride && currentStepCount === effectiveMaxSteps)
-        ? wrapStopOverride[scene.output.property]
-        : outputValueAtFrame(trajectory[currentStepCount - 1], scene.output);
+      var value = outputValueAtFrame(wrapStopOverride && currentStepCount === effectiveMaxSteps
+        ? wrapStopOverride : trajectory[currentStepCount - 1], scene.output);
       var prop = scene.output.property;
       if (prop === "x" || prop === "y") {
         // Edges off: a sigmoid squashes the unbounded coordinate into range (positionOutputT); angle is always circular.
@@ -3142,12 +3198,13 @@
       scene.bodies[i].y = frame[i].y;
       scene.bodies[i].angle = frame[i].angle;
     }
-    // Only on the final frame of a wrap-stopped run (see wrapStopOverride); lifespan has no body to correct.
-    if (wrapStopOverride && stepCount === effectiveMaxSteps && scene.output.body !== null) {
-      var out = scene.bodies[scene.output.body];
-      out.x = wrapStopOverride.x;
-      out.y = wrapStopOverride.y;
-      out.angle = wrapStopOverride.angle;
+    // Only on the final frame of a wrap-stopped run (see wrapStopOverride).
+    if (wrapStopOverride && stepCount === effectiveMaxSteps) {
+      for (var j = 0; j < scene.bodies.length; j++) {
+        scene.bodies[j].x = wrapStopOverride[j].x;
+        scene.bodies[j].y = wrapStopOverride[j].y;
+        scene.bodies[j].angle = wrapStopOverride[j].angle;
+      }
     }
   }
 
@@ -3316,11 +3373,16 @@
     warpEvents = PhysicsEngine.warpEventsFromTrajectory(trajectory);
     if (scene.edgeMode === "sticky" && scene.output) {
       var watchedIndices = PhysicsHingeGeometry.wrapWatchedBodyIndices(scene);
-      var targetBodyIndex = outputProp === "lifespan" || outputProp === "bounces" || outputProp === "warps" ? null : scene.output.body;
-      var wrapStop = PhysicsHingeGeometry.findWrapStopStep(trajectory, watchedIndices, targetBodyIndex, scene.frameWidth, scene.frameHeight, initialScene.bodies, PhysicsGPU.FIXED_DT);
+      var stopAt = function (b) {
+        return PhysicsHingeGeometry.findWrapStopStep(trajectory, watchedIndices, b, scene.frameWidth, scene.frameHeight, initialScene.bodies, PhysicsGPU.FIXED_DT);
+      };
+      var wrapStop = stopAt(null);
       if (wrapStop !== null) {
         effectiveMaxSteps = Math.max(1, wrapStop.step);
-        wrapStopOverride = wrapStop;
+        wrapStopOverride = scene.bodies.map(function (b, j) {
+          var at = stopAt(j);
+          return { x: at.x, y: at.y, angle: at.angle };
+        });
         lifespanValue = wrapStop.step + wrapStop.tFrac / PhysicsGPU.FIXED_DT;
       }
     }
