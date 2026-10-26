@@ -379,6 +379,10 @@ html.layout-mobile .fractalize-btn {
 html.layout-mobile #step-readout {
   display: none;
 }
+/* Opening Map Evolution in the phone dock turns Playback on (fractal-grid.js), so no switch. */
+html.layout-mobile .toggle-field:has(#evolution-inspect-checkbox) {
+  display: none;
+}
 /* The phone dock has no Movie card, so its settings would do nothing. */
 html.layout-mobile :is(#movie-friction-field, #movie-center-lines-field) {
   display: none;

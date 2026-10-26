@@ -387,7 +387,7 @@
 }
 
 /* Simple Mode: the map keeps only Inspect and Settings, the builder only the basic tools. */
-html.simple-mode #shared-settings-body > :not(#mode-switch, .volume-field, #color-blind-field, #grid-btn-tips, #grid-btn-reset-all),
+html.simple-mode #shared-settings-body > :not(#mode-switch, .volume-field, #color-blind-field, #grid-btn-tips, #grid-btn-reset-all, #settings-about-link),
 html.simple-mode #menu-stats,
 html.simple-mode #grid-btn-stats,
 html.simple-mode #grid-stats-panel,
@@ -507,3 +507,13 @@ html.drop-shadow-off :is(.floating-settings-btn, .floating-home-btn, .settings-p
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
+
+/* The last line of Settings, in the builder and on the map. */
+#settings-about-link {
+  display: block;
+  margin-top: 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+#settings-about-link:hover { color: var(--text); }

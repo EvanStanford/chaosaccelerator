@@ -618,6 +618,8 @@
       } else {
         freezeMapAtEnd();
       }
+      // In the phone dock only one card is open, so the card itself is the Playback switch.
+      if (dockActive && evolutionInspectCheckbox.checked !== open) setPlaybackSwitch(open);
       refreshHoverPreview();
     });
 
@@ -8838,13 +8840,12 @@
     syncMapToInspection();
   }
 
-  evolutionInspectCheckbox.addEventListener("change", function () {
-    setMapFollowsInspect(evolutionInspectCheckbox.checked);
-    // Switching Playback on presses its play button.
-    if (evolutionInspectCheckbox.checked && !gridPlayPauseBtn.disabled && gridPlayPauseBtn.getAttribute("aria-label") === "Play") {
-      gridPlayPauseBtn.click();
-    }
-  });
+  // Switching Playback on presses its play button.
+  function setPlaybackSwitch(on) {
+    setMapFollowsInspect(on);
+    if (on && !gridPlayPauseBtn.disabled && gridPlayPauseBtn.getAttribute("aria-label") === "Play") gridPlayPauseBtn.click();
+  }
+  evolutionInspectCheckbox.addEventListener("change", function () { setPlaybackSwitch(evolutionInspectCheckbox.checked); });
 
   function previewOwnsTimeline() {
     return hasFloatColorBuffer && mapFollowsInspect() && (inspectMenu.isOpen() || inspectedGroups.length > 0) && playbackHasSession
@@ -10778,6 +10779,7 @@
         if (!menu.isOpen()) return;
         if (keep) menu.set(false); else keep = menu;
       });
+      if (playbackMenu.isOpen() && !evolutionInspectCheckbox.checked) setPlaybackSwitch(true);
     }
     dockMenus.forEach(function (menu) {
       menu.docked = active;
