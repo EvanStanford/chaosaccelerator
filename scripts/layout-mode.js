@@ -61,7 +61,7 @@
     if (challengeVelocityInputs) root.classList.add("challenge-velocity-inputs");
     var challengeSheet = document.createElement("link");
     challengeSheet.rel = "stylesheet";
-    challengeSheet.href = "challenges/challenge-frame.css?v=m218";
+    challengeSheet.href = "challenges/challenge-frame.css?v=m220";
     document.head.appendChild(challengeSheet);
   }
 

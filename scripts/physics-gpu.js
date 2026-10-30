@@ -48,14 +48,31 @@
       "  if (sq > MAX_SPEED * MAX_SPEED) v *= MAX_SPEED / sqrt(sq);",
       "  return v;",
       "}",
-      // PhysicsEngine.outsideShare.
-      "float outsideShare(vec2 d, vec2 dv, float contact, float h) {",
-      "  float a = dot(dv, dv), b = dot(d, dv), c = dot(d, d) - contact * contact;",
-      "  if (a == 0.0) return c >= 0.0 ? 1.0 : 0.0;",
-      "  float disc = b * b - a * c;",
-      "  if (disc <= 0.0) return 1.0;",
-      "  float root = sqrt(disc), t1 = (-b - root) / a, t2 = (-b + root) / a;",
-      "  return 1.0 - max(0.0, min(0.5 * h, t2) - max(-0.5 * h, t1)) / h;",
+      // PhysicsEngine.segmentField: the pull per unit mass at p from a segment (center c, axis e, half length h, G*mass/length k).
+      "vec2 segmentField(vec2 p, vec2 c, vec2 e, float h, float k, float eps) {",
+      "  vec2 r = p - c;",
+      "  float along = dot(r, e), d = r.y * e.x - r.x * e.y, u1 = -h - along, u2 = h - along, d2 = d * d, soft = d2;",
+      "  if (d2 < eps * eps) {",
+      "    float over = clamp(1.0 - (abs(along) - h) / eps, 0.0, 1.0);",
+      "    soft = d2 + over * (eps * eps * 0.5 + d2 * d2 / (2.0 * eps * eps) - d2);",
+      "  }",
+      "  float r1 = sqrt(u1 * u1 + soft), r2 = sqrt(u2 * u2 + soft), du = u2 * u2 - u1 * u1;",
+      "  float fa = k * du / (r1 * r2 * (r1 + r2));",
+      "  float fd = u1 * u2 > 0.0 ? k * d * du / (r1 * r2 * (u2 * r1 + u1 * r2)) : k * d * (u2 / r2 - u1 / r1) / soft;",
+      "  return vec2(fa * e.x + fd * e.y, fa * e.y - fd * e.x);",
+      "}",
+      "float pointSegmentDistance(vec2 p, vec2 c, vec2 e, float h) {",
+      "  vec2 r = p - c;",
+      "  return length(r - e * clamp(dot(r, e), -h, h));",
+      "}",
+      // PhysicsEngine.segmentsDistance: 0 where they cross, else the nearest end to the other segment.
+      "float segmentsDistance(vec2 ca, vec2 ea, float ha, vec2 cb, vec2 eb, float hb) {",
+      "  vec2 a0 = ca - ea * ha, a1 = ca + ea * ha, b0 = cb - eb * hb, b1 = cb + eb * hb;",
+      "  float s0 = (a1.x - a0.x) * (b0.y - a0.y) - (a1.y - a0.y) * (b0.x - a0.x), s1 = (a1.x - a0.x) * (b1.y - a0.y) - (a1.y - a0.y) * (b1.x - a0.x);",
+      "  float t0 = (b1.x - b0.x) * (a0.y - b0.y) - (b1.y - b0.y) * (a0.x - b0.x), t1 = (b1.x - b0.x) * (a1.y - b0.y) - (b1.y - b0.y) * (a1.x - b0.x);",
+      "  if (s0 * s1 < 0.0 && t0 * t1 < 0.0) return 0.0;",
+      "  return min(min(pointSegmentDistance(a0, cb, eb, hb), pointSegmentDistance(a1, cb, eb, hb)),",
+      "    min(pointSegmentDistance(b0, ca, ea, ha), pointSegmentDistance(b1, ca, ea, ha)));",
       "}",
     ].filter(Boolean).join("\n");
   }
@@ -1171,6 +1188,9 @@
       if (!sp.aIsWorld && !consts[sp.a].isAnchored) { sprung[sp.a] = true; if (!sp.localA.zero) turned[sp.a] = true; }
       if (!consts[sp.b].isAnchored) { sprung[sp.b] = true; if (!sp.localB.zero) turned[sp.b] = true; }
     });
+    // Under Mutual Gravity a pull along a free line or portal twists it.
+    var gravTurned = consts.map(function (c) { return !!mutualGravity && !c.isAnchored && c.type !== "circle"; });
+    gravTurned.forEach(function (on, i) { if (on) turned[i] = true; });
     // One generator, two spellings: df has no operators, so dfAdd(a, b) where f32 says a + b.
     var E = df ? {
       body: "dbody", bodyType: "DBody", scalarType: "MF", vecType: "DVec2",
@@ -1312,30 +1332,23 @@
     }
 
     var accelExpr = {};
-    // gravityLines(pos, acc, vel): the pull on every free body from positions pos(i).x/.y, summed into acc(i).
-    // vel(i): the free body's stored velocity, for pairs that weigh their pull by PhysicsEngine.outsideShare.
-    // apartLines(apart): apart(a, b) names a bool, set for circles apart at the step's start.
-    var gravityLines = null, apartLines = null;
+    // gravityLines(): this step's pull on every free body, into gravAccN (and gravWN, a free segment's twist).
+    // apartLines(apart): apart(a, b) names a bool, set for bodies whose shapes are apart at the step's start.
+    // segmentPullLines: the pull on one body from another at given poses, for the bounce and the portal pass.
+    var gravityLines = null, apartLines = null, segmentPullLines = null, touchLine = null;
     function eachGravityPair(fn) {
       for (var pa = 0; pa < n; pa++) {
         for (var pb = pa + 1; pb < n; pb++) if (!(consts[pa].isAnchored && consts[pb].isAnchored)) fn(pa, pb);
       }
     }
-    function crossesInFlight(pa, pb) {
-      return collisionsOn && (consts[pa].type !== "circle" || consts[pb].type !== "circle");
-    }
-    // vel(b) - vel(a), leaving out anchored bodies.
-    function relVelExpr(vel, pa, pb, sub, neg) {
-      if (consts[pa].isAnchored) return vel(pb);
-      if (consts[pb].isAnchored) return neg(vel(pa));
-      return sub(vel(pb), vel(pa));
-    }
-    var gravKick = FIXED_DT;
+    function isSeg(i) { return consts[i].type !== "circle"; }
+    function halfThick(i) { return (consts[i].type === "portal" ? PORTAL_THICKNESS : LINE_THICKNESS) / 2; }
+    var GAUSS_N = [-Math.sqrt(0.6), 0, Math.sqrt(0.6)], GAUSS_W = [5 / 18, 8 / 18, 5 / 18];
     if (mutualGravity) {
       var gravK = consts.map(function (c) { return global.PhysicsEngine.gravitationalMass(unitBodyOf(c)); });
       var reachK = consts.map(function (c) { return global.PhysicsEngine.halfExtent(unitBodyOf(c)); });
       var GRAV_G = global.PhysicsEngine.MUTUAL_GRAVITY_CONSTANT;
-
+      var glit = df ? global.PhysicsDF.num : fnum;
       if (df) {
         var dfnumG = global.PhysicsDF.num;
         for (var mdf = 0; mdf < n; mdf++) {
@@ -1346,22 +1359,160 @@
           lines.push("  MF gravGM" + mdf + " = dfMul(" + dfnumG(GRAV_G * gravK[mdf]) + ", " +
             (consts[mdf].type === "circle" ? "dfSqr(" + halfDf + ")" : halfDf) + ");");
         }
+      } else {
+        for (var h32 = 0; h32 < n; h32++) {
+          lines.push("  float fHalf" + h32 + " = BODY" + h32 + "_HALF;");
+        }
+        for (var m = 0; m < n; m++) {
+          lines.push("  float gravMass" + m + " = " + fnum(gravK[m]) + " * fHalf" + m +
+            (consts[m].type === "circle" ? " * fHalf" + m : "") + ";");
+        }
+        var reachExpr = consts.map(function (c, i) {
+          return reachK[i] === 1 ? "fHalf" + i : "(" + fnum(reachK[i]) + " * fHalf" + i + ")";
+        });
+      }
+      // Each segment's axis at the step's start, and G * mass / length.
+      for (var sg = 0; sg < n; sg++) {
+        if (!isSeg(sg)) continue;
+        if (df) {
+          lines.push("  MF gSn" + sg + ", gCs" + sg + "; dfSinCos(" + B(sg) + ".angle, gSn" + sg + ", gCs" + sg + "); DVec2 gE" + sg + " = dv2(gCs" + sg + ", gSn" + sg + ");");
+          lines.push("  MF gravLam" + sg + " = dfDiv(gravGM" + sg + ", dfMulPow2(BODY" + sg + "_HALF, 2.0));");
+        } else {
+          lines.push("  vec2 gE" + sg + " = vec2(cos(" + B(sg) + ".angle), sin(" + B(sg) + ".angle));");
+          lines.push("  float gravLam" + sg + " = " + fnum(GRAV_G) + " * gravMass" + sg + " / (2.0 * fHalf" + sg + ");");
+        }
+      }
+      // Precision-neutral pieces for the segment pulls (PhysicsEngine.pairPull).
+      var V = df ? {
+        half: function (i) { return "BODY" + i + "_HALF"; },
+        mass: function (i) { return "gravGM" + i; },
+        field: function (p, j, eps) { return "dfSegmentField(" + p + ", " + V.at(j) + ", gE" + j + ", BODY" + j + "_HALF, gravLam" + j + ", " + eps + ")"; },
+        eps: function (c, sgi) { return c < 0 ? glit(halfThick(-c - 1) + halfThick(sgi)) : "dfAdd(BODY" + c + "_HALF, " + glit(halfThick(sgi)) + ")"; },
+        cross: function (a, b) { return "dfSub(dfMul(" + a + ".x, " + b + ".y), dfMul(" + a + ".y, " + b + ".x))"; },
+        add: function (t, v) { return t + " = dv2Add(" + t + ", " + v + ");"; },
+        sub: function (t, v) { return t + " = dv2Sub(" + t + ", " + v + ");"; },
+        scale: function (v, k) { return "dv2Scale(" + v + ", " + k + ")"; },
+        ratio: function (a, b) { return "dfDiv(" + a + ", " + b + ")"; },
+        twist: function (k, crossE, over) { return "dfDiv(dfMul(" + k + ", " + crossE + "), " + over + ")"; },
+        times: function (a, b) { return "dfMul(" + a + ", " + b + ")"; },
+        sq: function (a) { return "dfSqr(" + a + ")"; },
+        sAdd: function (t, v) { return t + " = dfAdd(" + t + ", " + v + ");"; },
+        sSub: function (t, v) { return t + " = dfSub(" + t + ", " + v + ");"; },
+        gauss: function (i, p, g) { return "dv2Add(" + p + ", dv2Scale(gE" + i + ", dfMul(BODY" + i + "_HALF, " + glit(GAUSS_N[g]) + ")))"; },
+        vsub: function (a, b) { return "dv2Sub(" + a + ", " + b + ")"; },
+        touch: function (i, pi, j, pj) {
+          if (!isSeg(i)) return "dfLess(dfPointSegmentDistance(" + pi + ", " + pj + ", gE" + j + ", BODY" + j + "_HALF), dfAdd(BODY" + i + "_HALF, " + glit(halfThick(j)) + "))";
+          if (!isSeg(j)) return "dfLess(dfPointSegmentDistance(" + pj + ", " + pi + ", gE" + i + ", BODY" + i + "_HALF), dfAdd(BODY" + j + "_HALF, " + glit(halfThick(i)) + "))";
+          return "dfLess(dfSegmentsDistance(" + pi + ", gE" + i + ", BODY" + i + "_HALF, " + pj + ", gE" + j + ", BODY" + j + "_HALF), " + glit(halfThick(i) + halfThick(j)) + ")";
+        },
+        vecT: "DVec2", sclT: "MF",
+      } : {
+        half: function (i) { return "fHalf" + i; },
+        mass: function (i) { return "gravMass" + i; },
+        field: function (p, j, eps) { return "segmentField(" + p + ", " + V.at(j) + ", gE" + j + ", fHalf" + j + ", gravLam" + j + ", " + eps + ")"; },
+        eps: function (c, sgi) { return c < 0 ? fnum(halfThick(-c - 1) + halfThick(sgi)) : "(fHalf" + c + " + " + fnum(halfThick(sgi)) + ")"; },
+        cross: function (a, b) { return "(" + a + ".x * " + b + ".y - " + a + ".y * " + b + ".x)"; },
+        add: function (t, v) { return t + " += " + v + ";"; },
+        sub: function (t, v) { return t + " -= " + v + ";"; },
+        scale: function (v, k) { return v + " * (" + k + ")"; },
+        ratio: function (a, b) { return a + " / " + b; },
+        twist: function (k, crossE, over) { return k + " * " + crossE + " / (" + over + ")"; },
+        times: function (a, b) { return "(" + a + ") * (" + b + ")"; },
+        sq: function (a) { return a + " * " + a; },
+        sAdd: function (t, v) { return t + " += " + v + ";"; },
+        sSub: function (t, v) { return t + " -= " + v + ";"; },
+        gauss: function (i, p, g) { return p + " + gE" + i + " * (fHalf" + i + " * " + fnum(GAUSS_N[g]) + ")"; },
+        vsub: function (a, b) { return a + " - " + b; },
+        touch: function (i, pi, j, pj) {
+          if (!isSeg(i)) return "pointSegmentDistance(" + pi + ", " + pj + ", gE" + j + ", fHalf" + j + ") < fHalf" + i + " + " + fnum(halfThick(j));
+          if (!isSeg(j)) return "pointSegmentDistance(" + pj + ", " + pi + ", gE" + i + ", fHalf" + i + ") < fHalf" + j + " + " + fnum(halfThick(i));
+          return "segmentsDistance(" + pi + ", gE" + i + ", fHalf" + i + ", " + pj + ", gE" + j + ", fHalf" + j + ") < " + fnum(halfThick(i) + halfThick(j));
+        },
+        vecT: "vec2", sclT: "float",
+      };
+      var vAt = {};
+      V.at = function (j) { return vAt[j]; };
+      // The pull between i and j (one of them a segment) at poses pi, pj (vec expressions), into the free sides'
+      // acc(i) and, for a free segment, twist(i). onlyOn: just that body's pull.
+      function segPairLines(i, pi, j, pj, acc, twist, onlyOn) {
+        var out = [], three = glit(3);
+        vAt[i] = pi; vAt[j] = pj;
+        var want = function (b) { return !consts[b].isAnchored && (onlyOn === undefined || onlyOn === b); };
+        if (!isSeg(i) || !isSeg(j)) {
+          var c = isSeg(i) ? j : i, sgi = isSeg(i) ? i : j, pc = c === i ? pi : pj, ps = c === i ? pj : pi;
+          out.push("    { " + V.vecT + " gf = " + V.field(pc, sgi, V.eps(c, sgi)) + ";");
+          if (want(c)) out.push("      " + V.add(acc(c), "gf"));
+          if (want(sgi)) {
+            out.push("      " + V.sub(acc(sgi), V.scale("gf", V.ratio(V.mass(c), V.mass(sgi)))));
+            if (twist) {
+              out.push("      " + V.vecT + " ga = " + V.vsub(pc, ps) + ";");
+              out.push("      " + V.sSub(twist(sgi), V.twist(V.times(three, V.mass(c)), V.cross("ga", "gf"), V.times(V.mass(sgi), V.sq(V.half(sgi))))));
+            }
+          }
+          out.push("    }");
+          return out;
+        }
+        for (var g = 0; g < GAUSS_N.length; g++) {
+          var w = glit(GAUSS_W[g]);
+          out.push("    { " + V.vecT + " gq = " + V.gauss(i, pi, g) + "; " + V.vecT + " gf = " + V.field("gq", j, V.eps(-i - 1, j)) + ";");
+          if (want(i)) {
+            out.push("      " + V.add(acc(i), V.scale("gf", w)));
+            if (twist) {
+              out.push("      " + V.vecT + " ga = " + V.vsub("gq", pi) + ";");
+              out.push("      " + V.sAdd(twist(i), V.twist(V.times(three, w), V.cross("ga", "gf"), V.sq(V.half(i)))));
+            }
+          }
+          if (want(j)) {
+            out.push("      " + V.sub(acc(j), V.scale("gf", V.times(w, V.ratio(V.mass(i), V.mass(j))))));
+            if (twist) {
+              out.push("      " + V.vecT + " gb = " + V.vsub("gq", pj) + ";");
+              out.push("      " + V.sSub(twist(j), V.twist(V.times(V.times(three, w), V.mass(i)), V.cross("gb", "gf"), V.times(V.mass(j), V.sq(V.half(j))))));
+            }
+          }
+          out.push("    }");
+        }
+        return out;
+      }
+      function posVec(i) { return E.vec(B(i) + ".x", B(i) + ".y"); }
+      // The pull on k at pk from j at pj (vec expressions) into `target`; gate: an expression that skips it.
+      segmentPullLines = function (k, pk, j, pj, target, gate, twistTarget) {
+        var out = [];
+        var a = k < j ? k : j, b = k < j ? j : k;
+        out.push("    if (!(" + gate + ")) {");
+        segPairLines(a, k < j ? pk : pj, b, k < j ? pj : pk, function () { return target; }, twistTarget ? function () { return twistTarget; } : null, k)
+          .forEach(function (l) { out.push("  " + l); });
+        out.push("    }");
+        return out;
+      };
+      touchLine = function (i, pi, j, pj) { return V.touch(i, pi, j, pj); };
+
+      if (df) {
         apartLines = function (apart) {
           var out = [];
           eachGravityPair(function (pa, pb) {
-            if (crossesInFlight(pa, pb)) return;
+            if (isSeg(pa) || isSeg(pb)) {
+              out.push("  bool " + apart(pa, pb) + " = !(" + touchLine(pa, posVec(pa), pb, posVec(pb)) + ");");
+              return;
+            }
             out.push("  bool " + apart(pa, pb) + "; { DVec2 gd = dv2(dfSub(" + B(pb) + ".x, " + B(pa) + ".x), dfSub(" + B(pb) + ".y, " + B(pa) + ".y)); " +
               "MF gContact = dfAdd(gravReach" + pa + ", gravReach" + pb + "); " + apart(pa, pb) + " = !dfLess(dv2LengthSq(gd), dfSqr(gContact)); }");
           });
           return out;
         };
-        gravityLines = function (pos, acc, vel) {
-          var out = [];
+        gravityLines = function () {
+          var out = [], pos = B, acc = function (i) { return "gravAcc" + i; };
           for (var adf = 0; adf < n; adf++) {
             if (!consts[adf].isAnchored) out.push("  DVec2 " + acc(adf) + " = dv2Zero();");
+            if (gravTurned[adf]) out.push("  MF gravW" + adf + " = DF_ZERO;");
           }
           // Once per unordered pair; each body still accumulates in ascending index order.
           eachGravityPair(function (pa, pb) {
+            if (isSeg(pa) || isSeg(pb)) {
+              out.push("  " + (collisionsOn ? "if (!(" + touchLine(pa, posVec(pa), pb, posVec(pb)) + ")) {" : "{"));
+              segPairLines(pa, posVec(pa), pb, posVec(pb), acc, function (i) { return "gravW" + i; }).forEach(function (l) { out.push(l); });
+              out.push("  }");
+              return;
+            }
             out.push("  {");
             out.push("    DVec2 gd = dv2(dfSub(" + pos(pb) + ".x, " + pos(pa) + ".x), dfSub(" + pos(pb) + ".y, " + pos(pa) + ".y));");
             out.push("    MF gr2 = dv2LengthSq(gd);");
@@ -1372,16 +1523,8 @@
             var applyLines = [];
             if (!consts[pa].isAnchored) applyLines.push(acc(pa) + " = dv2Add(" + acc(pa) + ", dv2Scale(gd, dfMul(gravGM" + pb + ", gk)));");
             if (!consts[pb].isAnchored) applyLines.push(acc(pb) + " = dv2Sub(" + acc(pb) + ", dv2Scale(gd, dfMul(gravGM" + pa + ", gk)));");
-            if (crossesInFlight(pa, pb)) {
-              var dvDf = relVelExpr(vel, pa, pb, function (x, y) { return "dv2Sub(" + x + ", " + y + ")"; }, function (x) { return "dv2Neg(" + x + ")"; });
-              out.push("    MF gw = dfOutsideShare(gd, " + dvDf + ", gContact, " + dfnumG(gravKick) + ");");
-              out.push("    if (dfGreater(gw, DF_ZERO)) {");
-              out.push("      if (dfLess(gr2, gContact2)) gr2 = gContact2;");
-              out.push("      MF gk = dfDiv(gw, dfMul(gr2, dfSqrt(gr2)));");
-              applyLines.forEach(function (l) { out.push("      " + l); });
-              out.push("    }");
-            } else if (collisionsOn) {
-              // Touching bodies do not pull: see PhysicsEngine.computeAccelerations.
+            if (collisionsOn) {
+              // Touching bodies do not pull: see PhysicsEngine.mutualPull.
               out.push("    if (" + outside + ") {");
               out.push("      MF gk = dfDiv(DF_ONE, dfMul(gr2, dfSqrt(gr2)));");
               applyLines.forEach(function (l) { out.push("      " + l); });
@@ -1405,16 +1548,6 @@
           return out;
         };
       } else {
-        for (var h32 = 0; h32 < n; h32++) {
-          lines.push("  float fHalf" + h32 + " = BODY" + h32 + "_HALF;");
-        }
-        for (var m = 0; m < n; m++) {
-          lines.push("  float gravMass" + m + " = " + fnum(gravK[m]) + " * fHalf" + m +
-            (consts[m].type === "circle" ? " * fHalf" + m : "") + ";");
-        }
-        var reachExpr = consts.map(function (c, i) {
-          return reachK[i] === 1 ? "fHalf" + i : "(" + fnum(reachK[i]) + " * fHalf" + i + ")";
-        });
         // Once per unordered pair: d is shared, and the second body's pull is along -d.
         // Each body still accumulates in ascending index order.
         function pull32(toward, r3) {
@@ -1423,33 +1556,35 @@
         apartLines = function (apart) {
           var out = [];
           eachGravityPair(function (pa, pb) {
-            if (crossesInFlight(pa, pb)) return;
+            if (isSeg(pa) || isSeg(pb)) {
+              out.push("  bool " + apart(pa, pb) + " = !(" + touchLine(pa, posVec(pa), pb, posVec(pb)) + ");");
+              return;
+            }
             out.push("  bool " + apart(pa, pb) + "; { vec2 d = vec2(" + B(pb) + ".x - " + B(pa) + ".x, " + B(pb) + ".y - " + B(pa) + ".y); " +
               "float contact = " + reachExpr[pa] + " + " + reachExpr[pb] + "; " + apart(pa, pb) + " = dot(d, d) >= contact * contact; }");
           });
           return out;
         };
-        gravityLines = function (pos, acc, vel) {
-          var out = [];
+        gravityLines = function () {
+          var out = [], pos = B, acc = function (i) { return "gravAcc" + i; };
           for (var a = 0; a < n; a++) {
             if (!consts[a].isAnchored) out.push("  vec2 " + acc(a) + " = vec2(0.0);");
+            if (gravTurned[a]) out.push("  float gravW" + a + " = 0.0;");
           }
           eachGravityPair(function (pa, pb) {
+            if (isSeg(pa) || isSeg(pb)) {
+              out.push("  " + (collisionsOn ? "if (!(" + touchLine(pa, posVec(pa), pb, posVec(pb)) + ")) {" : "{"));
+              segPairLines(pa, posVec(pa), pb, posVec(pb), acc, function (i) { return "gravW" + i; }).forEach(function (l) { out.push(l); });
+              out.push("  }");
+              return;
+            }
             var aMoves = !consts[pa].isAnchored, bMoves = !consts[pb].isAnchored;
             out.push("  {");
             out.push("    vec2 d = vec2(" + pos(pb) + ".x - " + pos(pa) + ".x, " + pos(pb) + ".y - " + pos(pa) + ".y);");
-            // Touching bodies do not pull (PhysicsEngine.computeAccelerations); collisions off: smooth interior law.
+            // Touching bodies do not pull (PhysicsEngine.mutualPull); collisions off: smooth interior law.
             out.push("    float contact = " + reachExpr[pa] + " + " + reachExpr[pb] + ";");
             out.push("    float r2 = dot(d, d);");
-            if (crossesInFlight(pa, pb)) {
-              var dv32 = relVelExpr(vel, pa, pb, function (x, y) { return x + " - " + y; }, function (x) { return "-" + x; });
-              out.push("    float gw = outsideShare(d, " + dv32 + ", contact, " + fnum(gravKick) + ");");
-              out.push("    if (gw > 0.0) {");
-              out.push("      r2 = max(r2, contact * contact);");
-              if (aMoves) out.push("      " + acc(pa) + " += gw * " + pull32(pb, "(r2 * sqrt(r2))") + ";");
-              if (bMoves) out.push("      " + acc(pb) + " -= gw * " + pull32(pa, "(r2 * sqrt(r2))") + ";");
-              out.push("    }");
-            } else if (collisionsOn) {
+            if (collisionsOn) {
               out.push("    if (r2 >= contact * contact) {");
               if (aMoves) out.push("      " + acc(pa) + " += " + pull32(pb, "(r2 * sqrt(r2))") + ";");
               if (bMoves) out.push("      " + acc(pb) + " -= " + pull32(pa, "(r2 * sqrt(r2))") + ";");
@@ -1472,10 +1607,11 @@
           return out;
         };
       }
-      gravityLines(B, function (i) { return "gravAcc" + i; }, function (i) { return E.vec(B(i) + ".vx", B(i) + ".vy"); })
-        .forEach(function (l) { lines.push(l); });
+      gravityLines().forEach(function (l) { lines.push(l); });
       for (var ga = 0; ga < n; ga++) {
         if (!consts[ga].isAnchored) accelExpr[ga] = "gravAcc" + ga;
+        // A segment's twist joins its spin the way a spring's does (springSpin).
+        if (gravTurned[ga] && !sprung[ga]) lines.push("  " + E.scalarType + " sprAlpha" + ga + " = gravW" + ga + ", sprSwing" + ga + " = " + E.zero + ";");
       }
       lines.push("");
     }
@@ -1492,7 +1628,7 @@
       for (var sb = 0; sb < n; sb++) {
         if (!sprung[sb]) continue;
         lines.push("  " + E.vecType + " sprAcc" + sb + " = " + E.zeroVec + ";");
-        if (turned[sb]) lines.push("  " + E.scalarType + " sprAlpha" + sb + " = " + E.zero + ", sprSwing" + sb + " = " + E.zero + ";");
+        if (turned[sb]) lines.push("  " + E.scalarType + " sprAlpha" + sb + " = " + (gravTurned[sb] ? "gravW" + sb : E.zero) + ", sprSwing" + sb + " = " + E.zero + ";");
       }
       // df only: one sin/cos per off-center-attached body, shared by its springs.
       var armed = {};
@@ -1635,28 +1771,30 @@
     }
     function bApart(a, b) { return "bApart" + Math.min(a, b) + "_" + Math.max(a, b); }
     // Assigns to `out` the pull on free body k standing at (px, py), the others at the poses `at` names.
-    function bouncePullLines(k, px, py, out, at) {
+    // outW, for a segment Mutual Gravity twists: its twist, the same way.
+    function bouncePullLines(k, px, py, out, at, outW) {
       var res = ["    " + out + " = " + (sprung[k] ? "sprAcc" + k : E.zeroVec) + ";"];
+      if (outW) res.push("    " + outW + " = " + E.zero + ";");
       for (var j = 0; j < n; j++) {
         if (j === k) continue;
-        var pj = consts[j].isAnchored ? B(j) : at + j, cross = crossesInFlight(k, j);
-        var dvb = consts[j].isAnchored ? E.negVec("u" + k) : E.vsub("u" + j, "u" + k);
+        var pj = consts[j].isAnchored ? B(j) : at + j;
+        if (consts[k].type !== "circle" || consts[j].type !== "circle") {
+          var pjVec = consts[j].isAnchored ? E.vec(B(j) + ".x", B(j) + ".y") : pj;
+          segmentPullLines(k, E.vec(px, py), j, pjVec, out, "!" + bApart(k, j), outW).forEach(function (l) { res.push(l); });
+          continue;
+        }
         if (df) {
           res.push("    { DVec2 gd = dv2(dfSub(" + pj + ".x, " + px + "), dfSub(" + pj + ".y, " + py + ")); MF gr2 = dv2LengthSq(gd);");
           res.push("      MF gContact = dfAdd(gravReach" + k + ", gravReach" + j + "); MF gContact2 = dfSqr(gContact);");
-          res.push(cross
-            ? "      MF gw = dfOutsideShare(gd, " + dvb + ", gContact, " + bLit(gravKick) + "); if (dfGreater(gw, DF_ZERO)) {"
-            : "      MF gw = DF_ONE; if (" + bApart(k, j) + ") {");
+          res.push("      if (" + bApart(k, j) + ") {");
           res.push("        if (dfLess(gr2, gContact2)) gr2 = gContact2;");
-          res.push("        " + out + " = dv2Add(" + out + ", dv2Scale(gd, dfMul(gravGM" + j + ", dfDiv(gw, dfMul(gr2, dfSqrt(gr2))))));");
+          res.push("        " + out + " = dv2Add(" + out + ", dv2Scale(gd, dfMul(gravGM" + j + ", dfDiv(DF_ONE, dfMul(gr2, dfSqrt(gr2))))));");
           res.push("      } }");
         } else {
           res.push("    { vec2 d = vec2(" + pj + ".x - (" + px + "), " + pj + ".y - (" + py + ")); float contact = " + reachExpr[k] + " + " + reachExpr[j] + ";");
-          res.push(cross
-            ? "      float gw = outsideShare(d, " + dvb + ", contact, " + fnum(gravKick) + "); if (gw > 0.0) {"
-            : "      float gw = 1.0; if (" + bApart(k, j) + ") {");
+          res.push("      if (" + bApart(k, j) + ") {");
           res.push("        float r2 = max(dot(d, d), contact * contact);");
-          res.push("        " + out + " += gw * (" + fnum(GRAV_G) + " * gravMass" + j + " / (r2 * sqrt(r2))) * d;");
+          res.push("        " + out + " += (" + fnum(GRAV_G) + " * gravMass" + j + " / (r2 * sqrt(r2))) * d;");
           res.push("      } }");
         }
       }
@@ -2012,8 +2150,9 @@
     if (anyBounce) apartLines(bApart).forEach(function (l) { lines.push(l); });
     lines.push("");
 
+    bounceBody.forEach(function (on, g) { if (on && gravTurned[g]) lines.push("  " + E.scalarType + " bSpin0" + g + " = " + B(g) + ".w;"); });
     // Leg 1: move at vFull for tHit (matching detection). A hit body's kick before the solve runs to tHit plus
-    // half a (sub)step and leg 2 takes the rest (PhysicsEngine.step's bodyTKick).
+    // half a step and leg 2 takes the rest (PhysicsEngine.step's bodyTKick).
     for (var g3 = 0; g3 < n; g3++) {
       if (consts[g3].isAnchored) continue;
       var t1 = paired[g3] ? "body" + g3 + "THit" : E.DT;
@@ -2055,14 +2194,21 @@
     bounceBody.forEach(function (on, g) {
       if (!on) return;
       var tHit = "body" + g + "THit";
-      lines.push("  " + E.vecType + " bAc" + g + " = " + E.zeroVec + ";");
+      var tw = gravTurned[g] ? "bAcW" + g : null;
+      lines.push("  " + E.vecType + " bAc" + g + " = " + E.zeroVec + ";" + (tw ? " " + E.scalarType + " " + tw + " = " + E.zero + ";" : ""));
       lines.push("  if (" + E.less(tHit, E.DT) + ") {");
       // From the step's start velocity on the pull there and at the contact, linear between.
       lines.push("    " + E.vecType + " bv0 = " + E.advanceVelocity + "(u" + g + ", " + E.halfDT + ", " + accelFor(g) + ");");
-      bouncePullLines(g, B(g) + ".x", B(g) + ".y", "bAc" + g, "bLeg").forEach(function (l) { lines.push(l); });
+      bouncePullLines(g, B(g) + ".x", B(g) + ".y", "bAc" + g, "bLeg", tw).forEach(function (l) { lines.push(l); });
       lines.push("    " + E.vecType + " bv = " + E.advanceVelocity + "(bv0, " + tHit + ", " + bAvg(accelFor(g), "bAc" + g) + ");");
       if (isShaken(g)) lines.push("    bv = " + E.vadd("bv", "shDv" + g) + ";");
       lines.push("    " + B(g) + ".vx = bv.x; " + B(g) + ".vy = bv.y;");
+      if (tw) {
+        // The twist the same way: from the step's start and at the contact, linear between.
+        var a0 = df ? "dfAdd(sprAlpha" + g + ", dfMulPow2(dfSub(" + tw + ", gravW" + g + "), 0.5))" : "sprAlpha" + g + " + (" + tw + " - gravW" + g + ") * 0.5";
+        var wIn = (df ? "dfSpringSpin(" : "springSpin(") + "bSpin0" + g + ", " + a0 + ", sprSwing" + g + ", " + tHit + ")";
+        lines.push("    " + B(g) + ".w = " + (isShaken(g) ? E.add(wIn, "shDw" + g) : wIn) + ";");
+      }
       lines.push("  }");
     });
     if (anyBounce) lines.push("");
@@ -2187,16 +2333,24 @@
         var bt = "body" + g2 + "THit", bAc = "bAc" + g2;
         lines.push("  if (" + E.less(bt, E.DT) + ") {");
         lines.push("    " + E.vecType + " bv = " + E.vec(B(g2) + ".vx", B(g2) + ".vy") + ";");
-        lines.push("    " + E.vecType + " bA1 = " + E.zeroVec + ";");
-        bouncePullLines(g2, B(g2) + ".x", B(g2) + ".y", "bA1", "bEnd").forEach(function (l) { lines.push(l); });
+        var tw2 = gravTurned[g2];
+        lines.push("    " + E.vecType + " bA1 = " + E.zeroVec + ";" + (tw2 ? " " + E.scalarType + " bA1W = " + E.zero + ";" : ""));
+        bouncePullLines(g2, B(g2) + ".x", B(g2) + ".y", "bA1", "bEnd", tw2 ? "bA1W" : null).forEach(function (l) { lines.push(l); });
         lines.push("    bv = " + E.advanceVelocity + "(bv, " + t2 + ", " + bAvg(bAc, "bA1") + ");");
         lines.push("    bv = " + E.advanceVelocity + "(bv, " + E.neg(E.halfDT) + ", bA1);");
         lines.push("    " + B(g2) + ".vx = bv.x; " + B(g2) + ".vy = bv.y;");
+        if (tw2) {
+          var a2 = df ? "dfSub(dfAdd(sprAlpha" + g2 + ", dfMulPow2(dfAdd(bAcW" + g2 + ", bA1W), 0.5)), gravW" + g2 + ")"
+            : "sprAlpha" + g2 + " + (bAcW" + g2 + " + bA1W) * 0.5 - gravW" + g2;
+          lines.push("    " + B(g2) + ".w = " + (df ? "dfSpringSpin(" : "springSpin(") + B(g2) + ".w, " + a2 + ", sprSwing" + g2 + ", " + t2 + ");");
+        } else if (turned[g2]) {
+          lines.push("    " + B(g2) + ".w = " + spinExpr(g2, t2) + ";");
+        }
         lines.push("  } else {");
         lines.push("    " + E.vecType + " vPost" + g2 + " = " + advance(g2, E.vec(B(g2) + ".vx", B(g2) + ".vy"), E.sub(E.DT, "body" + g2 + "TKick")) + ";");
         lines.push("    " + B(g2) + ".vx = vPost" + g2 + ".x; " + B(g2) + ".vy = vPost" + g2 + ".y;");
+        if (turned[g2]) lines.push("    " + B(g2) + ".w = " + spinExpr(g2, t2) + ";");
         lines.push("  }");
-        if (turned[g2]) lines.push("  " + B(g2) + ".w = " + spinExpr(g2, t2) + ";");
       } else {
       lines.push("  " + E.vecType + " vPost" + g2 + " = " + advance(g2, E.vec(B(g2) + ".vx", B(g2) + ".vy"), E.sub(E.DT, "body" + g2 + "TKick")) + ";");
       lines.push("  " + B(g2) + ".vx = vPost" + g2 + ".x; " + B(g2) + ".vy = vPost" + g2 + ".y;");
@@ -2264,7 +2418,11 @@
       function outsidePullLines(target, m, members, pos) {
         var out = [];
         for (var j = 0; j < n; j++) {
-          if (members.indexOf(j) !== -1) continue;
+          if (members.indexOf(j) !== -1 || j === m) continue;
+          if (consts[m].type !== "circle" || consts[j].type !== "circle") {
+            segmentPullLines(m, pos, j, phPos(j), target, collisionsOn ? touchLine(m, pos, j, phPos(j)) : "false").forEach(function (l) { out.push("  " + l); });
+            continue;
+          }
           if (df) {
             out.push("      { DVec2 gd = dv2Sub(" + phPos(j) + ", " + pos + "); MF gr2 = dv2LengthSq(gd); MF gContact = dfAdd(gravReach" + m + ", gravReach" + j + "); MF gContact2 = dfSqr(gContact);");
             if (collisionsOn) {

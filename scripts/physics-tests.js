@@ -3173,8 +3173,8 @@
     }
   );
 
-  // A ball falling past the edge of an anchored line's pull-free disk (radius + half length), collisions on.
-  // The free short line crosses that disk's edge too, so both ends of a pair can move.
+  // A ball falling onto an anchored line, collisions on; the free short line falls toward it too, so both ends of a
+  // pair can move.
   function lineZoneScene(dy, withFreeLine) {
     var b = PhysicsEngine.createCircle(470, 100 + dy, 45, false), l = PhysicsEngine.createLine(500, 560, 532, 0.0045, true);
     var bodies = [b, l];
@@ -3188,8 +3188,8 @@
   }
 
   addTest(
-    "Mutual Gravity: crossing into a line's pull-free disk no longer makes a jump in the map",
-    "reported as a 40px jump along an Inspect line over a line: the pull switched off at the disk's edge on whole steps, so the run lost a step of pull wherever the entry moved by a step. It now pulls for the share of each step spent outside the disk",
+    "Mutual Gravity: a ball falling onto a line comes out continuous in where it starts",
+    "reported as a 40px jump along an Inspect line over a line: the line stopped pulling inside a disk of its radius plus half length, on whole steps. A line now pulls along its whole length until the ball touches it",
     function () {
       var ys = [];
       for (var k = 0; k < 400; k++) {
@@ -3208,8 +3208,8 @@
   );
 
   addTest(
-    "Mutual Gravity: JS engine and GPU compiler agree on a line's pull across its disk edge",
-    "the share of a step spent outside the disk is hand-synced in physics-engine.js and both spellings of generateStepOnceGLSL",
+    "Mutual Gravity: JS engine and GPU compiler agree on a line's pull",
+    "the exact pull of a segment, its twist on a free one and the Gauss points between two lines are hand-synced in physics-engine.js and both spellings of generateStepOnceGLSL",
     function () {
       var errs = {}, cpu = PhysicsEngine.runTrajectory(lineZoneScene(7, true), 150, DT);
       ["f32", "df"].forEach(function (prec) {
@@ -3218,6 +3218,125 @@
       return {
         pass: errs.df < 1e-3 && errs.f32 < 0.5,
         detail: "f32 " + errs.f32.toExponential(1) + "px, df " + errs.df.toExponential(1) + "px over 150 steps",
+      };
+    }
+  );
+
+  addTest(
+    "Mutual Gravity: a line pulls along its whole length",
+    "a line pulled as a point at its center and not at all inside a disk of a ball's radius plus half its length, so a ball 200px above a long line floated. The pull is now the exact sum over the segment",
+    function () {
+      var G = PhysicsEngine.MUTUAL_GRAVITY_CONSTANT, L = 400, ang = 0.3, line = PhysicsEngine.createLine(500, 500, L, ang, true);
+      var M = PhysicsEngine.gravitationalMass(line), worst = 0;
+      [[500, 300], [800, 600], [760, 579], [690, 520], [520, 470], [400, 550], [900, 620], [200, 400]].forEach(function (q) {
+        var a = PhysicsEngine.computeAccelerations({ bodies: [PhysicsEngine.createCircle(q[0], q[1], 1, false), line], hinges: [], springs: [],
+          mutualGravity: true, collisionsEnabled: false })[0];
+        var bx = 0, by = 0, N = 4000;
+        for (var k = 0; k < N; k++) {
+          var t = (k + 0.5) / N - 0.5, dx = 500 + Math.cos(ang) * L * t - q[0], dy = 500 + Math.sin(ang) * L * t - q[1], r = Math.hypot(dx, dy);
+          bx += G * (M / N) * dx / (r * r * r); by += G * (M / N) * dy / (r * r * r);
+        }
+        worst = Math.max(worst, Math.hypot(a.x - bx, a.y - by) / Math.hypot(bx, by));
+      });
+      // The reported ball: 203px above a 546px line, inside the old disk.
+      var hover = PhysicsEngine.computeAccelerations({ bodies: [PhysicsEngine.createCircle(664.4, 369, 45, false),
+        PhysicsEngine.createLine(696.4, 631.9, 545.625, 0, true)], hinges: [], springs: [], mutualGravity: true, collisionsEnabled: true })[0];
+      return {
+        pass: worst < 1e-5 && hover.y > 500,
+        detail: "against a 4000-piece sum, worst relative difference " + worst.toExponential(1) + "; the reported ball is pulled " + hover.y.toFixed(0) + "px/s^2 toward the line",
+      };
+    }
+  );
+
+  addTest(
+    "Mutual Gravity: a free line and a ball keep their momentum and angular momentum while the line is twisted",
+    "a pull along a segment acts off its center, so a free line turns; the pull between them is equal and opposite and so is its moment, so neither total changes",
+    function () {
+      var l = PhysicsEngine.createLine(500, 500, 300, 0.2, false), c = PhysicsEngine.createCircle(500, 200, 30, false);
+      c.vx = 120;
+      var sc = { bodies: [c, l], hinges: [], springs: [], frameWidth: 2000, frameHeight: 2000, edgeMode: "infinite", mutualGravity: true, collisionsEnabled: false };
+      function totals() {
+        var px = 0, py = 0, lz = 0;
+        sc.bodies.forEach(function (b) { px += b.mass * b.vx; py += b.mass * b.vy; lz += b.mass * (b.x * b.vy - b.y * b.vx) + b.inertia * b.w; });
+        return [px, py, lz];
+      }
+      var t0 = totals();
+      for (var i = 0; i < 300; i++) PhysicsEngine.step(sc, DT);
+      var t1 = totals(), dp = Math.hypot(t1[0] - t0[0], t1[1] - t0[1]) / Math.hypot(t0[0], t0[1]), dl = Math.abs(t1[2] - t0[2]) / Math.abs(t0[2]);
+      return {
+        pass: dp < 1e-9 && dl < 1e-9 && Math.abs(l.w) > 0.05,
+        detail: "momentum changed by " + dp.toExponential(1) + ", angular momentum by " + dl.toExponential(1) + " over 300 steps; the line spins at " + l.w.toFixed(3) + " rad/s",
+      };
+    }
+  );
+
+  addTest(
+    "Mutual Gravity: JS engine and GPU compiler agree on two free lines and a ball passing through each other",
+    "collisions off: the segment pull softened inside a body's reach, two lines by Gauss points, both twisted",
+    function () {
+      function scene() {
+        var a = PhysicsEngine.createLine(500, 500, 300, 0.2, false), b = PhysicsEngine.createLine(560, 380, 200, -0.7, false), c = PhysicsEngine.createCircle(420, 300, 25, false);
+        c.vx = 90; b.vx = -30;
+        return { bodies: [c, a, b], hinges: [], springs: [], frameWidth: 2000, frameHeight: 2000, edgeMode: "infinite", mutualGravity: true, collisionsEnabled: false };
+      }
+      var errs = {}, cpu = PhysicsEngine.runTrajectory(scene(), 150, DT);
+      ["f32", "df"].forEach(function (prec) { errs[prec] = maxTrajectoryError(cpu, PhysicsGPU.runSceneOnGPU(scene(), 150, prec), 150); });
+      return {
+        pass: errs.df < 1e-3 && errs.f32 < 0.5,
+        detail: "f32 " + errs.f32.toExponential(1) + "px, df " + errs.df.toExponential(1) + "px over 150 steps",
+      };
+    }
+  );
+
+  // The reported scene: a free 140px line dropped tumbling onto an anchored 546px line.
+  function tumblingLineScene() {
+    var a = PhysicsEngine.createLine(696.4375, 631.875, 545.625, 0, true), f = PhysicsEngine.createLine(620.5142, 214.3958, 140.4735, 1.0594, false);
+    return { bodies: [a, f], hinges: [], springs: [], frameWidth: 1476, frameHeight: 1080, edgeMode: "infinite", mutualGravity: true, collisionsEnabled: true };
+  }
+
+  addTest(
+    "Mutual Gravity: a line spun round by a bounce on a line does not pick up energy from its twist",
+    "reported as a tumbling line that gained energy at a bounce and flew off: the line's twist from gravity was taken at the step's start and kept for the whole step, so once the bounce reversed the spin the same twist sped it up, and its far end swung 18px into the other line. The twist is now taken at the start, the contact and the end, like the pull",
+    function () {
+      var sc = tumblingLineScene(), a = sc.bodies[0], f = sc.bodies[1], G = PhysicsEngine.MUTUAL_GRAVITY_CONSTANT;
+      var lam = PhysicsEngine.gravitationalMass(a) / a.length, mf = PhysicsEngine.gravitationalMass(f), nodes = [-Math.sqrt(0.6), 0, Math.sqrt(0.6)], wts = [5 / 18, 8 / 18, 5 / 18];
+      function energy() {
+        var u = 0, hx = Math.cos(f.angle) * f.length / 2, hy = Math.sin(f.angle) * f.length / 2;
+        for (var g = 0; g < 3; g++) {
+          var px = f.x + hx * nodes[g] - a.x, py = f.y + hy * nodes[g] - a.y, h = a.length / 2, u1 = -h - px, u2 = h - px;
+          u += wts[g] * mf * -G * lam * Math.log((u2 + Math.hypot(u2, py)) / (u1 + Math.hypot(u1, py)));
+        }
+        var acc = PhysicsEngine.computeAccelerations(sc)[1], vx = f.vx + acc.x * DT / 2, vy = f.vy + acc.y * DT / 2, w = f.w + acc.w * DT / 2;
+        return 0.5 * f.mass * (vx * vx + vy * vy) + 0.5 * f.inertia * w * w + u;
+      }
+      var e0 = energy(), highest = -Infinity, deepest = 0;
+      for (var i = 0; i < 400; i++) {
+        PhysicsEngine.step(sc, DT);
+        var hx = Math.cos(f.angle) * f.length / 2, hy = Math.sin(f.angle) * f.length / 2;
+        [[f.x - hx, f.y - hy], [f.x + hx, f.y + hy]].forEach(function (p) {
+          if (Math.abs(p[0] - a.x) <= a.length / 2) deepest = Math.max(deepest, 30 - Math.abs(p[1] - a.y));
+        });
+        // Read clear of the line, where the half-step velocity reads true.
+        if (a.y - f.y > 200) highest = Math.max(highest, (energy() - e0) / Math.abs(e0));
+      }
+      return {
+        pass: deepest < 6 && highest < 0.1,
+        detail: "deepest an end got inside the anchored line " + deepest.toFixed(1) + "px (was 18px); energy clear of the line at most " +
+          (100 * highest).toFixed(1) + "% above the start (was 126%)",
+      };
+    }
+  );
+
+  addTest(
+    "Mutual Gravity: JS engine and GPU compiler agree on a line tumbling onto a line",
+    "the twist at the contact and the end of a bounce step is hand-synced in physics-engine.js and both spellings of generateStepOnceGLSL",
+    function () {
+      var cpu = PhysicsEngine.runTrajectory(tumblingLineScene(), 230, DT);
+      var f32 = maxTrajectoryError(cpu, PhysicsGPU.runSceneOnGPU(tumblingLineScene(), 230, "f32"), 120);
+      var dfe = maxTrajectoryError(cpu, PhysicsGPU.runSceneOnGPU(tumblingLineScene(), 230, "df"), 230);
+      return {
+        pass: dfe < 1e-3 && f32 < 0.5,
+        detail: "df " + dfe.toExponential(1) + "px over 230 steps (bounces at 57, 144, 210 and 213), f32 " + f32.toExponential(1) + "px over the first 120",
       };
     }
   );

@@ -130,16 +130,32 @@
       "}");
     }
     lines.push(
-    // PhysicsEngine.outsideShare.
-    "MF dfOutsideShare(DVec2 d, DVec2 dv, MF contact, MF h) {",
-    "  MF a = dv2LengthSq(dv), b = dv2Dot(d, dv), c = dfSub(dv2LengthSq(d), dfSqr(contact));",
-    "  if (dfIsZero(a)) return dfLess(c, DF_ZERO) ? DF_ZERO : DF_ONE;",
-    "  MF disc = dfSub(dfSqr(b), dfMul(a, c));",
-    "  if (!dfGreater(disc, DF_ZERO)) return DF_ONE;",
-    "  MF root = dfSqrt(disc), reach = dfMulPow2(h, 0.5);",
-    "  MF t1 = dfDiv(dfNeg(dfAdd(b, root)), a), t2 = dfDiv(dfSub(root, b), a);",
-    "  MF inside = dfMax(DF_ZERO, dfSub(dfMin(reach, t2), dfMax(dfNeg(reach), t1)));",
-    "  return dfSub(DF_ONE, dfDiv(inside, h));",
+    // PhysicsEngine.segmentField.
+    "DVec2 dfSegmentField(DVec2 p, DVec2 c, DVec2 e, MF h, MF k, MF eps) {",
+    "  DVec2 r = dv2Sub(p, c);",
+    "  MF along = dv2Dot(r, e), d = dfSub(dfMul(r.y, e.x), dfMul(r.x, e.y));",
+    "  MF u1 = dfSub(dfNeg(h), along), u2 = dfSub(h, along), d2 = dfSqr(d), soft = d2, eps2 = dfSqr(eps);",
+    "  if (dfLess(d2, eps2)) {",
+    "    MF over = dfMax(DF_ZERO, dfMin(DF_ONE, dfSub(DF_ONE, dfDiv(dfSub(dfAbs(along), h), eps))));",
+    "    soft = dfAdd(d2, dfMul(over, dfSub(dfAdd(dfMulPow2(eps2, 0.5), dfDiv(dfSqr(d2), dfMulPow2(eps2, 2.0))), d2)));",
+    "  }",
+    "  MF r1 = dfSqrt(dfAdd(dfSqr(u1), soft)), r2 = dfSqrt(dfAdd(dfSqr(u2), soft)), du = dfSub(dfSqr(u2), dfSqr(u1)), r12 = dfMul(r1, r2);",
+    "  MF fa = dfDiv(dfMul(k, du), dfMul(r12, dfAdd(r1, r2))), fd;",
+    "  if (dfGreater(dfMul(u1, u2), DF_ZERO)) fd = dfDiv(dfMul(dfMul(k, d), du), dfMul(r12, dfAdd(dfMul(u2, r1), dfMul(u1, r2))));",
+    "  else fd = dfDiv(dfMul(dfMul(k, d), dfSub(dfDiv(u2, r2), dfDiv(u1, r1))), soft);",
+    "  return dv2(dfAdd(dfMul(fa, e.x), dfMul(fd, e.y)), dfSub(dfMul(fa, e.y), dfMul(fd, e.x)));",
+    "}",
+    "MF dfPointSegmentDistance(DVec2 p, DVec2 c, DVec2 e, MF h) {",
+    "  DVec2 r = dv2Sub(p, c);",
+    "  MF t = dfMax(dfNeg(h), dfMin(h, dv2Dot(r, e)));",
+    "  return dfSqrt(dv2LengthSq(dv2Sub(r, dv2Scale(e, t))));",
+    "}",
+    "MF dfSide(DVec2 p, DVec2 q, DVec2 r) { return dfSub(dfMul(dfSub(q.x, p.x), dfSub(r.y, p.y)), dfMul(dfSub(q.y, p.y), dfSub(r.x, p.x))); }",
+    "MF dfSegmentsDistance(DVec2 ca, DVec2 ea, MF ha, DVec2 cb, DVec2 eb, MF hb) {",
+    "  DVec2 a0 = dv2Sub(ca, dv2Scale(ea, ha)), a1 = dv2Add(ca, dv2Scale(ea, ha)), b0 = dv2Sub(cb, dv2Scale(eb, hb)), b1 = dv2Add(cb, dv2Scale(eb, hb));",
+    "  if (dfLess(dfMul(dfSide(a0, a1, b0), dfSide(a0, a1, b1)), DF_ZERO) && dfLess(dfMul(dfSide(b0, b1, a0), dfSide(b0, b1, a1)), DF_ZERO)) return DF_ZERO;",
+    "  return dfMin(dfMin(dfPointSegmentDistance(a0, cb, eb, hb), dfPointSegmentDistance(a1, cb, eb, hb)),",
+    "    dfMin(dfPointSegmentDistance(b0, ca, ea, ha), dfPointSegmentDistance(b1, ca, ea, ha)));",
     "}");
     return lines.filter(Boolean).join("\n");
   }
