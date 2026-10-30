@@ -48,6 +48,8 @@
     if (ctx) return ctx;
     var Ctor = global.AudioContext || global.webkitAudioContext;
     if (!Ctor) return null; // no Web Audio support: sounds just silently don't play
+    // iOS mutes Web Audio under the ring/silent switch unless the session is "playback".
+    try { if (global.navigator.audioSession) global.navigator.audioSession.type = "playback"; } catch (err) {}
     ctx = new Ctor();
     masterGain = limitedOutput(ctx, ctx.destination);
     applyGain();

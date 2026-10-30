@@ -118,12 +118,19 @@
   // get NO pull with collisions on (null): position correction would pump energy, and the contact
   // force answers the pull. With collisions off bodies pass through, so inside the pull is a
   // polynomial in r^2 matching G*m/r^2 at the rim in value, slope AND curvature (less is a corner).
-  function mutualPull(scene, bodyI, bodyJ, dx, dy) {
+  // With a relative velocity dv and kick length h, a pair with a line or portal pulls for its share of the kick's
+  // window spent outside contact distance: that disk's edge is crossed in mid-flight, not at a bounce.
+  function mutualPull(scene, bodyI, bodyJ, dx, dy, dv, h) {
     var r2 = dx * dx + dy * dy;
     var contact = halfExtent(bodyI) + halfExtent(bodyJ);
-    var pull;
+    var pull, share = 1;
+    if (dv && crossesInFlight(scene, bodyI, bodyJ)) {
+      share = outsideShare(dx, dy, dv.x, dv.y, contact, h);
+      if (share === 0) return null;
+      r2 = Math.max(r2, contact * contact);
+    }
     if (r2 >= contact * contact) {
-      pull = MUTUAL_GRAVITY_CONSTANT * gravitationalMass(bodyJ) / (r2 * Math.sqrt(r2));
+      pull = share * MUTUAL_GRAVITY_CONSTANT * gravitationalMass(bodyJ) / (r2 * Math.sqrt(r2));
     } else if (collisionsEnabled(scene)) {
       return null;
     } else {
@@ -134,8 +141,28 @@
     return { x: pull * dx, y: pull * dy };
   }
 
-  // Per-body acceleration this step: (0, GRAVITY), or under Mutual Gravity every other body's pull.
-  function computeAccelerations(scene) {
+  function crossesInFlight(scene, bodyI, bodyJ) {
+    return collisionsEnabled(scene) && (bodyI.type !== "circle" || bodyJ.type !== "circle");
+  }
+
+  // Share of the window [-h/2, h/2] that relative motion d + dv*t keeps at least `contact` apart. Centered on
+  // now because the stored velocity trails the position by half a kick.
+  function outsideShare(dx, dy, dvx, dvy, contact, h) {
+    var a = dvx * dvx + dvy * dvy, b = dx * dvx + dy * dvy, c = dx * dx + dy * dy - contact * contact;
+    if (a === 0) return c >= 0 ? 1 : 0;
+    var disc = b * b - a * c;
+    if (disc <= 0) return 1;
+    var root = Math.sqrt(disc), t1 = (-b - root) / a, t2 = (-b + root) / a;
+    return 1 - Math.max(0, Math.min(h / 2, t2) - Math.max(-h / 2, t1)) / h;
+  }
+
+  function relativeVelocity(bodyI, bodyJ) {
+    var vi = bodyI.isAnchored ? 0 : 1, vj = bodyJ.isAnchored ? 0 : 1;
+    return { x: vj * bodyJ.vx - vi * bodyI.vx, y: vj * bodyJ.vy - vi * bodyI.vy };
+  }
+
+  // Per-body acceleration this step: (0, GRAVITY), or under Mutual Gravity every other body's pull, kicked for h.
+  function computeAccelerations(scene, h) {
     var bodies = scene.bodies, n = bodies.length, i, acc = new Array(n);
     if (!scene.mutualGravity) {
       for (i = 0; i < n; i++) acc[i] = { x: 0, y: GRAVITY };
@@ -146,7 +173,8 @@
       if (!bodies[i].isAnchored) {
         for (var j = 0; j < n; j++) {
           if (j === i) continue;
-          var p = mutualPull(scene, bodies[i], bodies[j], bodies[j].x - bodies[i].x, bodies[j].y - bodies[i].y);
+          var p = mutualPull(scene, bodies[i], bodies[j], bodies[j].x - bodies[i].x, bodies[j].y - bodies[i].y,
+            h ? relativeVelocity(bodies[i], bodies[j]) : null, h);
           if (p) { ax += p.x; ay += p.y; }
         }
       }
@@ -155,81 +183,28 @@
     return acc;
   }
 
-  // ---- Gravity Substeps (Settings > Performance): page state, not scene data. Under Mutual Gravity a step's
-  // pull is taken GRAVITY_SUBSTEPS times, so a fast close pass doesn't hang on where the step boundaries fall.
-  var GRAVITY_SUBSTEPS = 3;
-  var gravitySubstepsOn = false;
-  function setGravitySubsteps(on) { gravitySubstepsOn = !!on; }
-  function gravitySubstepsFor(scene) { return gravitySubstepsOn && scene.mutualGravity ? GRAVITY_SUBSTEPS : 1; }
+  // ---- Bounces under Mutual Gravity. Near a dense body the pull changes a lot within a step, so a hit body takes
+  // it at three points: the step's start, the contact and the step's end, linear between them. The hit itself is
+  // found on the step's parabola, not the chord detection sweeps.
 
-  // The constant acceleration a leg of dt takes from velocity u to v: advanceVelocity's inverse below the cap.
-  function legAcceleration(u, v, dt, friction) {
-    if (friction > 0) {
-      var x = friction * dt, phi = -Math.expm1(-x) / x, decay = 1 - x * phi;
-      return { x: (v.x - u.x * decay) / (dt * phi), y: (v.y - u.y * decay) / (dt * phi) };
-    }
-    return { x: (v.x - u.x) / dt, y: (v.y - u.y) / dt };
-  }
-
-  // The pull at substep positions. With collisions on, a pair touching at the step's start stays pull-free, and
-  // one apart pulls at no less than contact distance: the substeps run on past the bounce the step will find.
-  function substepAccelerations(scene, poses, apart) {
-    var bodies = scene.bodies, n = bodies.length, acc = new Array(n);
-    for (var i = 0; i < n; i++) {
-      var ax = 0, ay = 0;
-      if (!bodies[i].isAnchored) {
-        for (var j = 0; j < n; j++) {
-          if (j === i || (apart && !apart[i][j])) continue;
-          var dx = poses[j].x - poses[i].x, dy = poses[j].y - poses[i].y;
-          if (apart) {
-            var contact = halfExtent(bodies[i]) + halfExtent(bodies[j]);
-            var r2 = Math.max(dx * dx + dy * dy, contact * contact);
-            var k = MUTUAL_GRAVITY_CONSTANT * gravitationalMass(bodies[j]) / (r2 * Math.sqrt(r2));
-            ax += k * dx; ay += k * dy;
-          } else {
-            var p = mutualPull(scene, bodies[i], bodies[j], dx, dy);
-            ax += p.x; ay += p.y;
-          }
-        }
-      }
-      acc[i] = { x: ax, y: ay };
-    }
-    return acc;
-  }
-
-  // Kick-drift substeps of h = dt / GRAVITY_SUBSTEPS, so velocities trail positions by h / 2 (step's contact kick
-  // follows). Springs keep their start value. vFull becomes the chord, acc the constant acceleration from u to the end.
-  function substepGravity(scene, gravityStart, acc, u, vFull, dt, maxSpeed, friction) {
-    var bodies = scene.bodies, n = bodies.length, h = dt / GRAVITY_SUBSTEPS, i, s;
-    var poses = bodies.map(function (b) { return { x: b.x, y: b.y }; });
-    var a = new Array(n), other = new Array(n), v = new Array(n);
-    var apart = collisionsEnabled(scene) ? bodies.map(function (bi) {
-      return bodies.map(function (bj) {
-        var dx = bj.x - bi.x, dy = bj.y - bi.y, contact = halfExtent(bi) + halfExtent(bj);
-        return dx * dx + dy * dy >= contact * contact;
-      });
-    }) : null;
-    for (i = 0; i < n; i++) {
-      if (bodies[i].isAnchored) continue;
-      a[i] = acc[i];
-      other[i] = { x: acc[i].x - gravityStart[i].x, y: acc[i].y - gravityStart[i].y };
-      v[i] = u[i];
-    }
-    for (s = 0; s < GRAVITY_SUBSTEPS; s++) {
-      var g = s > 0 ? substepAccelerations(scene, poses, apart) : null;
-      for (i = 0; i < n; i++) {
-        if (bodies[i].isAnchored) continue;
-        if (g) a[i] = { x: g[i].x + other[i].x, y: g[i].y + other[i].y };
-        v[i] = advanceVelocity(v[i].x, v[i].y, h, a[i].x, a[i].y, maxSpeed, friction);
-        poses[i].x += v[i].x * h;
-        poses[i].y += v[i].y * h;
+  // The pull on free body k standing at (x, y), the others at `poses`. Circles apart at the step's start pull
+  // from no nearer than contact distance.
+  function bouncePull(scene, k, x, y, poses, u, apart, dt, springPart) {
+    var bodies = scene.bodies, bk = bodies[k], ax = springPart ? springPart[k].x : 0, ay = springPart ? springPart[k].y : 0;
+    for (var j = 0; j < bodies.length; j++) {
+      if (j === k) continue;
+      var bj = bodies[j], dx = poses[j].x - x, dy = poses[j].y - y;
+      if (crossesInFlight(scene, bk, bj)) {
+        var vj = bj.isAnchored ? { x: 0, y: 0 } : u[j];
+        var p = mutualPull(scene, bk, bj, dx, dy, { x: vj.x - u[k].x, y: vj.y - u[k].y }, dt);
+        if (p) { ax += p.x; ay += p.y; }
+      } else if (apart[k][j]) {
+        var contact = halfExtent(bk) + halfExtent(bj), r2 = Math.max(dx * dx + dy * dy, contact * contact);
+        var pull = MUTUAL_GRAVITY_CONSTANT * gravitationalMass(bj) / (r2 * Math.sqrt(r2));
+        ax += pull * dx; ay += pull * dy;
       }
     }
-    for (i = 0; i < n; i++) {
-      if (bodies[i].isAnchored) continue;
-      vFull[i] = { x: (poses[i].x - bodies[i].x) / dt, y: (poses[i].y - bodies[i].y) / dt };
-      acc[i] = legAcceleration(u[i], v[i], dt, friction);
-    }
+    return { x: ax, y: ay };
   }
 
   // The acceleration on portal chain member m at (x, y) from outside its chain, the part that does
@@ -1668,12 +1643,12 @@
 
     // Fixed for the whole step; both legs and the detection sweep must agree on them.
     var maxSpeed = speedCapFor(scene), friction = frictionRate(scene);
-    var acc = computeAccelerations(scene);
-    var substeps = gravitySubstepsFor(scene);
-    var gravityStart = substeps > 1 ? acc.map(function (a) { return { x: a.x, y: a.y }; }) : null;
+    var acc = computeAccelerations(scene, dt);
     // Springs add angular acceleration (alpha) and the swing tally; all zeros without springs.
     var alpha = new Array(bodies.length).fill(0), swing = new Array(bodies.length).fill(0);
+    var pullOnly = scene.mutualGravity && sceneSprings(scene).length ? acc.map(function (a) { return { x: a.x, y: a.y }; }) : null;
     if (sceneSprings(scene).length) addSpringAccelerations(scene, acc, alpha, swing, dt);
+    var springPart = pullOnly && acc.map(function (a, k) { return { x: a.x - pullOnly[k].x, y: a.y - pullOnly[k].y }; });
 
     // u: entering velocity. vFull: whole-step velocity, used for BOTH detection and leg 1.
     var u = new Array(bodies.length), vFull = new Array(bodies.length);
@@ -1682,7 +1657,6 @@
       u[i] = { x: bodies[i].vx, y: bodies[i].vy };
       vFull[i] = advanceVelocity(u[i].x, u[i].y, dt, acc[i].x, acc[i].y, maxSpeed, friction);
     }
-    if (gravityStart) substepGravity(scene, gravityStart, acc, u, vFull, dt, maxSpeed, friction);
     var shake = scene.hinges.length ? shakeHinges(scene, bodies, vFull, alpha, swing, dt) : null;
 
     // Probes move and turn as leg 1 will: at vFull, and at the whole step's spin with any hinge impulse.
@@ -1723,12 +1697,31 @@
     if (portals && contacts.length) contacts = contacts.filter(function (c) { return !onPortalFront(c); });
 
     // Earliest contact instant per body; dt when none (leg 1 is the whole step, leg 2 a no-op).
+    // Under Mutual Gravity a step moves on the parabola x0 + v0 t + a0 t^2 / 2, which sits a0 t (t - dt) / 2 off
+    // the chord; one Newton step along the contact normal puts the hit on it.
+    var bounces = scene.mutualGravity && contacts.length > 0;
+    function bendAt(k, t) {
+      return bodies[k].isAnchored ? { x: 0, y: 0 } : { x: acc[k].x * t * (t - dt) / 2, y: acc[k].y * t * (t - dt) / 2 };
+    }
     var bodyTHit = new Array(bodies.length).fill(dt);
     for (i = 0; i < contacts.length; i++) {
-      var c = contacts[i];
-      if (c.tHit < bodyTHit[c.a]) bodyTHit[c.a] = c.tHit;
-      if (c.tHit < bodyTHit[c.b]) bodyTHit[c.b] = c.tHit;
+      var c = contacts[i], tc = c.tHit;
+      if (bounces && tc > 0) {
+        var ba = bendAt(c.a, tc), bb = bendAt(c.b, tc);
+        var va = bodies[c.a].isAnchored ? { x: 0, y: 0 } : vFull[c.a], vb = bodies[c.b].isAnchored ? { x: 0, y: 0 } : vFull[c.b];
+        var closing = (vb.x - va.x) * c.normal.x + (vb.y - va.y) * c.normal.y;
+        var off = (bb.x - ba.x) * c.normal.x + (bb.y - ba.y) * c.normal.y;
+        if (closing < 0) tc = Math.min(dt, Math.max(0, tc - off / closing));
+      }
+      if (tc < bodyTHit[c.a]) bodyTHit[c.a] = tc;
+      if (tc < bodyTHit[c.b]) bodyTHit[c.b] = tc;
     }
+    var apartStart = bounces ? bodies.map(function (bi) {
+      return bodies.map(function (bj) {
+        var dx = bj.x - bi.x, dy = bj.y - bi.y, contact = halfExtent(bi) + halfExtent(bj);
+        return dx * dx + dy * dy >= contact * contact;
+      });
+    }) : null;
 
     // Opt-in per-body "touching this step" (Bounce Count's source; twin of the GPU's g_contactN).
     var contactFlags = opts.contactFlags;
@@ -1752,15 +1745,16 @@
       for (i = 0; i < contacts.length; i++) contactsOut.push({ a: contacts[i].a, b: contacts[i].b });
     }
 
-    // Leg 1: move at vFull for tHit (matching detection). A hit body's kick runs to tHit plus half a (sub)step
+    // Leg 1: move at vFull for tHit (matching detection). A hit body's kick runs to tHit plus half a step
     // and leg 2 takes the rest: the stored velocity trails the position by that much.
     var bodyTKick = new Array(bodies.length);
     for (i = 0; i < bodies.length; i++) {
       var b1 = bodies[i];
       if (b1.isAnchored) continue;
       var th = bodyTHit[i];
-      bodyTKick[i] = th < dt ? th + dt / (2 * substeps) : dt;
+      bodyTKick[i] = th < dt ? th + dt / 2 : dt;
       b1.x += vFull[i].x * th; b1.y += vFull[i].y * th;
+      if (bounces && th < dt) { var bd = bendAt(i, th); b1.x += bd.x; b1.y += bd.y; }
       // Angular twin: turn at the whole step's spin, keep only the torque acted by tHit. A hinge impulse
       // (already in vFull) joins the spin and the velocity here.
       var sh = shake && shake[i], dw = sh ? sh.w : 0;
@@ -1768,6 +1762,18 @@
       b1.w = springSpin(b1.w, alpha[i], swing[i], th) + dw;
       var vPre = advanceVelocity(u[i].x, u[i].y, bodyTKick[i], acc[i].x, acc[i].y, maxSpeed, friction);
       b1.vx = vPre.x + (sh ? sh.x : 0); b1.vy = vPre.y + (sh ? sh.y : 0);
+    }
+    // A bounce's kick in, once every body stands at its leg-1 pose: from the step's start velocity on the pull
+    // there and at the contact, linear between.
+    var hitPoses = bounces ? bodies.map(function (b) { return { x: b.x, y: b.y }; }) : null, contactPull = [];
+    for (i = 0; bounces && i < bodies.length; i++) {
+      var bh = bodies[i], tHit = bodyTHit[i];
+      if (bh.isAnchored || tHit >= dt) continue;
+      var v0 = advanceVelocity(u[i].x, u[i].y, dt / 2, acc[i].x, acc[i].y, maxSpeed, friction);
+      var ac = contactPull[i] = bouncePull(scene, i, bh.x, bh.y, hitPoses, u, apartStart, dt, springPart);
+      var vIn = advanceVelocity(v0.x, v0.y, tHit, (acc[i].x + ac.x) / 2, (acc[i].y + ac.y) / 2, maxSpeed, friction);
+      var shb = shake && shake[i];
+      bh.vx = vIn.x + (shb ? shb.x : 0); bh.vy = vIn.y + (shb ? shb.y : 0);
     }
 
     // A pair's two contacts solve together (contactPairMatrix); pairs[i] is set on the first of them.
@@ -1792,11 +1798,31 @@
       }
     }
 
+    // A bounce's way out: every hit body moves on its contact pull first, so the end pulls are taken between end poses.
+    for (i = 0; bounces && i < bodies.length; i++) {
+      var be = bodies[i], tOut = dt - bodyTHit[i];
+      if (!contactPull[i]) continue;
+      be.x += (be.vx + contactPull[i].x * tOut / 2) * tOut; be.y += (be.vy + contactPull[i].y * tOut / 2) * tOut;
+    }
+    var endPoses = bounces ? bodies.map(function (b) { return { x: b.x, y: b.y }; }) : null;
+
     // Leg 2: the rest of the step, and of the kick, on the POST-impulse velocity; identity if no contact.
     for (i = 0; i < bodies.length; i++) {
       var b2 = bodies[i];
       if (b2.isAnchored) continue;
       var tRest = dt - bodyTHit[i];
+      if (contactPull[i]) {
+        // The velocity from the contact on the pull there and at the end, linear between, stored half a step
+        // behind as every other step leaves it.
+        var acb = contactPull[i];
+        var a1 = bouncePull(scene, i, b2.x, b2.y, endPoses, u, apartStart, dt, springPart);
+        var v1 = advanceVelocity(b2.vx, b2.vy, tRest, (acb.x + a1.x) / 2, (acb.y + a1.y) / 2, maxSpeed, friction);
+        var vs = advanceVelocity(v1.x, v1.y, -dt / 2, a1.x, a1.y, maxSpeed, friction);
+        b2.vx = vs.x; b2.vy = vs.y;
+        b2.w = springSpin(b2.w, alpha[i], swing[i], tRest);
+        b2.angle += b2.w * tRest;
+        continue;
+      }
       var vPost = advanceVelocity(b2.vx, b2.vy, dt - bodyTKick[i], acc[i].x, acc[i].y, maxSpeed, friction);
       b2.vx = vPost.x; b2.vy = vPost.y;
       b2.w = springSpin(b2.w, alpha[i], swing[i], tRest);
@@ -2101,9 +2127,6 @@
     gravitationalMass: gravitationalMass,
     halfExtent: halfExtent,
     computeAccelerations: computeAccelerations,
-    GRAVITY_SUBSTEPS: GRAVITY_SUBSTEPS,
-    setGravitySubsteps: setGravitySubsteps,
-    gravitySubstepsFor: gravitySubstepsFor,
     runBounceCounts: runBounceCounts,
     runBounceEvents: runBounceEvents,
     bounceCountsFromTrajectory: bounceCountsFromTrajectory,

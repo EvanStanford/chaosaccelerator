@@ -453,6 +453,9 @@ html.layout-mobile #menu-render-progress {
   left: calc(var(--panel-inset) + var(--safe-left));
   bottom: var(--panel-inset);
 }
+html.layout-mobile .render-progress-toggle {
+  top: calc(2px - max(0px, var(--safe-bottom) - var(--chrome-bottom)));
+}
 /* Left column keeps only the back link; the right (the Movie menu) is hidden whole.
    .dock-active, not the layout class alone: menus leave only once the dock has them (setDockActive). */
 #grid-view.dock-active #grid-right-menu-column {

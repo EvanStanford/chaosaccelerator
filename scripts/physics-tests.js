@@ -3084,69 +3084,24 @@
     }
   );
 
-  // ---- Gravity Substeps (Settings > Performance) ----
+  // A pass that covers its closest distance in a step or two, at 3000px/s.
   function fastPass(offset, collisions) {
     var p = PhysicsEngine.createCircle(-1500 + offset, 0.5, 30, false), c = PhysicsEngine.createCircle(0, 0, 30, true);
     p.vx = 3000;
     return { bodies: [p, c], hinges: [], springs: [], frameWidth: 1000, frameHeight: 1000, edgeMode: "infinite",
       mutualGravity: true, collisionsEnabled: collisions, friction: 0 };
   }
-  function withSubsteps(on, fn) {
-    PhysicsEngine.setGravitySubsteps(on);
-    try { return fn(); } finally { PhysicsEngine.setGravitySubsteps(false); }
+  function maxTrajectoryError(cpu, gpu, steps) {
+    var e = 0;
+    for (var i = 0; i < steps; i++) {
+      for (var b = 0; b < cpu[i].length; b++) e = Math.max(e, Math.abs(gpu[i][b].x - cpu[i][b].x), Math.abs(gpu[i][b].y - cpu[i][b].y));
+    }
+    return e;
   }
 
   addTest(
-    "Gravity Substeps: only Mutual Gravity changes, and an unused flag leaves the shader text alone",
-    "the setting is page state the engine and both shader spellings read; a constant pull has nothing to substep",
-    function () {
-      function dropScene() {
-        var b = PhysicsEngine.createCircle(300, 100, 20, false), l = PhysicsEngine.createLine(300, 600, 400, 0.1, true);
-        b.vx = 120;
-        return { bodies: [b, l], hinges: [], springs: [], frameWidth: 1000, frameHeight: 1000, edgeMode: "sticky", mutualGravity: false };
-      }
-      var plain = runJS(dropScene(), 200).bodies[0];
-      var flagged = withSubsteps(true, function () { return runJS(dropScene(), 200).bodies[0]; });
-      var same = plain.x === flagged.x && plain.y === flagged.y && plain.vx === flagged.vx && plain.vy === flagged.vy;
-      var sc = fastPass(0, false), consts = sc.bodies.map(PhysicsGPU.bodyConst), texts = {};
-      ["f32", "df"].forEach(function (prec) {
-        texts[prec] = [undefined, 1].map(function (k) {
-          return PhysicsGPU.generateStepOnceGLSL(2, consts, [], [], undefined, prec, true, false, [], { gravitySubsteps: k });
-        });
-      });
-      var textSame = texts.f32[0] === texts.f32[1] && texts.df[0] === texts.df[1];
-      return {
-        pass: same && textSame,
-        detail: "uniform-gravity bounce bit-identical with the setting on: " + same + "; stepOnce text unchanged by gravitySubsteps 1: " + textSame,
-      };
-    }
-  );
-
-  addTest(
-    "Gravity Substeps: a fast close pass no longer depends on where the steps fall",
-    "one gravity sample per step made the outcome of a pass that covers its closest distance in a step or two repeat with the step phase: sine-wave stripes on the map",
-    function () {
-      function spread(on) {
-        return withSubsteps(on, function () {
-          var lo = Infinity, hi = -Infinity;
-          for (var k = 0; k < 12; k++) {
-            var p = runJS(fastPass(50 * k / 12, false), 240).bodies[0], v = Math.hypot(p.vx, p.vy);
-            lo = Math.min(lo, v); hi = Math.max(hi, v);
-          }
-          return hi - lo;
-        });
-      }
-      var off = spread(false), on = spread(true);
-      return {
-        pass: off > 20 && on < off / 20,
-        detail: "outgoing speed across one step of start offset varies by " + off.toFixed(2) + " px/s off, " + on.toFixed(3) + " px/s on",
-      };
-    }
-  );
-
-  addTest(
-    "Gravity Substeps: JS engine and GPU compiler agree",
-    "the substep loop and its contact clamp are hand-synced in physics-engine.js and both spellings of generateStepOnceGLSL",
+    "Mutual Gravity: JS engine and GPU compiler agree on a fast pass and a three-body bounce with friction",
+    "the pull, the bounce's three-point pull and the hit moved onto the step's parabola are hand-synced in physics-engine.js and both spellings of generateStepOnceGLSL",
     function () {
       function bounce() {
         var p = PhysicsEngine.createCircle(-30, -400, 20, false), c = PhysicsEngine.createCircle(0, 0, 60, true), q = PhysicsEngine.createCircle(200, -300, 15, false);
@@ -3154,55 +3109,172 @@
         return { bodies: [p, q, c], hinges: [], springs: [], frameWidth: 1000, frameHeight: 1000, edgeMode: "infinite",
           mutualGravity: true, collisionsEnabled: true, friction: 0.15 };
       }
-      return withSubsteps(true, function () {
-        var errs = {};
-        [["pass", function () { return fastPass(0, false); }], ["bounce", bounce]].forEach(function (c) {
-          var cpu = PhysicsEngine.runTrajectory(c[1](), 120, DT);
-          ["f32", "df"].forEach(function (prec) {
-            var gpu = PhysicsGPU.runSceneOnGPU(c[1](), 120, prec), e = 0;
-            for (var i = 0; i < 120; i++) {
-              for (var b = 0; b < cpu[i].length; b++) e = Math.max(e, Math.abs(gpu[i][b].x - cpu[i][b].x), Math.abs(gpu[i][b].y - cpu[i][b].y));
-            }
-            errs[c[0] + " " + prec] = e;
-          });
+      var errs = {};
+      [["pass", function () { return fastPass(0, false); }], ["bounce", bounce]].forEach(function (c) {
+        var cpu = PhysicsEngine.runTrajectory(c[1](), 120, DT);
+        ["f32", "df"].forEach(function (prec) {
+          errs[c[0] + " " + prec] = maxTrajectoryError(cpu, PhysicsGPU.runSceneOnGPU(c[1](), 120, prec), 120);
         });
-        return {
-          pass: errs["pass df"] < 1e-3 && errs["bounce df"] < 1e-3 && errs["pass f32"] < 0.5 && errs["bounce f32"] < 0.5,
-          detail: Object.keys(errs).map(function (k) { return k + " " + errs[k].toExponential(1) + "px"; }).join(", ") + " over 120 steps",
-        };
       });
+      return {
+        pass: errs["pass df"] < 1e-3 && errs["bounce df"] < 1e-3 && errs["pass f32"] < 0.5 && errs["bounce f32"] < 0.5,
+        detail: Object.keys(errs).map(function (k) { return k + " " + errs[k].toExponential(1) + "px"; }).join(", ") + " over 120 steps",
+      };
+    }
+  );
+
+  // A ball falling ~560px onto an anchored planet of its own size, hitting at ~1500px/s into a ~19,600px/s^2 pull.
+  // t in [0, 1] walks the start 6px, through every phase of the hit within a step.
+  function planetDropScene(t) {
+    var b = PhysicsEngine.createCircle(667.0 + 0.16 * t, -14.9 + 6.29 * t, 45, false), p = PhysicsEngine.createCircle(690.2, 551.7, 45, true);
+    return { bodies: [b, p], hinges: [], springs: [], frameWidth: 1476, frameHeight: 1080, edgeMode: "infinite",
+      mutualGravity: true, collisionsEnabled: true, friction: 0 };
+  }
+
+  addTest(
+    "Mutual Gravity: a bounce on a dense planet lands near the fine-step answer, whatever the hit's phase in the step",
+    "reported as a sine wave along an Inspect line over a ball dropped on a planet: the bounce's error rose and fell with where in the step the hit fell (15px mean, 36px worst with the old substeps; 58px and 86px without). The pull is now taken at the step's start, the contact and the step's end, linear between, and the hit is found on the step's parabola instead of the chord",
+    function () {
+      function finalY(t, sub) {
+        var sc = planetDropScene(t);
+        for (var i = 0; i < 147 * sub; i++) PhysicsEngine.step(sc, DT / sub);
+        return sc.bodies[0].y;
+      }
+      var worst = 0, sum = 0, N = 30;
+      for (var k = 0; k < N; k++) {
+        var e = Math.abs(finalY(k / (N - 1), 1) - finalY(k / (N - 1), 64));
+        worst = Math.max(worst, e); sum += e / N;
+      }
+      return {
+        pass: worst < 3,
+        detail: "30 starts across 6px: off 64x finer steps by " + sum.toFixed(2) + "px mean, " + worst.toFixed(2) + "px worst after 147 steps",
+      };
     }
   );
 
   addTest(
-    "Gravity Substeps: a bounce on a planet stays nearer the fine-step answer than without",
-    "the substep path runs on into the planet, where touching bodies don't pull; without the contact-distance clamp the bounce step's pull came out weak and bounces gained energy until the body escaped",
+    "Mutual Gravity: a small ball on a dense planet neither settles nor escapes",
+    "first-order bounces lost or gained energy by where the hit fell: a radius-20 ball on a 10x dense radius-60 planet settled within seconds, or with the old substeps off climbed until it escaped. An elastic bounce keeps its height",
     function () {
-      function firstApex(d, sub, on) {
-        return withSubsteps(on, function () {
-          var p = PhysicsEngine.createCircle(0, -d, 20, false), c = PhysicsEngine.createCircle(0, 0, 60, true);
-          var sc = { bodies: [p, c], hinges: [], springs: [], frameWidth: 1000, frameHeight: 1000, edgeMode: "infinite", mutualGravity: true, collisionsEnabled: true, friction: 0 };
-          var prev = null;
-          for (var i = 0; i < 2400 * sub; i++) {
-            PhysicsEngine.step(sc, DT / sub);
-            var r = Math.hypot(p.x, p.y), vr = (p.x * p.vx + p.y * p.vy) / r;
-            if (prev !== null && prev > 0 && vr <= 0) return r;
-            prev = vr;
-          }
-          return 0;
-        });
+      var p = PhysicsEngine.createCircle(0, -420, 20, false), c = PhysicsEngine.createCircle(0, 0, 60, true);
+      var sc = { bodies: [p, c], hinges: [], springs: [], frameWidth: 1000, frameHeight: 1000, edgeMode: "infinite", mutualGravity: true, collisionsEnabled: true, friction: 0 };
+      var apexes = [], prev = null;
+      for (var i = 0; i < 7200; i++) {
+        PhysicsEngine.step(sc, DT);
+        var r = Math.hypot(p.x, p.y), vr = (p.x * p.vx + p.y * p.vy) / r;
+        if (prev !== null && prev > 0 && vr <= 0) apexes.push(r);
+        prev = vr;
       }
-      var offErr = 0, onErr = 0, onWorst = 0, N = 8;
-      for (var k = 0; k < N; k++) {
-        var d = 400 + 40 * k / N, ref = firstApex(d, 32, false);
-        offErr += Math.abs(firstApex(d, 1, false) - ref) / ref / N;
-        var e = Math.abs(firstApex(d, 1, true) - ref) / ref;
-        onErr += e / N; onWorst = Math.max(onWorst, e);
+      var lo = Math.min.apply(null, apexes), hi = Math.max.apply(null, apexes);
+      return {
+        pass: apexes.length > 50 && lo > 0.85 * 420 && hi < 1.1 * 420,
+        detail: apexes.length + " bounces over 2 minutes from a 420px drop, apexes between " + lo.toFixed(0) + " and " + hi.toFixed(0) + "px",
+      };
+    }
+  );
+
+  // A ball falling past the edge of an anchored line's pull-free disk (radius + half length), collisions on.
+  // The free short line crosses that disk's edge too, so both ends of a pair can move.
+  function lineZoneScene(dy, withFreeLine) {
+    var b = PhysicsEngine.createCircle(470, 100 + dy, 45, false), l = PhysicsEngine.createLine(500, 560, 532, 0.0045, true);
+    var bodies = [b, l];
+    if (withFreeLine) {
+      var s = PhysicsEngine.createLine(1150, 250, 120, 0.6, false);
+      s.vx = -60;
+      bodies.push(s);
+    }
+    return { bodies: bodies, hinges: [], springs: [], frameWidth: 1400, frameHeight: 1100, edgeMode: "infinite",
+      mutualGravity: true, collisionsEnabled: true, friction: 0 };
+  }
+
+  addTest(
+    "Mutual Gravity: crossing into a line's pull-free disk no longer makes a jump in the map",
+    "reported as a 40px jump along an Inspect line over a line: the pull switched off at the disk's edge on whole steps, so the run lost a step of pull wherever the entry moved by a step. It now pulls for the share of each step spent outside the disk",
+    function () {
+      var ys = [];
+      for (var k = 0; k < 400; k++) {
+        var sc = lineZoneScene(20 * k / 400);
+        for (var i = 0; i < 150; i++) PhysicsEngine.step(sc, DT);
+        ys.push(sc.bodies[0].y);
+      }
+      var steps = [];
+      for (k = 1; k < ys.length; k++) steps.push(Math.abs(ys[k] - ys[k - 1]));
+      var sorted = steps.slice().sort(function (a, b) { return a - b; }), worst = sorted[sorted.length - 1], median = sorted[sorted.length >> 1];
+      return {
+        pass: worst < 4 * median,
+        detail: "largest change between neighboring starts " + worst.toFixed(3) + "px vs the median " + median.toFixed(3) + "px (a lost step of pull is about 26px here)",
+      };
+    }
+  );
+
+  addTest(
+    "Mutual Gravity: JS engine and GPU compiler agree on a line's pull across its disk edge",
+    "the share of a step spent outside the disk is hand-synced in physics-engine.js and both spellings of generateStepOnceGLSL",
+    function () {
+      var errs = {}, cpu = PhysicsEngine.runTrajectory(lineZoneScene(7, true), 150, DT);
+      ["f32", "df"].forEach(function (prec) {
+        errs[prec] = maxTrajectoryError(cpu, PhysicsGPU.runSceneOnGPU(lineZoneScene(7, true), 150, prec), 150);
+      });
+      return {
+        pass: errs.df < 1e-3 && errs.f32 < 0.5,
+        detail: "f32 " + errs.f32.toExponential(1) + "px, df " + errs.df.toExponential(1) + "px over 150 steps",
+      };
+    }
+  );
+
+  // A ball dropped onto an anchored planet of its own size, hitting at ~1500px/s into a ~19,600px/s^2 pull.
+  function planetBounceScene(dy) {
+    var b = PhysicsEngine.createCircle(734.3, -64 + dy, 45, false), p = PhysicsEngine.createCircle(690.2, 551.7, 45, true);
+    return { bodies: [b, p], hinges: [], springs: [], frameWidth: 1476, frameHeight: 1080, edgeMode: "infinite",
+      mutualGravity: true, collisionsEnabled: true, friction: 0 };
+  }
+
+  addTest(
+    "Mutual Gravity: a bounce no longer makes a jump in the map where its hit moves to the next step",
+    "reported as a jump along an Inspect line over two circles: the bounce's kick ran on the step's start-of-step pull past the step's own half step, so moving the hit to the next step swapped a far pull for a near one (370px apart after 147 steps)",
+    function () {
+      var ys = [];
+      for (var k = 0; k < 1200; k++) {
+        var sc = planetBounceScene(12 * k / 1200);
+        for (var i = 0; i < 147; i++) PhysicsEngine.step(sc, DT);
+        ys.push(sc.bodies[0].y);
+      }
+      var d = [];
+      for (k = 1; k < ys.length; k++) d.push(Math.abs(ys[k] - ys[k - 1]));
+      var med = d.slice().sort(function (a, b) { return a - b; })[d.length >> 1], jumps = 0, worst = 0;
+      for (k = 1; k + 1 < d.length; k++) {
+        var ratio = d[k] / Math.max(d[k - 1], d[k + 1]);
+        worst = Math.max(worst, ratio);
+        if (ratio > 4 && d[k] > 3 * med) jumps++;
       }
       return {
-        pass: onErr < offErr && onWorst < 0.4,
-        detail: "first apex after a 400-440px drop, mean error vs 32 steps per frame: " + (100 * offErr).toFixed(0) + "% off, " +
-          (100 * onErr).toFixed(0) + "% on (worst " + (100 * onWorst).toFixed(0) + "%)",
+        pass: jumps === 0,
+        detail: "1200 starts across two hit steps: " + jumps + " jumps; largest change vs its neighbors " + worst.toFixed(2) + "x",
+      };
+    }
+  );
+
+  addTest(
+    "Mutual Gravity: JS engine and GPU compiler agree through a bounce on a planet",
+    "the three-point pull and the hit on the step's parabola are hand-synced in physics-engine.js and both spellings of generateStepOnceGLSL. The straight drop bounces eight times, where a float32 slip in the pull after the hit once grew to 15px while double-float stayed exact",
+    function () {
+      // Dropped from nearly straight above the planet: it bounces on the top eight times in 147 steps.
+      function straightDrop() {
+        var sc = planetBounceScene(0);
+        sc.bodies[0] = PhysicsEngine.createCircle(687.4, 382.1, 45, false);
+        return sc;
+      }
+      var errs = {};
+      [["bounce", function () { return planetBounceScene(5); }], ["drop", straightDrop], ["fall", function () { return planetDropScene(0.4); }]].forEach(function (c) {
+        var cpu = PhysicsEngine.runTrajectory(c[1](), 147, DT);
+        ["f32", "df"].forEach(function (prec) {
+          errs[c[0] + " " + prec] = maxTrajectoryError(cpu, PhysicsGPU.runSceneOnGPU(c[1](), 147, prec), 147);
+        });
+      });
+      var ok = Object.keys(errs).every(function (k) { return errs[k] < (/ df/.test(k) ? 1e-3 : 0.5); });
+      return {
+        pass: ok,
+        detail: Object.keys(errs).map(function (k) { return k + " " + errs[k].toExponential(1) + "px"; }).join(", ") + " over 147 steps",
       };
     }
   );
@@ -3462,26 +3534,21 @@
         var u = r >= contact ? -k / r : -k / contact;
         return 0.5 * ball.mass * (ball.vx * ball.vx + ball.vy * ball.vy) + u;
       }
-      // It must not wind up: a pump makes the second half the faster one and the energy climb step after step.
-      var earlyPeak = 0, latePeak = 0, e0 = totalEnergy(), ePrev = e0, climbs = 0;
-      for (var i = 0; i < 900; i++) {
+      // It must not wind up: over five minutes every bounce tops out near the first one.
+      var apexes = [], prev = null, closest = Infinity;
+      for (var i = 0; i < 18000; i++) {
         PhysicsEngine.step(scene, DT);
-        var speed = Math.hypot(ball.vx, ball.vy);
-        if (i < 450) earlyPeak = Math.max(earlyPeak, speed);
-        else latePeak = Math.max(latePeak, speed);
-        var e = totalEnergy();
-        if (e > ePrev) climbs++;
-        ePrev = e;
+        var dx = ball.x - anchor.x, dy = ball.y - anchor.y, r = Math.hypot(dx, dy), vr = (dx * ball.vx + dy * ball.vy) / r;
+        closest = Math.min(closest, r);
+        if (prev !== null && prev > 0 && vr <= 0) apexes.push(r);
+        prev = vr;
       }
-      var finalSep = Math.hypot(ball.x - anchor.x, ball.y - anchor.y);
-      var finalSpeed = Math.hypot(ball.vx, ball.vy);
+      var lo = Math.min.apply(null, apexes), hi = Math.max.apply(null, apexes), first = apexes[0];
       // Before the fix: lodged 57.4px inside the 60px contact at 1110px/s and climbing.
       return {
-        pass: finalSep >= 59.5 && latePeak < earlyPeak && climbs < 200 && ePrev <= e0,
-        detail: "after 900 steps: " + finalSep.toFixed(1) + "px apart (they touch at 60) at " +
-          finalSpeed.toFixed(0) + "px/s; fastest in the first half " + earlyPeak.toFixed(0) +
-          "px/s vs the second half " + latePeak.toFixed(0) + "px/s; energy rose on " + climbs +
-          " of 900 steps (a pump makes the second half faster: it used to end at 57.4px doing 1110px/s and rising, climbing on 401 steps)",
+        pass: closest >= 59 && apexes.length > 50 && lo > 0.8 * first && hi < 1.2 * first,
+        detail: "over 5 minutes: closest " + closest.toFixed(1) + "px apart (they touch at 60); " + apexes.length + " bounces topping out between " +
+          lo.toFixed(0) + " and " + hi.toFixed(0) + "px, the first at " + first.toFixed(0) + "px (it used to end lodged at 57.4px doing 1110px/s and rising)",
       };
     }
   );

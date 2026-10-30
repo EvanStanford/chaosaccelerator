@@ -745,6 +745,8 @@
   function setSoundOn(next) {
     soundOn = next;
     if (soundOn && !audioCtx && typeof AudioContext === "function") {
+      // Heard on an iPhone with the silent switch on.
+      try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (err) {}
       audioCtx = new AudioContext();
       // An Inspect movie sounds its points' bounces and edge stops; a keyframe movie, the zoom's tone.
       if (ofInspect) liveVoices = PhysicsSound.track(audioCtx, audioCtx.destination);

@@ -55,17 +55,18 @@
   // One Settings body (#shared-settings-body) is MOVED between the builder's panel
   // and the map's card (placeSettings). Until the map starts, the controls hold the state.
   var PERF_PRESETS = {
-    low: { endStride: 2, antialias: false, reuse: true, maxDpr: 2, frameMs: 50, drawMs: 20, playbackMB: 96, gestureFirst: true, noTransitions: true, precision: "f32", gravitySubsteps: false, dropShadow: false },
-    high: { endStride: 1, antialias: true, reuse: true, maxDpr: 0, frameMs: 0, drawMs: 5, playbackMB: 256, gestureFirst: false, noTransitions: false, precision: "auto", gravitySubsteps: true, dropShadow: true },
+    low: { endStride: 1, antialias: true, reuse: true, maxDpr: 2, frameMs: 50, drawMs: 20, playbackMB: 96, gestureFirst: true, noTransitions: true, precision: "f32", dropShadow: false },
+    high: { endStride: 1, antialias: true, reuse: true, maxDpr: 0, frameMs: 0, drawMs: 5, playbackMB: 256, gestureFirst: false, noTransitions: false, precision: "auto", dropShadow: true },
   };
   var perfDefaultPreset = global.LayoutMode && global.LayoutMode.isConstrained() ? "low" : "high";
   if (global.ShareUrl) global.ShareUrl.setOmittedPrecision(PERF_PRESETS[perfDefaultPreset].precision);
   // Each control at the Low preset or wherever it already sits below it. 0 for maxDpr and frameMs means uncapped.
+  // After a crash, resolution also stops one level short and antialiasing goes off.
   function lowerPerfValues(cur) {
     var low = PERF_PRESETS.low;
     return {
-      endStride: Math.max(cur.endStride, low.endStride),
-      antialias: cur.antialias && low.antialias,
+      endStride: Math.max(cur.endStride, 2),
+      antialias: false,
       reuse: low.reuse,
       maxDpr: cur.maxDpr === 0 ? low.maxDpr : Math.min(cur.maxDpr, low.maxDpr),
       frameMs: cur.frameMs === 0 ? low.frameMs : Math.max(cur.frameMs, low.frameMs),
@@ -73,7 +74,6 @@
       playbackMB: Math.min(cur.playbackMB, low.playbackMB),
       gestureFirst: cur.gestureFirst || low.gestureFirst,
       noTransitions: cur.noTransitions || low.noTransitions,
-      gravitySubsteps: cur.gravitySubsteps && low.gravitySubsteps,
       dropShadow: cur.dropShadow && low.dropShadow,
       precision: cur.precision, // left alone after a crash: the record has to say what was being compiled
     };
@@ -96,7 +96,7 @@
       resMin: $("resolution-min-slider"), resMax: $("resolution-max-slider"),
       resFill: $("resolution-range-fill"), resReadout: $("resolution-bounds-readout"),
       antialias: $("antialias-checkbox"), reuse: $("reuse-picture-checkbox"), gesture: $("perf-gesture-checkbox"),
-      transitions: $("perf-transitions-checkbox"), gravitySubsteps: $("gravity-substeps-checkbox"),
+      transitions: $("perf-transitions-checkbox"),
       dropShadow: $("perf-drop-shadow-checkbox"),
       dpr: $("perf-dpr-select"), frame: $("perf-frame-select"), draw: $("perf-draw-select"), memory: $("perf-playback-memory-select"),
       lineCount: $("inspect-line-sample-count-slider"), lineCountReadout: $("inspect-line-sample-count-readout"),
@@ -114,7 +114,7 @@
         endStride: el.resMax.value === RES_MAX[2] ? 2 : 1,
         antialias: el.antialias.checked, maxDpr: Number(el.dpr.value), frameMs: Number(el.frame.value),
         drawMs: Number(el.draw.value), playbackMB: Number(el.memory.value), gestureFirst: el.gesture.checked,
-        noTransitions: el.transitions.checked, gravitySubsteps: el.gravitySubsteps.checked,
+        noTransitions: el.transitions.checked,
         dropShadow: el.dropShadow.checked,
       };
     }
@@ -135,8 +135,6 @@
       el.frame.value = String(p.frameMs);
       if (!el.draw.disabled) el.draw.value = String(p.drawMs);
       el.memory.value = String(p.playbackMB);
-      el.gravitySubsteps.checked = p.gravitySubsteps;
-      PhysicsEngine.setGravitySubsteps(p.gravitySubsteps);
       el.dropShadow.checked = p.dropShadow;
       applyDropShadow(p.dropShadow);
     }
@@ -148,7 +146,7 @@
             el.reuse.checked === p.reuse && el.gesture.checked === p.gestureFirst &&
             el.transitions.checked === p.noTransitions && Number(el.dpr.value) === p.maxDpr &&
             Number(el.frame.value) === p.frameMs && Number(el.memory.value) === p.playbackMB &&
-            el.gravitySubsteps.checked === p.gravitySubsteps && el.dropShadow.checked === p.dropShadow &&
+            el.dropShadow.checked === p.dropShadow &&
             (el.draw.disabled || Number(el.draw.value) === p.drawMs)) return names[i];
       }
       return "custom";
@@ -193,7 +191,6 @@
       syncReadouts(); syncPreset();
     }));
     body.addEventListener("change", early(function (e) { if (e.target !== el.preset) syncPreset(); }));
-    el.gravitySubsteps.addEventListener("change", early(function () { PhysicsEngine.setGravitySubsteps(el.gravitySubsteps.checked); }));
     el.dropShadow.addEventListener("change", early(function () { applyDropShadow(el.dropShadow.checked); }));
 
     function volumeIcon(volume) {
@@ -812,8 +809,7 @@
       ? { width: sceneToCompile.frameWidth, height: sceneToCompile.frameHeight } : undefined;
     var stepOnceSource = PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, sceneToCompile.mutualGravity, PhysicsEngine.collisionsEnabled(sceneToCompile), initial.springs,
       { contactBody: isBounces ? sceneToCompile.output.body : null, touchBody: goalOrder ? outputBodies[0] : null,
-        warpBody: (isWarps || isTotalRotation || goalWarps) && hasPortals ? outputBodies[0] : null, warpFrom: goalWarps,
-        gravitySubsteps: PhysicsEngine.gravitySubstepsFor(sceneToCompile) });
+        warpBody: (isWarps || isTotalRotation || goalWarps) && hasPortals ? outputBodies[0] : null, warpFrom: goalWarps });
     var stepOnceCall = "stepOnce(" + PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, precision, initial.springs) + ");";
 
     // "Stop on wrap": each pixel freezes the first step ANY watched body would cross
@@ -4095,7 +4091,7 @@
     var targetMs = frameBaseMs() * share;
     perfStats.gpuMs = ms;
     // Only a frame that spent most of its budget measures its cost (a short one is overhead); a LONG one always does.
-    if (!(ms > 0.2) || (spent < budgetThen * 0.5 && ms < targetMs)) return;
+    if (!(ms > 0.2) || !isFinite(spent) || (spent < budgetThen * 0.5 && ms < targetMs)) return;
     var perMs = spent / ms;
     // Too slow is believed at once; faster is eased into.
     b.gpuPerMs = b.gpuPerMs > 0 && perMs > b.gpuPerMs ? b.gpuPerMs * (1 - BUDGET_SMOOTHING) + perMs * BUDGET_SMOOTHING : perMs;
@@ -4150,7 +4146,7 @@
   // Returns how many periods the previous work frame took (0 if none), for adaptSliceSteps.
   function noteFrameTiming(b, now) {
     var tookPeriods = 0;
-    if (b.lastWorkAt > 0 && b.lastSpent > 0) {
+    if (b.lastWorkAt > 0 && b.lastSpent > 0 && isFinite(b.lastSpent)) {
       var dt = now - b.lastWorkAt;
       // NOT rounded to whole periods: outside strict vsync a 1.3-period frame would round to 1 and grow the budget.
       var periods = Math.max(1, dt / frameTargetMs(now));
@@ -4965,6 +4961,7 @@
     if (progressive.aaSample > 0) {
       while (spent < pixelBudget || spent === 0) {
         var aaCost = drawAaBand(pixelBudget - spent);
+        if (progressive.stride === 0) break; // a pass just built restarted the run (onPassReady)
         if (aaCost === 0) break;
         spent += aaCost;
         if (progressive.band < currentPassRows()) continue;
@@ -4984,6 +4981,7 @@
     // Always at least one band per frame, however tight the budget: forward progress beats the frame target.
     while (spent < pixelBudget || spent === 0) {
       var bandCost = drawSublatticeBand(pixelBudget - spent);
+      if (progressive.stride === 0) break;
       if (bandCost === 0) break;
       spent += bandCost;
       if (progressive.band < currentPassRows()) continue;
@@ -10405,7 +10403,6 @@
   var perfPlaybackMemorySelect = document.getElementById("perf-playback-memory-select");
   var perfGestureCheckbox = document.getElementById("perf-gesture-checkbox");
   var perfTransitionsCheckbox = document.getElementById("perf-transitions-checkbox");
-  var gravitySubstepsCheckbox = document.getElementById("gravity-substeps-checkbox");
   var perfDropShadowCheckbox = document.getElementById("perf-drop-shadow-checkbox");
   var perfReadoutCheckbox = document.getElementById("perf-readout-checkbox");
   var perfReadoutEl = document.getElementById("perf-readout");
@@ -10427,7 +10424,6 @@
       playbackMB: perf.playbackMB,
       gestureFirst: perf.gestureFirst,
       noTransitions: perf.noTransitions,
-      gravitySubsteps: perf.gravitySubsteps,
       dropShadow: perf.dropShadow,
     };
   }
@@ -10439,7 +10435,7 @@
       if (now.startAtCoarsest && now.endStride === p.endStride &&
           now.antialias === p.antialias && now.reuse === p.reuse && now.maxDpr === p.maxDpr &&
           now.frameMs === p.frameMs && now.playbackMB === p.playbackMB && now.gestureFirst === p.gestureFirst &&
-          now.noTransitions === p.noTransitions && now.gravitySubsteps === p.gravitySubsteps && now.dropShadow === p.dropShadow &&
+          now.noTransitions === p.noTransitions && now.dropShadow === p.dropShadow &&
           // A control this GPU can't use (drawLengthLocked) can't keep the slider off a preset.
           (drawLengthLocked || now.drawMs === p.drawMs)) return names[i];
     }
@@ -10455,7 +10451,6 @@
     perfPlaybackMemorySelect.value = String(perf.playbackMB);
     perfGestureCheckbox.checked = perf.gestureFirst;
     perfTransitionsCheckbox.checked = perf.noTransitions;
-    gravitySubstepsCheckbox.checked = perf.gravitySubsteps;
     perfDropShadowCheckbox.checked = perf.dropShadow;
     var devDpr = window.devicePixelRatio || 1, dpr = gridDpr();
     perfDprReadout.textContent = (Math.round(dpr * 100) / 100) + "×" + (dpr < devDpr ? " of " + (Math.round(devDpr * 100) / 100) + "×" : "");
@@ -10498,24 +10493,6 @@
     releasePlaybackTextures();
     markDirty();
   }
-  // Different physics: every program, slice timing, playback and locked Inspect point is rebuilt.
-  function setGravitySubsteps(on) {
-    on = !!on;
-    if (on === perf.gravitySubsteps) return;
-    perf.gravitySubsteps = on;
-    PhysicsEngine.setGravitySubsteps(on);
-    reuse.image = null;
-    reuseDropSource();
-    releaseAllPlayback();
-    discardAllPasses();
-    releaseAllSliceStates();
-    bounceMaxProbe.measuredKey = null;
-    bounceMaxProbe.key = null;
-    sceneGeneration += 1;
-    markDirty();
-    if (inspectedGroups.length > 0) recomputeLockedTrajectories();
-    else restartCurrentPreview();
-  }
   function setPerfAntialias(on) {
     on = !!on;
     if (on === perf.antialias) return;
@@ -10534,7 +10511,6 @@
     setPerfPlaybackMB(p.playbackMB);
     perf.gestureFirst = !!p.gestureFirst; // read fresh every frame; nothing to set in motion
     perf.noTransitions = !!p.noTransitions;
-    setGravitySubsteps(p.gravitySubsteps);
     perf.dropShadow = !!p.dropShadow;
     applyDropShadow(perf.dropShadow);
     setPrecisionMode(p.precision);
@@ -10574,7 +10550,6 @@
   perfPlaybackMemorySelect.addEventListener("change", function () { setPerfPlaybackMB(Number(perfPlaybackMemorySelect.value)); syncPerfPresetUI(); });
   perfGestureCheckbox.addEventListener("change", function () { perf.gestureFirst = perfGestureCheckbox.checked; syncPerfPresetUI(); });
   perfTransitionsCheckbox.addEventListener("change", function () { perf.noTransitions = perfTransitionsCheckbox.checked; syncPerfPresetUI(); });
-  gravitySubstepsCheckbox.addEventListener("change", function () { setGravitySubsteps(gravitySubstepsCheckbox.checked); syncPerfPresetUI(); });
   perfDropShadowCheckbox.addEventListener("change", function () {
     perf.dropShadow = perfDropShadowCheckbox.checked;
     applyDropShadow(perf.dropShadow);

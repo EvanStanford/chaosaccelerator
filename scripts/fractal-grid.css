@@ -715,6 +715,9 @@ input[type="range"] {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  /* Puts the ring's bottom on the watermark's baseline. */
+  position: relative;
+  top: -2px;
 }
 .render-progress-toggle #render-progress-ring {
   width: 100%;

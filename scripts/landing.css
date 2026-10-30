@@ -52,10 +52,12 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 .watermark {
   position: fixed;
   right: 12px;
-  bottom: calc(var(--corner-bottom) + 2px);
+  bottom: calc(var(--corner-bottom) - 2px);
   z-index: 2000;
   color: #fff;
   font-size: 12px;
+  /* The '80s switch's height, so the two share a middle. */
+  line-height: 24px;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
   pointer-events: none;
   user-select: none;
