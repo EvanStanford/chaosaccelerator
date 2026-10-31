@@ -54,13 +54,13 @@
       });
     },
     // blob null: the same picture as the frame before.
-    saveFrame: function (i, key, blob, job) {
+    saveFrame: function (i, key, blob, job, colorScale) {
       return jobTransact("readwrite", function (jobs, frames) {
-        frames.put({ i: i, key: key, blob: blob }, i);
+        frames.put({ i: i, key: key, blob: blob, colorScale: colorScale }, i);
         jobs.put(job, JOB);
       });
     },
-    // Frames 0 to count - 1, in order: [{ i, key, blob }].
+    // Frames 0 to count - 1, in order: [{ i, key, blob, colorScale }].
     frames: function (count) {
       if (count < 1) return Promise.resolve([]);
       return jobTransact("readonly", function (jobs, frames) {

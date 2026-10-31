@@ -283,7 +283,7 @@
   // Frame i is in `copy`: into the video file, then on to the next.
   function frameDone(grid, i) {
     encodeFrame(i);
-    saveFrame(i);
+    saveFrame(i, grid.colorScale());
     reportProgress(i + 1);
     whenEncoderReady(function () { renderFrame(grid, i + 1); });
   }
@@ -350,6 +350,7 @@
     movieFacts.textContent = factsNote + frames.length.toLocaleString() + " frames  \u00b7  " + (frames.length / FPS).toFixed(1) + " s";
     openJob().then(function (from) {
       resumedFrom = from;
+      grid.setColorScale(from > 0 ? resumedColorScale : null);
       renderStartedAt = performance.now();
       reportProgress(from);
       renderFrame(grid, from);
@@ -357,11 +358,13 @@
   }
 
   // ---- Saved progress ---- (movie-store.js) every finished frame is saved, so a closed player can resume, two
-  // frames back in case either was bad. This render goes unsaved while another tab renders or another movie is paused.
+  // frames back in case either was bad. This render goes unsaved while another tab renders, and while another movie's
+  // paused render has more frames done.
   var address = ShareUrl.cleanFragment(location.hash);
   var job = null; // the progress this page saves, or null
   var saving = Promise.resolve(), saveFailed = false;
-  var resumedFrom = 0, priorMs = 0, progressNote = "", releaseLock = null, videoChosen = false;
+  var pausedDone = null, colorScales = [];
+  var resumedFrom = 0, resumedColorScale = null, priorMs = 0, progressNote = "", releaseLock = null, videoChosen = false;
 
   function openJob() {
     return Promise.all([MovieStore.load(), MovieStore.running()]).then(function (found) {
@@ -372,7 +375,7 @@
       }
       if (saved && saved.link === address) return resumeJob(saved);
       if (saved) {
-        progressNote = "progress isn't saved while another render is paused";
+        pausedDone = saved.done || 0;
         return 0;
       }
       var fresh = { link: address, total: frames.length, done: 0, ms: 0 };
@@ -385,7 +388,7 @@
       progressNote = "progress can't be saved in this browser";
       return 0;
     }).then(function (from) {
-      if (job) releaseLock = MovieStore.hold();
+      if (job || pausedDone !== null) releaseLock = MovieStore.hold();
       return from;
     });
   }
@@ -399,6 +402,7 @@
         (stored[from].blob || from > 0)) {
         var blob = stored[from].blob;
         blobPromises[from] = blob ? Promise.resolve(blob) : blobPromises[from - 1];
+        resumedColorScale = stored[from].colorScale;
         if (blob) {
           packedBytes += blob.size;
           packedFrames += 1;
@@ -415,23 +419,36 @@
   }
 
   // After a failed save the job stays as last saved, and is still cleared when the render ends.
-  function saveFrame(i) {
+  function saveFrame(i, colorScale) {
+    colorScales[i] = colorScale;
+    if (!job && pausedDone !== null && i + 1 > pausedDone) takeOverSave(i);
     if (!job || saveFailed) return;
     var repeat = i > 0 && blobPromises[i] === blobPromises[i - 1];
     saving = saving.then(function () { return blobPromises[i]; }).then(function (blob) {
       if (!job || saveFailed) return;
       job.done = i + 1;
       job.ms = priorMs + performance.now() - renderStartedAt;
-      return MovieStore.saveFrame(i, frameKey(frames[i]), repeat ? null : blob, job);
+      return MovieStore.saveFrame(i, frameKey(frames[i]), repeat ? null : blob, job, colorScale);
     }).catch(function () {
       saveFailed = true;
       progressNote = "progress stopped being saved";
     });
   }
 
+  // Past the paused render's frames done: this render's progress replaces it, its earlier frames included.
+  function takeOverSave(upTo) {
+    pausedDone = null;
+    job = { link: address, total: frames.length, done: 0, ms: 0 };
+    saving = saving.then(function () { return MovieStore.begin(job); });
+    for (var k = 0; k < upTo; k++) saveFrame(k, colorScales[k]);
+  }
+
   // The render is over (all of it, or ended early): nothing left to resume.
   function closeJob() {
-    if (!job) return;
+    if (!job) {
+      if (releaseLock) releaseLock();
+      return;
+    }
     job = null;
     saving = saving.then(function () { return MovieStore.discard(); }).catch(function () {}).then(function () {
       if (releaseLock) releaseLock();

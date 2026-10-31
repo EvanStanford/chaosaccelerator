@@ -2918,7 +2918,8 @@
     if (bounceMaxProbe.key !== bounceMaxViewKey()) return;
     bounceMaxProbe.measuredKey = bounceMaxProbe.key;
     var max = easedViewMax(viewMaxOf(bounceMaxProbe.values));
-    if (max !== bounceMaxValue) {
+    // A still held for this measurement needs a fresh draw to deliver from.
+    if (max !== bounceMaxValue || (stillJob && progressive.complete)) {
       bounceMaxValue = max;
       markDirty();
     }
@@ -9205,6 +9206,14 @@
   // The explainer drives the zoom from far inside one pixel out to the default
   // framing (transition.js): DEFAULT_SCALE / n shows one default-view pixel filling n.
   global.FractalGrid.defaultScale = function () { return DEFAULT_SCALE; };
+  // The movie player carries the eased color scale across a resume; null starts it over.
+  global.FractalGrid.colorScale = function () { return bounceMaxValue; };
+  global.FractalGrid.setColorScale = function (value) {
+    viewScaleSet = value != null;
+    if (value != null) bounceMaxValue = value;
+    bounceMaxProbe.measuredKey = null;
+    markDirty();
+  };
   global.FractalGrid.setScale = function (scale) {
     view.scale = scale;
     transitionScaleFloor = DEFAULT_SCALE;
@@ -10261,6 +10270,7 @@
     var wanted = pickPrecision();
     if (effectivePrecision() !== wanted && precisionPending(wanted)) return;
     if (samplePrecisionHolds()) return;
+    if (bounceMaxProbe.sync && bounceMaxProbe.key === bounceMaxViewKey()) return; // its color scale is still being measured
     var job = stillJob;
     stillJob = null;
     job.onDone(canvas);
