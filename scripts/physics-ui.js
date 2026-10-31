@@ -2964,13 +2964,13 @@
   }
 
   btnSampleDoublePendulum.addEventListener("click", function () {
-    loadSample("samples/double_pendulum.json?v=m224", "Double Pendulum");
+    loadSample("samples/double_pendulum.json?v=m225", "Double Pendulum");
   });
   btnSamplePinball.addEventListener("click", function () {
-    loadSample("samples/pinball.json?v=m224", "Pinball");
+    loadSample("samples/pinball.json?v=m225", "Pinball");
   });
   btnSampleBinaryStar.addEventListener("click", function () {
-    loadSample("samples/binary_star.json?v=m224", "Binary Star");
+    loadSample("samples/binary_star.json?v=m225", "Binary Star");
   });
   function clearScene() {
     sharedFrame = null;
@@ -3334,12 +3334,13 @@
   var btnBasinTool = document.querySelector('.tool-btn[data-tool="basin"]');
   function outputKeyGradient(prop) {
     var stops = [];
-    // Closest Basin: a band per basin; none placed, no key.
+    // Closest Basin: a band per basin, a lone basin's other half black; none placed, no key.
     if (prop === "basin") {
-      var n = scene.basins.length;
-      if (!n) return "";
-      scene.basins.forEach(function (b, i) {
-        var color = basinCss(b);
+      if (!scene.basins.length) return "";
+      var colors = scene.basins.map(basinCss);
+      if (colors.length === 1) colors.push("#000");
+      var n = colors.length;
+      colors.forEach(function (color, i) {
         stops.push(color + " " + (i / n * 100).toFixed(1) + "%", color + " " + ((i + 1) / n * 100).toFixed(1) + "%");
       });
       return "linear-gradient(to right, " + stops.join(", ") + ")";
@@ -3791,6 +3792,7 @@
   }
 
   global.PhysicsUI = {
+    isPlaying: function () { return isPlaying; },
     // The editor's grid into someone else's canvas, ruled across [x0, x1] x [y0, y1] of a frame this big.
     drawGridOver: function (targetCtx, frameWidth, frameHeight, x0, y0, x1, y1) {
       var originX = frameWidth / 2, originY = frameHeight / 2;

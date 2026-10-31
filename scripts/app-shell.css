@@ -520,3 +520,63 @@ html.drop-shadow-off :is(.floating-settings-btn, .floating-home-btn, .settings-p
   color: var(--text-dim);
 }
 #settings-about-link:hover { color: var(--text); }
+
+/* ---- Keyboard shortcuts (keyboard-shortcuts.js) ---- */
+html.input-coarse #show-shortcuts-field {
+  display: none;
+}
+html.show-shortcuts [data-shortcut]::after {
+  content: " (" attr(data-shortcut) ")";
+}
+html.show-shortcuts .icon-button[data-shortcut] {
+  position: relative;
+}
+html.show-shortcuts :is(.icon-button, .menu-toggle, .floating-settings-btn)[data-shortcut]:not(#grid-dock-tabs > .menu-toggle)::after {
+  content: "(" attr(data-shortcut) ")";
+  position: absolute;
+  right: 2px;
+  bottom: 1px;
+  font-size: 9px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+html.show-shortcuts #grid-dock-tabs > .menu-toggle[data-shortcut]::after {
+  content: attr(data-tab-label);
+}
+.shortcut-list {
+  width: min(760px, 100%);
+  max-width: none;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+}
+.shortcut-list h2 {
+  margin: 0 0 12px 0;
+  font-size: 16px;
+}
+.shortcut-list-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 4px 20px;
+  margin-bottom: 14px;
+}
+.shortcut-list h3 {
+  margin: 0 0 6px 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.shortcut-list dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 10px;
+  margin: 0 0 12px 0;
+  font-size: 13px;
+}
+.shortcut-list dt {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.shortcut-list dd {
+  margin: 0;
+}

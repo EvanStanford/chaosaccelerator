@@ -212,6 +212,7 @@
       try {
         localStorage.removeItem("physicsAppDismissedTips");
         localStorage.removeItem(global.ColorBlind.STORE_KEY);
+        localStorage.removeItem("showShortcuts");
       } catch (err) { /* nothing to clear */ }
       if (global.AppShell) global.AppShell.replayIntro();
       try {
