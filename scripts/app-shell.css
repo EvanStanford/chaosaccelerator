@@ -432,6 +432,8 @@ html:not(.simple-mode) .simple-mode-only {
 html.simple-mode #samples-section { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 html.simple-mode #samples-section > :is(.tool-grid, .editor-actions) { display: contents; }
 html.simple-mode #btn-clear-all { order: -1; }
+/* Simple Mode with + Basin shown: Set Input takes a row so + Basin sits beside Set Output. */
+html.simple-mode #panel .tool-grid:has(> [data-tool="basin"]:not([hidden])) > [data-tool="input"] { grid-column: 1 / -1; }
 
 /* ---- Toasts (app-message.js): opacity-animated, never [hidden] ---- */
 .app-toast {

@@ -106,6 +106,7 @@
     { key: "totalRotation", label: "Cumulative Rotation" },
     { key: "bounces", label: "Bounce Count" },
     { key: "warps", label: "Portal Warp Count" },
+    { key: "basin", label: "Closest Basin" },
   ];
   var OUTPUT_PAIR_PROPERTIES = [
     { key: "x", label: "Average X" },
@@ -136,6 +137,8 @@
     xInput: null,
     yInput: null,
     output: null,
+    // Closest Basin's points: { x, y, color }, color being an index into ColorBlind.basinRgb's sequence.
+    basins: [],
     // Wrap edges: the canvas area's shape (resizeCanvas), or a shared scene's own. Square until the first resize.
     frameWidth: PhysicsEngine.FRAME_SHORT_SIDE,
     frameHeight: PhysicsEngine.FRAME_SHORT_SIDE,
@@ -158,6 +161,7 @@
   var selectedSpring = -1;
   var springDraw = null; // { start: <spring end>, current: {x,y} }
   var springDrag = null; // { springIndex, current: {x,y} }
+  var basinDrag = null; // { index, offset: {x,y}, start: {x,y} (the basin's), press: {x,y}, moved }
   var drawingShape = null; // { tool: "circle" | "line", start: {x,y}, current: {x,y} }
   var velocityDrag = null; // Set Velocity tool, mid-drag: { bodyIndex, start: {x,y}, current: {x,y} }
   // Only bodyIndex: handle geometry is recomputed every move, since a hinge-preserving
@@ -1161,6 +1165,91 @@
     ctx.restore();
   }
 
+  // ---- Closest Basin markers ----
+  // Sized in screen pixels and drawn over every body; the click target is the outer circle.
+  var BASIN_OUTER_PX = 14, BASIN_INNER_PX = 5, BASIN_SPOKES = 10;
+  function basinsShown() {
+    return !!scene.output && scene.output.property === "basin";
+  }
+  function basinCss(basin) {
+    return ColorBlind.css(ColorBlind.basinRgb(basin.color));
+  }
+  // The lowest color index no basin has, so a deleted basin's color comes back first.
+  function nextBasinColor() {
+    var used = scene.basins.map(function (b) { return b.color; });
+    var c = 0;
+    while (used.indexOf(c) !== -1) c++;
+    return c;
+  }
+  function drawBasinShape(x, y, color) {
+    var inner = BASIN_INNER_PX * screenPx, outer = BASIN_OUTER_PX * screenPx;
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    for (var k = 0; k < BASIN_SPOKES; k++) {
+      var a = -Math.PI / 2 + k * 2 * Math.PI / BASIN_SPOKES, dx = Math.cos(a), dy = Math.sin(a);
+      ctx.moveTo(x + dx * inner, y + dy * inner);
+      ctx.lineTo(x + dx * outer, y + dy * outer);
+    }
+    // A dark edge keeps it readable on a body or a background of its own color.
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
+    ctx.lineWidth = 5 * screenPx;
+    ctx.stroke();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2.5 * screenPx;
+    ctx.stroke();
+    ctx.restore();
+  }
+  function drawBasins() {
+    if (!basinsShown()) return;
+    scene.basins.forEach(function (b) { drawBasinShape(b.x, b.y, basinCss(b)); });
+  }
+  // Topmost (last drawn) first.
+  function hitTestBasin(px, py) {
+    if (!basinsShown()) return -1;
+    var r = BASIN_OUTER_PX * screenPx + pointerSlop;
+    for (var i = scene.basins.length - 1; i >= 0; i--) {
+      var dx = px - scene.basins[i].x, dy = py - scene.basins[i].y;
+      if (dx * dx + dy * dy <= r * r) return i;
+    }
+    return -1;
+  }
+  function startBasinDrag(index, p) {
+    var b = scene.basins[index];
+    selectedIndex = -1;
+    selectedSpring = -1;
+    basinDrag = { index: index, offset: { x: p.x - b.x, y: p.y - b.y }, start: { x: b.x, y: b.y }, press: p, moved: false };
+    canvas.classList.add("dragging");
+    render();
+  }
+  function moveBasinDrag(p) {
+    var b = scene.basins[basinDrag.index];
+    b.x = clamp(p.x - basinDrag.offset.x, 0, scene.frameWidth);
+    b.y = clamp(p.y - basinDrag.offset.y, 0, scene.frameHeight);
+    if (Math.hypot(p.x - basinDrag.press.x, p.y - basinDrag.press.y) > CLICK_DRAG_THRESHOLD * screenPx) basinDrag.moved = true;
+    deleteZoneArmed = basinDrag.moved && isOverDeleteZone(p.x, p.y);
+    render();
+  }
+  // Escape or a lost pointer: the basin goes back to where the drag found it.
+  function cancelBasinDrag() {
+    var b = scene.basins[basinDrag.index];
+    b.x = basinDrag.start.x;
+    b.y = basinDrag.start.y;
+    basinDrag = null;
+    deleteZoneArmed = false;
+    canvas.classList.remove("dragging");
+    render();
+  }
+  function placeBasin(p) {
+    setActiveTool("select");
+    if (scene.basins.length >= PhysicsEngine.MAX_BASINS) {
+      AppMessage.toast("Max " + PhysicsEngine.MAX_BASINS + " basins");
+      return;
+    }
+    scene.basins.push({ x: clamp(p.x, 0, scene.frameWidth), y: clamp(p.y, 0, scene.frameHeight), color: nextBasinColor() });
+    startBasinDrag(scene.basins.length - 1, p);
+  }
+
   // Fraction of the frame's shorter side (the grid's replay canvas is smaller):
   // see PhysicsHingeGeometry.offscreenPointer.
   var OFFSCREEN_ARROW_MAX_FRACTION = 0.12;
@@ -1271,12 +1360,13 @@
     drawOutputKeyBodyDot(w, h);
     drawVelocityArrows();
     drawMappingBadges();
+    drawBasins();
     if (!isPlaying && selectedIndex >= 0) {
       drawResizeHandle(selectedIndex);
       drawRotationHandle(selectedIndex); // no-op for anything but a line
       drawAnchorIcon(selectedIndex); // no-op unless this body is anchored
     }
-    if ((dragging && selectedIndex >= 0) || hingeDrag || springDrag) drawDeleteZone(deleteZoneArmed);
+    if ((dragging && selectedIndex >= 0) || hingeDrag || springDrag || (basinDrag && basinDrag.moved)) drawDeleteZone(deleteZoneArmed);
     if (hingeDrag) drawHingeDragGhost(hingeDrag);
     if (springDrag) drawSpringDragGhost(springDrag);
     if (drawingShape) drawShapePreview(drawingShape);
@@ -1396,7 +1486,7 @@
   });
 
   // Simple Mode hides every tool but these.
-  var SIMPLE_MODE_TOOLS = ["select", "circle", "anchor", "input", "output"];
+  var SIMPLE_MODE_TOOLS = ["select", "circle", "anchor", "input", "output", "basin"];
   AppMode.onChange(function () {
     if (AppMode.isSimple() && SIMPLE_MODE_TOOLS.indexOf(activeTool) === -1) setActiveTool("select");
     useSimpleModeDefaults();
@@ -1420,6 +1510,7 @@
     if (hingeDrag) { hingeDrag = null; deleteZoneArmed = false; canvas.classList.remove("dragging"); render(); } // same, for a hinge on its way to the delete zone: it stays
     if (springDrag) { springDrag = null; deleteZoneArmed = false; canvas.classList.remove("dragging"); render(); } // and for a spring on its way there
     if (springDraw) { springDraw = null; render(); } // and for a spring half drawn: nothing is placed
+    if (basinDrag) cancelBasinDrag();
     setActiveTool("select");
   });
 
@@ -1540,7 +1631,7 @@
 
   // A body just anchored keeps nothing that needs it to move: hinges, springs, velocity inputs and an
   // Output that reads its motion. (computeMass already zeroed its velocity and spin.)
-  var MOVING_OUTPUTS = ["x", "y", "angle", "totalRotation", "warps"];
+  var MOVING_OUTPUTS = ["x", "y", "angle", "totalRotation", "warps", "basin"];
   function dropMotionFrom(index) {
     var dropped = [];
     var touches = function (link) { return link.bodyA === index || link.bodyB === index; };
@@ -1745,6 +1836,11 @@
         resizeHandleDrag = { bodyIndex: selectedIndex };
         return;
       }
+      var basinHit = hitTestBasin(p.x, p.y);
+      if (basinHit >= 0) {
+        startBasinDrag(basinHit, p);
+        return;
+      }
       var hingeHit = hitTestHinge(p.x, p.y);
       if (hingeHit >= 0) {
         hingeDrag = { hingeIndex: hingeHit, current: p };
@@ -1795,6 +1891,8 @@
     } else if (activeTool === "spring") {
       springDraw = { start: pickSpringEnd(p.x, p.y), current: p };
       render();
+    } else if (activeTool === "basin") {
+      placeBasin(p);
     } else if (activeTool === "velocity") {
       var hitV = hitTestTopmost(p.x, p.y);
       if (hitV >= 0 && scene.bodies[hitV].isAnchored) {
@@ -1889,6 +1987,10 @@
       render();
       return;
     }
+    if (basinDrag) {
+      moveBasinDrag(canvasPoint(e));
+      return;
+    }
     if (!dragging || selectedIndex < 0) return;
     var p = canvasPoint(e);
     var body = scene.bodies[selectedIndex];
@@ -1903,6 +2005,7 @@
   window.addEventListener("pointercancel", function (e) {
     if (e.pointerId !== activePointerId) return;
     activePointerId = null;
+    if (basinDrag) cancelBasinDrag();
     rotationHandleDrag = null;
     resizeHandleDrag = null;
     velocityDrag = null;
@@ -1974,6 +2077,16 @@
       render();
       return;
     }
+    if (basinDrag) {
+      var basinUp = canvasPoint(e);
+      var droppedBasin = basinDrag.moved && isOverDeleteZone(basinUp.x, basinUp.y) ? basinDrag.index : -1;
+      basinDrag = null;
+      deleteZoneArmed = false;
+      canvas.classList.remove("dragging");
+      if (droppedBasin >= 0) scene.basins.splice(droppedBasin, 1);
+      render();
+      return;
+    }
     if (!dragging) return;
     dragging = false;
     canvas.classList.remove("dragging");
@@ -2002,7 +2115,7 @@
   }
   function editInProgress() {
     return pointerHeld || dragging || !!hingeDrag || !!springDrag || !!drawingShape ||
-      !!springDraw || !!velocityDrag || !!rotationHandleDrag || !!resizeHandleDrag;
+      !!springDraw || !!velocityDrag || !!rotationHandleDrag || !!resizeHandleDrag || !!basinDrag;
   }
   function recordUndoState() {
     if (editInProgress()) return;
@@ -2378,6 +2491,9 @@
         highlight: [document.querySelector('[data-tool="output"]')],
       };
     }
+    if (scene.output.property === "basin" && scene.basins.length < 2) {
+      return { ready: false, message: "Please place 2 or more basins first", highlight: [btnBasinTool] };
+    }
     return { ready: true };
   }
 
@@ -2490,6 +2606,7 @@
   function translateWholeScene(dx, dy) {
     if (!dx && !dy) return;
     scene.bodies.forEach(function (b) { b.x += dx; b.y += dy; });
+    scene.basins.forEach(function (b) { b.x += dx; b.y += dy; });
     scene.hinges.forEach(function (h) {
       if (h.bodyA !== null) return;
       h.localAnchorA = { x: h.localAnchorA.x + dx, y: h.localAnchorA.y + dy };
@@ -2505,7 +2622,7 @@
   }
   // Of any scene-shaped object (see gridSceneFromShared); the parameter deliberately shadows the live scene.
   function serializeSceneOf(scene) {
-    return {
+    var out = {
       mutualGravity: !!scene.mutualGravity,
       collisionsEnabled: PhysicsEngine.collisionsEnabled(scene),
       simulationSteps: scene.simulationSteps,
@@ -2549,6 +2666,10 @@
       edgeMode: PhysicsEngine.edgeModeOf(scene),
       friction: roundNum(PhysicsEngine.frictionOf(scene)),
     };
+    // Left out when there are none, so older scenes save and link as before.
+    var basins = PhysicsEngine.sceneBasins(scene);
+    if (basins.length) out.basins = basins.map(function (b) { return { x: roundNum(b.x), y: roundNum(b.y), color: b.color }; });
+    return out;
   }
 
   // Validates any scene-shaped object into fresh bodies/hinges/mappings, or throws a message fit to show.
@@ -2644,6 +2765,18 @@
       }
     }
 
+    var newBasins = [];
+    if (Array.isArray(parsed.basins)) {
+      if (parsed.basins.length > PhysicsEngine.MAX_BASINS) {
+        throw new Error("Max " + PhysicsEngine.MAX_BASINS + " basins (JSON has " + parsed.basins.length + ").");
+      }
+      parsed.basins.forEach(function (b, bi) {
+        var bx = Number(b && b.x), by = Number(b && b.y), color = Number(b && b.color);
+        if (!isFinite(bx) || !isFinite(by)) throw new Error("basins[" + bi + "]: needs a numeric x and y.");
+        newBasins.push({ x: bx, y: by, color: color >= 0 && Math.floor(color) === color ? color : bi });
+      });
+    }
+
     function parseMapping(raw, label, propsList, allowLifespan) {
       if (raw === null || raw === undefined) return null;
       // Scene Lifespan has no body: checked before Number(raw.body) turns a genuine null into 0.
@@ -2679,6 +2812,7 @@
       xInput: parseMapping(parsed.xInput, "xInput"),
       yInput: parseMapping(parsed.yInput, "yInput"),
       output: parseMapping(parsed.output, "output", OUTPUT_PROPERTIES, true),
+      basins: newBasins,
       edgeMode: PhysicsEngine.edgeModeOf(parsed),
       // Rounded like the autosave and the link, so a hand-edited value runs the same after a reload.
       friction: roundNum(PhysicsEngine.frictionOf(parsed)),
@@ -2696,6 +2830,7 @@
     scene.xInput = data.xInput;
     scene.yInput = data.yInput;
     scene.output = data.output;
+    scene.basins = data.basins || [];
     pairUpPortals();
     scene.edgeMode = data.edgeMode;
     scene.friction = PhysicsEngine.frictionOf(data);
@@ -2767,13 +2902,13 @@
   }
 
   btnSampleDoublePendulum.addEventListener("click", function () {
-    loadSample("samples/double_pendulum.json?v=m223", "Double Pendulum");
+    loadSample("samples/double_pendulum.json?v=m224", "Double Pendulum");
   });
   btnSamplePinball.addEventListener("click", function () {
-    loadSample("samples/pinball.json?v=m223", "Pinball");
+    loadSample("samples/pinball.json?v=m224", "Pinball");
   });
   btnSampleBinaryStar.addEventListener("click", function () {
-    loadSample("samples/binary_star.json?v=m223", "Binary Star");
+    loadSample("samples/binary_star.json?v=m224", "Binary Star");
   });
   function clearScene() {
     sharedFrame = null;
@@ -2783,6 +2918,7 @@
     scene.xInput = null;
     scene.yInput = null;
     scene.output = null;
+    scene.basins = [];
     finishSceneReplace();
   }
   btnClearAll.addEventListener("click", function () {
@@ -2932,6 +3068,12 @@
 
   function updateOutputBackground(currentStepCount) {
     if (!scene.output) return;
+    if (scene.output.property === "basin") {
+      var nearest = scene.basins[outputValueAtFrame(wrapStopOverride && currentStepCount === effectiveMaxSteps
+        ? wrapStopOverride : trajectory[currentStepCount - 1], scene.output)];
+      canvas.style.backgroundColor = nearest ? basinCss(nearest) : "";
+      return;
+    }
     var rangeMax = outputRangeMax(scene.output.property);
     var t;
     if (scene.output.property === "lifespan") {
@@ -3127,8 +3269,19 @@
   // since a range track is only reachable via pseudo-elements (.output-key in physics.css); the state string avoids a style write per frame.
   var outputKeyControlsState = null;
   var btnOutputTool = document.querySelector('.tool-btn[data-tool="output"]');
+  var btnBasinTool = document.querySelector('.tool-btn[data-tool="basin"]');
   function outputKeyGradient(prop) {
     var stops = [];
+    // Closest Basin: a band per basin; none placed, no key.
+    if (prop === "basin") {
+      var n = scene.basins.length;
+      if (!n) return "";
+      scene.basins.forEach(function (b, i) {
+        var color = basinCss(b);
+        stops.push(color + " " + (i / n * 100).toFixed(1) + "%", color + " " + ((i + 1) / n * 100).toFixed(1) + "%");
+      });
+      return "linear-gradient(to right, " + stops.join(", ") + ")";
+    }
     for (var i = 0; i <= OUTPUT_KEY_STOPS; i++) {
       var f = i / OUTPUT_KEY_STOPS;
       stops.push(outputColorForNormalized(f, outputHueRange(prop)) + " " + (f * 100).toFixed(1) + "%");
@@ -3137,12 +3290,17 @@
   }
   function updateOutputKeyControls() {
     var prop = scene.output ? scene.output.property : "";
-    var state = prop + "|" + scene.edgeMode + "|" + !!scene.mutualGravity;
+    var state = prop + "|" + scene.edgeMode + "|" + !!scene.mutualGravity +
+      (prop === "basin" ? "|" + scene.basins.map(function (b) { return b.color; }).join(",") : "");
     if (state === outputKeyControlsState) return;
     outputKeyControlsState = state;
     var gradient = prop ? outputKeyGradient(prop) : "";
     if (btnOutputTool) btnOutputTool.textContent = prop ? "Output Set" : "Set Output";
-    [[playbackProgressSlider, prop === "lifespan"], [btnOutputTool, !!prop]].forEach(function (pair) {
+    if (btnBasinTool) {
+      btnBasinTool.hidden = prop !== "basin";
+      if (btnBasinTool.hidden && activeTool === "basin") setActiveTool("select");
+    }
+    [[playbackProgressSlider, prop === "lifespan"], [btnOutputTool, !!gradient]].forEach(function (pair) {
       var el = pair[0], on = pair[1];
       if (!el) return;
       el.classList.toggle("output-key", on);
@@ -3186,7 +3344,7 @@
   // The Output value at one frame.
   function outputValueAtFrame(frame, output) {
     // Wrapped into a scene shape so PhysicsEngine.computeOutputValue stays the one JS definition.
-    var asScene = { bodies: frame, frameWidth: scene.frameWidth, frameHeight: scene.frameHeight, edgeMode: scene.edgeMode };
+    var asScene = { bodies: frame, basins: scene.basins, frameWidth: scene.frameWidth, frameHeight: scene.frameHeight, edgeMode: scene.edgeMode };
     return PhysicsEngine.computeOutputValue(asScene, output);
   }
 
@@ -3604,6 +3762,13 @@
         (sceneToDraw.hinges || []).forEach(function (h) { drawHinge(h, false, sceneToDraw.bodies); });
       });
     },
+    // A scene's Closest Basin markers as the editor draws them; px is one screen pixel in the target's units.
+    drawSceneBasins: function (targetCtx, basins, px) {
+      drawInto(targetCtx, function () {
+        screenPx = px;
+        basins.forEach(function (b) { drawBasinShape(b.x, b.y, basinCss(b)); });
+      });
+    },
     // Every spring of a scene whose bodies are where they should be drawn.
     drawSceneSprings: function (targetCtx, sceneToDraw) {
       drawInto(targetCtx, function () {
@@ -3656,6 +3821,9 @@
       var data = parseSceneData(PhysicsCoords.toEngineJSON(authored, frame));
       if (!hasSomethingToMap(data) || !data.xInput || !data.yInput || !data.output) {
         throw new Error("its scene has no X / Y Input and Output mapped yet");
+      }
+      if (data.output.property === "basin" && data.basins.length < 2) {
+        throw new Error("its Closest Basin Output has fewer than 2 basins");
       }
       data.frameWidth = frame.frameWidth;
       data.frameHeight = frame.frameHeight;

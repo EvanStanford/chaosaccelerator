@@ -743,6 +743,27 @@
     return lines;
   }
 
+  // Closest Basin's colors for every Color Blind Support mode (u_colorBlind picks the row); gray with no basins.
+  function basinColorLines(basins) {
+    var count = Math.max(basins.length, 1), colors = [];
+    ColorBlind.modes.forEach(function (m) {
+      for (var k = 0; k < count; k++) {
+        var rgb = basins[k] ? ColorBlind.basinRgb(basins[k].color, m) : [0.5, 0.5, 0.5];
+        colors.push("vec3(" + rgb.map(function (v) { return v.toFixed(6); }).join(", ") + ")");
+      }
+    });
+    return [
+      "const int BASIN_COUNT = " + count + ";",
+      "const vec3 BASIN_COLORS[" + colors.length + "] = vec3[" + colors.length + "](" + colors.join(", ") + ");",
+      "vec3 basinColor(float t) {",
+      "  int k = clamp(int(t * float(BASIN_COUNT)), 0, BASIN_COUNT - 1);",
+      "  vec3 color = BASIN_COLORS[u_colorBlind * BASIN_COUNT + k];",
+      "  return u_colorBlind == 0 && u_lowSaturation ? lowSaturate(color) : color;",
+      "}",
+      "",
+    ];
+  }
+
   function compileScenePieces(sceneToCompile, precision) {
     // "df" means any multi-float precision (two, three or four words).
     var df = PhysicsDF.isExtended(precision);
@@ -756,6 +777,10 @@
     var isBounces = outProp === "bounces";
     var isWarps = outProp === "warps";
     var isTotalRotation = outProp === "totalRotation";
+    // Closest Basin: the nearest basin's index, colored by the basin itself.
+    var isBasin = outProp === "basin";
+    var basins = PhysicsEngine.sceneBasins(sceneToCompile);
+    var basinCount = Math.max(basins.length, 1);
     var isCount = isBounces || isWarps;
     var isRunTally = isLifespan || isCount;
     // Only a scene with both portals placed can warp.
@@ -785,6 +810,24 @@
       outputLines = ["  outputValue = warpCount;"];
     } else if (isTotalRotation) {
       outputLines = [emitBodyValue("outAngle", outputBodies[0], "angle"), "  outputValue = " + B.sub("outAngle", "rotationBase") + ";"];
+    } else if (isBasin) {
+      // Twin of PhysicsEngine.closestBasin, compared at the pass's precision.
+      outputLines = [emitBodyValue("outBasinX", outputBodies[0], "x"), emitBodyValue("outBasinY", outputBodies[0], "y"),
+        "  " + B.scalar + " basinBest = " + B.zero + ";"];
+      var basinWrap = PhysicsEngine.edgeModeOf(sceneToCompile) === "wrap";
+      basins.forEach(function (b, k) {
+        outputLines.push("  {",
+          "    " + B.scalar + " basinDx = " + B.sub("outBasinX", B.lit(b.x)) + ";",
+          "    " + B.scalar + " basinDy = " + B.sub("outBasinY", B.lit(b.y)) + ";");
+        if (basinWrap) {
+          var bw = PhysicsGPU.fnum(sceneToCompile.frameWidth), bh = PhysicsGPU.fnum(sceneToCompile.frameHeight);
+          outputLines.push("    basinDx = " + B.sub("basinDx", B.mul(B.lit(sceneToCompile.frameWidth), B.fromFloat("floor(" + B.toFloat("basinDx") + " / " + bw + " + 0.5)"))) + ";");
+          outputLines.push("    basinDy = " + B.sub("basinDy", B.mul(B.lit(sceneToCompile.frameHeight), B.fromFloat("floor(" + B.toFloat("basinDy") + " / " + bh + " + 0.5)"))) + ";");
+        }
+        outputLines.push("    " + B.scalar + " basinD = " + B.add(B.mul("basinDx", "basinDx"), B.mul("basinDy", "basinDy")) + ";",
+          k === 0 ? "    basinBest = basinD;" : "    if (" + B.less("basinD", "basinBest") + ") { basinBest = basinD; outputValue = " + PhysicsGPU.fnum(k) + "; }",
+          "  }");
+      });
     } else if (isDistance) {
       // Twin of shortestSeparation, at the pass's precision: derived modes difference it.
       outputLines = [
@@ -953,10 +996,11 @@
     // ---- Derived display modes ----
     // A derivative of the field from a stencil of neighboring starting points, in
     // WORLD space: differencing 8-bit ramped color would show false edges at hue breakpoints.
-    var OB = isRunTally ? PhysicsGridCodegen.backendFor("f32") : B;
+    var OB = isRunTally || isBasin ? PhysicsGridCodegen.backendFor("f32") : B;
     var outScalar = OB.scalar;
     var outZero = OB.zero;
-    var deltaDenom = isCount ? "max(u_bounceMax, 1.0)"
+    var deltaDenom = isBasin ? PhysicsGPU.fnum(basinCount)
+      : isCount ? "max(u_bounceMax, 1.0)"
       : isTotalRotation ? "(2.0 * u_bounceMax)"
       : isLifespan ? "float(u_durationSteps)"
         : "OUTPUT_RANGE_MAX";
@@ -971,7 +1015,10 @@
     // mod() at the pass's precision (folding in float32 first merges neighboring
     // pixels); lifespan and distance clamp. Counts and Cumulative Rotation are scaled by
     // the largest value in view and NOT clamped; u_bounceMax = 0 reads back the raw value.
-    isCount
+    // A basin index k reads as the middle of the k-th of basinCount bands.
+    isBasin
+      ? "  float t = (outputValue + 0.5) / " + PhysicsGPU.fnum(basinCount) + ";"
+    : isCount
       ? "  float t = u_bounceMax > 0.0 ? outputValue / u_bounceMax : outputValue;"
       : isTotalRotation
         ? "  float t = " + B.toFloat("outputValue") + ";\n  if (u_bounceMax > 0.0) t = 0.5 + 0.5 * t / u_bounceMax;"
@@ -1118,7 +1165,9 @@
       "  return CIRCULAR_OUTPUT ? cbCyclic(u_colorBlind, t) : cbSequential(u_colorBlind, t);",
       "}",
       "",
+    ], isBasin ? basinColorLines(basins) : [], [
       "vec3 colorMap(float t) {",
+      isBasin ? "  if (BASIN_COUNT > 0) return basinColor(t);" : "",
       "  t = clamp(t, 0.0, 1.0);",
       "  vec3 color;",
       "  if (u_colorBlind != 0) {",
@@ -1765,6 +1814,17 @@
     (scene.output.property === "x" || scene.output.property === "y" || scene.output.property === "distance");
   var bounceMaxValue = 1;
   function isCountProperty(prop) { return prop === "bounces" || prop === "warps"; }
+  function isBasinOutput() { return scene.output.property === "basin"; }
+  // The shader's BASIN_COUNT.
+  function basinBands() { return Math.max(PhysicsEngine.sceneBasins(scene).length, 1); }
+  // The color of the basin whose band t is in, as colorMap draws it; null with no basins.
+  function basinColorForT(t) {
+    var basins = PhysicsEngine.sceneBasins(scene);
+    var basin = basins[Math.min(basins.length - 1, Math.max(0, Math.floor(t * basins.length)))];
+    if (!basin) return null;
+    var rgb = ColorBlind.basinRgb(basin.color);
+    return !ColorBlind.on() && lowSaturationEnabled ? lowSaturate(rgb, 1) : ColorBlind.css(rgb);
+  }
   function isViewScaledOutput() { return isCountOutput || isTotalRotationOutput; }
   function currentOutputRangeMax() { return outputRangeMax(scene, scene.output.property); }
   function computeIsCircularOutput() {
@@ -2511,6 +2571,8 @@
 
   // Circular outputs need a wraparound-aware distance (t=0.99 and t=0.02 are close).
   function valueDistance(a, b) {
+    // Basins are categories: different or not.
+    if (isBasinOutput()) return Math.floor(a * basinBands()) === Math.floor(b * basinBands()) ? 0 : 1;
     var d = Math.abs(a - b);
     return isCircularOutput ? Math.min(d, 1 - d) : d;
   }
@@ -4171,6 +4233,8 @@
     }
     btnSuperlativeLargest.textContent = largestLabel;
     btnSuperlativeSmallest.textContent = smallestLabel;
+    // Basins have no order to be largest or smallest in.
+    btnSuperlativeLargest.hidden = btnSuperlativeSmallest.hidden = prop === "basin";
     if (smallestFirst) {
       btnSuperlativeLargest.parentNode.insertBefore(btnSuperlativeSmallest, btnSuperlativeLargest);
     } else {
@@ -6110,6 +6174,7 @@
   // OKLCH, not HSL, for this animated window: HSL lightness isn't perceptually uniform, so a sweeping
   // hue would flash. Under Color Zoom the hue repeats 10x; chroma/lightness stay fixed but for the fade.
   function hoverOutputColor(t) {
+    if (isBasinOutput()) return basinColorForT(t) || "";
     if (ColorBlind.on()) return colorBlindOutputColor(t);
     if (colorEnds.flip) t = 1 - t;
     var hue = colorZoomEnabled ? hueRangeMaxValue * (1 - (t * 10 % 1)) : hueRangeMaxValue * (1 - t);
@@ -6120,6 +6185,7 @@
   // The exact grid color (colorMap's HSL): only for the FINAL frozen frame, where nothing flashes and
   // the swatch can match the pixel. In a derived display mode it still shows the value's own color.
   function hoverOutputColorFinal(t) {
+    if (isBasinOutput()) return basinColorForT(t) || "";
     if (ColorBlind.on()) return colorBlindOutputColor(t);
     if (colorEnds.flip) t = 1 - t;
     var hue, sat, fade = outputFade(t);
@@ -6194,6 +6260,7 @@
 
   // Mirrors the shader's tLine: mod(outputValue, OUTPUT_RANGE_MAX) / OUTPUT_RANGE_MAX with the always-positive wrap, unless it clamps.
   function outputColorT(v) {
+    if (isBasinOutput()) return (v + 0.5) / basinBands();
     // Lifespan is clamped, not wrapped (its max means "ran the whole run"); Bounce Count scales by the grid's own u_bounceMax.
     if (isCountOutput) return Math.min(1, Math.max(0, v / bounceMaxValue));
     if (isTotalRotationOutput) return Math.min(1, Math.max(0, 0.5 + 0.5 * v / bounceMaxValue));
@@ -6694,6 +6761,10 @@
     hoverCtx.lineWidth = 1.5 / hoverFit.scale;
     hoverCtx.strokeRect(0, 0, scene.frameWidth, scene.frameHeight);
   }
+  // Closest Basin's markers, over every body: half their builder size in a small preview, never under it in frame units.
+  function drawHoverBasins() {
+    if (isBasinOutput()) PhysicsUI.drawSceneBasins(hoverCtx, PhysicsEngine.sceneBasins(scene), Math.max(1, 0.5 / hoverFit.scale));
+  }
 
   // Cheap pure-JS path: the offset scene at t=0, no WebGL, fast enough for every mousemove; t=0 here is
   // the replay's first frame. A VELOCITY Input starts every pixel in the same place, so only this preview
@@ -6777,6 +6848,7 @@
     }));
     drawHoverInputVelocityArrows(offsetScene);
     drawInspectedAtStep(0);
+    drawHoverBasins();
     if (inspectedGroups.length > 0) {
       // Several scenes' Output values aren't reconciled into one background; each has its own color.
       hoverCanvas.style.backgroundColor = "";
@@ -6836,6 +6908,7 @@
 
     // step, not the capped hoveredStep: an inspected point keeps playing after the hovered scene froze.
     drawInspectedAtStep(step);
+    drawHoverBasins();
 
     if (inspectedGroups.length > 0) {
       hoverCanvas.style.backgroundColor = "";
@@ -7061,6 +7134,7 @@
         valueFor(1, "x") - valueFor(0, "x"), valueFor(1, "y") - valueFor(0, "y"));
       return Math.sqrt(d.x * d.x + d.y * d.y);
     }
+    if (prop === "basin") return Math.max(0, PhysicsEngine.closestBasin(scene, valueFor(0, "x"), valueFor(0, "y")));
     var total = 0;
     for (var h = 0; h < heads.length; h++) total += valueFor(h, prop);
     return heads.length ? total / heads.length : 0;
@@ -7291,11 +7365,13 @@
     if (prop === "bounces") return "Bounce Count";
     if (prop === "warps") return "Portal Warp Count";
     if (prop === "totalRotation") return "Cumulative Rotation";
+    if (prop === "basin") return "Closest Basin";
     return prop;
   }
 
   // Output units per unit of t. Exact where t is a plain division; under Infinite Space (a sigmoid) it is the frame dimension, not a constant ratio.
   function statsValueSpan() {
+    if (isBasinOutput()) return basinBands();
     if (isCountOutput) return bounceMaxValue;
     if (isTotalRotationOutput) return 2 * bounceMaxValue;
     return currentOutputRangeMax();
@@ -7314,6 +7390,7 @@
   // Inverse of outputColorT, branch for branch. Not monotonic for every Output: with +y up, t = 0 is the
   // TOP of the frame (largest Center Y); callers wanting an ordered pair sort themselves.
   function statsValueForT(t) {
+    if (isBasinOutput()) return Math.min(basinBands() - 1, Math.max(0, Math.floor(t * basinBands())));
     if (isCountOutput) return authoredOutputValue(t * bounceMaxValue);
     if (isTotalRotationOutput) return authoredOutputValue((2 * t - 1) * bounceMaxValue);
     var rangeMax = currentOutputRangeMax();
@@ -7334,6 +7411,7 @@
     if (prop === "bounces") return (Math.round(v * 10) / 10).toLocaleString() + " bounces";
     if (prop === "warps") return (Math.round(v * 10) / 10).toLocaleString() + " warps";
     if (prop === "totalRotation") return Math.round(v * 180 / Math.PI).toLocaleString() + "°";
+    if (prop === "basin") return "Basin " + (Math.round(v) + 1);
     var a = Math.abs(v);
     if (a !== 0 && (a < 1e-3 || a >= 1e6)) return v.toExponential(2);
     return (Math.round(v * 100) / 100).toLocaleString();
@@ -9857,7 +9935,7 @@
       // The view's own precision, not one picked for the card's size.
       precision: pickPrecision(),
       // Lifespan and the counts are one float32 at any precision.
-      tally: ["lifespan", "bounces", "warps"].indexOf(scene.output.property) !== -1,
+      tally: ["lifespan", "bounces", "warps", "basin"].indexOf(scene.output.property) !== -1,
       look: { mode: displayMode, colorZoom: colorZoomEnabled, lowSaturation: lowSaturationEnabled, duration: simulationSteps },
       stencil: stencil,
       bandRows: bandRows,
@@ -10523,6 +10601,7 @@
           drawFrameBoundary();
           drawTraceTails(step, null);
           drawInspectedAtStep(step);
+          drawHoverBasins();
           // The backdrop goes under the drawing, so what a hollow body cuts out of it shows the backdrop.
           ctx.globalCompositeOperation = "destination-over";
           if (background === "grid") {
@@ -10568,6 +10647,7 @@
           ctx.setTransform(hoverFit.scale, 0, 0, hoverFit.scale, hoverFit.offsetX, hoverFit.offsetY);
           drawFrameBoundary();
           drawReplayFrame(replay, shown);
+          drawHoverBasins();
           // Under the drawing, as inspectTab's.
           ctx.globalCompositeOperation = "destination-over";
           ctx.setTransform(1, 0, 0, 1, 0, 0);

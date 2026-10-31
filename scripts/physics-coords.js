@@ -55,6 +55,11 @@
     }
     out.hinges = (json.hinges || []).map(convertLink);
     if (json.springs) out.springs = json.springs.map(convertLink);
+    if (json.basins) {
+      out.basins = json.basins.map(function (b) {
+        return { x: round(mapX(Number(b.x) || 0, frame)), y: round(mapY(Number(b.y) || 0, frame)), color: b.color };
+      });
+    }
 
     return out;
   }

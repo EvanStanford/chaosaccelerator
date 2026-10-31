@@ -173,6 +173,16 @@
     "blue-yellow": ["#e69f00", "#56b4e9", "#009e73", "#f0e442", "#0072b2", "#d55e00", "#cc79a7"],
     monochrome: ["#eeeeee", "#636363", "#bebebe", "#424242", "#929292"],
   };
+  function categoricalIn(list, i) {
+    return list[((i % list.length) + list.length) % list.length];
+  }
+  // Closest Basin colors, one per basin (PhysicsEngine.MAX_BASINS is the list's length).
+  var BASIN_COLORS = ["#4e79a7", "#f28e2b", "#e15759", "#76b7b2", "#59a14f", "#edc948", "#b07aa1", "#ff9da7", "#9c755f", "#bab0ac"];
+  function basinRgb(colorIndex, inMode) {
+    if (inMode === "off") return stops(categoricalIn(BASIN_COLORS, colorIndex).slice(1))[0];
+    var list = CATEGORICAL[inMode];
+    return stops(categoricalIn(list, colorIndex + Math.floor(list.length / 2)).slice(1))[0];
+  }
   // Inspect (Grid)'s two directions: corners [x0y0, x1y0, x0y1, x1y1], blended in between.
   var GRID_CORNERS = {
     "red-green": stops("0d3583 918009 acc9fd fff5b8"),
@@ -207,9 +217,10 @@
     css: css,
     palette: function () { return PALETTES[mode]; },
     categorical: function (i) {
-      var list = CATEGORICAL[mode];
-      return list[((i % list.length) + list.length) % list.length];
+      return categoricalIn(CATEGORICAL[mode], i);
     },
+    // A basin's color index as [r, g, b] in 0 to 1, in the current mode or the one named.
+    basinRgb: function (colorIndex, inMode) { return basinRgb(colorIndex, inMode || mode); },
     gridColor: function (x, y) {
       var c = GRID_CORNERS[mode];
       return mixRgb(mixRgb(c[0], c[1], x), mixRgb(c[2], c[3], x), y);

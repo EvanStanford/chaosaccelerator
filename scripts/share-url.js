@@ -33,7 +33,7 @@
   function shapeKey(b) { return b.type === "portal" ? "portal " + b.color : b.type; }
   var PROPERTY_CODES = {
     x: "x", y: "y", angle: "ang", radius: "rad", length: "len", vx: "vx", vy: "vy",
-    bounces: "bnce", distance: "dist", lifespan: "life", totalRotation: "turn", warps: "warp",
+    bounces: "bnce", distance: "dist", lifespan: "life", totalRotation: "turn", warps: "warp", basin: "basn",
   };
   var EDGE_CODES = { sticky: "stik", wrap: "wrap", infinite: "infi" };
   var DISPLAY_CODES = { standard: "std", colorzoom: "czom", gradient: "grad", laplacian: "lapl", contours: "cont", ftle: "ftle" };
@@ -276,6 +276,17 @@
     };
   }
 
+  // x:y:color, color being the basin's color index.
+  function encodeBasin(b) {
+    return [sceneNum(b.x), sceneNum(b.y), b.color].join(":");
+  }
+  function decodeBasin(text, i) {
+    var what = "basin " + (i + 1);
+    var parts = text.split(":");
+    if (parts.length !== 3) throw new Error(what + " needs an x, a y and a color");
+    return { x: parseNum(parts[0], what + "'s x"), y: parseNum(parts[1], what + "'s y"), color: parseIndex(parts[2], what + "'s color") };
+  }
+
   // "0.ang" is body 0's rotation; "1.2.dist" an Output read from a pair; "life" alone is Scene Lifespan.
   function encodeMapping(m) {
     var parts = [];
@@ -302,6 +313,7 @@
     if (scene.xInput) fields.push("xinp:" + encodeMapping(scene.xInput));
     if (scene.yInput) fields.push("yinp:" + encodeMapping(scene.yInput));
     if (scene.output) fields.push("outp:" + encodeMapping(scene.output));
+    if (scene.basins && scene.basins.length) fields.push("basn:" + scene.basins.map(encodeBasin).join(";"));
     if (scene.edgeMode && scene.edgeMode !== DEFAULT_EDGE) fields.push("edge:" + EDGE_CODES[scene.edgeMode]);
     if (scene.mutualGravity) fields.push("mgrv:t");
     if (scene.collisionsEnabled === false) fields.push("coll:f");
@@ -329,7 +341,7 @@
       if (portals[b.color]) throw new Error("body " + (i + 1) + " is a second " + b.color + " portal");
       portals[b.color] = true;
     });
-    return {
+    var scene = {
       mutualGravity: fields.mgrv === undefined ? false : parseBool(fields.mgrv, "mgrv"),
       collisionsEnabled: fields.coll === undefined ? true : parseBool(fields.coll, "coll"),
       friction: fields.fric === undefined ? 0 : parseNum(fields.fric, "fric"),
@@ -344,6 +356,8 @@
       frameHeight: fields.frmh === undefined ? 0 : parseNum(fields.frmh, "frmh"),
       edgeMode: fields.edge === undefined ? DEFAULT_EDGE : EDGES_BY_CODE[fields.edge],
     };
+    if (fields.basn !== undefined) scene.basins = splitList(fields.basn).map(decodeBasin);
+    return scene;
   }
 
   // ---- The map's view ---- what FractalGrid.shareState() hands over and applyShareView()

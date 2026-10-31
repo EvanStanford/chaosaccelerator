@@ -423,7 +423,8 @@ html:has(#perf-readout-checkbox:checked) #editor-perf-readout {
 #physics-canvas.tool-select { cursor: default; }
 #physics-canvas.tool-circle,
 #physics-canvas.tool-line,
-#physics-canvas.tool-velocity { cursor: crosshair; }
+#physics-canvas.tool-velocity,
+#physics-canvas.tool-basin { cursor: crosshair; }
 #physics-canvas.tool-anchor,
 #physics-canvas.tool-hinge,
 #physics-canvas.tool-input,

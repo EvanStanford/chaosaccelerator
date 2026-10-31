@@ -5187,6 +5187,36 @@
   );
 
   addTest(
+    "Closest Basin reads the nearest basin, the short way round only under Pac-Man Warp, and keeps its basins through a link and a Play/Reset",
+    "basins are fixed points in scene.basins; the Output is the index of the nearest one, which the grid shader repeats in GLSL",
+    function () {
+      var scene = twoBallScene("sticky", 100, 300, 700, 300);
+      scene.basins = [{ x: 750, y: 300, color: 0 }, { x: 300, y: 300, color: 1 }];
+      scene.xInput = { body: 1, property: "x" }; scene.yInput = { body: 1, property: "y" };
+      scene.output = { body: 0, bodyB: null, property: "basin" };
+      var sticky = PhysicsEngine.computeOutputValue(scene, scene.output);
+      // 100 is 200 from 300, and 150 from 750 the short way round an 800-wide frame.
+      scene.edgeMode = "wrap";
+      var wrapped = PhysicsEngine.computeOutputValue(scene, scene.output);
+      var none = PhysicsEngine.closestBasin({ bodies: [] }, 0, 0);
+      var authored = PhysicsCoords.toAuthoredJSON(scene);
+      var linked = PhysicsCoords.toEngineJSON(ShareUrl.decode("#" + ShareUrl.encode({ page: "bldr", scene: authored })).scene, scene);
+      var cloned = PhysicsEngine.cloneScene(scene);
+      function same(list) {
+        return JSON.stringify((list || []).map(function (b) { return [b.x, b.y, b.color]; })) === JSON.stringify([[750, 300, 0], [300, 300, 1]]);
+      }
+      var plain = ShareUrl.encode({ page: "bldr", scene: PhysicsCoords.toAuthoredJSON(twoBallScene("sticky", 100, 300, 700, 300)) });
+      return {
+        pass: sticky === 1 && wrapped === 0 && none === -1 && same(linked.basins) && linked.output.property === "basin" &&
+          same(cloned.basins) && plain.indexOf("basn") === -1,
+        detail: "sticky=" + sticky + " (want 1), wrap=" + wrapped + " (want 0), no basins=" + none + " (want -1); link basins " +
+          JSON.stringify(linked.basins) + " output " + linked.output.property + "; clone " + JSON.stringify(cloned.basins) +
+          "; a scene without basins links without a basn field: " + (plain.indexOf("basn") === -1),
+      };
+    }
+  );
+
+  addTest(
     "Output survives a Play/Reset round trip with its second body intact",
     "PhysicsEngine.cloneScene is what physics-ui.js round-trips the live scene through on every Play and Reset: an omitted field there silently resets mid-edit, which is how simulationSteps and edgeMode each got lost once, and a dropped bodyB would quietly turn a pair Output back into a one-body one",
     function () {
@@ -5219,6 +5249,7 @@
         ["bounce count", { body: 2, bodyB: null, property: "bounces" }],
         ["cumulative rotation", { body: 2, bodyB: null, property: "totalRotation" }],
         ["portal warps", { body: 2, property: "warps" }],
+        ["closest basin", { body: 2, bodyB: null, property: "basin" }],
         ["pair average", { body: 0, bodyB: 2, property: "x" }],
         ["distance", { body: 0, bodyB: 2, property: "distance" }],
       ];
@@ -5229,6 +5260,7 @@
         ["bounces with a pair", { body: 0, bodyB: 1, property: "bounces" }],
         ["cumulative rotation with a pair", { body: 0, bodyB: 1, property: "totalRotation" }],
         ["warps with a pair", { body: 0, bodyB: 1, property: "warps" }],
+        ["closest basin with a pair", { body: 0, bodyB: 1, property: "basin" }],
         ["body out of range", { body: 9, bodyB: null, property: "y" }],
         ["bodyB out of range", { body: 0, bodyB: 9, property: "x" }],
         ["no mapping at all", null],

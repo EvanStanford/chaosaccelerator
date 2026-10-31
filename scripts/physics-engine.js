@@ -1575,7 +1575,29 @@
     if (output.property === "warps" && isPairOutput(output)) {
       return "Portal Warp Count reads one body, but a second is set";
     }
+    if (output.property === "basin" && isPairOutput(output)) {
+      return "Closest Basin reads one body, but a second is set";
+    }
     return null;
+  }
+
+  // ---- Closest Basin: scene.basins [{ x, y, color }] are fixed points; the Output is the index of the nearest.
+  var MAX_BASINS = 10;
+  function sceneBasins(scene) {
+    return Array.isArray(scene.basins) ? scene.basins : [];
+  }
+  // Squared distances, the short way round under Pac-Man Warp; ties go to the lower index. -1 with no basins.
+  // fractal-grid.js repeats this in GLSL.
+  function closestBasin(scene, x, y) {
+    var basins = sceneBasins(scene), best = -1, bestD = Infinity;
+    var w = scene.frameWidth, h = scene.frameHeight, wrap = edgeModeOf(scene) === "wrap" && w > 0 && h > 0;
+    for (var i = 0; i < basins.length; i++) {
+      var dx = x - basins[i].x, dy = y - basins[i].y;
+      if (wrap) { dx -= w * Math.floor(dx / w + 0.5); dy -= h * Math.floor(dy / h + 0.5); }
+      var d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    return best;
   }
 
   // Short way round on a wrapped frame, so a distance Output doesn't jump at an edge crossing.
@@ -1605,6 +1627,9 @@
     }
     // Run tallies start from nothing.
     if (output.property === "bounces" || output.property === "warps" || output.property === "totalRotation") return 0;
+    if (output.property === "basin") {
+      return Math.max(0, closestBasin(scene, bodies[indices[0]].x, bodies[indices[0]].y));
+    }
     var sum = 0;
     for (var i = 0; i < indices.length; i++) sum += bodies[indices[i]][output.property];
     return sum / indices.length;
@@ -1966,7 +1991,7 @@
   }
 
   function cloneScene(scene) {
-    return {
+    var copy = {
       // physics-ui.js clones the scene on Play and back on Reset: an omitted field is wiped by that.
       mutualGravity: !!scene.mutualGravity,
       collisionsEnabled: collisionsEnabled(scene),
@@ -1993,6 +2018,8 @@
       frameWidth: scene.frameWidth,
       frameHeight: scene.frameHeight,
     };
+    if (scene.basins) copy.basins = sceneBasins(scene).map(function (b) { return { x: b.x, y: b.y, color: b.color }; });
+    return copy;
   }
 
   // runTrajectory: rows[i] is every body's {x, y, angle, wrapX, wrapY, warped, contacts} after i+1 steps, like
@@ -2211,6 +2238,9 @@
     outputBodyIndices: outputBodyIndices,
     isPairOutput: isPairOutput,
     outputMappingError: outputMappingError,
+    MAX_BASINS: MAX_BASINS,
+    sceneBasins: sceneBasins,
+    closestBasin: closestBasin,
     shortestSeparation: shortestSeparation,
     outputDistanceMax: outputDistanceMax,
     getLineEndpoints: getLineEndpoints,
