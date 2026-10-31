@@ -6527,6 +6527,125 @@
     return moved(s) > 4 + 3 * Math.max(moved(s - 1), moved(s + 1));
   }
 
+  // Trace Tails (Advanced Mode): a dot at every step's position of each Output body, one tail per run shown.
+  var traceTailsCheckbox = document.getElementById("trace-tails-checkbox");
+  var TRACE_DOT_RADIUS = 1.5;
+  // A movie of the Inspect tab sets this from its snapshot.
+  var traceTailsOverride = null;
+  function traceTailsOn() {
+    if (traceTailsOverride !== null) return traceTailsOverride;
+    return traceTailsCheckbox.checked && !global.AppMode.isSimple();
+  }
+  function redrawForTraceTails() {
+    if (!previewEmpty && (activeReplay || inspectedGroups.length > 0)) renderPlaybackFrame();
+  }
+  traceTailsCheckbox.addEventListener("change", redrawForTraceTails);
+  global.AppMode.onChange(redrawForTraceTails);
+
+  // Per Output body, where along its axis the tail sits: 0 at the center, or for a line held by one hinge,
+  // +1 or -1 for the end farthest from that hinge.
+  function traceTailEnds() {
+    var ends = {};
+    PhysicsEngine.outputBodyIndices(scene.output).forEach(function (i) {
+      var anchors = [];
+      scene.hinges.forEach(function (h) {
+        if (h.bodyB === i) anchors.push(h.localAnchorB);
+        else if (h.bodyA === i) anchors.push(h.localAnchorA);
+      });
+      var lone = scene.bodies[i].type === "line" && anchors.length === 1;
+      ends[i] = !lone ? 0 : anchors[0] && anchors[0].x > 0 ? -1 : 1;
+    });
+    return ends;
+  }
+
+  // Tails build up on two cached layers, dark rings under the dots, so a frame only adds the steps new since the last.
+  // Going back in time, or any change to the runs, colors or view, starts the layers over.
+  var tailCache = null;
+  var TAIL_RING_ALPHA = 0.6; // as HOLLOW_UNDERLAY
+  function tailLayer() {
+    var canvas = document.createElement("canvas");
+    return { canvas: canvas, ctx: canvas.getContext("2d") };
+  }
+  function sameTailRuns(cache, runs) {
+    if (cache.runs.length !== runs.length) return false;
+    for (var k = 0; k < runs.length; k++) {
+      if (cache.runs[k] !== runs[k] || cache.trajectories[k] !== runs[k].trajectory) return false;
+    }
+    return true;
+  }
+
+  // Dots for steps from..to of one run, added to `path`; `last` holds each body's latest dot.
+  function addTailDots(path, entry, from, to, ends, slots, last, r) {
+    var rows = entry.trajectory, lastRow = entry.effectiveMaxStep - 1, stop = entry.wrapOverride;
+    to = Math.min(to, lastRow);
+    slots.forEach(function (i, n) {
+      var end = ends[i], prev = last[n];
+      for (var s = from; s <= to; s++) {
+        var row = rows[s][i];
+        if (s === lastRow && stop && stop.bodyIndex === i) row = { x: stop.x, y: stop.y, angle: stop.angle, half: row.half };
+        var x = row.x + end * Math.cos(row.angle) * row.half, y = row.y + end * Math.sin(row.angle) * row.half;
+        // A dot on top of the last one adds nothing.
+        if (Math.abs(x - prev.x) < r * 0.5 && Math.abs(y - prev.y) < r * 0.5) continue;
+        path.moveTo(x + r, y);
+        path.arc(x, y, r, 0, Math.PI * 2);
+        prev.x = x; prev.y = y;
+      }
+    });
+  }
+
+  // Under every body: the hovered run's tail (if `replay`), then each inspected point's.
+  function drawTraceTails(step, replay) {
+    if (!traceTailsOn()) return;
+    var ends = traceTailEnds(), slots = Object.keys(ends).map(Number);
+    if (!slots.length) return;
+    var runs = [], colors = [];
+    if (replay) {
+      var head = scene.bodies[slots[0]], pal = ColorBlind.palette();
+      runs.push(replay);
+      colors.push(head.isAnchored ? pal.anchoredFill : pal.bodyFill);
+    }
+    inspectedGroups.forEach(function (group) {
+      group.points.forEach(function (entry) { runs.push(entry); colors.push(entry.color.fill); });
+    });
+    var target = hoverCtx.canvas, m = hoverCtx.getTransform(), to = Math.floor(step);
+    var key = [target.width, target.height, m.a, m.e, m.f, slots.map(function (i) { return i + ":" + ends[i]; }).join(" "), colors.join(" ")].join("|");
+    var cache = tailCache;
+    if (!cache || cache.target !== target || cache.key !== key || !sameTailRuns(cache, runs) || to < cache.step) {
+      cache = tailCache = cache || { rings: tailLayer(), dots: tailLayer() };
+      [cache.rings, cache.dots].forEach(function (layer) {
+        layer.canvas.width = target.width;
+        layer.canvas.height = target.height;
+        layer.ctx.setTransform(m);
+      });
+      cache.target = target;
+      cache.key = key;
+      cache.runs = runs;
+      cache.trajectories = runs.map(function (entry) { return entry.trajectory; });
+      cache.last = runs.map(function () { return slots.map(function () { return { x: Infinity, y: Infinity }; }); });
+      cache.step = -1;
+    }
+    if (to > cache.step) {
+      var r = TRACE_DOT_RADIUS / hoverFit.scale;
+      cache.rings.ctx.lineWidth = 2 / hoverFit.scale;
+      cache.rings.ctx.strokeStyle = "#000";
+      runs.forEach(function (entry, k) {
+        var path = new Path2D();
+        addTailDots(path, entry, cache.step + 1, to, ends, slots, cache.last[k], r);
+        cache.rings.ctx.stroke(path);
+        cache.dots.ctx.fillStyle = colors[k];
+        cache.dots.ctx.fill(path);
+      });
+      cache.step = to;
+    }
+    hoverCtx.save();
+    hoverCtx.setTransform(1, 0, 0, 1, 0, 0);
+    hoverCtx.globalAlpha = TAIL_RING_ALPHA;
+    hoverCtx.drawImage(cache.rings.canvas, 0, 0);
+    hoverCtx.globalAlpha = 1;
+    hoverCtx.drawImage(cache.dots.canvas, 0, 0);
+    hoverCtx.restore();
+  }
+
   // Every inspected point's bodies at `step` (inspectedRowAt), in its own color.
   // "grid" groups draw no bodies; their mesh is the separate pass below so it sits on top of every group.
   var INSPECT_GRID_MESH_LINE_WIDTH = 2.5;
@@ -6710,6 +6829,7 @@
     hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);
     setHoverTransform();
     drawFrameBoundary();
+    drawTraceTails(step, activeReplay);
 
     var shown = activeReplay ? replayFrame(activeReplay, step) : null;
     if (shown) drawReplayFrame(activeReplay, shown);
@@ -10333,6 +10453,7 @@
       link: link,
       steps: lockedClockCeiling(inspectedGroups),
       stepsPerSecond: hoverStepsPerSecond(),
+      tails: traceTailsOn(),
       groups: inspectedGroups.map(function (group) {
         return {
           type: group.type,
@@ -10394,11 +10515,13 @@
         hoverFit = fitScene(width / k, height / k);
         inspectedGroups = groups;
         fillOutlinedBodies = filled;
+        if (snapshot) traceTailsOverride = !!snapshot.tails;
         try {
           ctx.setTransform(1, 0, 0, 1, 0, 0);
           ctx.clearRect(0, 0, width, height);
           ctx.setTransform(k * hoverFit.scale, 0, 0, k * hoverFit.scale, k * hoverFit.offsetX, k * hoverFit.offsetY);
           drawFrameBoundary();
+          drawTraceTails(step, null);
           drawInspectedAtStep(step);
           // The backdrop goes under the drawing, so what a hollow body cuts out of it shows the backdrop.
           ctx.globalCompositeOperation = "destination-over";
@@ -10416,6 +10539,7 @@
           hoverFit = savedFit;
           inspectedGroups = savedGroups;
           fillOutlinedBodies = savedFilled;
+          traceTailsOverride = null;
         }
       },
     };
