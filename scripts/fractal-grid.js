@@ -2862,13 +2862,12 @@
     return Math.max(isTotalRotationOutput ? TAU / 360 : 1, max);
   }
 
-  // Cumulative Rotation's scale moves only part of the way to each new measurement, so it doesn't jump between views.
-  var ROTATION_SCALE_KEEP = 0.7;
-  var rotationScaleSet = false;
+  // The view-scaled Outputs' scale moves only part of the way to each new measurement, so it doesn't jump between views.
+  var VIEW_SCALE_KEEP = 0.7;
+  var viewScaleSet = false;
   function easedViewMax(max) {
-    if (!isTotalRotationOutput) return max;
-    var eased = rotationScaleSet ? ROTATION_SCALE_KEEP * bounceMaxValue + (1 - ROTATION_SCALE_KEEP) * max : max;
-    rotationScaleSet = true;
+    var eased = viewScaleSet ? VIEW_SCALE_KEEP * bounceMaxValue + (1 - VIEW_SCALE_KEEP) * max : max;
+    viewScaleSet = true;
     return eased;
   }
 
@@ -9264,7 +9263,7 @@
     sceneCoordinateSpan = computeSceneCoordinateSpan();
     precisionRaises = [];
     sampleCheck = null;
-    rotationScaleSet = false;
+    viewScaleSet = false;
     // Compiled against the OLD scene, builds in flight included; requestPass rebuilds lazily.
     discardAllPasses();
     releaseAllSliceStates();
@@ -9366,6 +9365,9 @@
       friction: friction === undefined ? PhysicsEngine.frictionOf(scene) : friction,
     };
   }
+
+  // Keyframes may go past the map's duration, up to the longest duration it allows; the movie runs that far.
+  function maxKeyframeStep() { return Number(stepsSlider.max) * SIMULATION_STEPS_PER_NOTCH; }
 
   function goToKeyframe(k) {
     // A step short of the last is only on screen with Map Evolution open.
@@ -9489,14 +9491,14 @@
 
       what.appendChild(movieField("step", "Step of keyframe " + (i + 1), {
         stepHint: "a step",
-        show: function () { return Math.min(k.step, simulationSteps).toLocaleString(); },
-        edit: function () { return String(Math.min(k.step, simulationSteps)); },
+        show: function () { return k.step.toLocaleString(); },
+        edit: function () { return String(k.step); },
         parse: function (text) {
           var n = Number(String(text).replace(/[\s,]/g, ""));
           return isFinite(n) ? Math.round(n) : undefined;
         },
-        step: function (dir) { return Math.min(k.step, simulationSteps) + dir; },
-        apply: function (step) { k.step = clamp(step, 0, simulationSteps); },
+        step: function (dir) { return k.step + dir; },
+        apply: function (step) { k.step = clamp(step, 0, maxKeyframeStep()); },
       }));
 
       // The move ARRIVING here (the first keyframe has one only when looping). Empty: worked out; arrows step from that.
@@ -10557,7 +10559,7 @@
       return {
         center: k.center,
         scale: clamp(DEFAULT_SCALE / k.zoom, MIN_SCALE, MAX_SCALE),
-        step: clamp(k.step, 0, simulationSteps),
+        step: clamp(k.step, 0, maxKeyframeStep()),
         seconds: k.seconds,
         friction: k.friction == null ? PhysicsEngine.frictionOf(scene) : PhysicsEngine.frictionOf({ friction: k.friction }),
       };

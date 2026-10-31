@@ -338,7 +338,7 @@
     if (frictionVaries) grid.useFrictionUniform();
     var defaultScale = grid.defaultScale();
     log10DefaultScale = Math.log10(defaultScale);
-    var lastStep = link.scene.simulationSteps;
+    var lastStep = engineSteps;
     frames = MoviePath.frames(movie.keyframes.map(function (k) {
       return { center: k.center, scale: defaultScale / k.zoom, step: Math.min(k.step, lastStep), seconds: k.seconds, friction: k.friction };
     }), movie.loop, link.scene.friction);
@@ -463,12 +463,12 @@
       view.precision = link.view.precision;
       view.samplePrecision = link.view.samplePrecision;
       // One friction for every frame: the engine compiles it as a constant, and the Inspect point runs at it.
-      var engineScene = link.scene;
-      if (sharedFriction !== null) {
-        engineScene = {};
-        for (var key in link.scene) engineScene[key] = link.scene[key];
-        engineScene.friction = sharedFriction;
-      }
+      // The engine runs as long as the furthest keyframe, which may be past the scene's duration.
+      var engineScene = {};
+      for (var key in link.scene) engineScene[key] = link.scene[key];
+      if (sharedFriction !== null) engineScene.friction = sharedFriction;
+      engineScene.simulationSteps = movie.keyframes.reduce(function (most, k) { return Math.max(most, k.step); }, link.scene.simulationSteps);
+      engineSteps = engineScene.simulationSteps;
       engine.src = "chaos.html#" + ShareUrl.encode({ page: ShareUrl.PAGE_MAP, scene: engineScene, view: view });
       return;
     }
@@ -592,6 +592,7 @@
   // A movie whose keyframes share one simulation frame plays the point's run once instead, then fades it out.
   var inspectField = $("inspect-field"), inspectCorner = $("inspect-corner");
   var engineGrid = null;
+  var engineSteps = 0;
   var inspection = null; // FractalGrid.inspection(), made the first time a corner is picked
   var inspectCanvas = document.createElement("canvas");
 
