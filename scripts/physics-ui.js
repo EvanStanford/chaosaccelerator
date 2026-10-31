@@ -1204,6 +1204,67 @@
     if (!basinsShown()) return;
     scene.basins.forEach(function (b) { drawBasinShape(b.x, b.y, basinCss(b)); });
   }
+  // Keeps the side of poly nearer p than q.
+  function clipNearer(poly, p, q) {
+    var nx = q.x - p.x, ny = q.y - p.y, c = (nx * (p.x + q.x) + ny * (p.y + q.y)) / 2, out = [];
+    var side = function (v) { return nx * v.x + ny * v.y - c; };
+    for (var i = 0; i < poly.length; i++) {
+      var a = poly[i], b = poly[(i + 1) % poly.length], sa = side(a), sb = side(b);
+      if (sa <= 0) out.push(a);
+      if ((sa < 0 && sb > 0) || (sa > 0 && sb < 0)) {
+        var t = sa / (sa - sb);
+        out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+      }
+    }
+    return out;
+  }
+  // Voronoi edges between basins inside the frame, each once; under Pac-Man Warp the copies one frame over count too.
+  function basinBorderSegments(basins, w, h, wrap) {
+    var points = [];
+    var offsets = wrap ? [-1, 0, 1] : [0];
+    offsets.forEach(function (ox) {
+      offsets.forEach(function (oy) {
+        basins.forEach(function (b) { points.push({ x: b.x + ox * w, y: b.y + oy * h }); });
+      });
+    });
+    var eps = 1e-6 * Math.max(w, h), seen = {}, segments = [];
+    var onFrame = function (a, b) {
+      return (Math.abs(a.x) < eps && Math.abs(b.x) < eps) || (Math.abs(a.x - w) < eps && Math.abs(b.x - w) < eps) ||
+        (Math.abs(a.y) < eps && Math.abs(b.y) < eps) || (Math.abs(a.y - h) < eps && Math.abs(b.y - h) < eps);
+    };
+    points.forEach(function (p) {
+      var cell = [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: h }, { x: 0, y: h }];
+      for (var k = 0; k < points.length && cell.length; k++) {
+        var q = points[k];
+        if (q !== p && (q.x !== p.x || q.y !== p.y)) cell = clipNearer(cell, p, q);
+      }
+      for (var i = 0; i < cell.length; i++) {
+        var a = cell[i], b = cell[(i + 1) % cell.length];
+        if (Math.hypot(b.x - a.x, b.y - a.y) < eps || onFrame(a, b)) continue;
+        // One direction per edge so neighboring cells' dots line up.
+        if (a.x > b.x || (a.x === b.x && a.y > b.y)) { var s = a; a = b; b = s; }
+        var key = [a.x, a.y, b.x, b.y].map(function (v) { return Math.round(v * 100); }).join(",");
+        if (seen[key]) continue;
+        seen[key] = true;
+        segments.push([a, b]);
+      }
+    });
+    return segments;
+  }
+  function drawBasinBorders() {
+    if (!basinsShown() || scene.basins.length < 2) return;
+    var w = scene.frameWidth, h = scene.frameHeight;
+    var segments = basinBorderSegments(scene.basins, w, h, PhysicsEngine.edgeModeOf(scene) === "wrap");
+    ctx.save();
+    ctx.beginPath();
+    segments.forEach(function (s) { ctx.moveTo(s[0].x, s[0].y); ctx.lineTo(s[1].x, s[1].y); });
+    ctx.lineCap = "round";
+    ctx.setLineDash([0, 6 * screenPx]);
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+    ctx.lineWidth = 2 * screenPx;
+    ctx.stroke();
+    ctx.restore();
+  }
   // Topmost (last drawn) first.
   function hitTestBasin(px, py) {
     if (!basinsShown()) return -1;
@@ -1352,6 +1413,7 @@
     drawGrid(w, h);
     drawOutputKeyBorder(w, h);
     drawOutputKeyRing();
+    drawBasinBorders();
     updateOutputKeyControls();
     updateInputToolButtons();
     for (var i = 0; i < scene.bodies.length; i++) drawBody(scene.bodies[i], i === selectedIndex);

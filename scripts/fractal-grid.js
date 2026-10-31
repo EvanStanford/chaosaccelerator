@@ -743,12 +743,12 @@
     return lines;
   }
 
-  // Closest Basin's colors for every Color Blind Support mode (u_colorBlind picks the row); gray with no basins.
+  // Closest Basin's colors for every Color Blind Support mode (u_colorBlind picks the row), then the Low Saturation row; gray with no basins.
   function basinColorLines(basins) {
     var count = Math.max(basins.length, 1), colors = [];
-    ColorBlind.modes.forEach(function (m) {
+    ColorBlind.modes.concat("low").forEach(function (m) {
       for (var k = 0; k < count; k++) {
-        var rgb = basins[k] ? ColorBlind.basinRgb(basins[k].color, m) : [0.5, 0.5, 0.5];
+        var rgb = !basins[k] ? [0.5, 0.5, 0.5] : m === "low" ? ColorBlind.basinRgb(basins[k].color, "off", true) : ColorBlind.basinRgb(basins[k].color, m);
         colors.push("vec3(" + rgb.map(function (v) { return v.toFixed(6); }).join(", ") + ")");
       }
     });
@@ -757,8 +757,8 @@
       "const vec3 BASIN_COLORS[" + colors.length + "] = vec3[" + colors.length + "](" + colors.join(", ") + ");",
       "vec3 basinColor(float t) {",
       "  int k = clamp(int(t * float(BASIN_COUNT)), 0, BASIN_COUNT - 1);",
-      "  vec3 color = BASIN_COLORS[u_colorBlind * BASIN_COUNT + k];",
-      "  return u_colorBlind == 0 && u_lowSaturation ? lowSaturate(color) : color;",
+      "  int row = u_colorBlind == 0 && u_lowSaturation ? " + ColorBlind.modes.length + " : u_colorBlind;",
+      "  return BASIN_COLORS[row * BASIN_COUNT + k];",
       "}",
       "",
     ];
@@ -1822,8 +1822,7 @@
     var basins = PhysicsEngine.sceneBasins(scene);
     var basin = basins[Math.min(basins.length - 1, Math.max(0, Math.floor(t * basins.length)))];
     if (!basin) return null;
-    var rgb = ColorBlind.basinRgb(basin.color);
-    return !ColorBlind.on() && lowSaturationEnabled ? lowSaturate(rgb, 1) : ColorBlind.css(rgb);
+    return ColorBlind.css(ColorBlind.basinRgb(basin.color, null, !ColorBlind.on() && lowSaturationEnabled));
   }
   function isViewScaledOutput() { return isCountOutput || isTotalRotationOutput; }
   function currentOutputRangeMax() { return outputRangeMax(scene, scene.output.property); }
@@ -4233,8 +4232,15 @@
     }
     btnSuperlativeLargest.textContent = largestLabel;
     btnSuperlativeSmallest.textContent = smallestLabel;
-    // Basins have no order to be largest or smallest in.
+    // Basins have no order to be largest or smallest in, nor a ramp for Color Zoom to repeat.
     btnSuperlativeLargest.hidden = btnSuperlativeSmallest.hidden = prop === "basin";
+    colorZoomCheckbox.disabled = prop === "basin";
+    colorZoomField.title = prop === "basin" ? "Color Zoom has no effect on Closest Basin" : "";
+    if (prop === "basin" && colorZoomEnabled) {
+      colorZoomEnabled = false;
+      colorZoomCheckbox.checked = false;
+      markDirty();
+    }
     if (smallestFirst) {
       btnSuperlativeLargest.parentNode.insertBefore(btnSuperlativeSmallest, btnSuperlativeLargest);
     } else {
@@ -10738,7 +10744,7 @@
     view.center.y = shared.center.y; view.center.yLo = shared.center.yLo;
     view.scale = clamp(DEFAULT_SCALE / shared.zoom, MIN_SCALE, MAX_SCALE);
 
-    colorZoomEnabled = shared.display === "colorzoom";
+    colorZoomEnabled = shared.display === "colorzoom" && !isBasinOutput();
     colorZoomCheckbox.checked = colorZoomEnabled;
     lowSaturationEnabled = shared.lowSaturation === true;
     lowSaturationCheckbox.checked = lowSaturationEnabled;

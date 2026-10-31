@@ -508,6 +508,9 @@ input[type="range"] {
   background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.55), transparent);
   animation: toggle-nudge-sweep 1.6s ease-in-out infinite;
 }
+.toggle-field:has(input:disabled) > span:first-child {
+  opacity: 0.5;
+}
 .toggle-field:has(#evolution-inspect-checkbox:not(:checked)) > span:first-child {
   color: var(--accent);
   font-weight: 600;

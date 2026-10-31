@@ -177,9 +177,11 @@
     return list[((i % list.length) + list.length) % list.length];
   }
   // Closest Basin colors, one per basin (PhysicsEngine.MAX_BASINS is the list's length).
-  var BASIN_COLORS = ["#4e79a7", "#f28e2b", "#e15759", "#76b7b2", "#59a14f", "#edc948", "#b07aa1", "#ff9da7", "#9c755f", "#bab0ac"];
-  function basinRgb(colorIndex, inMode) {
-    if (inMode === "off") return stops(categoricalIn(BASIN_COLORS, colorIndex).slice(1))[0];
+  var BASIN_COLORS = ["#2b78c3", "#f88a00", "#ff1c3e", "#45bfb7", "#22aa00", "#f3c800", "#c26bac", "#ff9da7", "#ac6e49", "#bfafa8"];
+  // The same basins under Low Saturation (Color Blind Support off).
+  var BASIN_COLORS_LOW = ["#5379a2", "#ec9241", "#da5f5f", "#7cb6b1", "#5f9f56", "#eaca5c", "#ad7c9f", "#f9a1a9", "#997662", "#b9b0ad"];
+  function basinRgb(colorIndex, inMode, low) {
+    if (inMode === "off") return stops(categoricalIn(low ? BASIN_COLORS_LOW : BASIN_COLORS, colorIndex).slice(1))[0];
     var list = CATEGORICAL[inMode];
     return stops(categoricalIn(list, colorIndex + Math.floor(list.length / 2)).slice(1))[0];
   }
@@ -219,8 +221,8 @@
     categorical: function (i) {
       return categoricalIn(CATEGORICAL[mode], i);
     },
-    // A basin's color index as [r, g, b] in 0 to 1, in the current mode or the one named.
-    basinRgb: function (colorIndex, inMode) { return basinRgb(colorIndex, inMode || mode); },
+    // A basin's color index as [r, g, b] in 0 to 1, in the current mode or the one named; low for Low Saturation.
+    basinRgb: function (colorIndex, inMode, low) { return basinRgb(colorIndex, inMode || mode, low); },
     gridColor: function (x, y) {
       var c = GRID_CORNERS[mode];
       return mixRgb(mixRgb(c[0], c[1], x), mixRgb(c[2], c[3], x), y);
