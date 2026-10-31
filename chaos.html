@@ -401,11 +401,12 @@
                     <span>Inspection Line Sample Count: <b id="inspect-line-sample-count-readout">30</b></span>
                     <input type="range" id="inspect-line-sample-count-slider" min="5" max="60" value="30">
                   </label>
-                  <label class="field">
+                  <!-- Hidden controls below keep their values for the code and presets; there is no way to change them here. -->
+                  <label class="field" hidden>
                     <span>Inspection Grid Size: <b id="inspect-grid-size-readout">3&times;3</b></span>
                     <input type="range" id="inspect-grid-size-slider" min="1" max="8" value="3">
                   </label>
-                  <label class="toggle-field">
+                  <label class="toggle-field" hidden>
                     <span>Inspection Grid Two Part Line</span>
                     <span class="toggle-switch">
                       <input type="checkbox" id="inspect-grid-two-part-checkbox" checked>
@@ -469,7 +470,7 @@
                         <span class="toggle-slider"></span>
                       </span>
                     </label>
-                    <label class="toggle-field" id="reuse-picture-field">
+                    <label class="toggle-field" id="reuse-picture-field" hidden>
                       <span>Reuse Last Picture</span>
                       <span class="toggle-switch">
                         <input type="checkbox" id="reuse-picture-checkbox">
@@ -484,9 +485,9 @@
                       </span>
                     </label>
                     <label class="toggle-field" id="perf-transitions-field">
-                      <span>Disable transitions</span>
+                      <span>Transitions</span>
                       <span class="toggle-switch">
-                        <input type="checkbox" id="perf-transitions-checkbox">
+                        <input type="checkbox" id="perf-transitions-checkbox" checked>
                         <span class="toggle-slider"></span>
                       </span>
                     </label>
@@ -504,7 +505,7 @@
                         <span class="toggle-slider"></span>
                       </span>
                     </label>
-                    <label class="field">
+                    <label class="field" hidden>
                       <span>Canvas pixel density: <b id="perf-dpr-readout"></b></span>
                       <select id="perf-dpr-select">
                         <option value="0">Full (whatever the display has)</option>
@@ -513,7 +514,7 @@
                         <option value="1">At most 1&times;</option>
                       </select>
                     </label>
-                    <label class="field">
+                    <label class="field" hidden>
                       <span>Work per frame</span>
                       <select id="perf-frame-select">
                         <option value="0">One display refresh (smoothest)</option>
@@ -522,7 +523,7 @@
                         <option value="100">About 100 ms (fastest)</option>
                       </select>
                     </label>
-                    <label class="field">
+                    <label class="field" hidden>
                       <span>Longest single GPU draw</span>
                       <select id="perf-draw-select">
                         <option value="5">5 ms (safest)</option>
@@ -530,14 +531,14 @@
                         <option value="20">20 ms (fastest)</option>
                       </select>
                     </label>
-                    <label class="field">
+                    <label class="field" hidden>
                       <span>Map Evolution memory</span>
                       <select id="perf-playback-memory-select">
                         <option value="96">Up to 96 MB</option>
                         <option value="256">Up to 256 MB</option>
                       </select>
                     </label>
-                    <label class="field" id="stats-sample-field">
+                    <label class="field" id="stats-sample-field" hidden>
                       <span>Analysis Sampling Resolution: <b id="stats-sample-readout">&hellip;</b></span>
                       <input type="range" id="stats-sample-slider" min="0" max="3" step="1" value="3" aria-label="Analysis sampling resolution">
                     </label>

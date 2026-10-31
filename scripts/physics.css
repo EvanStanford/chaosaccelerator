@@ -451,6 +451,12 @@ html:has(#perf-readout-checkbox:checked) #editor-perf-readout {
 }
 
 /* Apple-style toggle: still the same checkbox input, visually hidden, with .toggle-slider styled off :checked/:disabled. */
+/* Settings kept for the code and presets only. */
+#shared-settings-body .field[hidden],
+#shared-settings-body .toggle-field[hidden] {
+  display: none;
+}
+
 .toggle-field {
   display: flex;
   align-items: center;

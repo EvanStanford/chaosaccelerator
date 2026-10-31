@@ -114,7 +114,7 @@
         endStride: el.resMax.value === RES_MAX[2] ? 2 : 1,
         antialias: el.antialias.checked, maxDpr: Number(el.dpr.value), frameMs: Number(el.frame.value),
         drawMs: Number(el.draw.value), playbackMB: Number(el.memory.value), gestureFirst: el.gesture.checked,
-        noTransitions: el.transitions.checked,
+        noTransitions: !el.transitions.checked,
         dropShadow: el.dropShadow.checked,
       };
     }
@@ -129,7 +129,7 @@
       el.antialias.checked = p.antialias;
       el.reuse.checked = p.reuse;
       el.gesture.checked = p.gestureFirst;
-      el.transitions.checked = p.noTransitions;
+      el.transitions.checked = !p.noTransitions;
       el.precision.value = p.precision;
       el.dpr.value = String(p.maxDpr);
       el.frame.value = String(p.frameMs);
@@ -144,7 +144,7 @@
         var p = PERF_PRESETS[names[i]];
         if (el.resMin.value === "0" && el.resMax.value === RES_MAX[p.endStride] && el.antialias.checked === p.antialias &&
             el.reuse.checked === p.reuse && el.gesture.checked === p.gestureFirst &&
-            el.transitions.checked === p.noTransitions && Number(el.dpr.value) === p.maxDpr &&
+            el.transitions.checked === !p.noTransitions && Number(el.dpr.value) === p.maxDpr &&
             Number(el.frame.value) === p.frameMs && Number(el.memory.value) === p.playbackMB &&
             el.dropShadow.checked === p.dropShadow &&
             (el.draw.disabled || Number(el.draw.value) === p.drawMs)) return names[i];
@@ -2862,6 +2862,16 @@
     return Math.max(isTotalRotationOutput ? TAU / 360 : 1, max);
   }
 
+  // Cumulative Rotation's scale moves only part of the way to each new measurement, so it doesn't jump between views.
+  var ROTATION_SCALE_KEEP = 0.7;
+  var rotationScaleSet = false;
+  function easedViewMax(max) {
+    if (!isTotalRotationOutput) return max;
+    var eased = rotationScaleSet ? ROTATION_SCALE_KEEP * bounceMaxValue + (1 - ROTATION_SCALE_KEEP) * max : max;
+    rotationScaleSet = true;
+    return eased;
+  }
+
   // Asynchronous (PBO behind a fence): it runs every frame of a drag, and a readPixels stall hitched each one.
   var bounceMaxProbe = { target: null, pbo: null, sync: null, key: null, measuredKey: null,
     values: new Float32Array(BOUNCE_MAX_SAMPLE_SIZE * BOUNCE_MAX_SAMPLE_SIZE * 4) };
@@ -2908,7 +2918,7 @@
     // A stale view's measurement says nothing; the move queued its own.
     if (bounceMaxProbe.key !== bounceMaxViewKey()) return;
     bounceMaxProbe.measuredKey = bounceMaxProbe.key;
-    var max = viewMaxOf(bounceMaxProbe.values);
+    var max = easedViewMax(viewMaxOf(bounceMaxProbe.values));
     if (max !== bounceMaxValue) {
       bounceMaxValue = max;
       markDirty();
@@ -2919,7 +2929,7 @@
   function findBounceMax() {
     var grid = sampleValueGrid(BOUNCE_MAX_SAMPLE_SIZE, BOUNCE_MAX_SAMPLE_SIZE, true);
     if (!grid) return bounceMaxValue; // no float-texture support: keep whatever we had
-    return viewMaxOf(grid.values);
+    return easedViewMax(viewMaxOf(grid.values));
   }
 
   // Draws one sub-lattice: rendered pixel (i, j) carries full-res pixel (i*stride + originX, j*stride + originY).
@@ -9254,6 +9264,7 @@
     sceneCoordinateSpan = computeSceneCoordinateSpan();
     precisionRaises = [];
     sampleCheck = null;
+    rotationScaleSet = false;
     // Compiled against the OLD scene, builds in flight included; requestPass rebuilds lazily.
     discardAllPasses();
     releaseAllSliceStates();
@@ -10626,7 +10637,7 @@
     perfDrawSelect.value = String(drawLengthLocked ? SLICE_TARGET_BASE_MS : perf.drawMs);
     perfPlaybackMemorySelect.value = String(perf.playbackMB);
     perfGestureCheckbox.checked = perf.gestureFirst;
-    perfTransitionsCheckbox.checked = perf.noTransitions;
+    perfTransitionsCheckbox.checked = !perf.noTransitions;
     perfDropShadowCheckbox.checked = perf.dropShadow;
     var devDpr = window.devicePixelRatio || 1, dpr = gridDpr();
     perfDprReadout.textContent = (Math.round(dpr * 100) / 100) + "×" + (dpr < devDpr ? " of " + (Math.round(devDpr * 100) / 100) + "×" : "");
@@ -10725,7 +10736,7 @@
   perfDrawSelect.addEventListener("change", function () { setPerfDrawMs(Number(perfDrawSelect.value)); syncPerfPresetUI(); });
   perfPlaybackMemorySelect.addEventListener("change", function () { setPerfPlaybackMB(Number(perfPlaybackMemorySelect.value)); syncPerfPresetUI(); });
   perfGestureCheckbox.addEventListener("change", function () { perf.gestureFirst = perfGestureCheckbox.checked; syncPerfPresetUI(); });
-  perfTransitionsCheckbox.addEventListener("change", function () { perf.noTransitions = perfTransitionsCheckbox.checked; syncPerfPresetUI(); });
+  perfTransitionsCheckbox.addEventListener("change", function () { perf.noTransitions = !perfTransitionsCheckbox.checked; syncPerfPresetUI(); });
   perfDropShadowCheckbox.addEventListener("change", function () {
     perf.dropShadow = perfDropShadowCheckbox.checked;
     applyDropShadow(perf.dropShadow);

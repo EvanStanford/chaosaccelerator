@@ -59,10 +59,10 @@
     return global.matchMedia && global.matchMedia("(prefers-reduced-motion: reduce)").matches;
   }
 
-  // Settings > Performance Settings > Disable transitions. The control holds the value whether or not the map has started.
+  // Settings > Performance Settings > Transitions. The control holds the value whether or not the map has started.
   var transitionsCheckbox = document.getElementById("perf-transitions-checkbox");
   function transitionsDisabled() {
-    return !!(transitionsCheckbox && transitionsCheckbox.checked);
+    return !!(transitionsCheckbox && !transitionsCheckbox.checked);
   }
 
   function ease(u) {
