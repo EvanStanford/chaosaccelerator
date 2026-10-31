@@ -224,6 +224,7 @@
         if (state && state.page === global.ShareUrl.PAGE_MAP) {
           // A challenge keeps the precision its start link pins.
           if (!(global.LayoutMode && global.LayoutMode.challengeKind())) state.view.precision = undefined;
+          state.view.samplePrecision = undefined;
           state.view.volume = undefined;
           global.history.replaceState(global.history.state, "", "#" + global.ShareUrl.encode(state));
         }
@@ -1100,7 +1101,7 @@
       // PhysicsEngine.outputColorEnds: which way the scale runs, and the end that fades to black.
       "const bool FLIP_SCALE = " + sceneColorEnds.flip + ";",
       "const float FADE_AT = " + PhysicsGPU.fnum(sceneColorEnds.fadeAt) + ";",
-      "const float FADE_SPAN = " + PhysicsGPU.fnum(PhysicsEngine.OUTPUT_FADE_SPAN) + ";",
+      "const float FADE_SPAN = " + PhysicsGPU.fnum(sceneColorEnds.fadeSpan) + ";",
       "float frameSigmoid(float v) {",
       "  return 1.0 / (1.0 + exp(" + PhysicsGPU.fnum(-PhysicsEngine.OUTPUT_SIGMOID_STEEPNESS) + " * (v - 0.5)));",
       "}",
@@ -2021,7 +2022,10 @@
   // The builder/map transition zooms through one pixel to the default framing: pick precision for where it ends.
   var transitionScaleFloor = 0;
   function precisionSpacing() { return Math.max(view.scale, transitionScaleFloor) / referenceHeightPx(); }
-  function autoPrecision() { return precisionForSpacing(precisionSpacing()); }
+  function autoPrecision() {
+    var base = precisionForSpacing(precisionSpacing());
+    return samplePrecisionOn ? sampledRaise(view.center.x, view.center.y, precisionSpacing(), base) : base;
+  }
   function pickPrecision() {
     return precisionMode === "auto" ? autoPrecision() : precisionMode;
   }
@@ -2030,6 +2034,7 @@
     if (!precisionReadout || !activePass) return;
     var active = effectivePrecision(), wanted = pickPrecision();
     var text = PRECISION_LABELS[active];
+    if (precisionMode === "auto" && active === wanted && wanted !== precisionForSpacing(precisionSpacing())) text += ", raised by sampling";
     if (active !== wanted) {
       var name = PRECISION_LABELS[wanted].replace(/ \(.*$/, "");
       text += ", " + name + (precisionPending(wanted) ? " is compiling\u2026" : sliceTooHeavy[wanted] ? " is too slow for this scene on this GPU" : " is unavailable");
@@ -2146,6 +2151,7 @@
   // What the zoom wants, or the finest built rung below it while that builds.
   // Anything that must agree with the picture asks this, not pickPrecision().
   function effectivePrecision() {
+    if (forcedSamplePrecision) return forcedSamplePrecision;
     var wanted = pickPrecision();
     if (precisionReady(wanted)) return wanted;
     for (var i = PRECISION_LADDER.indexOf(wanted) - 1; i > 0; i--) {
@@ -2153,6 +2159,167 @@
     }
     return "f32";
   }
+
+  // ---- Sample based precision (Settings > Performance > Advanced; off by default) ----
+  // Once a picture finishes, 3x3 blocks of neighboring pixels across the view are sampled again. Where one scatters
+  // like static, the next rung renders the same points; if its picture there differs and is calmer, the view moves up
+  // a rung. Only ever raises Auto's choice. A raise holds inside its view and down to SAMPLE_RAISE_REACH times out.
+  var samplePrecisionCheckbox = document.getElementById("perf-sample-precision-checkbox");
+  var samplePrecisionOn = !!(samplePrecisionCheckbox && samplePrecisionCheckbox.checked);
+  var SAMPLE_BLOCKS_PER_SIDE = 5;
+  var SAMPLE_PAIR_GAP = 0.05;      // neighbors further apart than this (in t) disagree
+  var SAMPLE_STATIC_PAIRS = 6;     // of a 3x3 block's 12 neighbor pairs: an edge crosses about 3
+  var SAMPLE_RUNG_CHANGE = 0.05;   // mean change in t over the static blocks that counts as a different picture
+  var SAMPLE_SETTLE_MS = 300;
+  var SAMPLE_RAISE_REACH = 2;
+  var precisionRaises = [];        // { precision, spacing, x, y, halfWidth, halfHeight }
+  var sampleCheck = null;          // the view being checked, or the last one checked
+  var forcedSamplePrecision = null;
+
+  function rungAbove(precision) {
+    var i = PRECISION_LADDER.indexOf(precision);
+    return i >= 0 && i + 1 < PRECISION_LADDER.length ? PRECISION_LADDER[i + 1] : null;
+  }
+  function higherRung(a, b) { return PRECISION_LADDER.indexOf(b) > PRECISION_LADDER.indexOf(a) ? b : a; }
+  // The highest raise covering a view at (x, y) whose pixels are `spacing` apart, never below `base`.
+  function sampledRaise(x, y, spacing, base) {
+    var best = base;
+    precisionRaises.forEach(function (r) {
+      if (spacing <= r.spacing * SAMPLE_RAISE_REACH && Math.abs(x - r.x) <= r.halfWidth && Math.abs(y - r.y) <= r.halfHeight) {
+        best = higherRung(best, r.precision);
+      }
+    });
+    return best;
+  }
+  function samplePrecisionKey() {
+    return [viewCenterKey(), view.scale, canvas.width, canvas.height, simulationSteps, timeline.step, sceneGeneration, wantedVariant()].join(" ");
+  }
+  // Each block's nine t values, one pixel apart, rendered at `precision`; null where the field can't be sampled.
+  function sampleBlocks(precision) {
+    var n = SAMPLE_BLOCKS_PER_SIDE, aspect = canvas.width / Math.max(1, canvas.height), spacing = worldPixelSpacing();
+    var centers = [], blocks = [];
+    for (var by = 0; by < n; by++) {
+      for (var bx = 0; bx < n; bx++) centers.push(worldPointAtUV(((bx + 0.5) / n - 0.5) * aspect, (by + 0.5) / n - 0.5));
+    }
+    var saved = { x: view.center.x, xLo: view.center.xLo, y: view.center.y, yLo: view.center.yLo }, savedScale = view.scale;
+    forcedSamplePrecision = precision;
+    try {
+      if (!canSampleField()) return null;
+      for (var i = 0; i < centers.length; i++) {
+        var c = centers[i];
+        view.center.x = c.x; view.center.xLo = c.xLo; view.center.y = c.y; view.center.yLo = c.yLo;
+        view.scale = 3 * spacing;
+        var grid = sampleValueGrid(3, 3, false);
+        if (!grid) return null;
+        var values = [];
+        for (var k = 0; k < 9; k++) values.push(grid.values[k * 4]);
+        blocks.push(values);
+      }
+    } finally {
+      forcedSamplePrecision = null;
+      view.center.x = saved.x; view.center.xLo = saved.xLo; view.center.y = saved.y; view.center.yLo = saved.yLo;
+      view.scale = savedScale;
+    }
+    return blocks;
+  }
+  // Values run row by row, 3 to a row.
+  function blockIsStatic(values) {
+    var disagree = 0;
+    for (var r = 0; r < 3; r++) {
+      for (var c = 0; c < 3; c++) {
+        var v = values[r * 3 + c];
+        if (c < 2 && valueDistance(v, values[r * 3 + c + 1]) > SAMPLE_PAIR_GAP) disagree++;
+        if (r < 2 && valueDistance(v, values[r * 3 + c + 3]) > SAMPLE_PAIR_GAP) disagree++;
+      }
+    }
+    return disagree >= SAMPLE_STATIC_PAIRS;
+  }
+  function staticIndices(blocks) {
+    var out = [];
+    blocks.forEach(function (values, i) { if (blockIsStatic(values)) out.push(i); });
+    return out;
+  }
+  function meanBlockChange(a, b, indices) {
+    var sum = 0, count = 0;
+    indices.forEach(function (i) { for (var k = 0; k < a[i].length; k++) { sum += valueDistance(a[i][k], b[i][k]); count++; } });
+    return count ? sum / count : 0;
+  }
+  // A movie still waits for its view's check.
+  function samplePrecisionHolds() {
+    return samplePrecisionOn && precisionMode === "auto" && !!sampleCheck && !sampleCheck.done && sampleCheck.key === samplePrecisionKey();
+  }
+  // A still is delivered in the same task as its finishing draw (the canvas keeps no picture): one checked later
+  // asks for a fresh draw to deliver from.
+  function finishSampleCheck(check) {
+    check.done = true;
+    if (stillJob && !check.inFinishingDraw) markDirty();
+  }
+  // Called once a picture finishes: check it, unless it is a stand-in or was already checked at this rung.
+  function samplePrecisionAfterRun() {
+    if (!samplePrecisionOn || precisionMode !== "auto") return;
+    var key = samplePrecisionKey(), precision = effectivePrecision();
+    if (precision !== pickPrecision()) return;
+    if (sampleCheck && sampleCheck.key === key && sampleCheck.precision === precision) return;
+    if (sampleCheck && sampleCheck.timer) clearTimeout(sampleCheck.timer);
+    var check = sampleCheck = { key: key, precision: precision, done: false, timer: null, blocks: null, next: null, inFinishingDraw: false };
+    if (stillJob) {
+      check.inFinishingDraw = true;
+      runSampleCheck(check);
+      check.inFinishingDraw = false;
+      return;
+    }
+    check.timer = setTimeout(function () { check.timer = null; runSampleCheck(check); }, SAMPLE_SETTLE_MS);
+  }
+  function sampleCheckCurrent(check) {
+    return sampleCheck === check && samplePrecisionKey() === check.key && samplePrecisionOn && precisionMode === "auto";
+  }
+  function runSampleCheck(check) {
+    if (!sampleCheckCurrent(check)) return;
+    if (!stillJob && gestureInProgress(performance.now())) {
+      check.timer = setTimeout(function () { check.timer = null; runSampleCheck(check); }, SAMPLE_SETTLE_MS);
+      return;
+    }
+    var blocks = sampleBlocks(check.precision);
+    check.next = rungAbove(check.precision);
+    check.statics = blocks ? staticIndices(blocks) : [];
+    if (!blocks || !check.next || !check.statics.length) { finishSampleCheck(check); return; }
+    check.blocks = blocks;
+    waitForNextRung(check);
+  }
+  // Asking for the next rung also starts its build; the same points are sampled at it once it lands.
+  function waitForNextRung(check) {
+    if (!sampleCheckCurrent(check)) return;
+    var next = check.next, entry = hasFloatColorBuffer ? playbackGpu.programs[next] : null;
+    precisionReady(next);
+    if (sliceTooHeavy[next] || (entry && entry.status === "failed")) { finishSampleCheck(check); return; }
+    if (!precisionBuilt(next)) {
+      check.timer = setTimeout(function () { check.timer = null; waitForNextRung(check); }, 150);
+      return;
+    }
+    // Different there, and calmer: equally static at the next rung is the scene's own chaos, not rounding.
+    var above = sampleBlocks(next), calmer = above && check.statics.filter(function (i) { return !blockIsStatic(above[i]); }).length > 0;
+    if (above && calmer && meanBlockChange(check.blocks, above, check.statics) > SAMPLE_RUNG_CHANGE) {
+      var aspect = canvas.width / Math.max(1, canvas.height);
+      precisionRaises.push({ precision: next, spacing: worldPixelSpacing(), x: view.center.x, y: view.center.y,
+        halfWidth: view.scale * aspect / 2, halfHeight: view.scale / 2 });
+      check.done = true;
+      markDirty();
+      updatePrecisionReadout();
+      return;
+    }
+    finishSampleCheck(check);
+  }
+  function setSamplePrecision(on) {
+    on = !!on;
+    if (samplePrecisionCheckbox) samplePrecisionCheckbox.checked = on;
+    if (on === samplePrecisionOn) return;
+    samplePrecisionOn = on;
+    if (sampleCheck && sampleCheck.timer) clearTimeout(sampleCheck.timer);
+    sampleCheck = null;
+    if (!on) precisionRaises = [];
+    markDirty();
+  }
+  if (samplePrecisionCheckbox) samplePrecisionCheckbox.addEventListener("change", function () { setSamplePrecision(samplePrecisionCheckbox.checked); });
 
   // Start the next rung's build this many margins early: several wheel notches.
   var DF_PREWARM_FACTOR = 16;
@@ -5032,6 +5199,7 @@
     progressive.sublattice = 1; // so presentFrame shows the accumulator, not a preview
     presentFrame();
     updateResolutionBoundsUI();
+    samplePrecisionAfterRun();
     deliverStill();
   }
 
@@ -5925,7 +6093,7 @@
 
   // colorMap's fade to black at the common end (colorEnds), for a t already flipped.
   function outputFade(t) {
-    return colorEnds.fadeAt < 0 ? 1 : Math.min(1, Math.abs(t - colorEnds.fadeAt) / PhysicsEngine.OUTPUT_FADE_SPAN);
+    return colorEnds.fadeAt < 0 ? 1 : Math.min(1, Math.abs(t - colorEnds.fadeAt) / colorEnds.fadeSpan);
   }
 
   // A JS copy of colorMap's hue (hueRangeMaxValue: 360 for a wrapping Output, 300 for a capped one).
@@ -9084,6 +9252,8 @@
     colorEnds = PhysicsEngine.outputColorEnds(scene);
     relabelSuperlativeExtremeButtons();
     sceneCoordinateSpan = computeSceneCoordinateSpan();
+    precisionRaises = [];
+    sampleCheck = null;
     // Compiled against the OLD scene, builds in flight included; requestPass rebuilds lazily.
     discardAllPasses();
     releaseAllSliceStates();
@@ -9457,7 +9627,8 @@
       page: ShareUrl.PAGE_MOVIE,
       scene: PhysicsCoords.toAuthoredJSON(shared.scene),
       // Keyframes are the movie's views; how the map is drawn (mode, Color Zoom, Low Saturation) rides along.
-      view: { display: shared.view.display, lowSaturation: shared.view.lowSaturation, precision: shared.view.precision, movie: shared.view.movie },
+      view: { display: shared.view.display, lowSaturation: shared.view.lowSaturation, precision: shared.view.precision,
+        samplePrecision: shared.view.samplePrecision, movie: shared.view.movie },
     });
     // The address left behind must hold the card, or Back from the player loses the keyframes.
     if (global.AppShell && global.AppShell.syncAddress) global.AppShell.syncAddress();
@@ -9541,7 +9712,8 @@
     var job = {
       width: width, height: height, center: center, scale: view.scale, step: renderedSteps(),
       samples: movie.antialias ? MAX_AA_SAMPLES : 1,
-      precision: precisionMode === "auto" ? precisionForSpacing(spacing, center) : precisionMode,
+      // The view's own precision, not one picked for the card's size.
+      precision: pickPrecision(),
       // Lifespan and the counts are one float32 at any precision.
       tally: ["lifespan", "bounces", "warps"].indexOf(scene.output.property) !== -1,
       look: { mode: displayMode, colorZoom: colorZoomEnabled, lowSaturation: lowSaturationEnabled, duration: simulationSteps },
@@ -10075,6 +10247,7 @@
     if (!stillJob) return;
     var wanted = pickPrecision();
     if (effectivePrecision() !== wanted && precisionPending(wanted)) return;
+    if (samplePrecisionHolds()) return;
     var job = stillJob;
     stillJob = null;
     job.onDone(canvas);
@@ -10103,6 +10276,7 @@
   global.FractalGrid.stillPrecision = function (spec) {
     var spacing = clamp(spec.scale, MIN_SCALE, MAX_SCALE) / (spec.height || referenceHeightPx());
     var precision = precisionMode === "auto" ? precisionForSpacing(spacing, spec.center) : precisionMode;
+    if (precisionMode === "auto" && samplePrecisionOn) precision = sampledRaise(spec.center.x, spec.center.y, spacing, precision);
     return { name: precision, slowdown: PRECISION_SLOWDOWN[precision] || 1 };
   };
 
@@ -10311,6 +10485,7 @@
         display: colorZoomEnabled && displayMode.value === "standard" ? "colorzoom" : displayMode.value,
         lowSaturation: lowSaturationEnabled,
         precision: precisionMode,
+        samplePrecision: samplePrecisionOn,
         speed: playbackSpeed,
         volume: PhysicsSound.getVolume(),
         inspect: inspect,
@@ -10347,6 +10522,7 @@
       precisionMode = (shared.precision === "auto" || PRECISION_LADDER.indexOf(shared.precision) !== -1) ? shared.precision : "auto";
       if (precisionSelect) precisionSelect.value = precisionMode;
     }
+    if (shared.samplePrecision !== undefined) setSamplePrecision(shared.samplePrecision);
     if (shared.speed !== undefined) setPlaybackSpeed(shared.speed);
     if (shared.volume !== undefined) PhysicsSound.setVolume(shared.volume);
 

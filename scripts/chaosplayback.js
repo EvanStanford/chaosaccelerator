@@ -461,6 +461,7 @@
     var view = { display: link.view.display, lowSaturation: link.view.lowSaturation, volume: 0 };
     if (!ofInspect) {
       view.precision = link.view.precision;
+      view.samplePrecision = link.view.samplePrecision;
       // One friction for every frame: the engine compiles it as a constant, and the Inspect point runs at it.
       var engineScene = link.scene;
       if (sharedFriction !== null) {

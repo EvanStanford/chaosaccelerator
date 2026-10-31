@@ -2767,13 +2767,13 @@
   }
 
   btnSampleDoublePendulum.addEventListener("click", function () {
-    loadSample("samples/double_pendulum.json?v=m220", "Double Pendulum");
+    loadSample("samples/double_pendulum.json?v=m222", "Double Pendulum");
   });
   btnSamplePinball.addEventListener("click", function () {
-    loadSample("samples/pinball.json?v=m220", "Pinball");
+    loadSample("samples/pinball.json?v=m222", "Pinball");
   });
   btnSampleBinaryStar.addEventListener("click", function () {
-    loadSample("samples/binary_star.json?v=m220", "Binary Star");
+    loadSample("samples/binary_star.json?v=m222", "Binary Star");
   });
   function clearScene() {
     sharedFrame = null;
@@ -2911,7 +2911,7 @@
     var ends = PhysicsEngine.outputColorEnds(scene);
     if (ends.flip) t = 1 - t;
     var hue = (hueRange || 360) * (1 - t);
-    var fade = ends.fadeAt < 0 ? 1 : Math.min(1, Math.abs(t - ends.fadeAt) / PhysicsEngine.OUTPUT_FADE_SPAN);
+    var fade = ends.fadeAt < 0 ? 1 : Math.min(1, Math.abs(t - ends.fadeAt) / ends.fadeSpan);
     return "oklch(" + (60 * fade).toFixed(2) + "% " + (0.136 * fade).toFixed(4) + " " + hue.toFixed(2) + ")";
   }
 

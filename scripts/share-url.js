@@ -491,6 +491,7 @@
     if (view.display && view.display !== "standard") fields.push("disp:" + DISPLAY_CODES[view.display]);
     if (view.lowSaturation === true) fields.push("lsat:t");
     if (view.precision && view.precision !== omittedPrecision) fields.push("prec:" + view.precision);
+    if (view.samplePrecision === true) fields.push("spre:t");
     if (view.speed !== undefined && num(view.speed) !== "1") fields.push("sped:" + num(view.speed));
     if (view.volume !== undefined && num(view.volume) !== "0") fields.push("snd:" + num(view.volume));
     if (view.inspect && view.inspect.length) {
@@ -531,6 +532,7 @@
       display: attempt("disp", function (t) { return DISPLAYS_BY_CODE[t] || "standard"; }, "standard"),
       lowSaturation: attempt("lsat", function (t) { return parseBool(t, "lsat"); }, false),
       precision: attempt("prec", function (t) { return PRECISIONS.indexOf(t) === -1 ? undefined : t; }, undefined),
+      samplePrecision: attempt("spre", function (t) { return parseBool(t, "spre"); }, undefined),
       speed: attempt("sped", function (t) { return parseNum(t, "sped"); }, undefined),
       volume: attempt("snd", function (t) { return Math.min(1, Math.max(0, parseNum(t, "snd"))); }, undefined),
       inspect: attempt("insp", function (t) { return splitList(t).map(function (entry) { return decodeInspect(entry, frame); }); }, []),

@@ -1500,17 +1500,20 @@
 
   // Outputs whose runs pile up at one end of the range: that end gets one color, fading to black over
   // the last OUTPUT_FADE_SPAN of the scale. The color scale runs purple (0) to red (1); counts pile up at 0.
+  // Cumulative Rotation piles up at no turn, mid scale: black there, fading over OUTPUT_ROTATION_FADE_SPAN each way.
   var OUTPUT_FADE_SPAN = 0.05;
+  var OUTPUT_ROTATION_FADE_SPAN = 0.025;
   var OUTPUT_COMMON_END_RED = false;
-  // { flip: draw 1 - t, fadeAt: the drawn t that fades to black, or -1 for none }.
+  // { flip: draw 1 - t, fadeAt: the drawn t that fades to black, or -1 for none, fadeSpan: how far from it }.
   function outputColorEnds(scene) {
     var prop = scene.output && scene.output.property;
+    if (prop === "totalRotation") return { flip: false, fadeAt: 0.5, fadeSpan: OUTPUT_ROTATION_FADE_SPAN };
     var atZero = prop === "bounces" || prop === "warps";
     var edge = edgeModeOf(scene);
     var piles = atZero || prop === "lifespan" || prop === "distance" ||
       (prop === "y" && !scene.mutualGravity && (edge === "sticky" || edge === "infinite"));
-    if (!piles) return { flip: false, fadeAt: -1 };
-    return { flip: atZero === OUTPUT_COMMON_END_RED, fadeAt: OUTPUT_COMMON_END_RED ? 1 : 0 };
+    if (!piles) return { flip: false, fadeAt: -1, fadeSpan: OUTPUT_FADE_SPAN };
+    return { flip: atZero === OUTPUT_COMMON_END_RED, fadeAt: OUTPUT_COMMON_END_RED ? 1 : 0, fadeSpan: OUTPUT_FADE_SPAN };
   }
 
   function wrapCoord(v, span) {
