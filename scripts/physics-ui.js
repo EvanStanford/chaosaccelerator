@@ -3592,7 +3592,7 @@
       : null;
     bounceEvents = PhysicsEngine.runBounceEvents(initialScene, scene.simulationSteps, PhysicsGPU.FIXED_DT);
     warpEvents = PhysicsEngine.warpEventsFromTrajectory(trajectory);
-    if (scene.edgeMode === "sticky" && scene.output) {
+    if (scene.edgeMode === "sticky") {
       var watchedIndices = PhysicsHingeGeometry.wrapWatchedBodyIndices(scene);
       var stopAt = function (b) {
         return PhysicsHingeGeometry.findWrapStopStep(trajectory, watchedIndices, b, scene.frameWidth, scene.frameHeight, initialScene.bodies, PhysicsGPU.FIXED_DT);
