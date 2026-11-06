@@ -12,13 +12,13 @@
   // Before first paint, so a page with the '80s switched off never flashes them.
   try { if (localStorage.getItem("eightiesOff") !== "0") document.documentElement.classList.add("eighties-off"); } catch (e) {}
 </script>
-<link rel="stylesheet" href="scripts/landing.css?v=m225">
-<link rel="stylesheet" href="scripts/eighties.css?v=m225">
-<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m225" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="scripts/landing.css?v=m230">
+<link rel="stylesheet" href="scripts/eighties.css?v=m230">
+<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m230" as="font" type="font/woff2" crossorigin>
 </head>
 <body class="eighties">
 <canvas class="ride" id="ride" aria-hidden="true"></canvas>
-<script src="scripts/corner-menu.js?v=m225"></script>
+<script src="scripts/corner-menu.js?v=m230"></script>
 <main class="page">
   <a class="back-link" href="index.html" data-back>&larr; Chaos Accelerator</a>
   <article class="readme" id="readme"><p class="readme-note">Loading&hellip;</p></article>
@@ -54,6 +54,29 @@
       if (text.length) out.push("<p>" + inline(text.join(" ")) + "</p>");
       text = [];
     }
+    // A list item's line as { indent, ordered, text }, or null.
+    function listItem(line) {
+      var m = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/.exec(line);
+      return m && { indent: m[1].length, ordered: /\d/.test(m[2]), text: m[3] };
+    }
+    // The list whose items start at `indent`; a deeper item opens a list inside the item above it.
+    function list(indent) {
+      var ordered = listItem(lines[i]).ordered;
+      var items = [], item;
+      while (i < lines.length && (item = listItem(lines[i])) && item.indent === indent && item.ordered === ordered) {
+        var words = [item.text], nested = "";
+        i++;
+        while (i < lines.length) {
+          var next = listItem(lines[i]);
+          if (next && next.indent > indent) nested += list(next.indent);
+          // An indented line under an item continues it.
+          else if (!next && /\S/.test(lines[i]) && /^\s*/.exec(lines[i])[0].length > indent) words.push(lines[i++].trim());
+          else break;
+        }
+        items.push("<li>" + inline(words.join(" ")) + nested + "</li>");
+      }
+      return (ordered ? "<ol>" : "<ul>") + items.join("") + (ordered ? "</ol>" : "</ul>");
+    }
     while (i < lines.length) {
       var line = lines[i];
       if (/^```/.test(line)) {
@@ -76,19 +99,15 @@
         var quote = [];
         while (i < lines.length && /^>/.test(lines[i])) quote.push(lines[i++].replace(/^>\s?/, ""));
         out.push("<blockquote>" + render(quote.join("\n")) + "</blockquote>");
-      } else if ((m = /^\s*([-*+]|\d+[.)])\s+/.exec(line))) {
+      } else if (listItem(line)) {
         paragraph();
-        var ordered = /\d/.test(m[1]);
-        var itemRe = ordered ? /^\s*\d+[.)]\s+(.*)$/ : /^\s*[-*+]\s+(.*)$/;
-        var items = [];
-        while (i < lines.length && (m = itemRe.exec(lines[i]))) {
-          var item = [m[1]];
-          i++;
-          // An indented line under an item continues it.
-          while (i < lines.length && /^\s{2,}\S/.test(lines[i]) && !itemRe.test(lines[i])) item.push(lines[i++].trim());
-          items.push("<li>" + inline(item.join(" ")) + "</li>");
-        }
-        out.push((ordered ? "<ol>" : "<ul>") + items.join("") + (ordered ? "</ol>" : "</ul>"));
+        out.push(list(listItem(line).indent));
+      } else if (/^\s*<\w+(\s[^>]*)?>/.test(line)) {
+        // A raw HTML block, like a row of images: passed through as-is.
+        paragraph();
+        var html = [];
+        while (i < lines.length && !/^\s*$/.test(lines[i])) html.push(lines[i++]);
+        out.push(html.join("\n"));
       } else if (/^\s*$/.test(line)) {
         paragraph();
         i++;
@@ -117,9 +136,9 @@
       box.appendChild(a);
     });
 </script>
-<script src="scripts/back-link.js?v=m225"></script>
-<script src="scripts/eighties-ride.js?v=m225"></script>
-<script src="scripts/eighties-theme.js?v=m225"></script>
+<script src="scripts/back-link.js?v=m230"></script>
+<script src="scripts/eighties-ride.js?v=m230"></script>
+<script src="scripts/eighties-theme.js?v=m230"></script>
 <script>
   // ---- The menu's X, the '80s switch and the grid behind the page ----
   EightiesTheme.start({
