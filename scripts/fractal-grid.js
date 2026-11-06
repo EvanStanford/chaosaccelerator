@@ -26,6 +26,7 @@
     applyShareView: function () {},
     renderStill: function () {},
     useFrictionUniform: function () {},
+    setInvertYInput: function () {},
     // Replaced by boot(); kept as no-ops if boot stops early, so the way back to the builder still works.
     defaultScale: function () { return 1; },
     setScale: function () {},
@@ -660,6 +661,7 @@
       if (!Array.isArray(scene.bodies) || !Array.isArray(scene.hinges)) throw new Error("missing bodies/hinges");
       var outputProblem = PhysicsEngine.outputMappingError(scene.output, scene.bodies.length);
       if (outputProblem) throw new Error(outputProblem);
+      document.getElementById("invert-y-input-checkbox").checked = !!scene.invertYInput;
     } catch (err) {
       showEmptyState("The scene couldn't be read (" + (err.message || err) + "). Go back and send it again.");
       mapUnusable("Cannot load the given pattern: " + (err.message || err));
@@ -6433,74 +6435,16 @@
     hoverCtx.restore();
   }
 
-  // ---- Solid for the Output's body, an outline for everything else ----
-  // Two identical balls passing through each other are otherwise indistinguishable. Tracked: the Output's
-  // bodies; null when the Output names no body, and then nothing is hollowed.
-  function trackedBodySlots() {
-    var heads = PhysicsEngine.outputBodyIndices(scene.output);
-    if (!heads.length) return null;
-    var tracked = {};
-    heads.forEach(function (slot) { tracked[slot] = true; });
-    return tracked;
-  }
-  // A movie of the Inspect tab can draw every body solid (inspectTab).
-  var fillOutlinedBodies = false;
-  function isHollow(tracked, i) { return !fillOutlinedBodies && !!tracked && !tracked[i]; }
-
-  var HOLLOW_OUTLINE_WIDTH = 2.5;
-  // A wider dark ring under every outline: a lone light ring vanishes where the background hue matches.
+  // Every inspected body is drawn solid.
+  // A wider dark ring under a portal's oval: a lone light rim vanishes where the background hue matches.
   var HOLLOW_UNDERLAY = "rgba(0, 0, 0, 0.6)";
   var HOLLOW_UNDERLAY_EXTRA = 2.5;
 
-  // A thick stroke as an outline: stroke, then clear its inside (destination-out) so the background shows through.
-  function strokeHollow(trace, color) {
-    hoverCtx.lineWidth = PhysicsEngine.LINE_THICKNESS + HOLLOW_UNDERLAY_EXTRA;
-    hoverCtx.strokeStyle = HOLLOW_UNDERLAY;
-    trace();
-    hoverCtx.stroke();
-    hoverCtx.lineWidth = PhysicsEngine.LINE_THICKNESS;
-    hoverCtx.strokeStyle = color;
-    trace();
-    hoverCtx.stroke();
-    hoverCtx.save();
-    hoverCtx.globalCompositeOperation = "destination-out";
-    hoverCtx.lineWidth = PhysicsEngine.LINE_THICKNESS - 2 * HOLLOW_OUTLINE_WIDTH;
-    hoverCtx.strokeStyle = "#000";
-    trace();
-    hoverCtx.stroke();
-    hoverCtx.restore();
-  }
-
-  function drawHoverBody(spec, row, colorOverride, hollow) {
+  function drawHoverBody(spec, row, colorOverride) {
     var pal = ColorBlind.palette();
     var fill = colorOverride ? colorOverride.fill : (spec.isAnchored ? pal.anchoredFill : pal.bodyFill);
     var stroke = colorOverride ? colorOverride.stroke : (spec.isAnchored ? pal.anchoredStroke : pal.bodyStroke);
     hoverCtx.fillStyle = fill;
-    if (hollow) {
-      var outline = colorOverride ? colorOverride.fill : stroke;
-      hoverCtx.lineCap = "round";
-      hoverCtx.lineJoin = "round";
-      if (spec.type === "circle") {
-        hoverCtx.beginPath();
-        hoverCtx.arc(row.x, row.y, Math.max(row.half, MIN_DISPLAY_RADIUS), 0, Math.PI * 2);
-        hoverCtx.strokeStyle = HOLLOW_UNDERLAY;
-        hoverCtx.lineWidth = HOLLOW_OUTLINE_WIDTH + HOLLOW_UNDERLAY_EXTRA;
-        hoverCtx.stroke();
-        hoverCtx.strokeStyle = outline;
-        hoverCtx.lineWidth = HOLLOW_OUTLINE_WIDTH;
-        hoverCtx.stroke();
-      } else if (spec.type === "portal") {
-        drawHoverPortal(spec, row, colorOverride);
-      } else {
-        var ox = Math.cos(row.angle) * row.half, oy = Math.sin(row.angle) * row.half;
-        strokeHollow(function () {
-          hoverCtx.beginPath();
-          hoverCtx.moveTo(row.x - ox, row.y - oy);
-          hoverCtx.lineTo(row.x + ox, row.y + oy);
-        }, outline);
-      }
-      return;
-    }
     if (spec.type === "circle") {
       hoverCtx.strokeStyle = stroke;
       hoverCtx.lineWidth = 2;
@@ -6728,9 +6672,9 @@
       if (group.type === "grid") return;
       group.points.forEach(function (entry) {
         var shown = inspectedRowAt(entry, step);
-        var color = entry.color, tracked = trackedBodySlots();
+        var color = entry.color;
         for (var i = 0; i < shown.length; i++) {
-          if (shown[i]) drawHoverBody(scene.bodies[i], shown[i], color, isHollow(tracked, i));
+          if (shown[i]) drawHoverBody(scene.bodies[i], shown[i], color);
         }
         drawHoverSprings(shown, color);
         drawOffscreenMappingArrows(shown, color);
@@ -6840,7 +6784,6 @@
     hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);
     setHoverTransform();
     drawFrameBoundary();
-    var previewTracked = trackedBodySlots();
     offsetScene.bodies.forEach(function (body, i) {
       drawHoverBody(scene.bodies[i], {
         x: body.x,
@@ -6848,7 +6791,7 @@
         angle: body.angle,
         // PhysicsGPU.shapeHalf, the quantity the shader packs into alpha.
         half: PhysicsGPU.shapeHalf([body], 0),
-      }, undefined, isHollow(previewTracked, i));
+      });
     });
     drawHoverSprings(offsetScene.bodies.map(function (body) {
       return { x: body.x, y: body.y, angle: body.angle, half: PhysicsGPU.shapeHalf([body], 0) };
@@ -6882,12 +6825,12 @@
     return { step: hoveredStep, row: replay.trajectory[hoveredStep], isFinal: hoveredStep >= replay.effectiveMaxStep - 1 };
   }
   function drawReplayFrame(replay, frame) {
-    var row = frame.row, shownRows = [], tracked = trackedBodySlots();
+    var row = frame.row, shownRows = [];
     for (var i = 0; i < row.length; i++) {
       shownRows[i] = (frame.isFinal && replay.wrapOverride && i === replay.wrapOverride.bodyIndex)
         ? { x: replay.wrapOverride.x, y: replay.wrapOverride.y, angle: replay.wrapOverride.angle, half: row[i].half }
         : row[i];
-      drawHoverBody(scene.bodies[i], shownRows[i], undefined, isHollow(tracked, i));
+      drawHoverBody(scene.bodies[i], shownRows[i]);
     }
     drawHoverSprings(shownRows);
     drawOffscreenMappingArrows(shownRows);
@@ -9458,6 +9401,7 @@
     // An old replay or run must not reach the new scene's bodies.
     showHoverEmpty();
     scene = nextScene;
+    document.getElementById("invert-y-input-checkbox").checked = !!scene.invertYInput;
     sceneGeneration += 1;
     reuse.image = null;
     reuseDropSource();
@@ -9519,6 +9463,30 @@
     bounceMaxProbe.key = null;
     sceneGeneration += 1;
     markDirty();
+  };
+
+  // Invert Y Input on the map: recompiles and mirrors the view, Inspect points and keyframes so they land on the same runs.
+  global.FractalGrid.setInvertYInput = function (on) {
+    if (!!scene.invertYInput === on) return;
+    var shared = global.FractalGrid.shareState().view;
+    function flip(p) { return p && { x: p.x, xLo: p.xLo, y: -p.y, yLo: -(p.yLo || 0) }; }
+    shared.center = flip(shared.center);
+    shared.inspect.forEach(function (group) { group.a = flip(group.a); group.b = flip(group.b); });
+    shared.movie.keyframes.forEach(function (k) { k.center = flip(k.center); });
+    scene.invertYInput = on;
+    showHoverEmpty();
+    reuse.image = null;
+    reuseDropSource();
+    releaseAllPlayback();
+    discardAllPasses();
+    releaseAllSliceStates();
+    bounceMaxProbe.measuredKey = null;
+    bounceMaxProbe.key = null;
+    precisionRaises = [];
+    sampleCheck = null;
+    sceneGeneration += 1;
+    if (statsPanel) { statsHasResult = false; statsResultIsCurrent = false; statsPanel.clearResult(); }
+    global.FractalGrid.applyShareView(shared);
   };
 
   // ---- Movies ----
@@ -10402,7 +10370,7 @@
   function exportHeaderText(job) {
     var s = ShareUrl.decode(job.fragment).scene;
     var sceneJSON = snakeKeys({
-      bodies: s.bodies, hinges: s.hinges, springs: s.springs, xInput: s.xInput, yInput: s.yInput, output: s.output,
+      bodies: s.bodies, hinges: s.hinges, springs: s.springs, xInput: s.xInput, yInput: s.yInput, invertYInput: s.invertYInput, output: s.output,
       edgeMode: s.edgeMode, mutualGravity: s.mutualGravity, collisionsEnabled: s.collisionsEnabled, friction: s.friction,
       simulationSteps: s.simulationSteps, frameWidth: s.frameWidth, frameHeight: s.frameHeight,
     });
@@ -10579,11 +10547,11 @@
 
   // The Inspect tab's locked points for a movie: a snapshot's, or this page's own once a link's are rebuilt (null
   // until then). draw() paints step `step` as the preview does, scaled up from its size, lines and all. look:
-  // { background: "plain" (the preview's), "grid" (the editor's over that) or "black", filled: outlined bodies solid }.
+  // { background: "plain" (the preview's), "grid" (the editor's over that) or "black" }.
   global.FractalGrid.inspectTab = function (snapshot, look) {
     if (!snapshot && (pendingInspect || lockJob)) return null;
     var groups = snapshot ? unpackInspectGroups(snapshot.groups) : inspectedGroups;
-    var background = look && look.background, filled = !!(look && look.filled);
+    var background = look && look.background;
     var fill = background === "black" ? "#000" : global.getComputedStyle(hoverCanvas.parentNode).backgroundColor;
     return {
       points: groups.reduce(function (n, group) { return n + group.points.length; }, 0),
@@ -10595,11 +10563,10 @@
       voices: inspectVoices(groups),
       draw: function (ctx, width, height, step) {
         var k = width / HOVER_VIEW_W;
-        var savedCtx = hoverCtx, savedFit = hoverFit, savedGroups = inspectedGroups, savedFilled = fillOutlinedBodies;
+        var savedCtx = hoverCtx, savedFit = hoverFit, savedGroups = inspectedGroups;
         hoverCtx = ctx;
         hoverFit = fitScene(width / k, height / k);
         inspectedGroups = groups;
-        fillOutlinedBodies = filled;
         if (snapshot) traceTailsOverride = !!snapshot.tails;
         try {
           ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -10609,7 +10576,7 @@
           drawTraceTails(step, null);
           drawInspectedAtStep(step);
           drawHoverBasins();
-          // The backdrop goes under the drawing, so what a hollow body cuts out of it shows the backdrop.
+          // The backdrop goes under the drawing.
           ctx.globalCompositeOperation = "destination-over";
           if (background === "grid") {
             var x0 = -hoverFit.offsetX / hoverFit.scale, y0 = -hoverFit.offsetY / hoverFit.scale;
@@ -10624,7 +10591,6 @@
           hoverCtx = savedCtx;
           hoverFit = savedFit;
           inspectedGroups = savedGroups;
-          fillOutlinedBodies = savedFilled;
           traceTailsOverride = null;
         }
       },

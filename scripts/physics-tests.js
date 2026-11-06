@@ -1132,6 +1132,22 @@
   );
 
   addTest(
+    "Grid codegen: Invert Y Input flips the Y term in both spellings",
+    "physics-grid-codegen.js resolveOffsetTargets invertY",
+    function () {
+      var x = { body: 0, property: "vx" }, y = { body: 0, property: "vy" };
+      var plain = PhysicsGridCodegen.resolveOffsetTargets(x, y, undefined, false);
+      var flipped = PhysicsGridCodegen.resolveOffsetTargets(x, y, undefined, true);
+      var scene = { bodies: [{ type: "circle", x: 0, y: 0, angle: 0, radius: 20, vx: 10, vy: 10, w: 0 }], hinges: [], xInput: x, yInput: y };
+      var a = PhysicsGridCodegen.computeOffsetSceneNumeric(scene, 3, 5).bodies[0];
+      scene.invertYInput = true;
+      var b = PhysicsGridCodegen.computeOffsetSceneNumeric(scene, 3, 5).bodies[0];
+      var ok = plain[1].expr === "-worldY" && flipped[1].expr === "worldY" && a.vy === 5 && b.vy === 15 && a.vx === 13 && b.vx === 13;
+      return { pass: ok, detail: plain[1].expr + " / " + flipped[1].expr + ", vy " + a.vy + " / " + b.vy };
+    }
+  );
+
+  addTest(
     "Grid codegen: a position link and a shape link on the same body compose",
     "physics-grid-codegen.js resize-then-translate ordering",
     function () {
@@ -6732,9 +6748,9 @@
       var silent = !/kfrm|size|aa:|loop/.test(ShareUrl.encode({ page: "map", scene: scene, view: mapView }));
       // A movie of the Inspect tab: the view, its points, the size and the look; and a map with points keeps the size.
       var inspectView = { center: { x: 1.5, xLo: 0, y: -2, yLo: 0 }, scale: 100, zoom: 3, speed: 2, volume: 0.5, inspect: [{ type: "point", a: { x: 6, xLo: 0, y: -4.9, yLo: 0 } }],
-        movie: { keyframes: [], size: { width: 1000, height: 1000 }, antialias: true, loop: true, subject: "inspect", background: "grid", filled: true, pace: 0.25 } };
+        movie: { keyframes: [], size: { width: 1000, height: 1000 }, antialias: true, loop: true, subject: "inspect", background: "grid", pace: 0.25 } };
       var inspectBack = ShareUrl.decode(ShareUrl.encode({ page: "movi", scene: scene, view: inspectView })).view;
-      var inspectOk = inspectBack.movie.subject === "inspect" && inspectBack.movie.background === "grid" && inspectBack.movie.filled === true && inspectBack.movie.pace === 0.25 &&
+      var inspectOk = inspectBack.movie.subject === "inspect" && inspectBack.movie.background === "grid" && inspectBack.movie.pace === 0.25 &&
         inspectBack.movie.size.width === 1000 && inspectBack.inspect.length === 1 && inspectBack.speed === 2 && inspectBack.volume === 0.5 && inspectBack.zoom === 3;
       inspectView.movie.subject = undefined;
       var mapWithPoints = ShareUrl.encode({ page: "map", scene: scene, view: inspectView });
@@ -6745,7 +6761,7 @@
       return {
         pass: keyframesOk && settingsOk && noViewFields && mapKeeps && silent && inspectOk && mapLookOk && defaults.size.width === 1280 && defaults.size.height === 720 &&
           defaults.antialias === true && defaults.loop === true && defaults.keyframes.length === 0 && badSize.width === 1280 && badSize.height === 720 &&
-          defaults.subject === "map" && defaults.background === "plain" && defaults.filled === false && defaults.pace === 1 && oddLook.subject === "map" && oddLook.background === "plain",
+          defaults.subject === "map" && defaults.background === "plain" && defaults.pace === 1 && oddLook.subject === "map" && oddLook.background === "plain",
         detail: "keyframes " + (keyframesOk ? "exact" : "DIFFER: " + JSON.stringify(k)) + "; settings and scene=" + settingsOk +
           "; no map-view fields in a movie link=" + noViewFields + "; a map link keeps them=" + mapKeeps + " and is silent without any=" + silent +
           "; an Inspect movie round-trips=" + inspectOk + "; a map with points keeps the size and no look=" + mapLookOk +

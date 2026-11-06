@@ -48,6 +48,7 @@
   var speedValueEl = document.getElementById("speed-value");
   var btnReset = document.getElementById("btn-reset");
   var edgeModeSelect = document.getElementById("edge-mode-select");
+  var invertYInputCheckbox = document.getElementById("invert-y-input-checkbox");
   var mutualGravityCheckbox = document.getElementById("mutual-gravity-checkbox");
   var collisionsCheckbox = document.getElementById("collisions-checkbox");
   var simulationStepsSlider = document.getElementById("simulation-steps-slider");
@@ -136,6 +137,8 @@
     springs: [],
     xInput: null,
     yInput: null,
+    // On: the map's Y runs the other way for the Y Input.
+    invertYInput: false,
     output: null,
     // Closest Basin's points: { x, y, color }, color being an index into ColorBlind.basinRgb's sequence.
     basins: [],
@@ -2299,6 +2302,15 @@
     applyEdgeMode(edgeModeSelect.value);
   });
 
+  // In Settings, so it can change on the map too.
+  invertYInputCheckbox.addEventListener("change", function () {
+    var on = invertYInputCheckbox.checked;
+    if (initialScene) initialScene.invertYInput = on;
+    scene.invertYInput = on;
+    if (global.AppShell.currentView() === "grid") global.FractalGrid.setInvertYInput(on);
+    render();
+  });
+
   // ---- Friction ----
   // The slider is quadratic (notch n is (n/100)^2, so 10 reads 1% and 50 reads 25%) with the top notch
   // at the engine's limit; the typed box holds an exact percent to a hundredth. Both show the scene value.
@@ -2718,6 +2730,7 @@
       }),
       xInput: scene.xInput ? { body: scene.xInput.body, property: scene.xInput.property } : null,
       yInput: scene.yInput ? { body: scene.yInput.body, property: scene.yInput.property } : null,
+      invertYInput: !!scene.invertYInput,
       output: scene.output ? {
         body: scene.output.body,
         bodyB: typeof scene.output.bodyB === "number" ? scene.output.bodyB : null,
@@ -2873,6 +2886,7 @@
       springs: newSprings,
       xInput: parseMapping(parsed.xInput, "xInput"),
       yInput: parseMapping(parsed.yInput, "yInput"),
+      invertYInput: parsed.invertYInput === true,
       output: parseMapping(parsed.output, "output", OUTPUT_PROPERTIES, true),
       basins: newBasins,
       edgeMode: PhysicsEngine.edgeModeOf(parsed),
@@ -2891,6 +2905,7 @@
     scene.springs = data.springs || [];
     scene.xInput = data.xInput;
     scene.yInput = data.yInput;
+    scene.invertYInput = !!data.invertYInput;
     scene.output = data.output;
     scene.basins = data.basins || [];
     pairUpPortals();
@@ -2901,6 +2916,7 @@
     scene.simulationSteps = data.simulationSteps;
 
     edgeModeSelect.value = scene.edgeMode;
+    invertYInputCheckbox.checked = scene.invertYInput;
     syncFrictionUI();
     mutualGravityCheckbox.checked = scene.mutualGravity;
     collisionsCheckbox.checked = scene.collisionsEnabled;
@@ -2925,6 +2941,8 @@
     playbackProgressSlider.max = String(scene.simulationSteps);
     scene.edgeMode = PhysicsEngine.DEFAULT_EDGE_MODE;
     edgeModeSelect.value = scene.edgeMode;
+    scene.invertYInput = false;
+    invertYInputCheckbox.checked = false;
   }
 
   // Common tail for anything replacing the whole scene: refresh panels that read scene state directly.
@@ -2964,13 +2982,13 @@
   }
 
   btnSampleDoublePendulum.addEventListener("click", function () {
-    loadSample("samples/double_pendulum.json?v=m225", "Double Pendulum");
+    loadSample("samples/double_pendulum.json?v=m227", "Double Pendulum");
   });
   btnSamplePinball.addEventListener("click", function () {
-    loadSample("samples/pinball.json?v=m225", "Pinball");
+    loadSample("samples/pinball.json?v=m227", "Pinball");
   });
   btnSampleBinaryStar.addEventListener("click", function () {
-    loadSample("samples/binary_star.json?v=m225", "Binary Star");
+    loadSample("samples/binary_star.json?v=m227", "Binary Star");
   });
   function clearScene() {
     sharedFrame = null;

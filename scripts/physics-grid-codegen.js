@@ -86,20 +86,21 @@
 
   // ---- X/Y links into distinct (body, property) targets; duplicates add. Resize/
   // rotate targets run before translate ones: their recenter is absolute ----
-  function resolveOffsetTargets(xInput, yInput, B) {
+  // invertY flips the map's Y for the Y Input (scene.invertYInput).
+  function resolveOffsetTargets(xInput, yInput, B, invertY) {
     var byKey = {};
     var order = [];
 
-    function add(input, axisVar) {
+    function add(input, axisVar, flip) {
       if (!input) return;
       var key = input.body + ":" + input.property;
       var scaledVar = input.property === "angle" ? B.mul(axisVar, B.lit(ANGLE_INPUT_SCALE)) : axisVar;
-      var term = (isYAxisProperty(input.property) ? "-" : "") + scaledVar;
+      var term = (isYAxisProperty(input.property) !== !!flip ? "-" : "") + scaledVar;
       if (!byKey[key]) { byKey[key] = { body: input.body, property: input.property, terms: [] }; order.push(key); }
       byKey[key].terms.push(term);
     }
-    add(xInput, "worldX");
-    add(yInput, "worldY");
+    add(xInput, "worldX", false);
+    add(yInput, "worldY", invertY);
 
     return order.map(function (key) {
       var t = byKey[key];
@@ -115,7 +116,7 @@
     }
     var consts = scene.bodies.map(PhysicsGPU.bodyConst);
     var n = consts.length;
-    var targets = resolveOffsetTargets(scene.xInput, scene.yInput, B);
+    var targets = resolveOffsetTargets(scene.xInput, scene.yInput, B, scene.invertYInput);
 
     var state = consts.map(function (b) {
       return { x: B.lit(b.x), y: B.lit(b.y), angle: B.lit(b.angle), vx: B.lit(b.vx || 0), vy: B.lit(b.vy || 0) };
@@ -482,19 +483,19 @@
   }
 
   // Numeric mirror of resolveOffsetTargets' add(), kept side by side; the lockstep test compares them.
-  function resolveOffsetTargetsNumeric(xInput, yInput, worldX, worldY) {
+  function resolveOffsetTargetsNumeric(xInput, yInput, worldX, worldY, invertY) {
     var byKey = {};
     var order = [];
-    function add(input, axisValue) {
+    function add(input, axisValue, flip) {
       if (!input) return;
       var key = input.body + ":" + input.property;
       var scaledValue = input.property === "angle" ? axisValue * ANGLE_INPUT_SCALE : axisValue;
-      var term = isYAxisProperty(input.property) ? -scaledValue : scaledValue;
+      var term = isYAxisProperty(input.property) !== !!flip ? -scaledValue : scaledValue;
       if (!byKey[key]) { byKey[key] = { body: input.body, property: input.property, value: 0 }; order.push(key); }
       byKey[key].value += term;
     }
-    add(xInput, worldX);
-    add(yInput, worldY);
+    add(xInput, worldX, false);
+    add(yInput, worldY, invertY);
     return order.map(function (key) { return byKey[key]; });
   }
 
@@ -504,7 +505,7 @@
     // JSON scenes omit derived mass fields and cloneScene copies only what exists.
     result.bodies.forEach(PhysicsEngine.computeMass);
 
-    var targets = resolveOffsetTargetsNumeric(scene.xInput, scene.yInput, worldX, worldY);
+    var targets = resolveOffsetTargetsNumeric(scene.xInput, scene.yInput, worldX, worldY, scene.invertYInput);
     var resizeTargets = targets.filter(function (t) { return t.property === "radius" || t.property === "length" || t.property === "angle"; });
     var translateTargets = targets.filter(function (t) { return t.property === "x" || t.property === "y"; });
     var velocityTargets = targets.filter(function (t) { return t.property === "vx" || t.property === "vy"; });

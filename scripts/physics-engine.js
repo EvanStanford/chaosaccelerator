@@ -2014,6 +2014,7 @@
       springs: sceneSprings(scene).map(cloneSpring),
       xInput: scene.xInput ? { body: scene.xInput.body, property: scene.xInput.property } : null,
       yInput: scene.yInput ? { body: scene.yInput.body, property: scene.yInput.property } : null,
+      invertYInput: !!scene.invertYInput,
       output: scene.output ? { body: scene.output.body, bodyB: scene.output.bodyB === undefined ? null : scene.output.bodyB, property: scene.output.property } : null,
       frameWidth: scene.frameWidth,
       frameHeight: scene.frameHeight,

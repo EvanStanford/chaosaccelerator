@@ -94,29 +94,52 @@ html, body {
 
 /* Dark scrollbars: Firefox reads scrollbar-*, the rest the ::-webkit rules. */
 #grid-menu-stack,
-.menu-card-body {
+.menu-card-body,
+#panel,
+.settings-panel-body,
+#grid-right-menu-column {
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
 }
 #grid-menu-stack::-webkit-scrollbar,
-.menu-card-body::-webkit-scrollbar {
+.menu-card-body::-webkit-scrollbar,
+#panel::-webkit-scrollbar,
+.settings-panel-body::-webkit-scrollbar,
+#grid-right-menu-column::-webkit-scrollbar {
   width: 10px;
 }
 #grid-menu-stack::-webkit-scrollbar-track,
-.menu-card-body::-webkit-scrollbar-track {
+.menu-card-body::-webkit-scrollbar-track,
+#panel::-webkit-scrollbar-track,
+.settings-panel-body::-webkit-scrollbar-track,
+#grid-right-menu-column::-webkit-scrollbar-track {
   background: transparent;
 }
 #grid-menu-stack::-webkit-scrollbar-thumb,
-.menu-card-body::-webkit-scrollbar-thumb {
+.menu-card-body::-webkit-scrollbar-thumb,
+#panel::-webkit-scrollbar-thumb,
+.settings-panel-body::-webkit-scrollbar-thumb,
+#grid-right-menu-column::-webkit-scrollbar-thumb {
   background-color: var(--border);
   border-radius: 6px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 #grid-menu-stack::-webkit-scrollbar-thumb:hover,
-.menu-card-body::-webkit-scrollbar-thumb:hover {
+.menu-card-body::-webkit-scrollbar-thumb:hover,
+#panel::-webkit-scrollbar-thumb:hover,
+.settings-panel-body::-webkit-scrollbar-thumb:hover,
+#grid-right-menu-column::-webkit-scrollbar-thumb:hover {
   background-color: var(--accent);
   background-clip: padding-box;
+}
+
+/* Reserve the gutter so toggling the scrollbar never reflows content; a ResizeObserver on
+   #panel's children (layout-mode.js) otherwise flickers it on and off at the overflow threshold. */
+#panel,
+.settings-panel-body,
+#grid-right-menu-column {
+  scrollbar-gutter: stable;
 }
 
 /* The shared floating-card look. Two shadows: the tight one keeps the top and left edges readable. */

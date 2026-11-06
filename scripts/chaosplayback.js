@@ -511,32 +511,28 @@
     }).catch(function () {});
   }
 
-  // The look (background, filled bodies, pace) is chosen here, so a snapshot is this link's whatever its look. A
+  // The look (background, pace) is chosen here, so a snapshot is this link's whatever its look. A
   // new look replaces the address, landing mark kept, and the page films again.
   var backgroundField = $("background-field"), backgroundChoice = $("background-choice");
-  var bodiesField = $("bodies-field"), bodiesChoice = $("bodies-choice");
   var paceField = $("pace-field"), paceChoice = $("pace-choice");
   function withoutLook(fragment) { return fragment.replace(/,(bkgd|fill|pace):[a-z0-9.]+/g, ""); }
   backgroundChoice.value = movie.background;
-  bodiesChoice.value = movie.filled ? "filled" : "outlined";
   paceChoice.value = String(movie.pace);
   function changeLook() {
     var fragment = withoutLook(address);
     if (backgroundChoice.value !== "plain") fragment += ",bkgd:" + backgroundChoice.value;
-    if (bodiesChoice.value === "filled") fragment += ",fill:t";
     if (paceChoice.value !== "1") fragment += ",pace:" + paceChoice.value.replace(/^0/, "");
     history.replaceState(history.state, "", "#" + fragment);
     location.reload();
   }
   backgroundChoice.addEventListener("change", changeLook);
-  bodiesChoice.addEventListener("change", changeLook);
   paceChoice.addEventListener("change", changeLook);
 
   function beginInspectRender(grid) {
     renderStatus.textContent = "Filming the Inspect tab\u2026";
     renderSpinner.hidden = false;
     progressEl.hidden = renderDetail.hidden = renderActions.hidden = true;
-    var tab = grid.inspectTab(inspectSnapshot, { background: movie.background, filled: movie.filled });
+    var tab = grid.inspectTab(inspectSnapshot, { background: movie.background });
     if (!tab) {
       // Still rebuilding the link's points.
       requestAnimationFrame(function () { beginInspectRender(grid); });
@@ -897,7 +893,7 @@
 
     // The Inspect point belongs to keyframe movies, the look to Inspect ones. A changing friction has no one run to show.
     inspectField.hidden = ofInspect || frictionVaries;
-    backgroundField.hidden = bodiesField.hidden = paceField.hidden = !ofInspect;
+    backgroundField.hidden = paceField.hidden = !ofInspect;
     btnDownload.hidden = false;
     if (videoProblem) {
       btnDownload.textContent = videoProblem;

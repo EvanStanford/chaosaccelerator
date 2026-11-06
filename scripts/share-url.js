@@ -312,6 +312,7 @@
     if (springs.length) fields.push("sprg:" + springs.map(encodeSpring).join(";"));
     if (scene.xInput) fields.push("xinp:" + encodeMapping(scene.xInput));
     if (scene.yInput) fields.push("yinp:" + encodeMapping(scene.yInput));
+    if (scene.invertYInput) fields.push("yinv:t");
     if (scene.output) fields.push("outp:" + encodeMapping(scene.output));
     if (scene.basins && scene.basins.length) fields.push("basn:" + scene.basins.map(encodeBasin).join(";"));
     if (scene.edgeMode && scene.edgeMode !== DEFAULT_EDGE) fields.push("edge:" + EDGE_CODES[scene.edgeMode]);
@@ -357,15 +358,16 @@
       edgeMode: fields.edge === undefined ? DEFAULT_EDGE : EDGES_BY_CODE[fields.edge],
     };
     if (fields.basn !== undefined) scene.basins = splitList(fields.basn).map(decodeBasin);
+    if (fields.yinv !== undefined) scene.invertYInput = parseBool(fields.yinv, "yinv");
     return scene;
   }
 
   // ---- The map's view ---- what FractalGrid.shareState() hands over and applyShareView()
   // A missing precision, speed or volume reads as undefined: the viewer keeps their own setting.
   // takes back: { center: {x, xLo, y, yLo}, scale, zoom, display, lowSaturation, precision, speed,
-  // volume, inspect: [{type, a, b, count|size, twoPart, places}], movie: {keyframes, size: {width, height}, antialias, loop, subject, background, filled, pace} }.
+  // volume, inspect: [{type, a, b, count|size, twoPart, places}], movie: {keyframes, size: {width, height}, antialias, loop, subject, background, pace} }.
   // A movie's subject is "map" (its keyframes) or "inspect" (the Inspect tab's points, played once, on a
-  // "plain", "grid" or "black" background, bodies it outlines drawn solid if filled, slowed to a pace of 0.5 or 0.25).
+  // "plain", "grid" or "black" background, slowed to a pace of 0.5 or 0.25).
   // A keyframe is {center, zoom, step, seconds, friction}; seconds and friction (a fraction 0 to 0.99) are null when unset.
   // Inspect a and b are world points {x, xLo, y, yLo}, written as view heights from the center to the places
   // (centerDecimals) of the zoom they were picked at; places is written only when it isn't the view's own.
@@ -524,7 +526,6 @@
     }
     if (ofInspect) fields.push("subj:insp");
     if (ofInspect && movie.background && movie.background !== "plain") fields.push("bkgd:" + movie.background);
-    if (ofInspect && movie.filled) fields.push("fill:t");
     if (ofInspect && movie.pace && movie.pace !== 1) fields.push("pace:" + num(movie.pace));
     return fields;
   }
@@ -557,7 +558,6 @@
         loop: attempt("loop", function (t) { return parseBool(t, "loop"); }, true),
         subject: attempt("subj", function (t) { return t === "insp" ? "inspect" : "map"; }, "map"),
         background: attempt("bkgd", function (t) { return t === "grid" || t === "black" ? t : "plain"; }, "plain"),
-        filled: attempt("fill", function (t) { return parseBool(t, "fill"); }, false),
         pace: attempt("pace", function (t) { var v = parseNum(t, "pace"); return v === 0.5 || v === 0.25 ? v : 1; }, 1),
       },
       unread: unread, // keys of fields that were there but couldn't be read, so are at their defaults

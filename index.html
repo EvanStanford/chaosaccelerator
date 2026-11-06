@@ -18,15 +18,15 @@
   // Before first paint, so a page with the '80s switched off never flashes them.
   try { if (localStorage.getItem("eightiesOff") !== "0") document.documentElement.classList.add("eighties-off"); } catch (e) {}
 </script>
-<link rel="stylesheet" href="scripts/landing.css?v=m225">
-<link rel="stylesheet" href="scripts/eighties.css?v=m225">
-<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m225" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="scripts/landing.css?v=m230">
+<link rel="stylesheet" href="scripts/eighties.css?v=m230">
+<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m230" as="font" type="font/woff2" crossorigin>
 </head>
 <body class="landing eighties">
 <canvas class="ride" id="ride" aria-hidden="true"></canvas>
 <main class="screen">
 
-  <script src="scripts/corner-menu.js?v=m225"></script>
+  <script src="scripts/corner-menu.js?v=m230"></script>
 
   <header class="sky">
     <div class="sun" id="sun">
@@ -53,19 +53,37 @@
 
       <article class="tour-slide is-current" aria-label="Video tutorial">
         <div class="tour-media video">
-          <!-- PLACEHOLDER VIDEO: the cams video stands in until the tutorial is recorded; swap the id in src. -->
-          <iframe src="https://www.youtube-nocookie.com/embed/_dtBUiaAqRE" title="Chaos Accelerator video tutorial (placeholder)" loading="lazy" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+          <!-- Placeholder until the tutorial is uploaded: swap for a YouTube iframe. -->
+          <button class="yt-fake" id="tutorial-video" type="button" aria-label="Play: Create Your Own Fractals: How To With ChaosAccelerator Web Tool">
+            <img class="yt-fake-thumb" src="assets/tutorial-thumb.jpg?v=m230" width="1672" height="941" loading="lazy" decoding="async" alt="">
+            <span class="yt-fake-top">
+              <img class="yt-fake-avatar" src="assets/channel-avatar.jpg?v=m230" width="88" height="88" alt="">
+              <span class="yt-fake-title">Create Your Own Fractals: How To With ChaosAccelerator Web Tool</span>
+              <span class="yt-fake-action">
+                <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67V7z"/></svg>
+                <span>Watch later</span>
+              </span>
+              <span class="yt-fake-action">
+                <svg viewBox="0 0 24 24"><path d="M14 9V5l7 7-7 7v-4.1c-5 0-8.5 1.6-11 5.1 1-5 4-10 11-11z"/></svg>
+                <span>Share</span>
+              </span>
+            </span>
+            <svg class="yt-fake-play" viewBox="0 0 68 48"><path d="M66.52 7.74c-.78-2.93-2.49-5.41-5.42-6.19C55.79.13 34 0 34 0S12.21.13 6.9 1.55C3.97 2.33 2.27 4.81 1.48 7.74.06 13.05 0 24 0 24s.06 10.95 1.48 16.26c.78 2.93 2.49 5.41 5.42 6.19C12.21 47.87 34 48 34 48s21.79-.13 27.1-1.55c2.93-.78 4.64-3.26 5.42-6.19C67.94 34.95 68 24 68 24s-.06-10.95-1.48-16.26z" fill="#f00"/><path d="M45 24 27 14v20z" fill="#fff"/></svg>
+            <span class="yt-fake-watch">
+              Watch on
+              <svg viewBox="0 0 94 20"><path d="M27.97 3.12A3.58 3.58 0 0 0 25.45.6C23.22 0 14.28 0 14.28 0S5.33 0 3.1.6A3.58 3.58 0 0 0 .6 3.12C0 5.35 0 10 0 10s0 4.65.6 6.88a3.58 3.58 0 0 0 2.5 2.52c2.23.6 11.18.6 11.18.6s8.94 0 11.17-.6a3.58 3.58 0 0 0 2.52-2.52c.6-2.23.6-6.88.6-6.88s0-4.65-.6-6.88z" fill="#f00"/><path d="M11.43 14.29 18.85 10l-7.42-4.29z" fill="#fff"/><text x="31" y="16.2" fill="#fff" font-family="Roboto, Arial, sans-serif" font-size="16.5" font-weight="700" letter-spacing="-0.7">YouTube</text></svg>
+            </span>
+          </button>
         </div>
         <div class="tour-caption">
           <h2>In depth video tutorial</h2>
-          <p>[TODO: Replace with real video once ready]</p>
         </div>
       </article>
 
       <article class="tour-slide" aria-label="Step 1">
         <a class="tour-link" href="chaos.html">
         <div class="tour-media">
-          <img src="assets/builder.png?v=m225" width="1556" height="874" loading="lazy" decoding="async" alt="The scene builder">
+          <img src="assets/builder.png?v=m230" width="1556" height="874" loading="lazy" decoding="async" alt="The scene builder">
           <span class="tour-step">Step 1:</span>
         </div>
         <div class="tour-caption">
@@ -78,7 +96,7 @@
       <article class="tour-slide" aria-label="Step 2">
         <a class="tour-link" href="chaos.html">
         <div class="tour-media">
-          <img src="assets/map.jpg?v=m225" width="1556" height="874" loading="lazy" decoding="async" alt="The map made from the scene. Each pixel is one run of the scene from a slightly different start.">
+          <img src="assets/map.jpg?v=m230" width="1556" height="874" loading="lazy" decoding="async" alt="The map made from the scene. Each pixel is one run of the scene from a slightly different start.">
           <span class="tour-step">Step 2:</span>
         </div>
         <div class="tour-caption">
@@ -116,13 +134,21 @@
   </footer>
 
 </main>
+<dialog class="mail-dialog notice-dialog" id="tutorial-notice">
+  <form method="dialog">
+    <p class="notice-dialog-icon" aria-hidden="true">!</p>
+    <h2>Tutorial video not ready yet.</h2>
+    <p>This is just a placeholder.</p>
+    <button class="mail-copy" type="submit" autofocus>OK</button>
+  </form>
+</dialog>
 <a class="watermark" href="chaos.html">chaosaccelerator.com</a>
 <label class="eighties-toggle" id="eighties-toggle">
   <span class="toggle-switch"><input type="checkbox"><span class="toggle-slider"></span></span>
   <span class="eighties-toggle-label">Enable '80s</span>
 </label>
-<script src="scripts/eighties-ride.js?v=m225"></script>
-<script src="scripts/eighties-theme.js?v=m225"></script>
+<script src="scripts/eighties-ride.js?v=m230"></script>
+<script src="scripts/eighties-theme.js?v=m230"></script>
 <script>
   // ---- The tour ----
   var tour = (function () {
@@ -252,6 +278,14 @@
     lane: tour.lane,
     drift: document.querySelector(".billboard"),
   }, true);
+
+  // ---- The tutorial placeholder ----
+  (function () {
+    var notice = document.getElementById("tutorial-notice");
+    document.getElementById("tutorial-video").addEventListener("click", function () { notice.showModal(); });
+    // A click on the backdrop lands on the dialog itself.
+    notice.addEventListener("click", function (e) { if (e.target === notice) notice.close(); });
+  })();
 
   // ---- The gallery slide ----
   (function () {
