@@ -6,9 +6,9 @@
 (function () {
   "use strict";
 
-  // The scene, and an Inspect grid whose box becomes the map.
+  // The scene, and an Inspect line whose two ends are the corners of the box that becomes the map.
   var LINK = "#map/v:1.0,body:ci:13.4731:468.3284:0:75;ci:9.9353:-341.1889:0:75!,xinp:0.x,yinp:0.y,outp:0.y,step:800," +
-    "frmw:1080,frmh:1590,ctrx:-29.256147,ctry:-266.417678,insp:g:-.1343915343:.4335978834:.1920634921:-.3140211642:3t";
+    "frmw:1080,frmh:1590,ctrx:-29.256147,ctry:-266.417678,insp:l:-.1343915343:.4335978834:.1920634921:-.3140211642:30";
   var BOX_COLUMNS = 8, COLUMNS = 9; // squares across the Inspect box, and across the map, which runs on past its right side
   var X_STRETCH = 2; // the map is drawn this much wider than its own shape: a square covers half as much x as y
 

@@ -126,6 +126,7 @@
     entry("c", "Challenges", null, card("menu-challenges", "grid-btn-challenges")),
     entry("q", "Inspect (Point)", $("btn-inspect-point")),
     entry("w", "Inspect (Line)", $("btn-inspect-line")),
+    entry("o", "Inspect (Contour)", $("btn-inspect-contour")),
     toggleEntry("n", "Nerd Stats", $("perf-readout-checkbox")),
     toggleEntry("z", "Color Zoom", $("color-zoom-checkbox")),
     toggleEntry("s", "Low Saturation", $("low-saturation-checkbox")),

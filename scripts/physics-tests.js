@@ -6408,8 +6408,8 @@
         inspect: [
           { type: "point", a: at(0.0115, -0.0075), places: 14 },
           { type: "line", a: at(-0.2875, -0.1018), b: at(0.2973, 0.143), count: 45, places: 14 },
-          { type: "grid", a: at(-0.3691, -0.1426), b: at(0.3925, 0.2246), size: 5, twoPart: true, places: 20 },
-          { type: "grid", a: at(0.1, 0.1), b: at(0.2, 0.2), size: 2, twoPart: false, places: 14 },
+          { type: "contour", a: at(-0.3691, -0.1426), b: at(0.3925, 0.2246), points: [at(-0.3691, -0.1426), at(0.01, 0.05), at(0.3925, 0.2246)], places: 20 },
+          { type: "contour", a: at(0.1, 0.1), b: at(0.2, 0.2), points: [at(0.1, 0.1), at(0.2, 0.2)], places: 14 },
         ],
       };
       function near(p, q, places) {
@@ -6418,8 +6418,10 @@
       }
       function sameGroup(group, i) {
         var got = back.inspect[i];
-        return !!got && got.type === group.type && got.places === group.places && got.count === group.count && got.size === group.size &&
-          !!got.twoPart === !!group.twoPart && near(group.a, got.a, group.places) && (!group.b || near(group.b, got.b, group.places));
+        return !!got && got.type === group.type && got.places === group.places && got.count === group.count &&
+          near(group.a, got.a, group.places) && (!group.b || near(group.b, got.b, group.places)) &&
+          (!group.points || (!!got.points && got.points.length === group.points.length &&
+            group.points.every(function (p, k) { return near(p, got.points[k], group.places); })));
       }
       var fragment = ShareUrl.encode({ page: "map", scene: scene, view: view });
       var back = ShareUrl.decode(fragment).view;
@@ -7434,7 +7436,7 @@
 
   addTest(
     "A trajectory run taken a chunk at a time matches one call, with another run and evictions in between",
-    "Inspect (Grid) and (Line) locks ran every point in one task and froze the page for up to 45 s; split into slices, runs take turns on one context",
+    "Inspect (Line) locks ran every point in one task and froze the page for up to 45 s; split into slices, runs take turns on one context",
     function () {
       var scene = samplePendulum(), STEPS = 400;
       var f32 = PhysicsGridCodegen.compileHoverTrajectoryGLSL(scene, 0.7, -0.3, STEPS, "f32");

@@ -103,7 +103,6 @@
       dropShadow: $("perf-drop-shadow-checkbox"),
       dpr: $("perf-dpr-select"), frame: $("perf-frame-select"), draw: $("perf-draw-select"), memory: $("perf-playback-memory-select"),
       lineCount: $("inspect-line-sample-count-slider"), lineCountReadout: $("inspect-line-sample-count-readout"),
-      gridSize: $("inspect-grid-size-slider"), gridSizeReadout: $("inspect-grid-size-readout"),
       volume: $("grid-sound-volume-slider"), volumeIcon: $("grid-sound-volume-icon"),
       resetAll: $("grid-btn-reset-all"),
     };
@@ -162,7 +161,6 @@
     }
     function syncReadouts() {
       el.lineCountReadout.textContent = el.lineCount.value;
-      el.gridSizeReadout.textContent = el.gridSize.value + "\u00d7" + el.gridSize.value;
       el.resFill.style.left = el.resMin.value + "%";
       el.resFill.style.width = Math.max(0, Number(el.resMax.value) - Number(el.resMin.value)) + "%";
       el.resReadout.textContent = el.resMax.value === "100" ? "down to 1 sim/px" : el.resMax.value === "90" ? "down to 2px" : "set";
@@ -307,7 +305,7 @@
   var displayModePanelBody = document.getElementById("grid-display-mode-list");
   var btnInspectPoint = document.getElementById("btn-inspect-point");
   var btnInspectLine = document.getElementById("btn-inspect-line");
-  var btnInspectGrid = document.getElementById("btn-inspect-grid");
+  var btnInspectContour = document.getElementById("btn-inspect-contour");
   var btnInspectClearAll = document.getElementById("btn-inspect-clear-all");
   var btnMovieInspect = document.getElementById("movie-inspect");
   var btnSuperlativeLargest = document.getElementById("btn-superlative-largest");
@@ -332,9 +330,6 @@
   var reusePictureCheckbox = document.getElementById("reuse-picture-checkbox");
   var inspectLineSampleCountSlider = document.getElementById("inspect-line-sample-count-slider");
   var inspectLineSampleCountReadout = document.getElementById("inspect-line-sample-count-readout");
-  var inspectGridSizeSlider = document.getElementById("inspect-grid-size-slider");
-  var inspectGridSizeReadout = document.getElementById("inspect-grid-size-readout");
-  var inspectGridTwoPartCheckbox = document.getElementById("inspect-grid-two-part-checkbox");
   var gridPlayPauseBtn = document.getElementById("grid-play-pause");
   var evolutionInspectCheckbox = document.getElementById("evolution-inspect-checkbox");
   var gridTimelineSection = document.getElementById("grid-timeline-section");
@@ -586,7 +581,7 @@
   var settingsMenu = makeMenu("menu-settings", "grid-btn-settings", "right",
     function (open) { if (!open) AppTips.drop("advanced-mode"); });
 
-  // Collapsing Inspect stops the preview (it has sound) and disarms Line/Grid, but keeps inspectedGroups so
+  // Collapsing Inspect stops the preview (it has sound) and disarms Line/Contour, but keeps inspectedGroups so
   // reopening restores them. With the map following locked points the preview plays on, muted, for Map Evolution.
   var inspectMenu = makeMenu("menu-inspect", "grid-btn-inspect", "left",
     function (open) {
@@ -1945,9 +1940,9 @@
   function worldPointDelta(a, b, axis) {
     return (b[axis] - a[axis]) + ((b[axis + "Lo"] || 0) - (a[axis + "Lo"] || 0));
   }
-  function lerpWorldPoint(ax, bx, tx, ay, by, ty) {
-    var px = ddAddNumber(ax.x, ax.xLo || 0, worldPointDelta(ax, bx, "x") * tx);
-    var py = ddAddNumber(ay.y, ay.yLo || 0, worldPointDelta(ay, by, "y") * ty);
+  function lerpWorldPoint(a, b, t) {
+    var px = ddAddNumber(a.x, a.xLo || 0, worldPointDelta(a, b, "x") * t);
+    var py = ddAddNumber(a.y, a.yLo || 0, worldPointDelta(a, b, "y") * t);
     return { x: px[0], y: py[0], xLo: px[1], yLo: py[1] };
   }
 
@@ -2546,6 +2541,64 @@
     return { width: w, height: h, values: values };
   }
 
+  // One sample per screen pixel of the view, filled a band at a time over several frames.
+  // done gets { width, height, t }, t row by row from the bottom. A new request replaces the one running.
+  var viewSample = null;
+  var VIEW_SAMPLE_FRAME_MS = 8;
+  function viewSampleKey() { return bounceMaxViewKey() + " " + renderedSteps() + " " + bounceMaxValue + " " + sceneGeneration; }
+
+  function cancelViewSample() {
+    if (!viewSample) return;
+    if (viewSample.frame) cancelAnimationFrame(viewSample.frame);
+    if (viewSample.shown) hideInspectToast();
+    freeSampleTarget(viewSample.target);
+    viewSample = null;
+  }
+
+  function sampleViewPerPixel(label, contour, done) {
+    cancelViewSample();
+    var h = clamp(Math.round(canvas.getBoundingClientRect().height), 2, MAX_TEXTURE_SIZE);
+    var w = clamp(Math.round(h * canvas.width / canvas.height), 2, MAX_TEXTURE_SIZE);
+    // Global Stats' band size: half the ladder's pixel budget, capped.
+    var bandRows = clamp(Math.floor(ladderBudget.budget / 2 / w), 1, Math.min(h, Math.max(1, Math.floor(STATS_MAX_BAND_SAMPLES / w))));
+    viewSample = {
+      key: viewSampleKey(), label: label, contour: contour, done: done, grid: { width: w, height: h, t: new Float32Array(w * h) }, row: 0,
+      target: createSampleTarget(w, bandRows), bandRows: bandRows, bandBuffer: new Float32Array(w * bandRows * 4), frame: 0, shown: false,
+    };
+    sampleViewBands(viewSample);
+  }
+
+  // Bands for about VIEW_SAMPLE_FRAME_MS a frame; readSampleBand waits on the GPU, so the time is real.
+  function sampleViewBands(run) {
+    run.frame = 0;
+    if (run !== viewSample) return;
+    if (run.key !== viewSampleKey()) {
+      cancelViewSample();
+      showInspectToast("The map changed, click again");
+      return;
+    }
+    var grid = run.grid, start = performance.now();
+    while (run.row < grid.height) {
+      var drawn = drawSampleBand(run.target, grid.width, grid.height, run.row, run.bandRows, false);
+      if (drawn === 0) {
+        cancelViewSample();
+        showInspectToast("The map can't be measured at this precision");
+        return;
+      }
+      readSampleBand(run.target, drawn, run.bandBuffer);
+      for (var i = 0; i < drawn * grid.width; i++) grid.t[run.row * grid.width + i] = run.bandBuffer[i * 4];
+      run.row += drawn;
+      if (run.row < grid.height && performance.now() - start > VIEW_SAMPLE_FRAME_MS) {
+        showInspectToast(run.label + " " + Math.floor(100 * run.row / grid.height) + "%");
+        run.shown = true;
+        run.frame = requestAnimationFrame(function () { sampleViewBands(run); });
+        return;
+      }
+    }
+    cancelViewSample();
+    run.done(grid);
+  }
+
   // Trick Shot: whether the rendered pixel under (clientX, clientY) is in the goal region, by sampling the
   // field at that pixel's own world point. Null while nothing can measure (or without a goal).
   function goalAtPixel(clientX, clientY) {
@@ -2567,12 +2620,6 @@
   global.FractalGrid.goalAt = goalAtPixel;
 
   // ---- Superlatives: largest/smallest/rarest/sharpest-edge point in the view, locked as Inspect points ----
-  var SUPERLATIVE_SAMPLE_LONG_SIDE = 200;
-
-  function tAt(grid, col, row) {
-    return grid.values[(row * grid.width + col) * 4];
-  }
-
   // Circular outputs need a wraparound-aware distance (t=0.99 and t=0.02 are close).
   function valueDistance(a, b) {
     // Basins are categories: different or not.
@@ -2582,7 +2629,6 @@
   }
 
   // t=0 and t=1 coincide on a circular output, so comparisons straddling that seam are skipped.
-  // 0.15, not tighter: the sample grid is coarse.
   var WRAP_BORDER_EPSILON = 0.15;
   function wrapBorderSide(t) {
     if (!isCircularOutput) return null;
@@ -2612,21 +2658,6 @@
     }
   }
 
-  function precomputeInitialStates(grid) {
-    var states = new Array(grid.width * grid.height);
-    for (var row = 0; row < grid.height; row++) {
-      for (var col = 0; col < grid.width; col++) {
-        var w = sampleCoordToWorld(grid, col, row);
-        states[row * grid.width + col] = initialStateAt(w.x, w.y);
-      }
-    }
-    return states;
-  }
-
-  function stateAt(states, grid, col, row) {
-    return states[row * grid.width + col];
-  }
-
   // Adjacent samples' starts differ by a tiny amount; a jump near a frame dimension can only be the settle wrap.
   function inputStateCrossesSeam(a, b) {
     if (!a || !b) return false;
@@ -2638,78 +2669,102 @@
     return false;
   }
 
-  function findExtremeT(grid, wantMax) {
-    var best = wantMax ? -Infinity : Infinity;
-    var bestCol = 0, bestRow = 0;
-    for (var row = 0; row < grid.height; row++) {
-      for (var col = 0; col < grid.width; col++) {
-        var v = tAt(grid, col, row);
-        if (wantMax ? v > best : v < best) {
-          best = v;
-          bestCol = col;
-          bestRow = row;
-        }
+  // seam(i, j): whether neighboring samples i and j start on opposite sides of a frame edge.
+  // Starts are found on every SEAM_BLOCK-th sample; only blocks whose corners straddle a seam look at every sample.
+  var SEAM_BLOCK = 8;
+  function sampleSeams(grid) {
+    if (!PhysicsEngine.wrapsAtEdges(scene)) return function () { return false; };
+    var w = grid.width, h = grid.height, states = {}, blocks = {};
+    function stateOf(c, r) {
+      var i = r * w + c;
+      if (!(i in states)) {
+        var p = sampleCoordToWorld(grid, c, r);
+        states[i] = initialStateAt(p.x, p.y);
       }
+      return states[i];
     }
-    return { col: bestCol, row: bestRow };
+    function blockHasSeam(bc, br) {
+      var key = br * w + bc;
+      if (!(key in blocks)) {
+        var c0 = bc * SEAM_BLOCK, c1 = Math.min(c0 + SEAM_BLOCK, w - 1), r0 = br * SEAM_BLOCK, r1 = Math.min(r0 + SEAM_BLOCK, h - 1);
+        var a = stateOf(c0, r0), b = stateOf(c1, r0), c = stateOf(c0, r1), d = stateOf(c1, r1);
+        blocks[key] = inputStateCrossesSeam(a, b) || inputStateCrossesSeam(a, c) || inputStateCrossesSeam(a, d) ||
+          inputStateCrossesSeam(b, c) || inputStateCrossesSeam(b, d) || inputStateCrossesSeam(c, d);
+      }
+      return blocks[key];
+    }
+    return function (i, j) {
+      var ci = i % w, ri = (i - ci) / w, cj = j % w, rj = (j - cj) / w;
+      if (!blockHasSeam(Math.floor(Math.min(ci, cj) / SEAM_BLOCK), Math.floor(Math.min(ri, rj) / SEAM_BLOCK))) return false;
+      return inputStateCrossesSeam(stateOf(ci, ri), stateOf(cj, rj));
+    };
+  }
+
+  function findExtremeT(grid, wantMax) {
+    var best = wantMax ? -Infinity : Infinity, bestIndex = 0;
+    for (var i = 0; i < grid.t.length; i++) {
+      var v = grid.t[i];
+      if (wantMax ? v > best : v < best) { best = v; bestIndex = i; }
+    }
+    return bestIndex;
   }
 
   // Rarest = least like its 8 neighbors (mean valueDistance, maximized); neighbors across either seam are skipped.
-  function findRarest(grid, states) {
-    var bestScore = -Infinity, bestCol = 0, bestRow = 0;
-    for (var row = 0; row < grid.height; row++) {
-      for (var col = 0; col < grid.width; col++) {
-        var v = tAt(grid, col, row);
-        var sum = 0, count = 0;
+  function findRarest(grid, seam) {
+    var w = grid.width, h = grid.height, t = grid.t;
+    var bestScore = -Infinity, bestIndex = 0, near = [];
+    function score(i, skipSeams) {
+      var sum = 0, count = 0;
+      for (var k = 0; k < near.length; k++) {
+        var n = near[k];
+        if (pairCrossesWrapBorder(t[i], t[n])) continue;
+        if (skipSeams && seam(i, n)) continue;
+        sum += valueDistance(t[i], t[n]);
+        count++;
+      }
+      return count > 0 ? sum / count : 0;
+    }
+    for (var row = 0; row < h; row++) {
+      for (var col = 0; col < w; col++) {
+        var i = row * w + col;
+        near.length = 0;
         for (var dr = -1; dr <= 1; dr++) {
           for (var dc = -1; dc <= 1; dc++) {
-            if (dr === 0 && dc === 0) continue;
-            var nc = col + dc, nr = row + dr;
-            if (nc < 0 || nc >= grid.width || nr < 0 || nr >= grid.height) continue;
-            var nv = tAt(grid, nc, nr);
-            if (pairCrossesWrapBorder(v, nv)) continue;
-            if (inputStateCrossesSeam(stateAt(states, grid, col, row), stateAt(states, grid, nc, nr))) continue;
-            sum += valueDistance(v, nv);
-            count++;
+            if ((dr !== 0 || dc !== 0) && col + dc >= 0 && col + dc < w && row + dr >= 0 && row + dr < h) near.push(i + dr * w + dc);
           }
         }
-        var score = count > 0 ? sum / count : 0;
-        if (score > bestScore) { bestScore = score; bestCol = col; bestRow = row; }
+        // No mean is above the largest neighbor distance, so seams are checked only where that could win.
+        var bound = 0;
+        for (var k = 0; k < near.length; k++) bound = Math.max(bound, valueDistance(t[i], t[near[k]]));
+        if (bound <= bestScore) continue;
+        var s = score(i, true);
+        if (s > bestScore) { bestScore = s; bestIndex = i; }
       }
     }
-    return { col: bestCol, row: bestRow };
+    return bestIndex;
   }
 
-  // Most different ADJACENT pair; checking right and down neighbors visits each edge once.
-  function findSharpestEdge(grid, states) {
-    var bestScore = -Infinity, bestA = null, bestB = null;
-    for (var row = 0; row < grid.height; row++) {
-      for (var col = 0; col < grid.width; col++) {
-        var v = tAt(grid, col, row);
-        if (col + 1 < grid.width) {
-          var vRight = tAt(grid, col + 1, row);
-          if (!pairCrossesWrapBorder(v, vRight) && !inputStateCrossesSeam(stateAt(states, grid, col, row), stateAt(states, grid, col + 1, row))) {
-            var dRight = valueDistance(v, vRight);
-            if (dRight > bestScore) { bestScore = dRight; bestA = { col: col, row: row }; bestB = { col: col + 1, row: row }; }
-          }
-        }
-        if (row + 1 < grid.height) {
-          var vDown = tAt(grid, col, row + 1);
-          if (!pairCrossesWrapBorder(v, vDown) && !inputStateCrossesSeam(stateAt(states, grid, col, row), stateAt(states, grid, col, row + 1))) {
-            var dDown = valueDistance(v, vDown);
-            if (dDown > bestScore) { bestScore = dDown; bestA = { col: col, row: row }; bestB = { col: col, row: row + 1 }; }
-          }
-        }
+  // Most different adjacent pair; checking right and down neighbors visits each edge once.
+  function findSharpestEdge(grid, seam) {
+    var w = grid.width, h = grid.height, t = grid.t;
+    var bestScore = -Infinity, best = null;
+    function consider(i, j) {
+      if (pairCrossesWrapBorder(t[i], t[j])) return;
+      var d = valueDistance(t[i], t[j]);
+      if (d > bestScore && !seam(i, j)) { bestScore = d; best = [i, j]; }
+    }
+    for (var row = 0; row < h; row++) {
+      for (var col = 0; col < w; col++) {
+        var i = row * w + col;
+        if (col + 1 < w) consider(i, i + 1);
+        if (row + 1 < h) consider(i, i + w);
       }
     }
-    return [bestA, bestB];
+    return best;
   }
 
-  function superlativeGrid() {
-    var aspect = canvasArea.clientHeight > 0 ? canvasArea.clientWidth / canvasArea.clientHeight : 1;
-    var w = aspect >= 1 ? SUPERLATIVE_SAMPLE_LONG_SIDE : Math.max(1, Math.round(SUPERLATIVE_SAMPLE_LONG_SIDE * aspect));
-    var h = aspect >= 1 ? Math.max(1, Math.round(SUPERLATIVE_SAMPLE_LONG_SIDE / aspect)) : SUPERLATIVE_SAMPLE_LONG_SIDE;
-    return sampleValueGrid(w, h);
+  function sampleIndexToWorld(grid, i) {
+    return sampleCoordToWorld(grid, i % grid.width, Math.floor(i / grid.width));
   }
 
   function runSuperlative(kind) {
@@ -2717,33 +2772,35 @@
       toastInspectFull(false);
       return;
     }
-    var grid = superlativeGrid();
-    if (!grid) return; // heuristic-only sampler unavailable (see setUpColorSpreadSampler), nothing to do
-    if (kind === "largest") {
-      var largest = findExtremeT(grid, true);
-      lockPointAt(sampleCoordToWorld(grid, largest.col, largest.row));
-    } else if (kind === "smallest") {
-      var smallest = findExtremeT(grid, false);
-      lockPointAt(sampleCoordToWorld(grid, smallest.col, smallest.row));
-    } else if (kind === "rarest") {
-      var rarest = findRarest(grid, precomputeInitialStates(grid));
-      lockPointAt(sampleCoordToWorld(grid, rarest.col, rarest.row));
-    } else if (kind === "edge") {
-      var pair = findSharpestEdge(grid, precomputeInitialStates(grid));
-      lockPoints([sampleCoordToWorld(grid, pair[0].col, pair[0].row), sampleCoordToWorld(grid, pair[1].col, pair[1].row)]);
-    }
+    if (!canSampleField()) return;
+    sampleViewPerPixel("Searching the map", false, function (grid) {
+      if (kind === "largest" || kind === "smallest") {
+        lockPointAt(sampleIndexToWorld(grid, findExtremeT(grid, kind === "largest")));
+      } else if (kind === "rarest") {
+        lockPointAt(sampleIndexToWorld(grid, findRarest(grid, sampleSeams(grid))));
+      } else {
+        var pair = findSharpestEdge(grid, sampleSeams(grid));
+        if (pair) lockPoints([sampleIndexToWorld(grid, pair[0]), sampleIndexToWorld(grid, pair[1])]);
+      }
+    });
   }
 
-  // Where Sharpest Pair would land, in client pixels; nothing is inspected. Sample row 0 is the bottom.
+  // Where Sharpest Pair would land, in client pixels, from a coarse sample; nothing is inspected.
+  var ZOOM_TIP_SAMPLE_LONG_SIDE = 200;
   function sharpestPairClientPoint() {
-    var grid = superlativeGrid();
-    if (!grid) return null;
-    var pair = findSharpestEdge(grid, precomputeInitialStates(grid));
-    if (!pair[0]) return null;
+    var aspect = canvasArea.clientHeight > 0 ? canvasArea.clientWidth / canvasArea.clientHeight : 1;
+    var w = aspect >= 1 ? ZOOM_TIP_SAMPLE_LONG_SIDE : Math.max(1, Math.round(ZOOM_TIP_SAMPLE_LONG_SIDE * aspect));
+    var h = aspect >= 1 ? Math.max(1, Math.round(ZOOM_TIP_SAMPLE_LONG_SIDE / aspect)) : ZOOM_TIP_SAMPLE_LONG_SIDE;
+    var sample = sampleValueGrid(w, h);
+    if (!sample) return null;
+    var grid = { width: w, height: h, t: new Float32Array(w * h) };
+    for (var i = 0; i < w * h; i++) grid.t[i] = sample.values[i * 4];
+    var pair = findSharpestEdge(grid, sampleSeams(grid));
+    if (!pair) return null;
     var rect = canvas.getBoundingClientRect();
     return {
-      x: rect.left + ((pair[0].col + pair[1].col) / 2 + 0.5) / grid.width * rect.width,
-      y: rect.bottom - ((pair[0].row + pair[1].row) / 2 + 0.5) / grid.height * rect.height,
+      x: rect.left + ((pair[0] % w + pair[1] % w) / 2 + 0.5) / w * rect.width,
+      y: rect.bottom - ((Math.floor(pair[0] / w) + Math.floor(pair[1] / w)) / 2 + 0.5) / h * rect.height,
     };
   }
 
@@ -3076,12 +3133,10 @@
   }
 
   // ---- Inspect: locked reference points played back alongside the hover ----
-  // Groups: "point" (one entry), "line" (entries along a drag), "grid" (a computeGridLayout-sized set over a
-  // dragged box, drawn as a mesh). An entry is trajectoryEntry's result plus a color; Grid Size 8 needs 176.
+  // Groups: "point" (one entry), "line" (entries along a drag), "contour" (entries along a level line). An entry is
+  // trajectoryEntry's result plus a color.
   var MAX_INSPECT_POINTS = 300;
-  var inspectGridSize = Number(document.getElementById("inspect-grid-size-slider").value) || 3;
-  var inspectGridTwoPart = document.getElementById("inspect-grid-two-part-checkbox").checked;
-  var inspectedGroups = []; // each: { type, points: [...], startWorld, endWorld (line/grid), cols, rows, segments, meshLineEls, outputBodyIndex (grid only) }
+  var inspectedGroups = []; // each: { type, points: [...], startWorld, endWorld (line/contour), contourPoints (contour only) }
   function totalInspectedPointCount() {
     var total = 0;
     for (var i = 0; i < inspectedGroups.length; i++) total += inspectedGroups[i].points.length;
@@ -3089,15 +3144,16 @@
   }
 
   // Which drag the next gesture commits to. "point" is touch-only (no hover) and never takes the drag from panning.
-  var inspectArmMode = null; // null | "point" | "line" | "grid"
+  var inspectArmMode = null; // null | "point" | "line" | "contour"
   function inspectArmTakesDrag() {
-    return inspectArmMode === "line" || inspectArmMode === "grid";
+    return inspectArmMode === "line";
   }
   function disarmInspect() {
     inspectArmMode = null;
+    if (viewSample && viewSample.contour) cancelViewSample();
     btnInspectPoint.classList.remove("inspect-armed");
     btnInspectLine.classList.remove("inspect-armed");
-    btnInspectGrid.classList.remove("inspect-armed");
+    btnInspectContour.classList.remove("inspect-armed");
   }
 
   // Never reassigned, so removing a point never recolors the others; resets only once every group is gone.
@@ -3114,7 +3170,7 @@
 
   // Points per Inspect (Line) drag, hues split evenly; the dot pool is built at the slider's max so it never resizes.
   var INSPECT_LINE_SAMPLE_MAX = 60;
-  var inspectLineSampleCount = Number(document.getElementById("inspect-line-sample-count-slider").value) || 30;
+  var inspectLineSampleCount = Number(document.getElementById("inspect-line-sample-count-slider").value) || 29;
   // Short of 360 so the last point never matches the first.
   var INSPECT_LINE_MAX_HUE = 324;
   function inspectLinePointColor(i, count) {
@@ -3129,89 +3185,16 @@
     var points = [];
     for (var i = 0; i < count; i++) {
       var t = count > 1 ? i / (count - 1) : 0;
-      points.push(lerpWorldPoint(start, end, t, start, end, t));
+      points.push(lerpWorldPoint(start, end, t));
     }
     return points;
   }
 
-  function evenlySpacedGrid(corner1, corner2, cols, rows) {
-    // Decided on the double-double delta: at deep zoom both corners' .x can be the same float64.
-    var xFirst = worldPointDelta(corner1, corner2, "x") >= 0;
-    var yFirst = worldPointDelta(corner1, corner2, "y") >= 0;
-    var minXc = xFirst ? corner1 : corner2, maxXc = xFirst ? corner2 : corner1;
-    var minYc = yFirst ? corner1 : corner2, maxYc = yFirst ? corner2 : corner1;
-    var points = [];
-    for (var row = 0; row < rows; row++) {
-      var ty = rows > 1 ? row / (rows - 1) : 0;
-      for (var col = 0; col < cols; col++) {
-        var tx = cols > 1 ? col / (cols - 1) : 0;
-        var point = lerpWorldPoint(minXc, maxXc, tx, minYc, maxYc, ty);
-        point.col = col; point.row = row;
-        points.push(point);
-      }
-    }
-    return points;
-  }
-  // Grid Settings -> the dense dot grid a drag builds. N < 2 clamps to 2 (a plain box, intentionally). Two-part
-  // lines add a midpoint dot per gap (2*nEff - 1 per axis); lockGridOfPoints' filter drops the interior dots.
-  function computeGridLayout(n, twoPart) {
-    var nEff = Math.max(n, 2);
-    var size = twoPart ? (2 * nEff - 1) : nEff;
-    var axes = [];
-    for (var i = 0; i < nEff; i++) {
-      axes.push(Math.round(i * (size - 1) / (nEff - 1)));
-    }
-    return { size: size, axes: axes };
-  }
-  function isAxisIn(list, i) { return list.indexOf(i) !== -1; }
-  // RGB(x, y, 0.5) by (col, row) over the grid's own denseSize: position-only, legible whatever the scene does.
-  function inspectGridPointColor(col, row, denseSize) {
-    var x = denseSize > 1 ? col / (denseSize - 1) : 0;
-    var y = denseSize > 1 ? row / (denseSize - 1) : 0;
-    var rgb = ColorBlind.on() ? ColorBlind.gridColor(x, y) : [x, y, 0.5];
-    var r = Math.round(rgb[0] * 255), g = Math.round(rgb[1] * 255), b = Math.round(rgb[2] * 255);
-    return { r: r, g: g, b: b, fill: "rgb(" + r + "," + g + "," + b + ")", stroke: "#000000", made: ["grid", col, row, denseSize] };
-  }
   function remadeInspectColor(color) {
     var m = color && color.made;
     if (!m) return color;
     if (m[0] === "point") return lockedPointColor(m[1]);
-    if (m[0] === "line") return inspectLinePointColor(m[1], m[2]);
-    return inspectGridPointColor(m[1], m[2], m[3]);
-  }
-  function averageRgbFill(colorA, colorB) {
-    return "rgb(" + Math.round((colorA.r + colorB.r) / 2) + "," + Math.round((colorA.g + colorB.g) / 2) + "," + Math.round((colorA.b + colorB.b) / 2) + ")";
-  }
-  // One chain per drawn row/column (lineAxes), every dot along it so a two-part line can kink. `points` is row-major.
-  function buildGridMeshSegments(points, lineAxes, denseSize) {
-    var indexAt = {};
-    points.forEach(function (p, i) { indexAt[p.row + "," + p.col] = i; });
-    var segments = [];
-    function addChain(cells) {
-      for (var i = 0; i + 1 < cells.length; i++) {
-        segments.push([indexAt[cells[i]], indexAt[cells[i + 1]]]);
-      }
-    }
-    lineAxes.forEach(function (row) {
-      var cells = [];
-      for (var col = 0; col < denseSize; col++) cells.push(row + "," + col);
-      addChain(cells);
-    });
-    lineAxes.forEach(function (col) {
-      var cells = [];
-      for (var row = 0; row < denseSize; row++) cells.push(row + "," + col);
-      addChain(cells);
-    });
-    return segments;
-  }
-
-  // Which body a grid point plots: scene.output.body, or for Scene Lifespan (no body) the first non-anchored one.
-  function inspectGridOutputBodyIndex() {
-    if (scene.output.property !== "lifespan") return scene.output.body;
-    for (var i = 0; i < scene.bodies.length; i++) {
-      if (!scene.bodies[i].isAnchored) return i;
-    }
-    return scene.bodies.length > 0 ? 0 : null;
+    return inspectLinePointColor(m[1], m[2]);
   }
 
   // World point -> CSS pixels relative to #canvas-area. gl_FragCoord is bottom-left, the DOM top-left: hence fy.
@@ -3232,7 +3215,7 @@
   }
   function worldPointToCanvasArea(p, frame) { return worldToCanvasAreaPixel(p.x, p.y, p.xLo, p.yLo, frame); }
 
-  // Pooled .inspect-marker per point/line point; grids only reposition their mesh lines. Clicking removes the
+  // Pooled .inspect-marker per inspected point. Clicking removes the
   // WHOLE group; inspectMarkerGroupIndex is read fresh per click since slots change as points come and go.
   var inspectMarkerEls = [];
   var inspectMarkerGroupIndex = [];
@@ -3241,14 +3224,13 @@
     var flatPoints = [];
     inspectMarkerGroupIndex = [];
     inspectedGroups.forEach(function (group, groupIndex) {
-      if (group.type === "grid") return;
       group.points.forEach(function (point) {
         flatPoints.push(point);
         inspectMarkerGroupIndex.push(groupIndex);
       });
     });
     // The lock in progress: -1, so a click cancels it.
-    if (lockJob && lockJob.type !== "grid") {
+    if (lockJob) {
       lockJob.entries.forEach(function (entry) {
         if (!entry) return;
         flatPoints.push(entry);
@@ -3282,24 +3264,9 @@
       el.style.setProperty("--marker-color", entry.color.fill);
       el.hidden = !visible;
     });
-
-    var grids = inspectedGroups.filter(function (group) { return group.type === "grid"; });
-    if (lockJob && lockJob.type === "grid") grids.push({ points: lockJob.entries, segments: lockJob.segments, meshLineEls: lockJob.meshLineEls });
-    grids.forEach(function (group) {
-      group.segments.forEach(function (pair, i) {
-        var lineEl = group.meshLineEls[i], ends = [group.points[pair[0]], group.points[pair[1]]];
-        if (!ends[0] || !ends[1]) { lineEl.setAttribute("hidden", ""); return; }
-        var a = worldPointToCanvasArea(ends[0].worldPoint, frame);
-        var b = worldPointToCanvasArea(ends[1].worldPoint, frame);
-        lineEl.setAttribute("x1", a.x); lineEl.setAttribute("y1", a.y);
-        lineEl.setAttribute("x2", b.x); lineEl.setAttribute("y2", b.y);
-        if (visible) lineEl.removeAttribute("hidden");
-        else lineEl.setAttribute("hidden", "");
-      });
-    });
   }
 
-  // Inspect (Line) drag preview, pooled at the slider's max; hidden per element (#inspect-preview also hosts grids).
+  // Inspect (Line) drag preview, pooled at the slider's max; hidden per element.
   var SVG_NS = "http://www.w3.org/2000/svg";
   var inspectLinePreviewLine = document.createElementNS(SVG_NS, "line");
   inspectLinePreviewLine.setAttribute("stroke", "rgba(255,255,255,0.7)");
@@ -3345,30 +3312,6 @@
     inspectLinePreviewDots.forEach(function (d) { d.setAttribute("hidden", ""); });
   }
 
-  var inspectGridPreviewRect = document.createElementNS(SVG_NS, "rect");
-  inspectGridPreviewRect.setAttribute("fill", "none");
-  inspectGridPreviewRect.setAttribute("stroke", "rgba(255,255,255,0.7)");
-  inspectGridPreviewRect.setAttribute("stroke-width", "2");
-  inspectGridPreviewRect.setAttribute("stroke-dasharray", "6,4");
-  inspectGridPreviewRect.setAttribute("hidden", "");
-  inspectPreviewSvg.appendChild(inspectGridPreviewRect);
-
-  function updateInspectGridPreview(startWorld, endWorld) {
-    var startPx = worldToCanvasAreaPixel(startWorld.x, startWorld.y, startWorld.xLo, startWorld.yLo);
-    var endPx = worldToCanvasAreaPixel(endWorld.x, endWorld.y, endWorld.xLo, endWorld.yLo);
-    inspectGridPreviewRect.setAttribute("x", Math.min(startPx.x, endPx.x));
-    inspectGridPreviewRect.setAttribute("y", Math.min(startPx.y, endPx.y));
-    inspectGridPreviewRect.setAttribute("width", Math.abs(endPx.x - startPx.x));
-    inspectGridPreviewRect.setAttribute("height", Math.abs(endPx.y - startPx.y));
-    inspectGridPreviewRect.removeAttribute("hidden");
-  }
-  function hideInspectGridPreview() {
-    inspectGridPreviewRect.setAttribute("hidden", "");
-  }
-  function hideInspectPreview() {
-    hideInspectLinePreview();
-    hideInspectGridPreview();
-  }
 
   // "Drag to inspect" toast. Never [hidden]: display:none and an opacity transition can't combine in one frame.
   var INSPECT_TOAST_VISIBLE_MS = 2200;
@@ -3377,23 +3320,24 @@
     if (inspectToastHideTimer) clearTimeout(inspectToastHideTimer);
     inspectToastEl.textContent = message;
     inspectToastEl.classList.add("visible");
-    inspectToastHideTimer = setTimeout(function () {
-      inspectToastHideTimer = null;
-      inspectToastEl.classList.remove("visible");
-    }, INSPECT_TOAST_VISIBLE_MS);
+    inspectToastHideTimer = setTimeout(hideInspectToast, INSPECT_TOAST_VISIBLE_MS);
+  }
+  function hideInspectToast() {
+    if (inspectToastHideTimer) clearTimeout(inspectToastHideTimer);
+    inspectToastHideTimer = null;
+    inspectToastEl.classList.remove("visible");
   }
 
-  var INSPECT_ROW_GROUP_GLYPH = { grid: "⊞" };
-  // A line row's icon: five overlapping dots up a diagonal, red to blue.
-  function inspectLineIcon() {
+  // A line row's icon: five overlapping dots up a diagonal, red to blue; a contour's bend into an arch.
+  function inspectLineIcon(curved) {
     var svg = document.createElementNS(SVG_NS, "svg");
     svg.setAttribute("viewBox", "0 0 18 28");
     svg.setAttribute("width", "18");
     svg.setAttribute("height", "28");
     for (var i = 0; i < 5; i++) {
       var dot = document.createElementNS(SVG_NS, "circle");
-      dot.setAttribute("cx", String(4 + i * 2.5));
-      dot.setAttribute("cy", String(23 - i * 4.5));
+      dot.setAttribute("cx", String(curved ? 3.5 + i * 2.75 : 4 + i * 2.5));
+      dot.setAttribute("cy", String(curved ? 20 - 10 * Math.sin(i * Math.PI / 4) : 23 - i * 4.5));
       dot.setAttribute("r", "3.6");
       dot.setAttribute("fill", ColorBlind.on() ? inspectLinePointColor(i, 5).fill : "hsl(" + i * 60 + ", 100%, 50%)");
       dot.setAttribute("stroke", "#000");
@@ -3428,8 +3372,7 @@
     } else {
       icon.className = "inspect-row-icon";
       icon.setAttribute("aria-hidden", "true");
-      if (type === "line") icon.appendChild(inspectLineIcon());
-      else icon.textContent = INSPECT_ROW_GROUP_GLYPH[type];
+      icon.appendChild(inspectLineIcon(type === "contour"));
     }
     var coords = document.createElement("div");
     coords.className = "inspect-coords-group";
@@ -3720,7 +3663,7 @@
     var full = reservedPointCount() >= MAX_INSPECT_POINTS;
     btnInspectPoint.disabled = full;
     btnInspectLine.disabled = full;
-    btnInspectGrid.disabled = full;
+    btnInspectContour.disabled = full;
     btnInspectClearAll.hidden = inspectedGroups.length === 0 && !lockJob;
     updateMovieInspectButton();
   }
@@ -3925,7 +3868,7 @@
   }
 
   // job: { type, worldPoints, describe (its share-link groups), colorOf(i), finish(entries) (true if it added a
-  // group), relock(), meshLineEls and segments for a grid }. It waits its turn behind a lock in progress.
+  // group), relock() }. It waits its turn behind a lock in progress.
   function startLockJob(job) {
     job.entries = [];
     job.filled = 0;
@@ -3950,14 +3893,13 @@
       lockJob = null;
       // The duration or the physics changed meanwhile: again, with the new runs, ahead of the others.
       if (job.steps !== hoverStepCount() || job.generation !== sceneGeneration) {
-        removeLockMesh(job);
         job.relock();
         if (!lockJob) runNextLock();
         updateLockUI();
         return;
       }
-      // A grid or point that failed stays armed for a retry.
-      if (!job.finish(job.entries) && job.armMode && job.type !== "line" && !inspectArmMode) armInspect(job.armMode);
+      // A point that failed stays armed for a retry.
+      if (!job.finish(job.entries) && job.armMode && job.type === "point" && !inspectArmMode) armInspect(job.armMode);
       runNextLock();
       updateInspectUI();
     });
@@ -3966,10 +3908,6 @@
   function runNextLock() {
     var next = lockQueue.shift();
     if (next) runLockJob(next);
-  }
-
-  function removeLockMesh(job) {
-    if (job.meshLineEls) job.meshLineEls.forEach(function (el) { el.remove(); });
   }
 
   // One lock, running or waiting; the next waiting one starts.
@@ -3982,7 +3920,6 @@
     } else if (lockQueue.indexOf(job) !== -1) {
       lockQueue.splice(lockQueue.indexOf(job), 1);
     }
-    removeLockMesh(job);
     updateLockUI();
     if (!lockJob && inspectedGroups.length === 0) restartCurrentPreview();
   }
@@ -3991,7 +3928,6 @@
   function cancelAllLocks() {
     if (!lockJob) return;
     lockJob.handle.cancel();
-    [lockJob].concat(lockQueue).forEach(removeLockMesh);
     lockJob = null;
     lockQueue = [];
     updateLockUI();
@@ -4095,53 +4031,205 @@
     });
   }
 
-  // Inspect (Grid) drag. All-or-nothing (a partial grid reads as broken), staying armed on failure. The layout is
-  // resolved from Grid Settings once, here: a later settings change only affects the NEXT drag.
-  function lockGridOfPoints(startWorld, endWorld, gridSize, twoPart, places, linkItem) {
-    if (gridSize === undefined) { gridSize = inspectGridSize; twoPart = inspectGridTwoPart; }
-    var layout = computeGridLayout(gridSize, twoPart);
-    var worldPoints = evenlySpacedGrid(startWorld, endWorld, layout.size, layout.size)
-      .filter(function (p) { return isAxisIn(layout.axes, p.row) || isAxisIn(layout.axes, p.col); });
-    if (MAX_INSPECT_POINTS - reservedPointCount() < worldPoints.length) {
+  // ---- Inspect (Contour): points evenly spaced along the Output's level line through a click ----
+  // Marching squares on a sample of the view at one sample per screen pixel, linear along cell edges.
+  // A contour grid is { width, height, t }, t row by row from the bottom.
+  function contourT(grid, c, r) { return grid.t[r * grid.width + c]; }
+
+  // The Output at a fractional sample position, bilinear; null on a goal pixel.
+  function contourLevelAt(grid, gx, gy) {
+    var c = Math.min(Math.floor(gx), grid.width - 2), r = Math.min(Math.floor(gy), grid.height - 2);
+    var fx = gx - c, fy = gy - r, base = contourT(grid, c, r);
+    var corners = [contourT(grid, c + 1, r), contourT(grid, c, r + 1), contourT(grid, c + 1, r + 1)];
+    if (!(base >= 0) || corners.some(function (t) { return !(t >= 0); })) return null;
+    var d = corners.map(function (t) { return isCircularOutput ? t - base - Math.round(t - base) : t - base; });
+    var v = base + (1 - fy) * fx * d[0] + fy * ((1 - fx) * d[1] + fx * d[2]);
+    return isCircularOutput ? v - Math.floor(v) : v;
+  }
+
+  // Each sample's signed offset from the level (NaN on a goal pixel). Basins and counts are steps: their
+  // level line is the edge of the region clicked in.
+  function contourField(grid, level, stepped) {
+    var field = new Float32Array(grid.width * grid.height);
+    for (var i = 0; i < field.length; i++) {
+      var t = grid.t[i], d = t - level;
+      if (!(t >= 0)) field[i] = NaN;
+      else if (stepped) field[i] = valueDistance(t, level) < 1e-6 ? 0.5 : -0.5;
+      else field[i] = isCircularOutput ? d - Math.round(d) : d;
+    }
+    return field;
+  }
+
+  // The level line at sample position (gx, gy) as { points (sample coordinates), closed }, or null. Through the
+  // click when it is on the line, else from the nearest crossing; a closed line starts and ends there.
+  // seam(i, j): samples i and j start on opposite sides of a frame edge; the line ends at the first cell that does.
+  function traceContour(grid, field, gx, gy, wraps, throughClick, seam) {
+    var w = grid.width, h = grid.height, horizontal = (w - 1) * h;
+    // Edge ids: horizontal (c, r)-(c+1, r) first, then vertical (c, r)-(c, r+1).
+    function ends(e) {
+      if (e < horizontal) { var r = Math.floor(e / (w - 1)), c = e % (w - 1); return [r * w + c, r * w + c + 1]; }
+      e -= horizontal;
+      return [e, e + w];
+    }
+    function fieldCrossing(e) {
+      var ab = ends(e), da = field[ab[0]], db = field[ab[1]];
+      if (!(da === da && db === db) || (da >= 0) === (db >= 0)) return -1;
+      // The jump from +0.5 to -0.5 on a circular Output is the far side of the wheel, not the level.
+      if (wraps && Math.abs(da - db) > 0.5) return -1;
+      return da / (da - db);
+    }
+    function crossing(e) {
+      var s = fieldCrossing(e), ab = ends(e);
+      return s >= 0 && !seam(ab[0], ab[1]) ? s : -1;
+    }
+    function crossingPoint(e) {
+      var s = fieldCrossing(e);
+      if (e < horizontal) return [e % (w - 1) + s, Math.floor(e / (w - 1))];
+      e -= horizontal;
+      return [e % w, Math.floor(e / w) + s];
+    }
+    // A cell is its lower left sample's (c, r) as r * (w - 1) + c; -1 is outside.
+    function cellEdges(cell) {
+      var c = cell % (w - 1), r = Math.floor(cell / (w - 1));
+      return [r * (w - 1) + c, horizontal + r * w + c + 1, (r + 1) * (w - 1) + c, horizontal + r * w + c];
+    }
+    function edgeCells(e) {
+      if (e < horizontal) {
+        var r = Math.floor(e / (w - 1)), c = e % (w - 1);
+        return [r > 0 ? (r - 1) * (w - 1) + c : -1, r < h - 1 ? r * (w - 1) + c : -1];
+      }
+      e -= horizontal;
+      var vr = Math.floor(e / w), vc = e % w;
+      return [vc > 0 ? vr * (w - 1) + vc - 1 : -1, vc < w - 1 ? vr * (w - 1) + vc : -1];
+    }
+    function otherCell(e, cell) { var cells = edgeCells(e); return cells[0] === cell ? cells[1] : cells[0]; }
+    // The cell's crossings as pairs joined inside it; a saddle is split by its center value.
+    function cellPairs(cell) {
+      var c = cell % (w - 1), r = Math.floor(cell / (w - 1)), i = r * w + c;
+      if (seam(i, i + 1) || seam(i, i + w) || seam(i, i + w + 1)) return [];
+      var edges = cellEdges(cell), crossed = edges.filter(function (e) { return crossing(e) >= 0; });
+      if (crossed.length === 2) return [crossed];
+      if (crossed.length !== 4) return [];
+      var center = (field[i] + field[i + 1] + field[i + w] + field[i + w + 1]) / 4;
+      return (center >= 0) === (field[i + 1] >= 0) ? [[edges[3], edges[0]], [edges[1], edges[2]]] : [[edges[0], edges[1]], [edges[2], edges[3]]];
+    }
+    function partner(cell, e) {
+      var pairs = cellPairs(cell);
+      for (var i = 0; i < pairs.length; i++) {
+        if (pairs[i][0] === e) return pairs[i][1];
+        if (pairs[i][1] === e) return pairs[i][0];
+      }
+      return -1;
+    }
+    // Crossings past edge e, leaving `from`, until the view's border, a gap, or stopEdge.
+    function walk(e, from, stopEdge) {
+      var points = [], cell = otherCell(e, from);
+      for (var guard = 2 * w * h; cell >= 0 && guard > 0; guard--) {
+        var next = partner(cell, e);
+        if (next < 0) break;
+        if (next === stopEdge) return { points: points, closed: true };
+        points.push(crossingPoint(next));
+        cell = otherCell(next, cell);
+        e = next;
+      }
+      return { points: points, closed: false };
+    }
+    function distanceToSegment(p, a, b) {
+      var dx = b[0] - a[0], dy = b[1] - a[1], len2 = dx * dx + dy * dy;
+      var s = len2 > 0 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2)) : 0;
+      return Math.hypot(p[0] - a[0] - s * dx, p[1] - a[1] - s * dy);
+    }
+
+    var click = [gx, gy];
+    var clickCell = Math.min(Math.floor(gy), h - 2) * (w - 1) + Math.min(Math.floor(gx), w - 2);
+    var start;
+    var pairs = throughClick ? cellPairs(clickCell) : [];
+    if (pairs.length) {
+      var pair = pairs.length === 1 || distanceToSegment(click, crossingPoint(pairs[0][0]), crossingPoint(pairs[0][1])) <=
+        distanceToSegment(click, crossingPoint(pairs[1][0]), crossingPoint(pairs[1][1])) ? pairs[0] : pairs[1];
+      start = { before: pair[0], beforeFrom: clickCell, after: pair[1], afterFrom: clickCell, at: 1,
+        middle: [crossingPoint(pair[0]), click, crossingPoint(pair[1])] };
+    } else {
+      // Nearest first, so seams are only checked until one is clear.
+      var candidates = [];
+      for (var e = 0; e < horizontal + w * (h - 1); e++) {
+        if (fieldCrossing(e) < 0) continue;
+        var p = crossingPoint(e);
+        candidates.push({ edge: e, distance: Math.hypot(p[0] - gx, p[1] - gy) });
+      }
+      candidates.sort(function (a, b) { return a.distance - b.distance; });
+      var best = -1;
+      for (var k = 0; k < candidates.length && best < 0; k++) if (crossing(candidates[k].edge) >= 0) best = candidates[k].edge;
+      if (best < 0) return null;
+      var cells = edgeCells(best);
+      start = { before: best, beforeFrom: cells[1], after: best, afterFrom: cells[0], at: 0, middle: [crossingPoint(best)] };
+    }
+    var forward = walk(start.after, start.afterFrom, start.before);
+    if (forward.closed) {
+      return { points: start.middle.slice(start.at).concat(forward.points, start.middle.slice(0, start.at + 1)), closed: true };
+    }
+    var back = walk(start.before, start.beforeFrom, -1).points.reverse();
+    return { points: back.concat(start.middle, forward.points), closed: false };
+  }
+
+  // `count` points evenly spaced by length along a polyline; a closed one's last point would repeat its first.
+  function evenlySpacedAlong(points, count, closed) {
+    var lengths = [0];
+    for (var i = 1; i < points.length; i++) {
+      lengths.push(lengths[i - 1] + Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]));
+    }
+    var total = lengths[lengths.length - 1];
+    if (!(total > 0)) return null;
+    var out = [], k = 1;
+    for (var j = 0; j < count; j++) {
+      var at = total * j / (closed ? count : count - 1);
+      while (k < points.length - 1 && lengths[k] < at) k++;
+      var span = lengths[k] - lengths[k - 1], s = span > 0 ? Math.max(0, Math.min(1, (at - lengths[k - 1]) / span)) : 0;
+      out.push([points[k - 1][0] + s * (points[k][0] - points[k - 1][0]), points[k - 1][1] + s * (points[k][1] - points[k - 1][1])]);
+    }
+    return out;
+  }
+
+  // Inspect (Contour) click. Stays armed when there is no line to follow.
+  function lockContourAt(clientX, clientY) {
+    if (reservedPointCount() >= MAX_INSPECT_POINTS) { toastInspectFull(false); return; }
+    if (!canSampleField()) { showInspectToast("Contours can't be measured at this precision"); return; }
+    var uv = pixelToUV(clientX, clientY);
+    sampleViewPerPixel("Finding contour", true, function (grid) { traceContourAt(grid, uv); });
+  }
+
+  function traceContourAt(grid, uv) {
+    var gx = Math.max(0, Math.min(grid.width - 1, uv.uvx * grid.height + 0.5 * grid.width - 0.5));
+    var gy = Math.max(0, Math.min(grid.height - 1, uv.uvy * grid.height + 0.5 * grid.height - 0.5));
+    var stepped = isBasinOutput() || isCountOutput;
+    var level = stepped ? contourT(grid, Math.round(gx), Math.round(gy)) : contourLevelAt(grid, gx, gy);
+    var line = level === null || !(level >= 0) ? null :
+      traceContour(grid, contourField(grid, level, stepped), gx, gy, isCircularOutput && !stepped, !stepped, sampleSeams(grid));
+    var spaced = line && evenlySpacedAlong(line.points, inspectLineSampleCount, line.closed);
+    if (!spaced) { showInspectToast("No contour line here"); return; }
+    lockContourOfPoints(spaced.map(function (p) { return sampleCoordToWorld(grid, p[0], p[1]); }));
+  }
+
+  // Past MAX_INSPECT_POINTS only the first `available` points are added.
+  function lockContourOfPoints(worldPoints, places, linkItem, relocked) {
+    var available = MAX_INSPECT_POINTS - reservedPointCount();
+    if (available <= 0) {
       toastInspectFull(false, linkItem);
       return;
     }
+    if (worldPoints.length > available && !relocked) toastInspectFull(true, linkItem);
     if (places === undefined) places = viewPlaces();
-    function colorOf(i) { return inspectGridPointColor(worldPoints[i].col, worldPoints[i].row, layout.size); }
-    var segments = buildGridMeshSegments(worldPoints, layout.axes, layout.size);
-    // Shown segment by segment as both ends arrive.
-    var meshLineEls = segments.map(function (pair) {
-      var lineEl = document.createElementNS(SVG_NS, "line");
-      lineEl.setAttribute("stroke-width", "2");
-      lineEl.setAttribute("stroke", averageRgbFill(colorOf(pair[0]), colorOf(pair[1])));
-      lineEl.setAttribute("hidden", "");
-      inspectPreviewSvg.appendChild(lineEl);
-      return lineEl;
-    });
+    var count = worldPoints.length, startWorld = worldPoints[0], endWorld = worldPoints[count - 1];
     startLockJob({
-      type: "grid", worldPoints: worldPoints, segments: segments, meshLineEls: meshLineEls,
-      describe: [{ type: "grid", a: startWorld, b: endWorld, size: gridSize, twoPart: !!twoPart, places: places }],
-      colorOf: colorOf,
-      relock: function () { lockGridOfPoints(startWorld, endWorld, gridSize, twoPart, places, linkItem); },
-      finish: function (points) {
-        if (points.indexOf(null) !== -1) {
-          meshLineEls.forEach(function (el) { el.remove(); });
-          return false;
-        }
+      type: "contour", worldPoints: worldPoints.slice(0, available),
+      describe: [{ type: "contour", a: startWorld, b: endWorld, points: worldPoints, places: places }],
+      colorOf: function (i) { return inspectLinePointColor(i, count); },
+      relock: function () { lockContourOfPoints(worldPoints, places, linkItem, true); },
+      finish: function (entries) {
+        var points = entries.filter(Boolean);
+        if (points.length === 0) return false;
         inspectedGroups.push({
-          type: "grid",
-          points: points,
-          cols: layout.size,
-          rows: layout.size,
-          segments: segments,
-          meshLineEls: meshLineEls,
-          outputBodyIndex: inspectGridOutputBodyIndex(),
-          startWorld: startWorld,
-          endWorld: endWorld,
-          // What it was made with (the resolved layout can't be read back), for share links.
-          gridSize: gridSize,
-          twoPart: !!twoPart,
-          places: places,
+          type: "contour", points: points, startWorld: startWorld, endWorld: endWorld, contourPoints: worldPoints, places: places,
         });
         return true;
       },
@@ -4149,8 +4237,6 @@
   }
 
   function removeInspectedGroup(index) {
-    var group = inspectedGroups[index];
-    if (group.type === "grid") group.meshLineEls.forEach(function (el) { el.remove(); });
     inspectedGroups.splice(index, 1);
     if (inspectedGroups.length === 0) {
       nextColorIndex = 0;
@@ -4162,9 +4248,6 @@
   function clearInspected() {
     cancelAllLocks();
     cancelRecompute();
-    inspectedGroups.forEach(function (group) {
-      if (group.type === "grid") group.meshLineEls.forEach(function (el) { el.remove(); });
-    });
     inspectedGroups = [];
     pendingInspect = null;
     nextColorIndex = 0;
@@ -4178,7 +4261,7 @@
     inspectArmMode = mode;
     btnInspectPoint.classList.toggle("inspect-armed", mode === "point");
     btnInspectLine.classList.toggle("inspect-armed", mode === "line");
-    btnInspectGrid.classList.toggle("inspect-armed", mode === "grid");
+    btnInspectContour.classList.toggle("inspect-armed", mode === "contour");
   }
   btnInspectPoint.addEventListener("click", function () {
     AppTips.done("map-intro");
@@ -4189,9 +4272,9 @@
     if (reservedPointCount() >= MAX_INSPECT_POINTS) return;
     armInspect("line");
   });
-  btnInspectGrid.addEventListener("click", function () {
+  btnInspectContour.addEventListener("click", function () {
     if (reservedPointCount() >= MAX_INSPECT_POINTS) return;
-    armInspect("grid");
+    armInspect("contour");
   });
 
   btnInspectClearAll.addEventListener("click", clearInspected);
@@ -5510,9 +5593,7 @@
     lastClientY = clientY;
     if (inspectArmTakesDrag()) {
       if (dragDistance >= CLICK_DRAG_THRESHOLD) {
-        var current = snappedWorldPointFromEvent({ clientX: clientX, clientY: clientY });
-        if (inspectArmMode === "line") updateInspectLinePreview(inspectDragStartWorld, current);
-        else updateInspectGridPreview(inspectDragStartWorld, current);
+        updateInspectLinePreview(inspectDragStartWorld, snappedWorldPointFromEvent({ clientX: clientX, clientY: clientY }));
       }
       return;
     }
@@ -5524,17 +5605,17 @@
     if (dragging) {
       var current = snappedWorldPointFromEvent({ clientX: clientX, clientY: clientY });
       // The lock's own dots and row take over from the drag preview.
-      hideInspectPreview();
+      hideInspectLinePreview();
       var wasTap = dragIsTouch ? !dragPastSlop : dragDistance < CLICK_DRAG_THRESHOLD;
       if (wasTap) {
-        // A plain click locks a point (not in a Lyapunov frame, lines only); with Line/Grid armed it only
-        // reminds (a real drag is needed). A click on Topography's pinned line releases it instead.
+        // A plain click locks a point (not in a Lyapunov frame, lines only); with Line armed it only
+        // reminds (a real drag is needed), with Contour armed it traces. A click on Topography's pinned line releases it instead.
         if (featurePinned && featurePinnedHit(clientX, clientY)) {
           if (statsPanel) statsPanel.unpin(); else setPinnedOverlay(null);
         }
         else if (inspectArmMode === "line") showInspectToast("Drag to inspect a line");
-        else if (inspectArmMode === "grid") showInspectToast("Drag to inspect a grid");
-        // Neither arms without the Inspect card open, so a collapsed card is checked explicitly here.
+        else if (inspectArmMode === "contour") lockContourAt(clientX, clientY);
+        // Nothing arms without the Inspect card open, so a collapsed card is checked explicitly here.
         else if (inspectMenu.isOpen()) {
           // Elsewhere a finger's tap only locks a point once Inspect (Point) is armed; unarmed it does nothing.
           if (lyapunovMode) showInspectToast("Press Inspect (Line), then drag across the map");
@@ -5542,8 +5623,6 @@
         }
       } else if (inspectArmMode === "line") {
         lockLineOfPoints(inspectDragStartWorld, current);
-      } else if (inspectArmMode === "grid") {
-        lockGridOfPoints(inspectDragStartWorld, current);
       }
       inspectDragStartWorld = null;
     }
@@ -5576,7 +5655,7 @@
       // A second finger supersedes the first's pan or Inspect preview: a pinch is never an Inspect gesture.
       dragging = false;
       canvas.classList.remove("dragging");
-      hideInspectPreview();
+      hideInspectLinePreview();
       inspectDragStartWorld = null;
       pinchDistance = touchDistance(e.touches[0], e.touches[1]);
       var mid = touchMidpoint(e.touches[0], e.touches[1]);
@@ -5608,7 +5687,7 @@
       if (e.type === "touchcancel") {
         dragging = false;
         canvas.classList.remove("dragging");
-        hideInspectPreview();
+        hideInspectLinePreview();
         inspectDragStartWorld = null;
         pinchDistance = 0;
         return;
@@ -5622,7 +5701,7 @@
       var mid = touchMidpoint(e.touches[0], e.touches[1]);
       pinchMidX = mid.x; pinchMidY = mid.y;
     } else if (e.touches.length === 1) {
-      // Two fingers to one: keep panning. Not while Line/Grid is armed: inspectDragStartWorld
+      // Two fingers to one: keep panning. Not while Line is armed: inspectDragStartWorld
       // was cleared at the pinch, so a resumed drag would preview from null.
       pinchDistance = 0;
       if (!inspectArmTakesDrag()) {
@@ -5699,7 +5778,7 @@
     if (stepsReadout.value !== String(value)) stepsReadout.value = String(value);
   }
   // Locked points cached OLD-length trajectories: recompute in place, keeping colors. A failed point
-  // group is removed; a line/grid point keeps its stale trajectory so the group's shape survives.
+  // group is removed; a line or contour point keeps its stale trajectory so the group's shape survives.
   // A group at a time through computeEntriesInSteps, so the page stays usable and a newer duration cancels the rest.
   var recomputeHandle = null;
   var recomputingInspect = false;
@@ -5909,22 +5988,8 @@
     function recolor(entry) {
       if (entry) entry.color = remadeInspectColor(entry.color);
     }
-    function restroke(segments, lineEls, colorAt) {
-      segments.forEach(function (pair, i) {
-        lineEls[i].setAttribute("stroke", averageRgbFill(colorAt(pair[0]), colorAt(pair[1])));
-      });
-    }
-    inspectedGroups.forEach(function (group) {
-      group.points.forEach(recolor);
-      if (group.type === "grid") restroke(group.segments, group.meshLineEls, function (i) { return group.points[i].color; });
-    });
-    if (lockJob) {
-      lockJob.entries.forEach(recolor);
-      if (lockJob.type === "grid") restroke(lockJob.segments, lockJob.meshLineEls, lockJob.colorOf);
-    }
-    lockQueue.forEach(function (job) {
-      if (job.type === "grid") restroke(job.segments, job.meshLineEls, job.colorOf);
-    });
+    inspectedGroups.forEach(function (group) { group.points.forEach(recolor); });
+    if (lockJob) lockJob.entries.forEach(recolor);
     updateInspectUI();
   }
   ColorBlind.onChange(function () {
@@ -5967,28 +6032,12 @@
 
   syncDisplayModeUI();
 
-  // ---- Inspection Line Sample Count: read on the NEXT Line drag; nothing on screen changes ----
+  // ---- Inspection Line Sample Count: read on the NEXT Line drag or Contour click; nothing on screen changes ----
   inspectLineSampleCountSlider.value = String(inspectLineSampleCount);
   inspectLineSampleCountReadout.textContent = String(inspectLineSampleCount);
   inspectLineSampleCountSlider.addEventListener("input", function () {
     inspectLineSampleCount = Number(inspectLineSampleCountSlider.value);
     inspectLineSampleCountReadout.textContent = String(inspectLineSampleCount);
-  });
-
-  // ---- Grid Settings (Grid Size, Two Part Line) ----
-  // Read on the NEXT drag; an existing grid is never touched.
-  function updateInspectGridSettingsUI() {
-    inspectGridSizeReadout.textContent = inspectGridSize + "×" + inspectGridSize;
-  }
-  inspectGridSizeSlider.value = String(inspectGridSize);
-  inspectGridTwoPartCheckbox.checked = inspectGridTwoPart;
-  updateInspectGridSettingsUI();
-  inspectGridSizeSlider.addEventListener("input", function () {
-    inspectGridSize = Number(inspectGridSizeSlider.value);
-    updateInspectGridSettingsUI();
-  });
-  inspectGridTwoPartCheckbox.addEventListener("change", function () {
-    inspectGridTwoPart = inspectGridTwoPartCheckbox.checked;
   });
 
   // ---- Sound volume (mute button + settings slider) ----
@@ -6671,11 +6720,8 @@
   }
 
   // Every inspected point's bodies at `step` (inspectedRowAt), in its own color.
-  // "grid" groups draw no bodies; their mesh is the separate pass below so it sits on top of every group.
-  var INSPECT_GRID_MESH_LINE_WIDTH = 2.5;
   function drawInspectedAtStep(step) {
     inspectedGroups.forEach(function (group) {
-      if (group.type === "grid") return;
       group.points.forEach(function (entry) {
         var shown = inspectedRowAt(entry, step);
         var color = entry.color;
@@ -6684,29 +6730,6 @@
         }
         drawHoverSprings(shown, color);
         drawOffscreenMappingArrows(shown, color);
-      });
-    });
-
-    // Grid mesh pass: points at the OUTPUT body's (x, y), joined by buildGridMeshSegments' pairs; a separate
-    // pass so it paints over every group's bodies. Per-segment gradients, since endpoints drift apart.
-    inspectedGroups.forEach(function (group) {
-      if (group.type !== "grid" || group.outputBodyIndex === null) return;
-      var positions = group.points.map(function (entry) {
-        return inspectedRowAt(entry, step)[group.outputBodyIndex];
-      });
-      hoverCtx.lineCap = "round";
-      hoverCtx.lineWidth = INSPECT_GRID_MESH_LINE_WIDTH / hoverFit.scale;
-      group.segments.forEach(function (pair) {
-        var a = positions[pair[0]], b = positions[pair[1]];
-        if (!a || !b) return;
-        var gradient = hoverCtx.createLinearGradient(a.x, a.y, b.x, b.y);
-        gradient.addColorStop(0, group.points[pair[0]].color.fill);
-        gradient.addColorStop(1, group.points[pair[1]].color.fill);
-        hoverCtx.strokeStyle = gradient;
-        hoverCtx.beginPath();
-        hoverCtx.moveTo(a.x, a.y);
-        hoverCtx.lineTo(b.x, b.y);
-        hoverCtx.stroke();
       });
     });
   }
@@ -9521,7 +9544,7 @@
       return;
     }
     [statsMenu, displayMenu, playbackMenu, movieMenu, challengesMenu, renderProgressMenu].forEach(function (menu) { menu.set(false); });
-    if (inspectArmMode === "grid") disarmInspect();
+    if (inspectArmMode === "contour") disarmInspect();
     // The Display card and speed buttons are hidden: back to the standard look at normal speed.
     colorZoomEnabled = false;
     colorZoomCheckbox.checked = false;
@@ -10358,7 +10381,7 @@
         var out = { type: group.type, a: point(group.a, decimals) };
         if (group.b) out.b = point(group.b, decimals);
         if (group.type === "line") out.count = group.count;
-        if (group.type === "grid") { out.size = group.size; out.two_part = !!group.twoPart; }
+        if (group.type === "contour") out.points = group.points.map(function (p) { return point(p, decimals); });
         return out;
       }),
       movie: {
@@ -10516,8 +10539,6 @@
       groups: inspectedGroups.map(function (group) {
         return {
           type: group.type,
-          segments: group.segments || null,
-          outputBodyIndex: group.outputBodyIndex === undefined ? null : group.outputBodyIndex,
           points: group.points.map(function (entry) {
             var rows = entry.trajectory, bodies = rows.length ? rows[0].length : 0;
             var packed = new Float32Array(rows.length * bodies * 4), k = 0;
@@ -10536,8 +10557,6 @@
     return groups.map(function (group) {
       return {
         type: group.type,
-        segments: group.segments,
-        outputBodyIndex: group.outputBodyIndex,
         points: group.points.map(function (point) {
           var rows = [], data = point.trajectory;
           for (var k = 0; k < data.length;) {
@@ -10652,7 +10671,7 @@
   function describeInspectGroup(group) {
     if (group.type === "point") return { type: "point", a: group.points[0].worldPoint, places: group.places };
     if (group.type === "line") return { type: "line", a: group.startWorld, b: group.endWorld, count: group.sampleCount, places: group.places };
-    return { type: "grid", a: group.startWorld, b: group.endWorld, size: group.gridSize, twoPart: group.twoPart, places: group.places };
+    return { type: "contour", a: group.startWorld, b: group.endWorld, points: group.contourPoints, places: group.places };
   }
 
   // One group at a time (each a lock job), once the view's precision is built (the float32 stand-in can't tell a deep
@@ -10667,7 +10686,7 @@
     if (!pendingInspect.length) pendingInspect = null;
     if (next.type === "point") lockPointAt(next.a, next.places, next);
     else if (next.type === "line") lockLineOfPoints(next.a, next.b, next.count, next.places, next);
-    else lockGridOfPoints(next.a, next.b, next.size, next.twoPart, next.places, next);
+    else lockContourOfPoints(next.points, next.places, next);
     if (pendingInspect) return;
     if (linkCapToast === "owed") toastInspectFull(false, next);
     // A last group that failed to lock leaves the button as it was.
@@ -10740,8 +10759,7 @@
         b: group.b || null,
         places: group.places,
         count: clamp(group.count || 0, 2, INSPECT_LINE_SAMPLE_MAX),
-        size: clamp(group.size || 0, Number(inspectGridSizeSlider.min) || 1, Number(inspectGridSizeSlider.max) || 8),
-        twoPart: !!group.twoPart,
+        points: group.points || null,
       };
     });
     pendingInspect = groups.length ? groups : null;

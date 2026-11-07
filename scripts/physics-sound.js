@@ -30,7 +30,7 @@
   }
   function onVolumeChange(cb) { volumeListeners.push(cb); }
 
-  // A gain into `destination` through a limiter: a big Inspect (Grid) can stack over a hundred voices, which would clip without it.
+  // A gain into `destination` through a limiter: a big Inspect set can stack over a hundred voices, which would clip without it.
   function limitedOutput(c, destination) {
     var gain = c.createGain();
     var compressor = c.createDynamicsCompressor();

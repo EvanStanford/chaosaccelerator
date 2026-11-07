@@ -320,26 +320,26 @@ button:hover { background: var(--accent-hover); }
   padding: 6px 10px;
 }
 button.secondary:hover { background: var(--bg-input); }
-/* Inspect Line/Grid idle: outlined like .tool-btn. Not .secondary, whose padding would resize the button as it arms. */
+/* Inspect Line/Contour idle: outlined like .tool-btn. Not .secondary, whose padding would resize the button as it arms. */
 #btn-inspect-line,
-#btn-inspect-grid {
+#btn-inspect-contour {
   background: transparent;
   border-color: var(--border);
   color: var(--text);
 }
 #btn-inspect-line:hover,
-#btn-inspect-grid:hover {
+#btn-inspect-contour:hover {
   background: var(--bg-input);
 }
 /* Armed: blue, like .tool-btn.active. ID plus class so this outranks the idle rule on specificity, not source order. */
 #btn-inspect-line.inspect-armed,
-#btn-inspect-grid.inspect-armed {
+#btn-inspect-contour.inspect-armed {
   background: var(--accent);
   border-color: var(--accent);
   color: white;
 }
 #btn-inspect-line.inspect-armed:hover,
-#btn-inspect-grid.inspect-armed:hover {
+#btn-inspect-contour.inspect-armed:hover {
   background: var(--accent-hover);
 }
 
@@ -632,7 +632,7 @@ input[type="range"] {
 #movie-center-lines span:first-child { left: 0; right: 0; top: 50%; height: 1px; transform: translateY(-50%); }
 #movie-center-lines span:last-child { top: 0; bottom: 0; left: 50%; width: 1px; transform: translateX(-50%); }
 
-/* One per Inspect point, on the grid itself (a grid entry draws its mesh in #inspect-preview instead). */
+/* One per Inspect point, on the map itself. */
 /* --marker-color and left/top (CSS px in #grid-canvas-area's box) are set from JS; clickable to remove the point. */
 .inspect-marker {
   position: absolute;
@@ -662,7 +662,7 @@ input[type="range"] {
   color: var(--danger);
 }
 
-/* One SVG for the Inspect (Line) drag preview, the Inspect (Grid) drag rectangle, and an added grid's permanent mesh. */
+/* The SVG for the Inspect (Line) drag preview. */
 /* No viewBox: 1 SVG unit = 1 CSS pixel, matching worldToCanvasAreaPixel. */
 #inspect-preview {
   position: absolute;
@@ -919,7 +919,7 @@ input[type="range"] {
   color: var(--text-dim);
 }
 
-/* 3px either side: the same 18px slot as .inspect-row-icon, so dots and glyphs line up. */
+/* 3px either side: the same 18px slot as .inspect-row-icon, so the rows line up. */
 .inspect-dot {
   width: 12px;
   height: 12px;
@@ -929,7 +929,7 @@ input[type="range"] {
   border: 2px solid #000;
 }
 
-/* A line/grid row's stand-in for .inspect-dot; align-self: stretch so the big glyph spans the two-line coords group. */
+/* A line or contour row's stand-in for .inspect-dot, centered against the two-line coords group. */
 .inspect-row-icon {
   flex-shrink: 0;
   width: 18px;
@@ -937,9 +937,6 @@ input[type="range"] {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
-  line-height: 1;
-  color: var(--text-dim);
 }
 
 .inspect-coords-group {

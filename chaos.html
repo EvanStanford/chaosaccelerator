@@ -8,20 +8,20 @@
 <meta name="theme-color" content="#14161c">
 <title>Chaos Accelerator</title>
 <!-- Both views share this document so transition.js can show them at once. -->
-<link rel="stylesheet" href="scripts/physics.css?v=m232">
-<link rel="stylesheet" href="scripts/fractal-grid.css?v=m232">
-<link rel="stylesheet" href="scripts/app-shell.css?v=m232">
-<link rel="stylesheet" href="scripts/fractal-stats.css?v=m232">
-<link rel="stylesheet" href="scripts/responsive-layout.css?v=m232">
+<link rel="stylesheet" href="scripts/physics.css?v=m233">
+<link rel="stylesheet" href="scripts/fractal-grid.css?v=m233">
+<link rel="stylesheet" href="scripts/app-shell.css?v=m233">
+<link rel="stylesheet" href="scripts/fractal-stats.css?v=m233">
+<link rel="stylesheet" href="scripts/responsive-layout.css?v=m233">
 <!-- mobile.css after the app sheets: it must win their cascade without !important. -->
-<link rel="stylesheet" href="scripts/mobile.css?v=m232">
-<link rel="stylesheet" href="scripts/eighties-app.css?v=m232">
-<link rel="stylesheet" href="scripts/color-blind.css?v=m232">
-<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m232" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="scripts/mobile.css?v=m233">
+<link rel="stylesheet" href="scripts/eighties-app.css?v=m233">
+<link rel="stylesheet" href="scripts/color-blind.css?v=m233">
+<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m233" as="font" type="font/woff2" crossorigin>
 <!-- In <head> on purpose: both views measure their canvas area as they start. -->
-<script src="scripts/layout-mode.js?v=m232"></script>
-<script src="scripts/app-mode.js?v=m232"></script>
-<script src="scripts/color-blind.js?v=m232"></script>
+<script src="scripts/layout-mode.js?v=m233"></script>
+<script src="scripts/app-mode.js?v=m233"></script>
+<script src="scripts/color-blind.js?v=m233"></script>
 <!-- A #map/ link should open on the map: hide the editor (still laid out) until transition.js picks the view. -->
 <script>
   if (/^#map\//.test(location.hash)) document.documentElement.classList.add("opening-map");
@@ -280,10 +280,10 @@
 
               <section class="panel-section">
                 <div class="field-row" id="inspect-arm-row">
-                  <!-- Touch only (mobile.css): a tap locks a point only after this is pressed, like Line and Grid (armInspect). -->
+                  <!-- Touch only (mobile.css): a tap locks a point only after this is pressed, like Line and Contour (armInspect). -->
                   <button id="btn-inspect-point">Inspect (Point)</button>
                   <button id="btn-inspect-line">Inspect (Line)</button>
-                  <button id="btn-inspect-grid">Inspect (Grid)</button>
+                  <button id="btn-inspect-contour">Inspect (Contour)</button>
                 </div>
                 <p class="section-label">Add superlatives from current view window:</p>
                 <div class="tool-grid">
@@ -426,20 +426,8 @@
                     </span>
                   </label>
                   <label class="field">
-                    <span>Inspection Line Sample Count: <b id="inspect-line-sample-count-readout">30</b></span>
-                    <input type="range" id="inspect-line-sample-count-slider" min="5" max="60" value="30">
-                  </label>
-                  <!-- Hidden controls below keep their values for the code and presets; there is no way to change them here. -->
-                  <label class="field" hidden>
-                    <span>Inspection Grid Size: <b id="inspect-grid-size-readout">3&times;3</b></span>
-                    <input type="range" id="inspect-grid-size-slider" min="1" max="8" value="3">
-                  </label>
-                  <label class="toggle-field" hidden>
-                    <span>Inspection Grid Two Part Line</span>
-                    <span class="toggle-switch">
-                      <input type="checkbox" id="inspect-grid-two-part-checkbox" checked>
-                      <span class="toggle-slider"></span>
-                    </span>
+                    <span>Inspection Line Sample Count: <b id="inspect-line-sample-count-readout">29</b></span>
+                    <input type="range" id="inspect-line-sample-count-slider" min="5" max="60" value="29">
                   </label>
                   <label class="toggle-field" id="movie-friction-field">
                     <span>Allow friction % to change in movies</span>
@@ -808,27 +796,27 @@
 
 </div>
 
-<script src="scripts/app-message.js?v=m232"></script>
-<script src="scripts/app-tips.js?v=m232"></script>
-<script src="scripts/color-blind-setting.js?v=m232"></script>
-<script src="scripts/physics-engine.js?v=m232"></script>
-<script src="scripts/physics-coords.js?v=m232"></script>
-<script src="scripts/share-url.js?v=m232"></script>
-<script src="scripts/movie-path.js?v=m232"></script>
-<script src="scripts/movie-store.js?v=m232"></script>
-<script src="scripts/physics-sound.js?v=m232"></script>
-<script src="scripts/physics-hinge-geometry.js?v=m232"></script>
-<script src="scripts/physics-df.js?v=m232"></script>
-<script src="scripts/physics-gpu.js?v=m232"></script>
-<script src="scripts/physics-gpu-df.js?v=m232"></script>
-<script src="scripts/physics-grid-codegen.js?v=m232"></script>
-<script src="scripts/physics-ui.js?v=m232"></script>
-<script src="scripts/fractal-stats.js?v=m232"></script>
-<script src="scripts/fractal-stats-panel.js?v=m232"></script>
-<script src="scripts/fractal-grid.js?v=m232"></script>
-<script src="scripts/measuring-tape.js?v=m232"></script>
-<script src="scripts/keyboard-shortcuts.js?v=m232"></script>
-<script src="scripts/back-link.js?v=m232"></script>
-<script src="scripts/transition.js?v=m232"></script>
+<script src="scripts/app-message.js?v=m233"></script>
+<script src="scripts/app-tips.js?v=m233"></script>
+<script src="scripts/color-blind-setting.js?v=m233"></script>
+<script src="scripts/physics-engine.js?v=m233"></script>
+<script src="scripts/physics-coords.js?v=m233"></script>
+<script src="scripts/share-url.js?v=m233"></script>
+<script src="scripts/movie-path.js?v=m233"></script>
+<script src="scripts/movie-store.js?v=m233"></script>
+<script src="scripts/physics-sound.js?v=m233"></script>
+<script src="scripts/physics-hinge-geometry.js?v=m233"></script>
+<script src="scripts/physics-df.js?v=m233"></script>
+<script src="scripts/physics-gpu.js?v=m233"></script>
+<script src="scripts/physics-gpu-df.js?v=m233"></script>
+<script src="scripts/physics-grid-codegen.js?v=m233"></script>
+<script src="scripts/physics-ui.js?v=m233"></script>
+<script src="scripts/fractal-stats.js?v=m233"></script>
+<script src="scripts/fractal-stats-panel.js?v=m233"></script>
+<script src="scripts/fractal-grid.js?v=m233"></script>
+<script src="scripts/measuring-tape.js?v=m233"></script>
+<script src="scripts/keyboard-shortcuts.js?v=m233"></script>
+<script src="scripts/back-link.js?v=m233"></script>
+<script src="scripts/transition.js?v=m233"></script>
 </body>
 </html>

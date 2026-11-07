@@ -365,7 +365,7 @@
   // ---- The map's view ---- what FractalGrid.shareState() hands over and applyShareView()
   // A missing precision, speed or volume reads as undefined: the viewer keeps their own setting.
   // takes back: { center: {x, xLo, y, yLo}, scale, zoom, display, lowSaturation, precision, speed,
-  // volume, inspect: [{type, a, b, count|size, twoPart, places}], movie: {keyframes, size: {width, height}, antialias, loop, subject, background, pace} }.
+  // volume, inspect: [{type, a, b, count|points, places}], movie: {keyframes, size: {width, height}, antialias, loop, subject, background, pace} }.
   // A movie's subject is "map" (its keyframes) or "inspect" (the Inspect tab's points, played once, on a
   // "plain", "grid" or "black" background, slowed to a pace of 0.5 or 0.25).
   // A keyframe is {center, zoom, step, seconds, friction}; seconds and friction (a fraction 0 to 0.99) are null when unset.
@@ -415,14 +415,16 @@
     var text;
     if (group.type === "point") text = "p:" + at(group.a);
     else if (group.type === "line") text = "l:" + at(group.a) + ":" + at(group.b) + ":" + group.count;
-    else text = "g:" + at(group.a) + ":" + at(group.b) + ":" + group.size + (group.twoPart ? "t" : "");
+    else text = "c:" + group.points.map(at).join(":");
     return places === frame.places ? text : text + ":" + places;
   }
   function decodeInspect(text, frame) {
     var parts = text.split(":"), what = "insp";
-    var length = parts[0] === "p" ? 3 : 6;
-    if ((parts[0] !== "p" && parts[0] !== "l" && parts[0] !== "g") || (parts.length !== length && parts.length !== length + 1)) {
-      throw new Error("insp has an entry that is not a point, line or grid");
+    // A contour is its points, x and y each, with places as an odd one out.
+    var length = parts[0] === "p" ? 3 : parts[0] === "c" ? parts.length - (parts.length % 2 === 0 ? 1 : 0) : 6;
+    if ((parts[0] !== "p" && parts[0] !== "l" && parts[0] !== "c") || (parts.length !== length && parts.length !== length + 1) ||
+      (parts[0] === "c" && length < 5)) {
+      throw new Error("insp has an entry that is not a point, line or contour");
     }
     function at(i) {
       var x = offsetPoint(parts[i], frame.x, frame.xLo, frame.scale, what), y = offsetPoint(parts[i + 1], frame.y, frame.yLo, frame.scale, what);
@@ -430,14 +432,12 @@
     }
     var places = parts.length > length ? Math.min(45, parseIndex(parts[length], "insp's places")) : frame.places;
     if (parts[0] === "p") return { type: "point", a: at(1), places: places };
-    var group = { type: parts[0] === "l" ? "line" : "grid", a: at(1), b: at(3), places: places };
-    if (group.type === "line") {
-      group.count = parseIndex(parts[5], "insp's sample count");
-    } else {
-      group.twoPart = /t$/.test(parts[5]);
-      group.size = parseIndex(parts[5].replace(/t$/, ""), "insp's grid size");
+    if (parts[0] === "c") {
+      var points = [];
+      for (var i = 1; i < length; i += 2) points.push(at(i));
+      return { type: "contour", a: points[0], b: points[points.length - 1], points: points, places: places };
     }
-    return group;
+    return { type: "line", a: at(1), b: at(3), count: parseIndex(parts[5], "insp's sample count"), places: places };
   }
 
   function zoomNum(zoom) {

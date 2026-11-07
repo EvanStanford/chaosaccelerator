@@ -94,7 +94,7 @@ altogether.
 - Inspect card
   - Play back the simulation for any point on the map
   - Inspect a line, which places 30 inspection points along it (adjustable), or
-    a grid of points
+    a contour, which places them along the line of equal Output through a click
   - With more than one point inspected, the separation plot shows how far apart
     the runs drift on a log scale. Its slope estimates the largest Lyapunov
     exponent, shown as λmax
@@ -227,6 +227,7 @@ Map
 - `c` Challenges
 - `q` Inspect (Point), on touch and small screens
 - `w` Inspect (Line)
+- `o` Inspect (Contour)
 - `n` Nerd Stats
 - `z` Color Zoom
 - `s` Low Saturation

@@ -185,12 +185,6 @@
     var list = CATEGORICAL[inMode];
     return stops(categoricalIn(list, colorIndex + Math.floor(list.length / 2)).slice(1))[0];
   }
-  // Inspect (Grid)'s two directions: corners [x0y0, x1y0, x0y1, x1y1], blended in between.
-  var GRID_CORNERS = {
-    "red-green": stops("0d3583 918009 acc9fd fff5b8"),
-    "blue-yellow": stops("036666 830b0b a3fcfb febbb2"),
-    monochrome: [gray(0.35), gray(0.55), gray(0.75), gray(0.95)],
-  };
 
   global.ColorBlind = {
     STORE_KEY: STORE_KEY,
@@ -223,10 +217,6 @@
     },
     // A basin's color index as [r, g, b] in 0 to 1, in the current mode or the one named; low for Low Saturation.
     basinRgb: function (colorIndex, inMode, low) { return basinRgb(colorIndex, inMode || mode, low); },
-    gridColor: function (x, y) {
-      var c = GRID_CORNERS[mode];
-      return mixRgb(mixRgb(c[0], c[1], x), mixRgb(c[2], c[3], x), y);
-    },
     glsl: GLSL,
   };
 })(window);
