@@ -231,6 +231,7 @@ Map
 - `z` Color Zoom
 - `s` Low Saturation
 - `h` Reset View
+- `t` Measuring Tape (esc to cancel)
 - `0` Precision: Auto
 - `1` Precision: float32
 - `2` Precision: double-float

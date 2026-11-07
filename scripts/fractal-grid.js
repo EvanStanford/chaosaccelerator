@@ -33,6 +33,8 @@
     resetView: function () {},
     renderNow: function () {},
     pausePlayback: function () {},
+    metersPerPixel: function () { return 0; },
+    lengthScaleLabel: function () { return ""; },
     setLyapunovChallenge: function (challenge) { lyapunovChallenge = challenge || null; },
   };
 
@@ -5331,7 +5333,7 @@
     if (z >= 1e4 || (z > 0 && z < 1e-2)) return z.toExponential(2) + "×";
     return z.toFixed(2) + "×";
   }
-  // [smallest screen height in meters, label]; 1x zoom is a 1 m tall screen.
+  // [smallest length in meters, label]; 1x zoom is a 1 m tall screen.
   var ZOOM_SCALES = [
     [3, "larger than human"], [0.4, "human"], [0.07, "banana"], [2e-3, "insect"], [2e-4, "grain of sand"],
     [2e-5, "human hair width"], [1e-5, "cell"], [4e-6, "cell nucleus"], [4e-7, "bacteria"], [2e-8, "virus"],
@@ -5339,15 +5341,19 @@
     [5e-16, "proton"], [1e-17, "sub proton"], [5e-19, "weak force range"], [1e-20, "LHC collision"],
     [0, "smaller than anything ever measured"]
   ];
-  function zoomScaleLabel(z) {
-    var meters = 1 / z;
+  function lengthScaleLabel(meters) {
     for (var i = 0; i < ZOOM_SCALES.length; i++) if (meters >= ZOOM_SCALES[i][0]) return ZOOM_SCALES[i][1] + " scale";
     return "";
   }
   function updateZoomReadout() {
     var z = DEFAULT_SCALE / view.scale;
-    zoomReadout.textContent = "Zoom: " + z.toPrecision(3).replace("e+", "e") + " (" + zoomScaleLabel(z) + ")";
+    zoomReadout.textContent = "Zoom: " + z.toPrecision(3).replace("e+", "e") + " (" + lengthScaleLabel(1 / z) + ")";
   }
+  // For the Measuring Tape: meters per CSS pixel of the map.
+  global.FractalGrid.metersPerPixel = function () {
+    return view.scale / DEFAULT_SCALE / canvas.getBoundingClientRect().height;
+  };
+  global.FractalGrid.lengthScaleLabel = lengthScaleLabel;
 
   function pixelToUV(clientX, clientY) {
     var rect = canvas.getBoundingClientRect();

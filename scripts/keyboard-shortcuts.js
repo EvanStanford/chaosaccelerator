@@ -56,7 +56,7 @@
     };
   }
 
-  // name: for the "?" list. label: what shows the key. editing: off while the builder is playing.
+  // name: for the "?" list. label: what shows the key. listed: in the list without a label. editing: off while the builder is playing.
   function entry(key, name, el, opts) {
     var e = { key: key, name: name, run: press(el), label: el };
     for (var k in opts || {}) e[k] = opts[k];
@@ -130,6 +130,7 @@
     toggleEntry("z", "Color Zoom", $("color-zoom-checkbox")),
     toggleEntry("s", "Low Saturation", $("low-saturation-checkbox")),
     entry("h", "Reset View", $("btn-reset-view")),
+    entry("t", "Measuring Tape (esc to cancel)", null, { listed: true, run: function () { global.MeasuringTape.toggle(); } }),
     optionEntry("0", "Precision: Auto", precisionSelect, "auto"),
     optionEntry("1", "Precision: float32", precisionSelect, "f32"),
     optionEntry("2", "Precision: double-float", precisionSelect, "df"),
@@ -183,7 +184,7 @@
     section.appendChild(h);
     var dl = document.createElement("dl");
     entries.forEach(function (e) {
-      if (!e.label) return;
+      if (!e.label && !e.listed) return;
       var dt = document.createElement("dt");
       dt.textContent = e.list || e.key;
       var dd = document.createElement("dd");
@@ -248,6 +249,10 @@
     }
     if (listBackdrop) {
       if (e.key === "Escape") closeList();
+      return;
+    }
+    if (e.key === "Escape" && global.MeasuringTape.isActive()) {
+      global.MeasuringTape.stop();
       return;
     }
     if (e.shiftKey || document.querySelector(".app-dialog-backdrop") || !$("transition-layer").hidden) return;
