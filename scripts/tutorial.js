@@ -45,7 +45,7 @@
   // The builder's key color at t, the Output's place along its axis (0 to 1); x and y stop at hue 300 on Sticky Edges.
   function colorAt(t) {
     if (ends.flip) t = 1 - t;
-    var fade = ends.fadeAt < 0 ? 1 : Math.min(1, Math.abs(t - ends.fadeAt) / ends.fadeSpan);
+    var fade = PhysicsEngine.outputColorFade(ends, t);
     return "oklch(" + (60 * fade).toFixed(2) + "% " + (0.136 * fade).toFixed(4) + " " + (300 * (1 - t)).toFixed(2) + ")";
   }
 

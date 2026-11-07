@@ -1500,20 +1500,67 @@
 
   // Outputs whose runs pile up at one end of the range: that end gets one color, fading to black over
   // the last OUTPUT_FADE_SPAN of the scale. The color scale runs purple (0) to red (1); counts pile up at 0.
-  // Cumulative Rotation piles up at no turn, mid scale: black there, fading over OUTPUT_ROTATION_FADE_SPAN each way.
+  // Cumulative Rotation piles up at no turn, mid scale, and Center Y under Pac-Man Warp at the free fall's
+  // end: black there, fading over OUTPUT_MID_FADE_SPAN each way.
   var OUTPUT_FADE_SPAN = 0.05;
-  var OUTPUT_ROTATION_FADE_SPAN = 0.025;
+  var OUTPUT_MID_FADE_SPAN = 0.025;
   var OUTPUT_COMMON_END_RED = false;
-  // { flip: draw 1 - t, fadeAt: the drawn t that fades to black, or -1 for none, fadeSpan: how far from it }.
-  function outputColorEnds(scene) {
+  // Must agree with PhysicsGPU.FIXED_DT.
+  var OUTPUT_FALL_DT = 1 / 60;
+  // { flip: draw 1 - t, fadeAt: the drawn t that fades to black, or -1 for none, fadeSpan: how far from it,
+  // fadeWraps: measure the short way round }. steps: how far the runs have gone, all of simulationSteps if left out.
+  function outputColorEnds(scene, steps) {
     var prop = scene.output && scene.output.property;
-    if (prop === "totalRotation") return { flip: false, fadeAt: 0.5, fadeSpan: OUTPUT_ROTATION_FADE_SPAN };
+    if (prop === "totalRotation") return { flip: false, fadeAt: 0.5, fadeSpan: OUTPUT_MID_FADE_SPAN };
     var atZero = prop === "bounces" || prop === "warps";
     var edge = edgeModeOf(scene);
+    if (prop === "y" && !scene.mutualGravity && edge === "wrap") {
+      var fall = commonFallTs(scene);
+      if (!fall) return { flip: false, fadeAt: -1, fadeSpan: OUTPUT_FADE_SPAN };
+      var n = steps === undefined ? fall.length - 1 : clampNum(Math.round(steps), 0, fall.length - 1);
+      return { flip: false, fadeAt: fall[n], fadeSpan: OUTPUT_MID_FADE_SPAN, fadeWraps: true };
+    }
     var piles = atZero || prop === "lifespan" || prop === "distance" ||
       (prop === "y" && !scene.mutualGravity && (edge === "sticky" || edge === "infinite"));
     if (!piles) return { flip: false, fadeAt: -1, fadeSpan: OUTPUT_FADE_SPAN };
     return { flip: atZero === OUTPUT_COMMON_END_RED, fadeAt: OUTPUT_COMMON_END_RED ? 1 : 0, fadeSpan: OUTPUT_FADE_SPAN };
+  }
+
+  // Brightness at drawn t: 0 at fadeAt, 1 from fadeSpan away.
+  function outputColorFade(ends, t) {
+    if (ends.fadeAt < 0) return 1;
+    var d = Math.abs(t - ends.fadeAt);
+    if (ends.fadeWraps) d = Math.min(d, 1 - d);
+    return Math.min(1, d / ends.fadeSpan);
+  }
+
+  // Runs whose Output body touches nothing all fall alike, so they share one t after each step.
+  // t after 0..simulationSteps steps, or null when the Output body is held or its start is an Input.
+  var fallCache = { key: null, ts: null };
+  function commonFallTs(scene) {
+    var out = scene.output, i = out.body, body = scene.bodies[i], h = scene.frameHeight;
+    if (!body || body.isAnchored || isPairOutput(out) || !(h > 0)) return null;
+    var held = scene.hinges.concat(sceneSprings(scene)).some(function (j) { return j.bodyA === i || j.bodyB === i; });
+    var swept = [scene.xInput, scene.yInput].some(function (m) {
+      return m && m.body === i && (m.property === "y" || m.property === "vx" || m.property === "vy");
+    });
+    if (held || swept) return null;
+    var steps = Math.max(0, Math.round(scene.simulationSteps) || 0);
+    var key = [body.y, body.vx, body.vy, frictionOf(scene), h, steps].join(" ");
+    if (fallCache.key === key) return fallCache.ts;
+    var sim = cloneScene(scene);
+    sim.bodies = [sim.bodies[i]];
+    sim.hinges = [];
+    sim.springs = [];
+    sim.output = sim.xInput = sim.yInput = null;
+    delete sim.basins;
+    var ts = [];
+    for (var k = 0; k <= steps; k++) {
+      if (k) step(sim, OUTPUT_FALL_DT);
+      ts.push((sim.bodies[0].y % h + h) % h / h);
+    }
+    fallCache = { key: key, ts: ts };
+    return ts;
   }
 
   function wrapCoord(v, span) {
@@ -2285,6 +2332,7 @@
     frameSigmoid: frameSigmoid,
     OUTPUT_FADE_SPAN: OUTPUT_FADE_SPAN,
     outputColorEnds: outputColorEnds,
+    outputColorFade: outputColorFade,
     MAX_SPEED: MAX_SPEED,
     MUTUAL_GRAVITY_MAX_SPEED: MUTUAL_GRAVITY_MAX_SPEED,
     speedCapFor: speedCapFor,

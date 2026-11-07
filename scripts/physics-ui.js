@@ -2982,13 +2982,13 @@
   }
 
   btnSampleDoublePendulum.addEventListener("click", function () {
-    loadSample("samples/double_pendulum.json?v=m233", "Double Pendulum");
+    loadSample("samples/double_pendulum.json?v=m234", "Double Pendulum");
   });
   btnSamplePinball.addEventListener("click", function () {
-    loadSample("samples/pinball.json?v=m233", "Pinball");
+    loadSample("samples/pinball.json?v=m234", "Pinball");
   });
   btnSampleBinaryStar.addEventListener("click", function () {
-    loadSample("samples/binary_star.json?v=m233", "Binary Star");
+    loadSample("samples/binary_star.json?v=m234", "Binary Star");
   });
   function clearScene() {
     sharedFrame = null;
@@ -3124,10 +3124,11 @@
     // Color Blind Support's scales are the map's own: cyclic for a wrapping range, sequential otherwise.
     if (ColorBlind.on()) return ColorBlind.css((hueRange || 360) === 360 ? ColorBlind.cyclic(t) : ColorBlind.sequential(t));
     // The map's flip and fade to black at the end most runs pile up at (PhysicsEngine.outputColorEnds).
-    var ends = PhysicsEngine.outputColorEnds(scene);
+    // From the scene as it stood before Play: the free-fall end depends on the start.
+    var ends = PhysicsEngine.outputColorEnds(initialScene || scene);
     if (ends.flip) t = 1 - t;
     var hue = (hueRange || 360) * (1 - t);
-    var fade = ends.fadeAt < 0 ? 1 : Math.min(1, Math.abs(t - ends.fadeAt) / ends.fadeSpan);
+    var fade = PhysicsEngine.outputColorFade(ends, t);
     return "oklch(" + (60 * fade).toFixed(2) + "% " + (0.136 * fade).toFixed(4) + " " + hue.toFixed(2) + ")";
   }
 

@@ -1071,6 +1071,7 @@
       "uniform bool u_colorZoom;",
       "uniform bool u_lowSaturation;",
       "uniform int u_colorBlind;",
+      "uniform float u_fadeAt;",
       "uniform int u_maxSteps;",
       "uniform int u_durationSteps;",
       "uniform float u_bounceMax;",
@@ -1145,10 +1146,10 @@
       // repeats the ramp 10x, saturation 40%-100% across full t to tell repeats apart.
       "const float HUE_RANGE_MAX = " + PhysicsGPU.fnum(hueRangeMax) + ";",
       "const bool CIRCULAR_OUTPUT = " + isCircularOutput + ";",
-      // PhysicsEngine.outputColorEnds: which way the scale runs, and the end that fades to black.
+      // PhysicsEngine.outputColorEnds: which way the scale runs, and how the point at u_fadeAt fades to black.
       "const bool FLIP_SCALE = " + sceneColorEnds.flip + ";",
-      "const float FADE_AT = " + PhysicsGPU.fnum(sceneColorEnds.fadeAt) + ";",
       "const float FADE_SPAN = " + PhysicsGPU.fnum(sceneColorEnds.fadeSpan) + ";",
+      "const bool FADE_WRAPS = " + !!sceneColorEnds.fadeWraps + ";",
       "float frameSigmoid(float v) {",
       "  return 1.0 / (1.0 + exp(" + PhysicsGPU.fnum(-PhysicsEngine.OUTPUT_SIGMOID_STEEPNESS) + " * (v - 0.5)));",
       "}",
@@ -1185,7 +1186,11 @@
       "    color = rainbow(t);",
       "  }",
       "  if (u_lowSaturation) color = lowSaturate(color);",
-      "  if (FADE_AT >= 0.0) color *= clamp(abs(t - FADE_AT) / FADE_SPAN, 0.0, 1.0);",
+      "  if (u_fadeAt >= 0.0) {",
+      "    float d = abs(t - u_fadeAt);",
+      "    if (FADE_WRAPS) d = min(d, 1.0 - d);",
+      "    color *= clamp(d / FADE_SPAN, 0.0, 1.0);",
+      "  }",
       "  return color;",
       "}",
       "",
@@ -1660,6 +1665,7 @@
       colorZoom: gl.getUniformLocation(prog, "u_colorZoom"),
       lowSaturation: gl.getUniformLocation(prog, "u_lowSaturation"),
       colorBlind: gl.getUniformLocation(prog, "u_colorBlind"),
+      fadeAt: gl.getUniformLocation(prog, "u_fadeAt"),
       maxSteps: gl.getUniformLocation(prog, "u_maxSteps"),
       durationSteps: gl.getUniformLocation(prog, "u_durationSteps"),
       bounceMax: gl.getUniformLocation(prog, "u_bounceMax"),
@@ -3125,6 +3131,7 @@
     gl.uniform1i(pass.uniforms.colorZoom, colorZoomEnabled ? 1 : 0);
     gl.uniform1i(pass.uniforms.lowSaturation, lowSaturationEnabled ? 1 : 0);
     gl.uniform1i(pass.uniforms.colorBlind, ColorBlind.id());
+    gl.uniform1f(pass.uniforms.fadeAt, PhysicsEngine.outputColorEnds(scene, steps).fadeAt);
     gl.uniform1i(pass.uniforms.maxSteps, steps);
     gl.uniform1i(pass.uniforms.durationSteps, simulationSteps);
     gl.uniform1f(pass.uniforms.bounceMax, bounceMax);
@@ -6229,9 +6236,9 @@
     return Math.max(activeReplay ? activeReplay.effectiveMaxStep : 1, lockedClockCeiling(inspectedGroups));
   }
 
-  // colorMap's fade to black at the common end (colorEnds), for a t already flipped.
+  // colorMap's fade to black at the common end, for a t already flipped.
   function outputFade(t) {
-    return colorEnds.fadeAt < 0 ? 1 : Math.min(1, Math.abs(t - colorEnds.fadeAt) / colorEnds.fadeSpan);
+    return PhysicsEngine.outputColorFade(PhysicsEngine.outputColorEnds(scene, renderedSteps()), t);
   }
 
   // A JS copy of colorMap's hue (hueRangeMaxValue: 360 for a wrapping Output, 300 for a capped one).
@@ -6419,7 +6426,7 @@
   new ResizeObserver(sizeHoverCanvas).observe(hoverCanvas);
 
   // drawHoverBody: type/isAnchored come from the authored scene, x/y/angle/half from the trajectory row;
-  // colorOverride replaces the isAnchored colors so an inspected point reads as "the other scene".
+  // colorOverride gives a moving body its inspected point's color; anchored bodies keep the builder's.
   // MIN_DISPLAY_RADIUS matches physics-ui.js's: a radius-linked Input routinely lands near zero.
   var MIN_DISPLAY_RADIUS = 15;
 
@@ -6438,10 +6445,9 @@
       var pointer = PhysicsHingeGeometry.offscreenPointer(
         at.x, at.y, scene.frameWidth, scene.frameHeight, maxLength);
       if (!pointer) return;
-      var pal = ColorBlind.palette();
-      var color = colorOverride ? colorOverride.fill
-        : (scene.bodies[key].isAnchored ? pal.anchoredStroke : pal.bodyStroke);
-      drawHoverOffscreenArrow(pointer, color, colorOverride ? colorOverride.stroke : null);
+      var pal = ColorBlind.palette(), anchored = scene.bodies[key].isAnchored, override = anchored ? null : colorOverride;
+      var color = override ? override.fill : (anchored ? pal.anchoredStroke : pal.bodyStroke);
+      drawHoverOffscreenArrow(pointer, color, override ? override.stroke : null);
     });
   }
 
@@ -6719,18 +6725,24 @@
     hoverCtx.restore();
   }
 
-  // Every inspected point's bodies at `step` (inspectedRowAt), in its own color.
+  // Every inspected point's bodies at `step` (inspectedRowAt): anchored ones in the builder's colors under all
+  // the runs, the rest in the point's own color.
   function drawInspectedAtStep(step) {
+    var runs = [];
     inspectedGroups.forEach(function (group) {
-      group.points.forEach(function (entry) {
-        var shown = inspectedRowAt(entry, step);
-        var color = entry.color;
-        for (var i = 0; i < shown.length; i++) {
-          if (shown[i]) drawHoverBody(scene.bodies[i], shown[i], color);
-        }
-        drawHoverSprings(shown, color);
-        drawOffscreenMappingArrows(shown, color);
-      });
+      group.points.forEach(function (entry) { runs.push({ shown: inspectedRowAt(entry, step), color: entry.color }); });
+    });
+    runs.forEach(function (run) {
+      for (var i = 0; i < run.shown.length; i++) {
+        if (run.shown[i] && scene.bodies[i].isAnchored) drawHoverBody(scene.bodies[i], run.shown[i]);
+      }
+    });
+    runs.forEach(function (run) {
+      for (var i = 0; i < run.shown.length; i++) {
+        if (run.shown[i] && !scene.bodies[i].isAnchored) drawHoverBody(scene.bodies[i], run.shown[i], run.color);
+      }
+      drawHoverSprings(run.shown, run.color);
+      drawOffscreenMappingArrows(run.shown, run.color);
     });
   }
 
@@ -8050,6 +8062,7 @@
       "uniform bool u_colorZoom;",
       "uniform bool u_lowSaturation;",
       "uniform int u_colorBlind;",
+      "uniform float u_fadeAt;",
       "uniform int u_durationSteps;",
       "uniform float u_bounceMax;",
       "uniform int u_displayMode;",
@@ -8156,7 +8169,7 @@
   }
 
   var PLAYBACK_STEP_UNIFORMS = ["resolution", "gridStride", "gridOrigin", "centerHi", "centerLo", "centerLo2", "centerLo3", "scale", "state", "init", "baseStep", "steps", "group", "tileOrigin", "stencil"];
-  var PLAYBACK_COLOR_UNIFORMS = ["state", "stateSize", "stateSteps", "gridStride", "colorZoom", "lowSaturation", "colorBlind", "durationSteps", "bounceMax", "displayMode", "targetOrigin", "stencil", "sampleField", "ftleInit", "ftleRange"];
+  var PLAYBACK_COLOR_UNIFORMS = ["state", "stateSize", "stateSteps", "gridStride", "colorZoom", "lowSaturation", "colorBlind", "fadeAt", "durationSteps", "bounceMax", "displayMode", "targetOrigin", "stencil", "sampleField", "ftleInit", "ftleRange"];
 
   function finishedPlaybackProgram(build, uniformNames) {
     var prog = build.program;
@@ -8569,6 +8582,7 @@
     gl.uniform1i(u.colorZoom, colorZoomEnabled ? 1 : 0);
     gl.uniform1i(u.lowSaturation, lowSaturationEnabled ? 1 : 0);
     gl.uniform1i(u.colorBlind, ColorBlind.id());
+    gl.uniform1f(u.fadeAt, PhysicsEngine.outputColorEnds(scene, spec.totalSteps).fadeAt);
     gl.uniform1i(u.durationSteps, simulationSteps);
     gl.uniform1f(u.bounceMax, opts.bounceMax === undefined ? bounceMaxValue : opts.bounceMax);
     gl.uniform1i(u.displayMode, displayMode.id);
@@ -8924,6 +8938,7 @@
     gl.uniform1i(u.colorZoom, colorZoomEnabled ? 1 : 0);
     gl.uniform1i(u.lowSaturation, lowSaturationEnabled ? 1 : 0);
     gl.uniform1i(u.colorBlind, ColorBlind.id());
+    gl.uniform1f(u.fadeAt, PhysicsEngine.outputColorEnds(scene, timeline.stateStep).fadeAt);
     gl.uniform1i(u.durationSteps, simulationSteps);
     gl.uniform1f(u.bounceMax, bounceMaxValue);
     gl.uniform1i(u.displayMode, displayMode.id);
