@@ -26,6 +26,9 @@
   var DEFAULT_STEPS = 1000;
   var DEFAULT_EDGE = "sticky";
   var DEFAULT_MOVIE_SIZE = { width: 1280, height: 720 };
+  // The largest picture a browser canvas holds: 32767 a side and 16384 squared in all, in Chrome.
+  var MAX_MOVIE_SIDE = 32764;
+  var MAX_MOVIE_PIXELS = 16384 * 16384;
 
   // A portal's code carries its color.
   var TYPE_CODES = { circle: "ci", line: "ln", "portal orange": "po", "portal green": "pg" };
@@ -318,6 +321,7 @@
     if (scene.edgeMode && scene.edgeMode !== DEFAULT_EDGE) fields.push("edge:" + EDGE_CODES[scene.edgeMode]);
     if (scene.mutualGravity) fields.push("mgrv:t");
     if (scene.collisionsEnabled === false) fields.push("coll:f");
+    if (scene.adaptiveSubsteps) fields.push("asub:t");
     if (scene.friction > 0) fields.push("fric:" + sceneNum(scene.friction));
     if (scene.simulationSteps && scene.simulationSteps !== DEFAULT_STEPS) fields.push("step:" + scene.simulationSteps);
     fields.push("frmw:" + sceneNum(scene.frameWidth));
@@ -359,6 +363,7 @@
     };
     if (fields.basn !== undefined) scene.basins = splitList(fields.basn).map(decodeBasin);
     if (fields.yinv !== undefined) scene.invertYInput = parseBool(fields.yinv, "yinv");
+    if (fields.asub !== undefined) scene.adaptiveSubsteps = parseBool(fields.asub, "asub");
     return scene;
   }
 
@@ -481,7 +486,9 @@
   function parseMovieSize(text) {
     var m = /^(\d+)x(\d+)$/.exec(text);
     var width = m ? Number(m[1]) : 0, height = m ? Number(m[2]) : 0;
-    if (!(width >= 16 && width <= 4096 && height >= 16 && height <= 4096)) throw new Error("size must be pixels across and down, 16 to 4096 each");
+    if (!(width >= 16 && width <= MAX_MOVIE_SIDE && height >= 16 && height <= MAX_MOVIE_SIDE && width * height <= MAX_MOVIE_PIXELS)) {
+      throw new Error("size must be pixels across and down, 16 to " + MAX_MOVIE_SIDE + " each and " + MAX_MOVIE_PIXELS + " in all");
+    }
     return { width: width, height: height };
   }
 
@@ -630,6 +637,8 @@
     PAGE_BUILDER: PAGE_BUILDER,
     PAGE_MAP: PAGE_MAP,
     PAGE_MOVIE: PAGE_MOVIE,
+    MAX_MOVIE_SIDE: MAX_MOVIE_SIDE,
+    MAX_MOVIE_PIXELS: MAX_MOVIE_PIXELS,
     VERSION: VERSION,
     NEWER_VERSION_MESSAGE: NEWER_VERSION_MESSAGE,
     encode: encode,

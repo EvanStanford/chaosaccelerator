@@ -18,15 +18,15 @@
   // Before first paint, so a page with the '80s switched off never flashes them.
   try { if (localStorage.getItem("eightiesOff") !== "0") document.documentElement.classList.add("eighties-off"); } catch (e) {}
 </script>
-<link rel="stylesheet" href="scripts/landing.css?v=m234">
-<link rel="stylesheet" href="scripts/eighties.css?v=m234">
-<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m234" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="scripts/landing.css?v=m245">
+<link rel="stylesheet" href="scripts/eighties.css?v=m245">
+<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m245" as="font" type="font/woff2" crossorigin>
 </head>
 <body class="landing eighties">
 <canvas class="ride" id="ride" aria-hidden="true"></canvas>
 <main class="screen">
 
-  <script src="scripts/corner-menu.js?v=m234"></script>
+  <script src="scripts/corner-menu.js?v=m245"></script>
 
   <header class="sky">
     <div class="sun" id="sun">
@@ -55,9 +55,9 @@
         <div class="tour-media video">
           <!-- Placeholder until the tutorial is uploaded: swap for a YouTube iframe. -->
           <button class="yt-fake" id="tutorial-video" type="button" aria-label="Play: Create Your Own Fractals: How To With ChaosAccelerator Web Tool">
-            <img class="yt-fake-thumb" src="assets/tutorial-thumb.jpg?v=m234" width="1672" height="941" loading="lazy" decoding="async" alt="">
+            <img class="yt-fake-thumb" src="assets/tutorial-thumb.jpg?v=m245" width="1672" height="941" loading="lazy" decoding="async" alt="">
             <span class="yt-fake-top">
-              <img class="yt-fake-avatar" src="assets/channel-avatar.jpg?v=m234" width="88" height="88" alt="">
+              <img class="yt-fake-avatar" src="assets/channel-avatar.jpg?v=m245" width="88" height="88" alt="">
               <span class="yt-fake-title">Create Your Own Fractals: How To With ChaosAccelerator Web Tool</span>
               <span class="yt-fake-action">
                 <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67V7z"/></svg>
@@ -83,7 +83,7 @@
       <article class="tour-slide" aria-label="Step 1">
         <a class="tour-link" href="chaos.html">
         <div class="tour-media">
-          <img src="assets/builder.png?v=m234" width="1556" height="874" loading="lazy" decoding="async" alt="The scene builder">
+          <img src="assets/builder.png?v=m245" width="1556" height="874" loading="lazy" decoding="async" alt="The scene builder">
           <span class="tour-step">Step 1:</span>
         </div>
         <div class="tour-caption">
@@ -96,7 +96,7 @@
       <article class="tour-slide" aria-label="Step 2">
         <a class="tour-link" href="chaos.html">
         <div class="tour-media">
-          <img src="assets/map.jpg?v=m234" width="1556" height="874" loading="lazy" decoding="async" alt="The map made from the scene. Each pixel is one run of the scene from a slightly different start.">
+          <img src="assets/map.jpg?v=m245" width="1556" height="874" loading="lazy" decoding="async" alt="The map made from the scene. Each pixel is one run of the scene from a slightly different start.">
           <span class="tour-step">Step 2:</span>
         </div>
         <div class="tour-caption">
@@ -147,8 +147,8 @@
   <span class="toggle-switch"><input type="checkbox"><span class="toggle-slider"></span></span>
   <span class="eighties-toggle-label">Enable '80s</span>
 </label>
-<script src="scripts/eighties-ride.js?v=m234"></script>
-<script src="scripts/eighties-theme.js?v=m234"></script>
+<script src="scripts/eighties-ride.js?v=m245"></script>
+<script src="scripts/eighties-theme.js?v=m245"></script>
 <script>
   // ---- The tour ----
   var tour = (function () {

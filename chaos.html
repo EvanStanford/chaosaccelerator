@@ -8,20 +8,20 @@
 <meta name="theme-color" content="#14161c">
 <title>Chaos Accelerator</title>
 <!-- Both views share this document so transition.js can show them at once. -->
-<link rel="stylesheet" href="scripts/physics.css?v=m234">
-<link rel="stylesheet" href="scripts/fractal-grid.css?v=m234">
-<link rel="stylesheet" href="scripts/app-shell.css?v=m234">
-<link rel="stylesheet" href="scripts/fractal-stats.css?v=m234">
-<link rel="stylesheet" href="scripts/responsive-layout.css?v=m234">
+<link rel="stylesheet" href="scripts/physics.css?v=m245">
+<link rel="stylesheet" href="scripts/fractal-grid.css?v=m245">
+<link rel="stylesheet" href="scripts/app-shell.css?v=m245">
+<link rel="stylesheet" href="scripts/fractal-stats.css?v=m245">
+<link rel="stylesheet" href="scripts/responsive-layout.css?v=m245">
 <!-- mobile.css after the app sheets: it must win their cascade without !important. -->
-<link rel="stylesheet" href="scripts/mobile.css?v=m234">
-<link rel="stylesheet" href="scripts/eighties-app.css?v=m234">
-<link rel="stylesheet" href="scripts/color-blind.css?v=m234">
-<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m234" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="scripts/mobile.css?v=m245">
+<link rel="stylesheet" href="scripts/eighties-app.css?v=m245">
+<link rel="stylesheet" href="scripts/color-blind.css?v=m245">
+<link rel="preload" href="assets/fonts/saira-latin.woff2?v=m245" as="font" type="font/woff2" crossorigin>
 <!-- In <head> on purpose: both views measure their canvas area as they start. -->
-<script src="scripts/layout-mode.js?v=m234"></script>
-<script src="scripts/app-mode.js?v=m234"></script>
-<script src="scripts/color-blind.js?v=m234"></script>
+<script src="scripts/layout-mode.js?v=m245"></script>
+<script src="scripts/app-mode.js?v=m245"></script>
+<script src="scripts/color-blind.js?v=m245"></script>
 <!-- A #map/ link should open on the map: hide the editor (still laid out) until transition.js picks the view. -->
 <script>
   if (/^#map\//.test(location.hash)) document.documentElement.classList.add("opening-map");
@@ -425,6 +425,13 @@
                       <span class="toggle-slider"></span>
                     </span>
                   </label>
+                  <label class="toggle-field" id="adaptive-substeps-field" title="In Planet Mode, splits each step into smaller steps when objects pass close together, so fast close passes stay accurate at the cost of slower rendering." hidden>
+                    <span>Adaptive Substeps</span>
+                    <span class="toggle-switch">
+                      <input type="checkbox" id="adaptive-substeps-checkbox">
+                      <span class="toggle-slider"></span>
+                    </span>
+                  </label>
                   <label class="field">
                     <span>Inspection Line Sample Count: <b id="inspect-line-sample-count-readout">29</b></span>
                     <input type="range" id="inspect-line-sample-count-slider" min="5" max="60" value="29">
@@ -661,7 +668,7 @@
                     </span>
                   </label>
                   <p class="readout" id="movie-summary"></p>
-                  <button id="movie-done" type="button" disabled>Done</button>
+                  <button id="movie-done" type="button" disabled>Render Video</button>
                   <button id="movie-inspect" type="button" class="secondary" disabled>... or movie of the Inspect tab</button>
                   <button id="movie-export" type="button" class="secondary">... or export raw data</button>
                   <div id="movie-export-progress" hidden>
@@ -796,27 +803,28 @@
 
 </div>
 
-<script src="scripts/app-message.js?v=m234"></script>
-<script src="scripts/app-tips.js?v=m234"></script>
-<script src="scripts/color-blind-setting.js?v=m234"></script>
-<script src="scripts/physics-engine.js?v=m234"></script>
-<script src="scripts/physics-coords.js?v=m234"></script>
-<script src="scripts/share-url.js?v=m234"></script>
-<script src="scripts/movie-path.js?v=m234"></script>
-<script src="scripts/movie-store.js?v=m234"></script>
-<script src="scripts/physics-sound.js?v=m234"></script>
-<script src="scripts/physics-hinge-geometry.js?v=m234"></script>
-<script src="scripts/physics-df.js?v=m234"></script>
-<script src="scripts/physics-gpu.js?v=m234"></script>
-<script src="scripts/physics-gpu-df.js?v=m234"></script>
-<script src="scripts/physics-grid-codegen.js?v=m234"></script>
-<script src="scripts/physics-ui.js?v=m234"></script>
-<script src="scripts/fractal-stats.js?v=m234"></script>
-<script src="scripts/fractal-stats-panel.js?v=m234"></script>
-<script src="scripts/fractal-grid.js?v=m234"></script>
-<script src="scripts/measuring-tape.js?v=m234"></script>
-<script src="scripts/keyboard-shortcuts.js?v=m234"></script>
-<script src="scripts/back-link.js?v=m234"></script>
-<script src="scripts/transition.js?v=m234"></script>
+<script src="scripts/app-message.js?v=m245"></script>
+<script src="scripts/app-tips.js?v=m245"></script>
+<script src="scripts/color-blind-setting.js?v=m245"></script>
+<script src="scripts/physics-engine.js?v=m245"></script>
+<script src="scripts/physics-coords.js?v=m245"></script>
+<script src="scripts/share-url.js?v=m245"></script>
+<script src="scripts/movie-path.js?v=m245"></script>
+<script src="scripts/movie-store.js?v=m245"></script>
+<script src="scripts/save-file.js?v=m245"></script>
+<script src="scripts/physics-sound.js?v=m245"></script>
+<script src="scripts/physics-hinge-geometry.js?v=m245"></script>
+<script src="scripts/physics-df.js?v=m245"></script>
+<script src="scripts/physics-gpu.js?v=m245"></script>
+<script src="scripts/physics-gpu-df.js?v=m245"></script>
+<script src="scripts/physics-grid-codegen.js?v=m245"></script>
+<script src="scripts/physics-ui.js?v=m245"></script>
+<script src="scripts/fractal-stats.js?v=m245"></script>
+<script src="scripts/fractal-stats-panel.js?v=m245"></script>
+<script src="scripts/fractal-grid.js?v=m245"></script>
+<script src="scripts/measuring-tape.js?v=m245"></script>
+<script src="scripts/keyboard-shortcuts.js?v=m245"></script>
+<script src="scripts/back-link.js?v=m245"></script>
+<script src="scripts/transition.js?v=m245"></script>
 </body>
 </html>

@@ -422,15 +422,45 @@
     "  return c;",
     "}",
     "",
-    "// line -> circle; normal points line -> circle. Swept, for the same",
-    "// reason collideCircleCircle is: a discrete test only notices contact",
-    "// once some step's STARTING configuration is already overlapping, and",
-    "// which step that is jumps with the starting conditions. Runs in the",
-    "// line's frame (relative velocity, endpoints held fixed), so it",
-    "// ignores rotation of the line during the step.",
+    "// PhysicsEngine.spinningCapsuleCircleContact: a spinning line's ends run their chords (lineSweep).",
+    "Contact spinningCapsuleCircleContact(Body line, float halfLen, Body circle, float radius, float halfThickness) {",
+    "  float rsum = halfThickness + radius;",
+    "  vec2 cL = vec2(line.x, line.y), vL = vec2(line.vx, line.vy);",
+    "  vec2 h = vec2(cos(line.angle), sin(line.angle)) * halfLen;",
+    "  LineSweep s = lineSweep(cL, h, vL * DT, lineTurn(line, halfLen, h));",
+    "  vec2 p = vec2(circle.x, circle.y), dp = vec2(circle.vx, circle.vy) * DT;",
+    "  float f = sweepPointMovingSlab(p, dp, s.e0, s.d0, s.e1, s.d1, 2.0 * halfLen, rsum);",
+    "  float f0 = sweepPointSphere(p, dp - s.d0, s.e0, rsum, 1.0);",
+    "  if (f0 >= 0.0 && (f < 0.0 || f0 < f)) f = f0;",
+    "  float f1 = sweepPointSphere(p, dp - s.d1, s.e1, rsum, 1.0);",
+    "  if (f1 >= 0.0 && (f < 0.0 || f1 < f)) f = f1;",
+    "  Contact c = noContact();",
+    "  if (f < 0.0) return c;",
+    "  vec2 pf = p + dp * f;",
+    "  vec2 closest = closestPointOnSegment(s.e0 + s.d0 * f, s.e1 + s.d1 * f, pf);",
+    "  vec2 d = pf - closest;",
+    "  float dist = length(d);",
+    "  vec2 n = dist > 1e-9 ? d / dist : vec2(0.0, 1.0);",
+    "  float tHit = f * DT;",
+    "  vec2 pt = closest + n * halfThickness;",
+    "  c.hit = true;",
+    "  c.normal = n;",
+    "  c.point = pt;",
+    "  c.rA = pt - (cL + vL * tHit);",
+    "  c.rB = -n * radius;",
+    "  c.penetration = max(rsum - dist, 0.0);",
+    "  c.tHit = tHit;",
+    "  return c;",
+    "}",
+    "",
+    "// line -> circle; normal points line -> circle. Swept so the hit is continuous in the start.",
     "Contact collideLineCircle(Body line, float halfLen, Body circle, float radius) {",
     "  vec2 e0 = lineEndpoint0(line, halfLen);",
     "  vec2 e1 = lineEndpoint1(line, halfLen);",
+    "  vec2 p = vec2(circle.x, circle.y);",
+    "  if (line.w != 0.0 && length(p - closestPointOnSegment(e0, e1, p)) >= LINE_THICKNESS * 0.5 + radius) {",
+    "    return spinningCapsuleCircleContact(line, halfLen, circle, radius, LINE_THICKNESS * 0.5);",
+    "  }",
     "  return sweptCapsuleCircleContact(e0, e1, vec2(line.vx, line.vy), vec2(line.x, line.y), circle, radius, LINE_THICKNESS * 0.5);",
     "}",
     "",
@@ -1274,7 +1304,10 @@
     var warpBody = flags && typeof flags.warpBody === "number" ? flags.warpBody : -1;
     var warpBits = !!(flags && flags.warpBits);
     var warpFrom = warpBody >= 0 && !!(flags && flags.warpFrom);
+    var adaptiveSubsteps = !!(flags && flags.adaptiveSubsteps) && !!mutualGravity;
     if (contactBody >= 0) lines.push("bool g_contact" + contactBody + " = false;");
+    // Raised only while a draw is timed, so the timing sees the dearest step.
+    if (adaptiveSubsteps) lines.push("uniform int u_substepFloor;");
     if (pairContacts) lines.push("float g_pairContacts = 0.0;");
     if (warpBody >= 0) lines.push("bool g_warp = false;", E.scalarType + " g_warpTurn;");
     if (warpFrom) lines.push("int g_warpFrom = -1;");
@@ -1801,6 +1834,106 @@
       return res;
     }
 
+    // ---- Adaptive Substeps: PhysicsEngine.adaptiveSubsteps, behind flags.adaptiveSubsteps ----
+    var substepApart = adaptiveSubsteps && collisionsOn;
+    if (adaptiveSubsteps) {
+      var PDF = global.PhysicsDF, cLit = df ? PDF.num : fnum, ssMax = PE.MAX_SUBSTEPS;
+      var onHinge = {};
+      hingeAnchors.forEach(function (hg) { if (!hg.aIsWorld) onHinge[hg.a] = true; onHinge[hg.b] = true; });
+      var ssSubs = consts.map(function (c, i) { return !c.isAnchored && !onHinge[i]; });
+      if (substepApart) apartLines(bApart).forEach(function (l) { lines.push(l); });
+      // The count, in float32 either way: PhysicsEngine.adaptiveSubstepCount.
+      var f = function (x) { return df ? "dfToFloat(" + x + ")" : x; };
+      lines.push("  float ssRate = 0.0;");
+      eachGravityPair(function (pa, pb) {
+        function vel(i) { return consts[i].isAnchored ? "vec2(0.0)" : "vec2(" + f(B(i) + ".vx") + ", " + f(B(i) + ".vy") + ")"; }
+        function segHalf(i) { return isSeg(i) ? " - " + f(df ? "BODY" + i + "_HALF" : "fHalf" + i) : ""; }
+        function reach(i) { return isSeg(i) ? fnum(halfThick(i)) : (df ? f("gravReach" + i) : reachExpr[i]); }
+        var d = df ? "vec2(dfToFloat(dfSub(" + B(pb) + ".x, " + B(pa) + ".x)), dfToFloat(dfSub(" + B(pb) + ".y, " + B(pa) + ".y)))"
+          : "vec2(" + B(pb) + ".x - " + B(pa) + ".x, " + B(pb) + ".y - " + B(pa) + ".y)";
+        var gm = df ? "dfToFloat(dfAdd(gravGM" + pa + ", gravGM" + pb + "))" : fnum(GRAV_G) + " * (gravMass" + pa + " + gravMass" + pb + ")";
+        lines.push("  { float s = max(length(" + d + ")" + segHalf(pa) + segHalf(pb) + ", " + reach(pa) + " + " + reach(pb) + ");");
+        lines.push("    ssRate = max(ssRate, (length(" + vel(pb) + " - " + vel(pa) + ") + sqrt(" + gm + " / s)) / s); }");
+      });
+      lines.push("  int ssK = max(int(min(ceil(ssRate * " + fnum(FIXED_DT * PE.SUBSTEP_RESOLUTION) + "), " + fnum(ssMax) + ")), u_substepFloor);");
+      lines.push("  if (ssK > 1) {");
+      lines.push("    " + E.scalarType + " ssH = " + (df ? "dfDiv(DF_DT, dfFromFloat(float(ssK)))" : "DT / float(ssK)") + ", ssT = " + E.zero + ";");
+      for (var sb0 = 0; sb0 < n; sb0++) {
+        if (consts[sb0].isAnchored) continue;
+        lines.push("    " + E.vecType + " ssP" + sb0 + " = " + E.vec(B(sb0) + ".x", B(sb0) + ".y") + ";");
+        if (!ssSubs[sb0]) continue;
+        lines.push("    " + E.vecType + " ssA" + sb0 + " = " + accelFor(sb0) + ";");
+        lines.push("    " + E.vecType + " ssV" + sb0 + " = " + E.advanceVelocity + "(u" + sb0 + ", " + E.halfDT + ", ssA" + sb0 + ");");
+      }
+      var legC = 1 / (2 - Math.cbrt(2));
+      lines.push("    for (int s = 0; s < " + 3 * ssMax + "; s++) {");
+      lines.push("      if (s < 3 * ssK) {");
+      lines.push("        " + E.scalarType + " ssLeg = " + E.mul("ssH", "s % 3 == 1 ? " + cLit(1 - 2 * legC) + " : " + cLit(legC)) + ";");
+      lines.push("        " + E.scalarType + " ssHalf = " + (df ? "dfMulPow2(ssLeg, 0.5)" : "0.5 * ssLeg") + ";");
+      lines.push("        ssT = " + E.add("ssT", "ssLeg") + ";");
+      for (var sb1 = 0; sb1 < n; sb1++) {
+        if (consts[sb1].isAnchored) continue;
+        if (!ssSubs[sb1]) {
+          lines.push("        ssP" + sb1 + " = " + (df ? "dv2Add(" + E.vec(B(sb1) + ".x", B(sb1) + ".y") + ", dv2Scale(vFull" + sb1 + ", ssT))"
+            : E.vec(B(sb1) + ".x", B(sb1) + ".y") + " + vFull" + sb1 + " * ssT") + ";");
+          continue;
+        }
+        lines.push("        ssV" + sb1 + " = " + E.advanceVelocity + "(ssV" + sb1 + ", ssHalf, ssA" + sb1 + ");");
+        lines.push("        ssP" + sb1 + " = " + (df ? "dv2Add(ssP" + sb1 + ", dv2Scale(ssV" + sb1 + ", ssLeg))" : "ssP" + sb1 + " + ssV" + sb1 + " * ssLeg") + ";");
+      }
+      for (var sb2 = 0; sb2 < n; sb2++) {
+        if (!ssSubs[sb2]) continue;
+        var px = "ssP" + sb2 + ".x", py = "ssP" + sb2 + ".y", out = "ssA" + sb2;
+        var pullLines = substepApart ? bouncePullLines(sb2, px, py, out, "ssP", null) : substepPullLines(sb2, px, py, out);
+        pullLines.forEach(function (l) { lines.push("    " + l); });
+      }
+      for (var sb3 = 0; sb3 < n; sb3++) {
+        if (ssSubs[sb3]) lines.push("        ssV" + sb3 + " = " + E.advanceVelocity + "(ssV" + sb3 + ", ssHalf, ssA" + sb3 + ");");
+      }
+      lines.push("      }");
+      lines.push("    }");
+      // dt * phi: what a unit acceleration adds over the step.
+      lines.push("    " + E.scalarType + " ssUnit = " + E.advanceVelocity + "(" + E.zeroVec + ", " + E.DT + ", " + E.vec(df ? "DF_ONE" : "1.0", E.zero) + ").x;");
+      for (var sb4 = 0; sb4 < n; sb4++) {
+        if (!ssSubs[sb4]) continue;
+        var a4 = accelFor(sb4), pos4 = E.vec(B(sb4) + ".x", B(sb4) + ".y");
+        lines.push("    " + E.vecType + " ssEnd" + sb4 + " = " + E.advanceVelocity + "(ssV" + sb4 + ", " + (df ? "dfNeg(DF_HALF_DT)" : "-0.5 * DT") + ", ssA" + sb4 + ");");
+        lines.push(df
+          ? "    " + a4 + " = dv2Add(" + a4 + ", dv2Scale(dv2Sub(ssEnd" + sb4 + ", vFull" + sb4 + "), dfDiv(DF_ONE, ssUnit)));"
+          : "    " + a4 + " += (ssEnd" + sb4 + " - vFull" + sb4 + ") / ssUnit;");
+        lines.push(df
+          ? "    vFull" + sb4 + " = dv2(dfDiv(dfSub(ssP" + sb4 + ".x, " + B(sb4) + ".x), DF_DT), dfDiv(dfSub(ssP" + sb4 + ".y, " + B(sb4) + ".y), DF_DT));"
+          : "    vFull" + sb4 + " = (ssP" + sb4 + " - " + pos4 + ") / DT;");
+      }
+      lines.push("  }");
+    }
+    // The pull on free body k at (px, py) from the others at ssPN, collisions off: PhysicsEngine.substepPull.
+    function substepPullLines(k, px, py, out) {
+      var res = ["    " + out + " = " + (sprung[k] ? "sprAcc" + k : E.zeroVec) + ";"];
+      for (var j = 0; j < n; j++) {
+        if (j === k) continue;
+        var pj = consts[j].isAnchored ? B(j) : "ssP" + j;
+        if (isSeg(k) || isSeg(j)) {
+          segmentPullLines(k, E.vec(px, py), j, consts[j].isAnchored ? E.vec(B(j) + ".x", B(j) + ".y") : pj, out, "false", null)
+            .forEach(function (l) { res.push(l); });
+          continue;
+        }
+        if (df) {
+          res.push("    { DVec2 gd = dv2(dfSub(" + pj + ".x, " + px + "), dfSub(" + pj + ".y, " + py + ")); MF gr2 = dv2LengthSq(gd);");
+          res.push("      MF gContact = dfAdd(gravReach" + k + ", gravReach" + j + "); MF gContact2 = dfSqr(gContact); MF gk;");
+          res.push("      if (!dfLess(gr2, gContact2)) gk = dfDiv(DF_ONE, dfMul(gr2, dfSqrt(gr2)));");
+          res.push("      else { MF gu2 = dfDiv(gr2, gContact2); gk = dfDiv(dfAdd(dfSub(" + PDF.num(35 / 8) + ", dfMul(" + PDF.num(21 / 4) + ", gu2)), dfMul(" + PDF.num(15 / 8) + ", dfSqr(gu2))), dfMul(gContact2, gContact)); }");
+          res.push("      " + out + " = dv2Add(" + out + ", dv2Scale(gd, dfMul(gravGM" + j + ", gk))); }");
+        } else {
+          res.push("    { vec2 d = vec2(" + pj + ".x - (" + px + "), " + pj + ".y - (" + py + ")); float contact = " + reachExpr[k] + " + " + reachExpr[j] + "; float r2 = dot(d, d);");
+          res.push("      float u2 = r2 / (contact * contact);");
+          res.push("      " + out + " += (r2 >= contact * contact ? " + fnum(GRAV_G) + " * gravMass" + j + " / (r2 * sqrt(r2))");
+          res.push("        : " + fnum(GRAV_G) + " * gravMass" + j + " / (contact * contact * contact) * (35.0 / 8.0 - 21.0 / 4.0 * u2 + 15.0 / 8.0 * u2 * u2)) * d; }");
+        }
+      }
+      return res;
+    }
+
     lines.push("");
 
     // ---- Hinge impulses for the start pose: PhysicsEngine.shakeHinges, unrolled ----
@@ -1935,10 +2068,12 @@
     function isShaken(idx) { return shakeBodies.indexOf(idx) !== -1; }
 
     // Probes: real position, velocity vFull, so swept tests match leg 1's motion. A line swept against
-    // another line or a portal also turns at leg 1's spin.
+    // anything, or a portal swept against a line, also turns at leg 1's spin.
     var linePaired = {};
     pairs.forEach(function (pair) {
-      if (consts[pair[0]].type !== "circle" && consts[pair[1]].type !== "circle") { linePaired[pair[0]] = true; linePaired[pair[1]] = true; }
+      var a = consts[pair[0]].type, b = consts[pair[1]].type, noCircle = a !== "circle" && b !== "circle";
+      if (noCircle || a === "line") linePaired[pair[0]] = true;
+      if (noCircle || b === "line") linePaired[pair[1]] = true;
     });
     for (var p = 0; p < n; p++) {
       if (consts[p].isAnchored) continue;
@@ -2147,7 +2282,7 @@
         lines.push("  }");
       });
     });
-    if (anyBounce) apartLines(bApart).forEach(function (l) { lines.push(l); });
+    if (anyBounce && !substepApart) apartLines(bApart).forEach(function (l) { lines.push(l); });
     lines.push("");
 
     bounceBody.forEach(function (on, g) { if (on && gravTurned[g]) lines.push("  " + E.scalarType + " bSpin0" + g + " = " + B(g) + ".w;"); });
@@ -2180,6 +2315,10 @@
         lines.push("  if (" + E.less(t1, E.DT) + ") " + tk1 + " = " + E.add(t1, E.halfDT) + ";");
         lines.push("  " + E.vecType + " vPre" + g3 + " = " + (isShaken(g3) ? E.vadd(advance(g3, "u" + g3, tk1), "shDv" + g3) : advance(g3, "u" + g3, tk1)) + ";");
         lines.push("  " + B(g3) + ".vx = vPre" + g3 + ".x; " + B(g3) + ".vy = vPre" + g3 + ".y;");
+      } else if (adaptiveSubsteps && ssSubs[g3]) {
+        // After substeps vFull is the chord; the end velocity comes from the equivalent acceleration.
+        lines.push("  " + E.vecType + " vEnd" + g3 + " = " + advance(g3, "u" + g3, E.DT) + ";");
+        lines.push("  " + B(g3) + ".vx = vEnd" + g3 + ".x; " + B(g3) + ".vy = vEnd" + g3 + ".y;");
       } else {
         lines.push("  " + B(g3) + ".vx = vFull" + g3 + ".x; " + B(g3) + ".vy = vFull" + g3 + ".y;");
       }
@@ -2834,7 +2973,7 @@
     // Nothing here depends on maxSteps, so different run lengths reuse the program.
     var springs = springLinksFor(scene, df ? dfnum : fnum);
     lines.push(generateStepOnceGLSL(n, consts, pairs, hingeAnchors, frame, precision, scene.mutualGravity, PhysicsEngine.collisionsEnabled(scene), springs,
-      { pairContacts: true, warpBits: true }));
+      { pairContacts: true, warpBits: true, adaptiveSubsteps: PhysicsEngine.adaptiveSubstepsOn(scene) }));
     lines.push("");
     var locals = generateBodyLocalsGLSL(consts, precision) + "\n" + generateHingeAnchorLocalsGLSL(hingeAnchors, precision);
     lines.push(generateTrajectoryMainGLSL(n, locals, hingeAnchors, precision, chunk, springs));
@@ -3395,6 +3534,7 @@
       base: gl.getUniformLocation(prog, "u_trajBase"),
       advance: gl.getUniformLocation(prog, "u_trajAdvance"),
       points: gl.getUniformLocation(prog, "u_hoverPoints"),
+      substepFloor: gl.getUniformLocation(prog, "u_substepFloor"),
     };
 
     var pointsTexture = compiled.pointCount ? floatTexture(gl, count, 2, compiled.points) : null;
@@ -3467,6 +3607,35 @@
       }
       gl.activeTexture(gl.TEXTURE0);
       gl.uniform1i(u.state, 0);
+      if (u.substepFloor) gl.uniform1i(u.substepFloor, 0);
+    }
+
+    // Adaptive Substeps: steps cost up to the most substeps' worth, so chunks are capped by that cost, timed
+    // per batch into rows the real draws overwrite. Each timed draw is at most double one seen to be short.
+    function substepChunkCap() {
+      function readBack() {
+        var startedAt = performance.now();
+        gl.readPixels(numBodies, 0, 1, 1, gl.RGBA, gl.FLOAT, sentinels);
+        return performance.now() - startedAt;
+      }
+      function timed(k) {
+        var startedAt = performance.now();
+        drawLog(0, k, 0);
+        readBack();
+        return performance.now() - startedAt;
+      }
+      gl.uniform1i(u.substepFloor, global.PhysicsEngine.MAX_SUBSTEPS);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, logFbo);
+      var idle = Math.min(readBack(), readBack(), readBack());
+      var limit = Math.min(chunk.maxSteps, maxSteps), took = 0, k = 1;
+      for (;;) {
+        took = Math.min(timed(k), timed(k));
+        if (k >= limit || took - idle >= TRAJECTORY_TARGET_MS / 2 || took >= TRAJECTORY_TARGET_MS) break;
+        k = Math.min(k * 2, limit);
+      }
+      gl.uniform1i(u.substepFloor, 0);
+      var stepMs = Math.max((took - idle) / k, 1e-4);
+      return Math.max(1, Math.min(chunk.maxSteps, Math.floor(TRAJECTORY_TARGET_MS / stepMs)));
     }
 
     function drawLog(base, rows, current) {
@@ -3487,6 +3656,7 @@
     var stepTimes = entry.stepMs ? [entry.stepMs / widthScale] : [];
     var current = 0, base = 0, run = 0;
     var phase = "chunks";
+    var stepCap = null;
     var pixels = null, loPixels = null, glError = gl.NO_ERROR;
     var trajectories = [];
 
@@ -3498,6 +3668,7 @@
         gl.readPixels(numBodies, 0, 1, 1, gl.RGBA, gl.FLOAT, sentinels);
         entry.warmed = true;
       }
+      if (stepCap === null) stepCap = u.substepFloor ? substepChunkCap() : chunk.maxSteps;
       while (phase === "chunks") {
         if (base >= maxSteps || failure) {
           entry.chunkSteps = steps;
@@ -3506,7 +3677,7 @@
           phase = "read";
           break;
         }
-        var rows = Math.min(steps, chunk.maxSteps, maxSteps - base);
+        var rows = Math.min(steps, stepCap, maxSteps - base);
         var startedAt = performance.now();
         drawLog(base, rows, current);
         if (base + rows < maxSteps) {

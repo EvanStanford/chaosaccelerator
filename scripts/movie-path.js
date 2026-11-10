@@ -279,6 +279,7 @@
     FPS: FPS,
     FRICTION_MAX: FRICTION_MAX,
     ease: ease,
+    offsetCenter: offsetCenter,
     path: path,
     autoSeconds: autoSeconds,
     moves: moves,

@@ -9,8 +9,10 @@
 
   var FPS = MoviePath.FPS;
   var JPEG_QUALITY = 0.92;
+  var STILL_JPEG_QUALITY = 0.95; // an exported frame is edited further
   // Unpacked-frame budget: half a second ahead at any sensible size, without gigabytes.
   var DECODED_BUDGET_BYTES = 384 * 1024 * 1024;
+  var DECODED_LIMIT_BYTES = 2048 * 1024 * 1024;
   var SPEEDS = [0.25, 0.5, 1, 2, 4];
 
   function $(id) { return document.getElementById(id); }
@@ -21,7 +23,7 @@
   var messageBox = $("player-message"), messageText = $("player-message-text");
   var messageBuilder = $("player-message-builder"), messageOk = $("player-message-ok");
   var btnPlayPause = $("play-pause"), scrubber = $("scrubber"), timeReadout = $("time-readout");
-  var btnSpeed = $("speed"), btnLoop = $("loop"), btnRestart = $("restart");
+  var btnSpeed = $("speed"), btnLoop = $("loop"), btnRestart = $("restart"), transport = $("transport");
   var movieFacts = $("movie-facts"), btnDownload = $("download");
   var renderActions = $("render-actions"), btnEndEarly = $("end-early");
   var endEarlyConfirm = $("end-early-confirm"), btnEndEarlyYes = $("end-early-yes"), btnEndEarlyNo = $("end-early-no");
@@ -61,6 +63,8 @@
   var movieSize = movie.size, antialias = movie.antialias;
   // A movie of the map's Inspect tab plays its locked points once instead of flying through keyframes.
   var ofInspect = movie.subject === "inspect";
+  // One keyframe is one picture, saved as a JPEG.
+  var isStill = !ofInspect && movie.keyframes.length === 1;
   if (ofInspect ? !link.view.inspect.length : !movie.keyframes.length) {
     var unread = link.view.unread.indexOf(ofInspect ? "insp" : "kfrm") !== -1;
     fail(ofInspect ? (unread ? "This link's Inspect points couldn't be read." : "This link has no locked Inspect points to film.")
@@ -143,7 +147,8 @@
     return { size: size, inset: size, font: size + "px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" };
   }
   function stampWatermark() {
-    var mark = watermarkFont(copy.height), size = mark.size, inset = mark.inset;
+    // A still may be many screens tall: sized against its short side.
+    var mark = watermarkFont(isStill ? Math.min(copy.width, copy.height) : copy.height), size = mark.size, inset = mark.inset;
     copyCtx.save();
     copyCtx.font = mark.font;
     copyCtx.textAlign = "right";
@@ -288,6 +293,60 @@
     whenEncoderReady(function () { renderFrame(grid, i + 1); });
   }
 
+  // Larger pictures are drawn in tiles this size at most, each with a margin cut off so the display modes that
+  // look at neighboring pixels have them at the seams.
+  var TILE_SIZE = 4096, TILE_MARGIN = 4;
+
+  function sizeCopy(w, h) {
+    if (copy.width !== w || copy.height !== h) {
+      copy.width = frameWidth = w;
+      copy.height = frameHeight = h;
+    }
+  }
+
+  // Frame spec into `copy` at the movie's size, then done(); onTile(done, of) after each tile of a tiled one.
+  // The callbacks run inside the renderer's own frame: anything thrown there would end its render loop.
+  function drawFrame(grid, spec, onTile, done) {
+    var width = movieSize.width, height = movieSize.height;
+    var look = { step: spec.step, friction: spec.friction };
+    function still(center, scale, w, h, aa, colorScale, then) {
+      grid.renderStill({ center: center, scale: scale, step: look.step, friction: look.friction, antialias: aa, colorScale: colorScale,
+        width: w, height: h }, function (canvas) {
+        if (endedEarly) return; // this frame was given up on
+        try { then(canvas); } catch (err) { fail("Rendering stopped: " + (err.message || err)); }
+      });
+    }
+    if (width <= TILE_SIZE && height <= TILE_SIZE) {
+      still(spec.center, spec.scale, width, height, antialias, null, function (canvas) {
+        // Video encoders need even sizes, and Chrome garbles a canvas frame whose width isn't a multiple of 4.
+        sizeCopy(canvas.width - canvas.width % 4, canvas.height - canvas.height % 2);
+        copyCtx.drawImage(canvas, 0, 0);
+        done();
+      });
+      return;
+    }
+    var cols = Math.ceil(width / TILE_SIZE), rows = Math.ceil(height / TILE_SIZE);
+    var tileW = 4 * Math.ceil(width / cols / 4), tileH = 2 * Math.ceil(height / rows / 2), spacing = spec.scale / height;
+    sizeCopy(width, height);
+    // The whole picture small first, for the color scale every tile shares.
+    var fit = 512 / Math.max(width, height);
+    still(spec.center, spec.scale, Math.max(16, Math.round(width * fit)), Math.max(16, Math.round(height * fit)), false, null, function () {
+      var colorScale = grid.colorScale();
+      (function tile(k) {
+        if (k === cols * rows) return done();
+        var x0 = (k % cols) * tileW, y0 = Math.floor(k / cols) * tileH;
+        var w = Math.min(tileW, width - x0), h = Math.min(tileH, height - y0), m = TILE_MARGIN;
+        // Map y runs up the picture.
+        var center = MoviePath.offsetCenter(spec.center, (x0 + w / 2 - width / 2) * spacing, (height / 2 - y0 - h / 2) * spacing);
+        still(center, (h + 2 * m) * spacing, w + 2 * m, h + 2 * m, antialias, colorScale, function (canvas) {
+          copyCtx.drawImage(canvas, m, m, w, h, x0, y0, w, h);
+          onTile(k + 1, cols * rows);
+          tile(k + 1);
+        });
+      })(0);
+    });
+  }
+
   function renderFrame(grid, i) {
     if (endedEarly) return;
     if (i >= frames.length) {
@@ -295,38 +354,23 @@
       return;
     }
     frameStartedAt = performance.now();
-    var spec = frames[i];
-    grid.renderStill({ center: spec.center, scale: spec.scale, step: spec.step, friction: spec.friction, antialias: antialias,
-      width: movieSize.width, height: movieSize.height }, function (canvas) {
-      // Called from inside the renderer's own frame: anything thrown here would end its render loop.
-      if (endedEarly) return; // this frame was given up on
-      try {
-        // Video encoders need even sizes, and Chrome garbles a canvas frame whose width isn't a multiple of 4.
-        var w = canvas.width - canvas.width % 4, h = canvas.height - canvas.height % 2;
-        if (copy.width !== w || copy.height !== h) {
-          copy.width = frameWidth = w;
-          copy.height = frameHeight = h;
-        }
-        copyCtx.drawImage(canvas, 0, 0);
-        stampWatermark();
-        blobPromises[i] = new Promise(function (resolve) { copy.toBlob(resolve, "image/jpeg", JPEG_QUALITY); });
-        blobPromises[i].then(function (blob) {
-          if (!blob) return;
-          packedBytes += blob.size;
-          packedFrames += 1;
-        });
-        show(copy, i);
-        noteFrameTime(frameCosts[i], performance.now() - frameStartedAt);
-        // The first frame rendered sets the file's size, so the encoder is chosen now; a resumed render
-        // encodes nothing yet (its earlier frames exist only as JPEGs).
-        if (!videoChosen) {
-          videoChosen = true;
-          openVideo(w, h, resumedFrom === 0).then(function () { frameDone(grid, i); });
-        } else {
-          frameDone(grid, i);
-        }
-      } catch (err) {
-        fail("Rendering stopped: " + (err.message || err));
+    drawFrame(grid, frames[i], function () {}, function () {
+      stampWatermark();
+      blobPromises[i] = new Promise(function (resolve) { copy.toBlob(resolve, "image/jpeg", JPEG_QUALITY); });
+      blobPromises[i].then(function (blob) {
+        if (!blob) return;
+        packedBytes += blob.size;
+        packedFrames += 1;
+      });
+      show(copy, i);
+      noteFrameTime(frameCosts[i], performance.now() - frameStartedAt);
+      // The first frame rendered sets the file's size, so the encoder is chosen now; a resumed render
+      // encodes nothing yet (its earlier frames exist only as JPEGs).
+      if (!videoChosen) {
+        videoChosen = true;
+        openVideo(copy.width, copy.height, resumedFrom === 0).then(function () { frameDone(grid, i); });
+      } else {
+        frameDone(grid, i);
       }
     });
   }
@@ -347,6 +391,7 @@
       return { precision: precision.name, slowdown: precision.slowdown, steps: Math.max(1, f.step) };
     });
     blobPromises = new Array(frames.length);
+    if (isStill) return renderPicture(grid);
     movieFacts.textContent = factsNote + frames.length.toLocaleString() + " frames  \u00b7  " + (frames.length / FPS).toFixed(1) + " s";
     openJob().then(function (from) {
       resumedFrom = from;
@@ -354,6 +399,49 @@
       renderStartedAt = performance.now();
       reportProgress(from);
       renderFrame(grid, from);
+    });
+  }
+
+  // ---- One keyframe: a picture ---- no saved progress and no video; Download saves the JPEG.
+  var picture = null;
+  function renderPicture(grid) {
+    movieFacts.textContent = factsNote + "One frame";
+    renderActions.hidden = true;
+    transport.hidden = true;
+    renderStartedAt = performance.now();
+    var detail = movieSize.width + " \u00d7 " + movieSize.height + (antialias ? " with antialiasing" : "");
+    renderStatus.textContent = "Rendering the frame";
+    renderDetail.textContent = detail + "  \u00b7  pauses while this tab is in the background";
+    drawFrame(grid, frames[0], function (done, of) {
+      renderStatus.textContent = "Rendering the frame: tile " + Math.min(done + 1, of) + " of " + of;
+      renderBar.style.width = (100 * done / of).toFixed(1) + "%";
+      progressEl.setAttribute("aria-valuenow", String(Math.round(100 * done / of)));
+    }, function () {
+      stampWatermark();
+      show(copy, 0);
+      renderStatus.textContent = "Finishing\u2026";
+      copy.toBlob(function (blob) {
+        if (!blob) {
+          fail("This browser couldn't store a picture that size. Try a lower resolution in the Movie card.");
+          return;
+        }
+        picture = blob;
+        renderPanel.hidden = true;
+        // The renderer's canvas can go.
+        grid.renderStill({ center: frames[0].center, scale: frames[0].scale, step: 0, antialias: false, width: 16, height: 16 }, function () {});
+        movieFacts.textContent = factsNote + "One frame  \u00b7  " + frameWidth + " \u00d7 " + frameHeight + "  \u00b7  " + formatBytes(blob.size) +
+          "  \u00b7  rendered in " + formatDuration((performance.now() - renderStartedAt) / 1000);
+        btnDownload.hidden = false;
+        btnDownload.addEventListener("click", function () {
+          if (btnDownload.disabled) return;
+          btnDownload.disabled = true;
+          SaveFile.choose("chaosaccelerator-frame.jpg", "image/jpeg", "JPEG image").then(function (file) {
+            return file && file.save(picture);
+          }).catch(function (err) {
+            btnDownload.textContent = "Saving failed: " + ((err && err.message) || err);
+          }).then(function () { btnDownload.disabled = false; });
+        });
+      }, "image/jpeg", STILL_JPEG_QUALITY);
     });
   }
 
@@ -858,7 +946,8 @@
 
   function beginPlayback() {
     renderPanel.hidden = true;
-    maxDecoded = Math.min(90, Math.max(8, Math.floor(DECODED_BUDGET_BYTES / (frameWidth * frameHeight * 4))));
+    var frameBytes = frameWidth * frameHeight * 4;
+    maxDecoded = Math.min(90, Math.max(8, Math.floor(DECODED_BUDGET_BYTES / frameBytes)), Math.max(2, Math.floor(DECODED_LIMIT_BYTES / frameBytes)));
     movieFacts.textContent = factsNote + frames.length.toLocaleString() + " frames  \u00b7  " + (frames.length / FPS).toFixed(1) + " s  \u00b7  " +
       frameWidth + " \u00d7 " + frameHeight + "  \u00b7  " +
       formatBytes(blobs.reduce(function (sum, blob) { return sum + blob.size; }, 0)) + "  \u00b7  rendered in " + formatDuration((priorMs + performance.now() - renderStartedAt) / 1000) +
@@ -1247,6 +1336,14 @@
 
   function downloadMovie() {
     if (btnDownload.disabled) return;
+    btnDownload.disabled = true;
+    SaveFile.choose("chaosaccelerator-movie.mp4", "video/mp4", "MP4 video").then(function (file) {
+      btnDownload.disabled = false;
+      if (file) saveMovie(file);
+    });
+  }
+
+  function saveMovie(file) {
     var withSound = soundOn, withOverlay = !!inspection && inspectCorner.value !== "off";
     btnDownload.disabled = true;
     inspectCorner.disabled = true;
@@ -1288,14 +1385,9 @@
       }
       muxer.finalize();
       parts = tagMovie(parts, size, movieComment());
-      var save = document.createElement("a");
-      save.href = URL.createObjectURL(new Blob(parts, { type: "video/mp4" }));
-      save.download = "chaosaccelerator-movie.mp4";
-      document.body.appendChild(save);
-      save.click();
-      save.remove();
-      setTimeout(function () { URL.revokeObjectURL(save.href); }, 60000);
-      btnDownload.textContent = withSound && !sound ? "Saved without sound: not supported in this browser" : DOWNLOAD_LABEL;
+      return file.save(new Blob(parts, { type: "video/mp4" })).then(function () {
+        btnDownload.textContent = withSound && !sound ? "Saved without sound: not supported in this browser" : DOWNLOAD_LABEL;
+      });
     }).catch(function (err) {
       btnDownload.textContent = "Saving failed: " + ((err && err.message) || err);
     }).then(function () {

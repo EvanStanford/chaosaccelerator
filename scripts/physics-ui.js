@@ -51,6 +51,8 @@
   var invertYInputCheckbox = document.getElementById("invert-y-input-checkbox");
   var mutualGravityCheckbox = document.getElementById("mutual-gravity-checkbox");
   var collisionsCheckbox = document.getElementById("collisions-checkbox");
+  var adaptiveSubstepsCheckbox = document.getElementById("adaptive-substeps-checkbox");
+  var adaptiveSubstepsField = document.getElementById("adaptive-substeps-field");
   var simulationStepsSlider = document.getElementById("simulation-steps-slider");
   var simulationStepsReadout = document.getElementById("simulation-steps-readout");
   var frictionSlider = document.getElementById("friction-slider");
@@ -131,6 +133,8 @@
     mutualGravity: false,
     // Off: no pair contact at all. Toggling Planet Mode resets this to a default.
     collisionsEnabled: true,
+    // On: Planet Mode pulls are taken in more substeps the closer and faster bodies pass.
+    adaptiveSubsteps: false,
     simulationSteps: NEW_SCENE_SIMULATION_STEPS,
     bodies: [],
     hinges: [],
@@ -2267,6 +2271,7 @@
     scene.collisionsEnabled = !scene.mutualGravity;
     collisionsCheckbox.checked = scene.collisionsEnabled;
     applyEdgeMode(scene.mutualGravity ? "infinite" : PhysicsEngine.DEFAULT_EDGE_MODE);
+    adaptiveSubstepsField.hidden = !scene.mutualGravity;
     if (scene.mutualGravity) twinkleStars();
   });
 
@@ -2308,6 +2313,14 @@
     if (initialScene) initialScene.invertYInput = on;
     scene.invertYInput = on;
     if (global.AppShell.currentView() === "grid") global.FractalGrid.setInvertYInput(on);
+    render();
+  });
+
+  adaptiveSubstepsCheckbox.addEventListener("change", function () {
+    var on = adaptiveSubstepsCheckbox.checked;
+    if (initialScene) initialScene.adaptiveSubsteps = on;
+    scene.adaptiveSubsteps = on;
+    if (global.AppShell.currentView() === "grid") global.FractalGrid.setAdaptiveSubsteps(on);
     render();
   });
 
@@ -2699,6 +2712,7 @@
     var out = {
       mutualGravity: !!scene.mutualGravity,
       collisionsEnabled: PhysicsEngine.collisionsEnabled(scene),
+      adaptiveSubsteps: !!scene.adaptiveSubsteps,
       simulationSteps: scene.simulationSteps,
       bodies: scene.bodies.map(function (b) {
         var out = { type: b.type, x: roundNum(b.x), y: roundNum(b.y), angle: roundNum(b.angle), isAnchored: !!b.isAnchored };
@@ -2894,6 +2908,7 @@
       friction: roundNum(PhysicsEngine.frictionOf(parsed)),
       mutualGravity: parsed.mutualGravity === true,
       collisionsEnabled: PhysicsEngine.collisionsEnabled(parsed),
+      adaptiveSubsteps: parsed.adaptiveSubsteps === true,
       // Kept exact (see clampSimulationSteps); the slider rests on the nearest hundred.
       simulationSteps: clampSimulationSteps(parsed.simulationSteps) || DEFAULT_SIMULATION_STEPS,
     };
@@ -2913,6 +2928,7 @@
     scene.friction = PhysicsEngine.frictionOf(data);
     scene.mutualGravity = !!data.mutualGravity;
     scene.collisionsEnabled = data.collisionsEnabled !== false;
+    scene.adaptiveSubsteps = !!data.adaptiveSubsteps;
     scene.simulationSteps = data.simulationSteps;
 
     edgeModeSelect.value = scene.edgeMode;
@@ -2920,6 +2936,8 @@
     syncFrictionUI();
     mutualGravityCheckbox.checked = scene.mutualGravity;
     collisionsCheckbox.checked = scene.collisionsEnabled;
+    adaptiveSubstepsCheckbox.checked = scene.adaptiveSubsteps;
+    adaptiveSubstepsField.hidden = !scene.mutualGravity;
     simulationStepsSlider.value = String(simulationStepsNotch(scene.simulationSteps));
     updateSimulationStepsReadout(scene.simulationSteps);
     playbackProgressSlider.max = String(scene.simulationSteps);
@@ -2931,10 +2949,13 @@
     if (!AppMode.isSimple()) return;
     scene.mutualGravity = false;
     scene.collisionsEnabled = true;
+    scene.adaptiveSubsteps = false;
     scene.friction = 0;
     scene.simulationSteps = NEW_SCENE_SIMULATION_STEPS;
     mutualGravityCheckbox.checked = false;
     collisionsCheckbox.checked = true;
+    adaptiveSubstepsCheckbox.checked = false;
+    adaptiveSubstepsField.hidden = true;
     syncFrictionUI();
     simulationStepsSlider.value = String(simulationStepsNotch(scene.simulationSteps));
     updateSimulationStepsReadout(scene.simulationSteps);
@@ -2982,13 +3003,13 @@
   }
 
   btnSampleDoublePendulum.addEventListener("click", function () {
-    loadSample("samples/double_pendulum.json?v=m234", "Double Pendulum");
+    loadSample("samples/double_pendulum.json?v=m245", "Double Pendulum");
   });
   btnSamplePinball.addEventListener("click", function () {
-    loadSample("samples/pinball.json?v=m234", "Pinball");
+    loadSample("samples/pinball.json?v=m245", "Pinball");
   });
   btnSampleBinaryStar.addEventListener("click", function () {
-    loadSample("samples/binary_star.json?v=m234", "Binary Star");
+    loadSample("samples/binary_star.json?v=m245", "Binary Star");
   });
   function clearScene() {
     sharedFrame = null;
@@ -3061,7 +3082,7 @@
   // Not listed: the playback transport, outputBodyBSelect and the Advanced disclosures.
   var lockedDuringPlaybackControls = toolButtons.concat([
     btnSampleDoublePendulum, btnSamplePinball, btnSampleBinaryStar, btnClearAll,
-    mutualGravityCheckbox, collisionsCheckbox,
+    mutualGravityCheckbox, collisionsCheckbox, adaptiveSubstepsCheckbox,
     edgeModeSelect, frictionSlider, frictionReadout, simulationStepsSlider, simulationStepsReadout,
     xInputBodySelect, yInputBodySelect, outputBodySelect,
     xInputPropertySelect, yInputPropertySelect, outputPropertySelect,

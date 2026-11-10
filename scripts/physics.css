@@ -457,6 +457,9 @@ html:has(#perf-readout-checkbox:checked) #editor-perf-readout {
 #shared-settings-body .toggle-field[hidden] {
   display: none;
 }
+#adaptive-substeps-field[hidden] {
+  display: none;
+}
 
 .toggle-field {
   display: flex;

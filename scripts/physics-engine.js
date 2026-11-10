@@ -276,6 +276,86 @@
     return { x: ax, y: ay };
   }
 
+  // ---- Adaptive Substeps (scene.adaptiveSubsteps, Planet Mode only): a step's pull is taken in K substeps,
+  // K from the quickest pair, so a pass through or close by a planet is followed within the step. Each substep is
+  // Yoshida's fourth-order triple of kick-drift-kicks.
+  var SUBSTEP_RESOLUTION = 32;
+  var MAX_SUBSTEPS = 32;
+  var YOSHIDA_C = 1 / (2 - Math.cbrt(2)), SUBSTEP_LEGS = [YOSHIDA_C, 1 - 2 * YOSHIDA_C, YOSHIDA_C];
+  function adaptiveSubstepsOn(scene) { return !!scene.adaptiveSubsteps && !!scene.mutualGravity; }
+
+  // SUBSTEP_RESOLUTION substeps per pass time: the gap (centers less segment half lengths, no nearer than
+  // touching) over the closing speed plus the orbital speed there. Must agree with the GLSL copy in physics-gpu.js.
+  function adaptiveSubstepCount(scene, dt) {
+    var bodies = scene.bodies, rate = 0;
+    for (var i = 0; i < bodies.length; i++) {
+      for (var j = i + 1; j < bodies.length; j++) {
+        var a = bodies[i], b = bodies[j];
+        if (a.isAnchored && b.isAnchored) continue;
+        var reach = (isSegment(a) ? halfThickness(a) : a.radius) + (isSegment(b) ? halfThickness(b) : b.radius);
+        var gap = Math.hypot(b.x - a.x, b.y - a.y) - (isSegment(a) ? a.length / 2 : 0) - (isSegment(b) ? b.length / 2 : 0);
+        var s = Math.max(gap, reach);
+        var dvx = (b.isAnchored ? 0 : b.vx) - (a.isAnchored ? 0 : a.vx), dvy = (b.isAnchored ? 0 : b.vy) - (a.isAnchored ? 0 : a.vy);
+        var gm = MUTUAL_GRAVITY_CONSTANT * (gravitationalMass(a) + gravitationalMass(b));
+        rate = Math.max(rate, (Math.hypot(dvx, dvy) + Math.sqrt(gm / s)) / s);
+      }
+    }
+    return Math.max(1, Math.min(MAX_SUBSTEPS, Math.ceil(rate * dt * SUBSTEP_RESOLUTION)));
+  }
+
+  // The pull on free body k at poses[k], the others at theirs. With collisions on, the bounce rule (bouncePull).
+  function substepPull(scene, k, poses, apart, springPart) {
+    if (apart) return bouncePull(scene, k, poses[k].x, poses[k].y, poses, apart, springPart);
+    var bodies = scene.bodies, ax = springPart ? springPart[k].x : 0, ay = springPart ? springPart[k].y : 0;
+    for (var j = 0; j < bodies.length; j++) {
+      if (j === k) continue;
+      var p = k < j ? pairPull(scene, bodies[k], poses[k], bodies[j], poses[j], false) : pairPull(scene, bodies[j], poses[j], bodies[k], poses[k], false);
+      if (p) { ax += (k < j ? p.i : p.j).x; ay += (k < j ? p.i : p.j).y; }
+    }
+    return { x: ax, y: ay };
+  }
+
+  // Substeps for the free bodies on no hinge; the others move on at vFull. The stored velocity trails the position
+  // by half a step on both ends, as a plain step's does. vFull becomes the chord and acc the constant acceleration
+  // that ends on the same velocity, so the rest of the step runs as usual. Segments keep the step's start axis.
+  function adaptiveSubsteps(scene, k, acc, u, vFull, dt, maxSpeed, friction, springPart) {
+    var bodies = scene.bodies, n = bodies.length, i, s, t = 0;
+    var subs = bodies.map(function (b, m) {
+      return !b.isAnchored && !scene.hinges.some(function (hg) { return hg.bodyA === m || hg.bodyB === m; });
+    });
+    var apart = collisionsEnabled(scene) ? bodies.map(function (bi) {
+      return bodies.map(function (bj) { return bi === bj || !shapesTouch(bi, poseOf(bi), bj, poseOf(bj)); });
+    }) : null;
+    var poses = bodies.map(poseOf), v = new Array(n), a = new Array(n);
+    for (i = 0; i < n; i++) {
+      if (!subs[i]) continue;
+      a[i] = { x: acc[i].x, y: acc[i].y };
+      v[i] = advanceVelocity(u[i].x, u[i].y, dt / 2, a[i].x, a[i].y, maxSpeed, friction);
+    }
+    for (s = 0; s < 3 * k; s++) {
+      var h = dt / k * SUBSTEP_LEGS[s % 3];
+      t += h;
+      for (i = 0; i < n; i++) {
+        if (bodies[i].isAnchored) continue;
+        if (!subs[i]) { poses[i].x = bodies[i].x + vFull[i].x * t; poses[i].y = bodies[i].y + vFull[i].y * t; continue; }
+        v[i] = advanceVelocity(v[i].x, v[i].y, h / 2, a[i].x, a[i].y, maxSpeed, friction);
+        poses[i].x += v[i].x * h;
+        poses[i].y += v[i].y * h;
+      }
+      for (i = 0; i < n; i++) if (subs[i]) a[i] = substepPull(scene, i, poses, apart, springPart);
+      for (i = 0; i < n; i++) if (subs[i]) v[i] = advanceVelocity(v[i].x, v[i].y, h / 2, a[i].x, a[i].y, maxSpeed, friction);
+    }
+    // dt * phi: what a unit acceleration adds over the step.
+    var unit = advanceVelocity(0, 0, dt, 1, 0, Infinity, friction).x;
+    for (i = 0; i < n; i++) {
+      if (!subs[i]) continue;
+      var end = advanceVelocity(v[i].x, v[i].y, -dt / 2, a[i].x, a[i].y, maxSpeed, friction);
+      acc[i].x += (end.x - vFull[i].x) / unit;
+      acc[i].y += (end.y - vFull[i].y) / unit;
+      vFull[i] = { x: (poses[i].x - bodies[i].x) / dt, y: (poses[i].y - bodies[i].y) / dt };
+    }
+  }
+
   // ---- Springs: a FORCE, not a constraint (massless, collides with nothing). Shape:
   // { bodyA: index | null, bodyB, localAnchorA, localAnchorB, stiffness, restLength }; bodyA
   // null means localAnchorA is a WORLD point. An off-center end is the engine's only source
@@ -651,7 +731,7 @@
     }];
   }
 
-  // Swept capsule (e0-e1, moving at segVx/segVy, rotation ignored) vs. circle: flat side plus a cap
+  // Swept capsule (e0-e1, moving at segVx/segVy, not turning) vs. circle: flat side plus a cap
   // each end, earliest t wins. refX/refY is the OWNING body's center, since rA is its lever arm.
   function sweptCapsuleCircleContact(e0, e1, segVx, segVy, refX, refY, circle, halfThickness, dt) {
     var p0x = circle.x, p0y = circle.y;
@@ -701,10 +781,42 @@
     };
   }
 
-  // line = A, circle = B; normal points line -> circle. Swept in the line's frame.
+  // A spinning line's capsule vs. a circle apart at the start: its ends run their chords (lineSweep).
+  function spinningCapsuleCircleContact(line, circle, half, dt) {
+    var rsum = half + circle.radius, s = lineSweep(line, dt);
+    var p = { x: circle.x, y: circle.y }, dp = { x: circle.vx * dt, y: circle.vy * dt };
+    var f = sweepPointMovingSlab(p, dp, s.e0, s.d0, s.e1, s.d1, line.length, rsum);
+    var f0 = sweepPointSphere(p.x, p.y, dp.x - s.d0.x, dp.y - s.d0.y, s.e0.x, s.e0.y, rsum, 1);
+    if (f0 >= 0 && (f < 0 || f0 < f)) f = f0;
+    var f1 = sweepPointSphere(p.x, p.y, dp.x - s.d1.x, dp.y - s.d1.y, s.e1.x, s.e1.y, rsum, 1);
+    if (f1 >= 0 && (f < 0 || f1 < f)) f = f1;
+    if (f < 0) return null;
+    var pf = sweptPoint(p, dp, f);
+    var closest = closestPointOnSegment(sweptPoint(s.e0, s.d0, f), sweptPoint(s.e1, s.d1, f), pf);
+    var dx = pf.x - closest.x, dy = pf.y - closest.y;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    var nx = dist > 1e-9 ? dx / dist : 0;
+    var ny = dist > 1e-9 ? dy / dist : 1;
+    var tHit = f * dt, px = closest.x + nx * half, py = closest.y + ny * half;
+    return {
+      normal: { x: nx, y: ny },
+      point: { x: px, y: py },
+      rA: { x: px - (line.x + line.vx * tHit), y: py - (line.y + line.vy * tHit) },
+      rB: { x: -nx * circle.radius, y: -ny * circle.radius },
+      penetration: Math.max(rsum - dist, 0),
+      tHit: tHit,
+    };
+  }
+
+  // line = A, circle = B; normal points line -> circle.
   function collideLineCircle(line, circle, dt) {
-    var endpoints = getLineEndpoints(line);
-    var c = sweptCapsuleCircleContact(endpoints[0], endpoints[1], line.vx, line.vy, line.x, line.y, circle, LINE_THICKNESS / 2, dt);
+    var endpoints = getLineEndpoints(line), half = LINE_THICKNESS / 2, c;
+    var closest = closestPointOnSegment(endpoints[0], endpoints[1], circle);
+    if (line.w && Math.hypot(circle.x - closest.x, circle.y - closest.y) >= half + circle.radius) {
+      c = spinningCapsuleCircleContact(line, circle, half, dt);
+    } else {
+      c = sweptCapsuleCircleContact(endpoints[0], endpoints[1], line.vx, line.vy, line.x, line.y, circle, half, dt);
+    }
     return c ? [c] : null;
   }
 
@@ -1789,6 +1901,8 @@
       u[i] = { x: bodies[i].vx, y: bodies[i].vy };
       vFull[i] = advanceVelocity(u[i].x, u[i].y, dt, acc[i].x, acc[i].y, maxSpeed, friction);
     }
+    var substeps = adaptiveSubstepsOn(scene) ? adaptiveSubstepCount(scene, dt) : 1;
+    if (substeps > 1) adaptiveSubsteps(scene, substeps, acc, u, vFull, dt, maxSpeed, friction, springPart);
     var shake = scene.hinges.length ? shakeHinges(scene, bodies, vFull, alpha, swing, dt) : null;
 
     // Probes move and turn as leg 1 will: at vFull, and at the whole step's spin with any hinge impulse.
@@ -2062,6 +2176,7 @@
       xInput: scene.xInput ? { body: scene.xInput.body, property: scene.xInput.property } : null,
       yInput: scene.yInput ? { body: scene.yInput.body, property: scene.yInput.property } : null,
       invertYInput: !!scene.invertYInput,
+      adaptiveSubsteps: !!scene.adaptiveSubsteps,
       output: scene.output ? { body: scene.output.body, bodyB: scene.output.bodyB === undefined ? null : scene.output.bodyB, property: scene.output.property } : null,
       frameWidth: scene.frameWidth,
       frameHeight: scene.frameHeight,
@@ -2263,6 +2378,10 @@
     gravitationalMass: gravitationalMass,
     halfExtent: halfExtent,
     computeAccelerations: computeAccelerations,
+    SUBSTEP_RESOLUTION: SUBSTEP_RESOLUTION,
+    MAX_SUBSTEPS: MAX_SUBSTEPS,
+    adaptiveSubstepsOn: adaptiveSubstepsOn,
+    adaptiveSubstepCount: adaptiveSubstepCount,
     runBounceCounts: runBounceCounts,
     runBounceEvents: runBounceEvents,
     bounceCountsFromTrajectory: bounceCountsFromTrajectory,

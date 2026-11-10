@@ -317,6 +317,39 @@
     }
   );
 
+  // Reported from the map: a falling ball clipped by the spinning tip of a hinged pair of lines.
+  function spinningTipScene() {
+    var authored = ShareUrl.decode("#map/v:1.0,body:ci:95.5796:320.414:0:9.8768;ln:54.7817:-225.4363:-.1363:378.6051;ln:202.5307:-287.3698:-2.4916:100.2303;ci:-134.0107:-197.8589:0:115.8931,hnge:w:1:-22.2542:-215.8099:-77.6294:-.9304;1:2:187.79:-3.1432:-50.304:-3.5916;1:3:-192.6964:2.4718:-1.781:1.0547,xinp:0.x,yinp:1.ang,outp:0.y,edge:infi,step:115,frmw:1487,frmh:1080").scene;
+    var scene = PhysicsCoords.toEngineJSON(authored, authored);
+    scene.bodies.forEach(PhysicsEngine.computeMass);
+    return scene;
+  }
+
+  addTest(
+    "A spinning line's circle contacts sweep its turn, so a tip's hit makes no jump where it moves to the next step (JS, float32, double-float)",
+    "reported as a 190px jump along an Inspect line: the circle sweep held the line's angle, so a tip turning at 290px/s was only found overlapping at a step's start",
+    function () {
+      var scene = spinningTipScene(), A = [-108.939, -227.971], B = [-102.722, -229.553], N = 400, STEPS = 115;
+      function start(t) { return PhysicsGridCodegen.computeOffsetSceneNumeric(scene, A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t); }
+      var ys = [], hit = 0, worst = 0;
+      for (var k = 0; k < N; k++) {
+        var s = start(k / (N - 1));
+        for (var i = 0; i < STEPS; i++) PhysicsEngine.step(s, DT);
+        ys.push(s.bodies[0].y);
+        if (s.bodies[0].vx < -1000) hit++;
+        if (k > 0) worst = Math.max(worst, Math.abs(ys[k] - ys[k - 1]));
+      }
+      var js = PhysicsEngine.runTrajectory(start(0.48), STEPS, DT);
+      var f32 = maxTrajectoryError(js, PhysicsGPU.runSceneOnGPU(start(0.48), STEPS, "f32"), STEPS);
+      var df = maxTrajectoryError(js, PhysicsGPU.runSceneOnGPU(start(0.48), STEPS, "df"), STEPS);
+      return {
+        pass: hit === N && worst < 3 && f32 < 0.5 && df < 1e-3,
+        detail: hit + " of " + N + " starts hit by the tip, largest change between neighbors " + worst.toFixed(2) + "px (was 190px); through the hit float32 within " +
+          f32.toExponential(1) + "px of JS, double-float " + df.toExponential(1) + "px",
+      };
+    }
+  );
+
   addTest(
     "Two lines found crossed are pushed apart the shorter way, toward where each one mostly lies (JS, float32, double-float)",
     "crossed segments have no closest-point direction, so the push is out the shorter way toward the side each line mostly lies on: a rod whose end has dipped 15px past a floor's center line goes back up 15px plus a line's thickness, in either body order",
@@ -3353,6 +3386,60 @@
       return {
         pass: dfe < 1e-3 && f32 < 0.5,
         detail: "df " + dfe.toExponential(1) + "px over 230 steps (bounces at 57, 144, 210 and 213), f32 " + f32.toExponential(1) + "px over the first 120",
+      };
+    }
+  );
+
+  // A ball that falls through a small planet's core 16-21 times in 10 s, collisions off, a big planet further off.
+  function corePassScene(dx, on, collisions) {
+    var b = PhysicsEngine.createCircle(625.2817 + dx, 219.4547, 53.3607, false);
+    var small = PhysicsEngine.createCircle(742.6897, 111.6717, 30, true), big = PhysicsEngine.createCircle(285.1027, 728.7439, 100.9426, true);
+    return { bodies: [b, small, big], hinges: [], springs: [], frameWidth: 1153, frameHeight: 1080, edgeMode: "infinite", mutualGravity: true,
+      collisionsEnabled: !!collisions, adaptiveSubsteps: on };
+  }
+
+  addTest(
+    "Adaptive Substeps: a ball falling through a planet's core again and again follows a 64x finer step",
+    "reported as an intricate deep-zoom map that was the 1/60 step's error at each core pass. The reference starts half a 1/60 step on, as the engine reads a start velocity",
+    function () {
+      var worst = 0, offWorst = 0;
+      [-0.6, -0.3, 0, 0.3, 0.6].forEach(function (dx) {
+        var on = corePassScene(dx, true), off = corePassScene(dx, false), ref = corePassScene(dx, false);
+        var a0 = PhysicsEngine.computeAccelerations(ref)[0];
+        ref.bodies[0].vx += a0.x * (DT / 2 - DT / 128);
+        ref.bodies[0].vy += a0.y * (DT / 2 - DT / 128);
+        for (var i = 0; i < 600; i++) {
+          PhysicsEngine.step(on, DT);
+          PhysicsEngine.step(off, DT);
+          for (var k = 0; k < 64; k++) PhysicsEngine.step(ref, DT / 64);
+        }
+        var r = ref.bodies[0];
+        worst = Math.max(worst, Math.hypot(on.bodies[0].x - r.x, on.bodies[0].y - r.y));
+        offWorst = Math.max(offWorst, Math.hypot(off.bodies[0].x - r.x, off.bodies[0].y - r.y));
+      });
+      return {
+        pass: worst < 2,
+        detail: "after 600 steps, 5 starts 0.3px apart: worst " + worst.toFixed(2) + "px off the finer step with substeps (" + offWorst.toFixed(0) + "px without)",
+      };
+    }
+  );
+
+  addTest(
+    "Adaptive Substeps: JS engine and GPU compiler agree",
+    "the substep count, the Yoshida substeps and both pull rules are hand-synced in physics-engine.js and both spellings of generateStepOnceGLSL",
+    function () {
+      var line = corePassScene(0, true);
+      line.bodies.push(PhysicsEngine.createLine(875, 100, 140, 0.4, false));
+      var cases = [["collisions off", corePassScene(0, true)], ["collisions on", corePassScene(0, true, true)], ["a free line", line]];
+      var worstDf = 0, worstF32 = 0;
+      cases.forEach(function (c) {
+        var cpu = PhysicsEngine.runTrajectory(c[1], 200, DT);
+        worstDf = Math.max(worstDf, maxTrajectoryError(cpu, PhysicsGPU.runSceneOnGPU(c[1], 200, "df"), 200));
+        worstF32 = Math.max(worstF32, maxTrajectoryError(cpu, PhysicsGPU.runSceneOnGPU(c[1], 200, "f32"), 100));
+      });
+      return {
+        pass: worstDf < 1e-3 && worstF32 < 0.5,
+        detail: "df " + worstDf.toExponential(1) + "px over 200 steps, f32 " + worstF32.toExponential(1) + "px over the first 100 (" + cases.map(function (c) { return c[0]; }).join(", ") + ")",
       };
     }
   );

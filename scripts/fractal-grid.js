@@ -646,6 +646,12 @@
     if (message) emptyState.querySelector("p").textContent = message;
   }
 
+  // The Settings toggle only applies to Planet Mode scenes.
+  function showAdaptiveSubstepsSetting(scene) {
+    document.getElementById("adaptive-substeps-checkbox").checked = !!scene.adaptiveSubsteps;
+    document.getElementById("adaptive-substeps-field").hidden = !scene.mutualGravity;
+  }
+
   var raw = bootScene ? JSON.stringify(bootScene) : null;
   var scene = null;
   // Friction as GLSL uniforms (useFrictionUniform); stillFriction is a still's fraction, null for the scene's.
@@ -659,6 +665,7 @@
       var outputProblem = PhysicsEngine.outputMappingError(scene.output, scene.bodies.length);
       if (outputProblem) throw new Error(outputProblem);
       document.getElementById("invert-y-input-checkbox").checked = !!scene.invertYInput;
+      showAdaptiveSubstepsSetting(scene);
     } catch (err) {
       showEmptyState("The scene couldn't be read (" + (err.message || err) + "). Go back and send it again.");
       mapUnusable("Cannot load the given pattern: " + (err.message || err));
@@ -853,7 +860,8 @@
       ? { width: sceneToCompile.frameWidth, height: sceneToCompile.frameHeight } : undefined;
     var stepOnceSource = PhysicsGPU.generateStepOnceGLSL(initial.n, initial.consts, initial.pairs, initial.hingeAnchors, frame, precision, sceneToCompile.mutualGravity, PhysicsEngine.collisionsEnabled(sceneToCompile), initial.springs,
       { contactBody: isBounces ? sceneToCompile.output.body : null, touchBody: goalOrder ? outputBodies[0] : null,
-        warpBody: (isWarps || isTotalRotation || goalWarps) && hasPortals ? outputBodies[0] : null, warpFrom: goalWarps });
+        warpBody: (isWarps || isTotalRotation || goalWarps) && hasPortals ? outputBodies[0] : null, warpFrom: goalWarps,
+        adaptiveSubsteps: PhysicsEngine.adaptiveSubstepsOn(sceneToCompile) });
     var stepOnceCall = "stepOnce(" + PhysicsGPU.stepOnceCallArgs(initial.n, initial.hingeAnchors, precision, initial.springs) + ");";
 
     // "Stop on wrap": each pixel freezes the first step ANY watched body would cross
@@ -1666,6 +1674,7 @@
       lowSaturation: gl.getUniformLocation(prog, "u_lowSaturation"),
       colorBlind: gl.getUniformLocation(prog, "u_colorBlind"),
       fadeAt: gl.getUniformLocation(prog, "u_fadeAt"),
+      substepFloor: gl.getUniformLocation(prog, "u_substepFloor"),
       maxSteps: gl.getUniformLocation(prog, "u_maxSteps"),
       durationSteps: gl.getUniformLocation(prog, "u_durationSteps"),
       bounceMax: gl.getUniformLocation(prog, "u_bounceMax"),
@@ -2994,6 +3003,8 @@
   // The view-scaled Outputs' scale moves only part of the way to each new measurement, so it doesn't jump between views.
   var VIEW_SCALE_KEEP = 0.7;
   var viewScaleSet = false;
+  // A tile of a larger still uses the whole picture's scale (renderStill's colorScale) instead of measuring its own.
+  var heldColorScale = null;
   function easedViewMax(max) {
     var eased = viewScaleSet ? VIEW_SCALE_KEEP * bounceMaxValue + (1 - VIEW_SCALE_KEEP) * max : max;
     viewScaleSet = true;
@@ -3010,6 +3021,7 @@
   }
 
   function requestBounceMax() {
+    if (heldColorScale !== null) return;
     var key = bounceMaxViewKey();
     // Already measured, or being measured, for this view.
     if (key === bounceMaxProbe.measuredKey || (bounceMaxProbe.sync && key === bounceMaxProbe.key)) return;
@@ -3044,7 +3056,7 @@
     gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, bounceMaxProbe.values);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
     // A stale view's measurement says nothing; the move queued its own.
-    if (bounceMaxProbe.key !== bounceMaxViewKey()) return;
+    if (bounceMaxProbe.key !== bounceMaxViewKey() || heldColorScale !== null) return;
     bounceMaxProbe.measuredKey = bounceMaxProbe.key;
     var max = easedViewMax(viewMaxOf(bounceMaxProbe.values));
     // A still held for this measurement needs a fresh draw to deliver from.
@@ -3122,6 +3134,7 @@
   // A bound grid program's uniforms for a full-res picture width x height px.
   function setGridUniforms(pass, width, height, stride, originX, originY, steps, bounceMax, sampleField) {
     gl.uniform1i(pass.uniforms.sampleField, sampleField);
+    gl.uniform1i(pass.uniforms.substepFloor, substepFloor);
     gl.uniform2f(pass.uniforms.resolution, width, height);
     gl.uniform1f(pass.uniforms.gridStride, stride);
     gl.uniform2f(pass.uniforms.gridOrigin, originX, originY);
@@ -8168,7 +8181,7 @@
     ).join("\n"));
   }
 
-  var PLAYBACK_STEP_UNIFORMS = ["resolution", "gridStride", "gridOrigin", "centerHi", "centerLo", "centerLo2", "centerLo3", "scale", "state", "init", "baseStep", "steps", "group", "tileOrigin", "stencil"];
+  var PLAYBACK_STEP_UNIFORMS = ["resolution", "gridStride", "gridOrigin", "centerHi", "centerLo", "centerLo2", "centerLo3", "scale", "state", "init", "baseStep", "steps", "group", "tileOrigin", "stencil", "substepFloor"];
   var PLAYBACK_COLOR_UNIFORMS = ["state", "stateSize", "stateSteps", "gridStride", "colorZoom", "lowSaturation", "colorBlind", "fadeAt", "durationSteps", "bounceMax", "displayMode", "targetOrigin", "stencil", "sampleField", "ftleInit", "ftleRange"];
 
   function finishedPlaybackProgram(build, uniformNames) {
@@ -8315,7 +8328,13 @@
 
   // Times run(k) (a draw of k steps plus a readback) for k = 1, 2, 4... up to kMax, judging each by its time
   // above a bare readback; each timed draw is at most double one seen to be short. Times are per draw.
+  // Adaptive Substeps: timed runs take every step at the most substeps, the cost a close pass reaches.
+  var substepFloor = 0;
   function calibrateRun(run, readOnly, kMax, draws) {
+    substepFloor = PhysicsEngine.MAX_SUBSTEPS;
+    try { return calibrateRunAt(run, readOnly, kMax, draws); } finally { substepFloor = 0; }
+  }
+  function calibrateRunAt(run, readOnly, kMax, draws) {
     run(1);
     run(1);
     var idleRaw = Math.min(readOnly(), readOnly(), readOnly());
@@ -8401,7 +8420,9 @@
   var sliceRoomyFrames = 0;
   function noteSliceGpuTime(slice, drawMs) {
     var precision = slice.precision;
-    var roomy = sliceSteps[precision] === slice.steps && slice.maxK >= slice.steps && !sliceTooHeavy[precision] &&
+    // Adaptive Substeps: a quick draw only means no close pass yet, so the calibrated length stands.
+    var roomy = !PhysicsEngine.adaptiveSubstepsOn(scene) &&
+      sliceSteps[precision] === slice.steps && slice.maxK >= slice.steps && !sliceTooHeavy[precision] &&
       slice.steps < sliceStepsMax() && drawMs < SLICE_RAISE_SHARE * sliceTargetMs();
     if (!roomy) { sliceRoomyFrames = 0; return; }
     if (++sliceRoomyFrames < SLICE_RAISE_FRAMES) return;
@@ -8530,6 +8551,7 @@
     gl.uniform1i(u.init, job.started ? 0 : 1);
     gl.uniform1i(u.baseStep, job.done);
     gl.uniform1i(u.steps, k);
+    gl.uniform1i(u.substepFloor, substepFloor);
     gl.uniform2f(u.tileOrigin, spec.tileX, spec.tileY);
     gl.uniform1i(u.stencil, spec.stencil);
     gl.bindFramebuffer(gl.FRAMEBUFFER, st.fbo);
@@ -8899,6 +8921,7 @@
     gl.uniform1i(u.init, pass.init ? 1 : 0);
     gl.uniform1i(u.baseStep, pass.from);
     gl.uniform1i(u.steps, pass.steps);
+    gl.uniform1i(u.substepFloor, substepFloor);
     gl.uniform2f(u.tileOrigin, 0, 0);
     gl.uniform1i(u.stencil, 1);
     gl.bindFramebuffer(gl.FRAMEBUFFER, playbackGpu.fbo);
@@ -9401,6 +9424,7 @@
   // The movie player carries the eased color scale across a resume; null starts it over.
   global.FractalGrid.colorScale = function () { return bounceMaxValue; };
   global.FractalGrid.setColorScale = function (value) {
+    heldColorScale = null;
     viewScaleSet = value != null;
     if (value != null) bounceMaxValue = value;
     bounceMaxProbe.measuredKey = null;
@@ -9446,6 +9470,7 @@
     showHoverEmpty();
     scene = nextScene;
     document.getElementById("invert-y-input-checkbox").checked = !!scene.invertYInput;
+    showAdaptiveSubstepsSetting(scene);
     sceneGeneration += 1;
     reuse.image = null;
     reuseDropSource();
@@ -9518,6 +9543,18 @@
     shared.inspect.forEach(function (group) { group.a = flip(group.a); group.b = flip(group.b); });
     shared.movie.keyframes.forEach(function (k) { k.center = flip(k.center); });
     scene.invertYInput = on;
+    rerunSceneView(shared);
+  };
+
+  global.FractalGrid.setAdaptiveSubsteps = function (on) {
+    if (!!scene.adaptiveSubsteps === on) return;
+    var shared = global.FractalGrid.shareState().view;
+    scene.adaptiveSubsteps = on;
+    rerunSceneView(shared);
+  };
+
+  // After a scene flag changes from Settings: recompile and rerun the same view, Inspect and keyframes.
+  function rerunSceneView(shared) {
     showHoverEmpty();
     reuse.image = null;
     reuseDropSource();
@@ -9531,7 +9568,7 @@
     sceneGeneration += 1;
     if (statsPanel) { statsHasResult = false; statsResultIsCurrent = false; statsPanel.clearResult(); }
     global.FractalGrid.applyShareView(shared);
-  };
+  }
 
   // ---- Movies ----
   //
@@ -9793,10 +9830,11 @@
     movieLoopCheckbox.checked = movie.loop;
     var seconds = MoviePath.totalSeconds(movie.keyframes, movie.loop);
     movieSummary.textContent = movie.keyframes.length < 2
-      ? (movie.keyframes.length ? "Add at least one more keyframe." : "")
+      ? (movie.keyframes.length ? "One keyframe makes a picture; add another to make a video." : "")
       : movie.keyframes.length + " keyframes  \u00b7  " + seconds.toFixed(1) + " s  \u00b7  " +
         Math.round(seconds * MoviePath.FPS).toLocaleString() + " frames to render";
-    btnMovieDone.disabled = movie.keyframes.length < 2;
+    btnMovieDone.textContent = movie.keyframes.length === 1 ? "Export Frame" : "Render Video";
+    btnMovieDone.disabled = movie.keyframes.length < 1;
   }
 
   // A render left unfinished (movie-store.js): the player saves after every frame, so closing it mid-render
@@ -9836,11 +9874,16 @@
     movie.keyframes.push(currentKeyframe());
     updateMovieUI();
   });
-  // Rounded down to what video encoders take (width a multiple of 4, height even), 16 to 4096 a side; anything else is put back.
+  // Rounded down to what video encoders take (width a multiple of 4, height even), within ShareUrl's limits; anything else is put back.
   function commitMovieSize() {
     var w = Math.floor(Number(movieWidthInput.value.replace(/[\s,]/g, "")));
     var h = Math.floor(Number(movieHeightInput.value.replace(/[\s,]/g, "")));
-    if (w > 0 && h > 0) movie.size = { width: clamp(w - w % 4, 16, 4096), height: clamp(h - h % 2, 16, 4096) };
+    if (w > 0 && h > 0) {
+      var fit = Math.min(1, Math.sqrt(ShareUrl.MAX_MOVIE_PIXELS / (w * h)));
+      w = clamp(Math.floor(w * fit), 16, ShareUrl.MAX_MOVIE_SIDE);
+      h = clamp(Math.floor(h * fit), 16, ShareUrl.MAX_MOVIE_SIDE);
+      movie.size = { width: w - w % 4, height: h - h % 2 };
+    }
     movieWidthInput.value = String(movie.size.width);
     movieHeightInput.value = String(movie.size.height);
   }
@@ -9860,7 +9903,7 @@
     updateMovieUI();
   });
   btnMovieDone.addEventListener("click", function () {
-    if (movie.keyframes.length < 2) return;
+    if (movie.keyframes.length < 1) return;
     var shared = global.FractalGrid.shareState();
     var link = "chaosplayback.html#" + ShareUrl.encode({
       page: ShareUrl.PAGE_MOVIE,
@@ -9929,7 +9972,7 @@
   var EXPORT_CONFIRM_BYTES = 1024 * 1024 * 1024;
   var HEX_BYTE = [];
   for (var hexByte = 0; hexByte < 256; hexByte++) HEX_BYTE.push((hexByte < 16 ? "0" : "") + hexByte.toString(16));
-  var exportJob = null;
+  var exportJob = null, exportChoosing = false;
   if (!hasFloatColorBuffer) {
     btnMovieExport.disabled = true;
     btnMovieExport.title = "Exporting raw data needs floating-point render targets, which this browser doesn't provide";
@@ -9984,14 +10027,21 @@
   }
 
   btnMovieExport.addEventListener("click", function () {
-    if (exportJob || !hasFloatColorBuffer) return;
+    if (exportJob || exportChoosing || !hasFloatColorBuffer) return;
     var job = newExportJob();
+    // Asked where to save first, in the click.
     function begin() {
-      if (exportJob) return;
-      exportJob = job;
-      btnMovieExport.hidden = true;
-      movieExportProgress.hidden = false;
-      showExportProgress(job);
+      if (exportJob || exportChoosing) return;
+      exportChoosing = true;
+      SaveFile.choose("chaosaccelerator-raw-data.json", "application/json", "JSON data").then(function (file) {
+        exportChoosing = false;
+        if (!file || exportJob) return;
+        job.file = file;
+        exportJob = job;
+        btnMovieExport.hidden = true;
+        movieExportProgress.hidden = false;
+        showExportProgress(job);
+      });
     }
     if (job.estimate < EXPORT_CONFIRM_BYTES) begin();
     else global.AppMessage.prompt("This file will be about " + formatBytes(job.estimate) + ". Export it anyway?",
@@ -10415,7 +10465,7 @@
     var s = ShareUrl.decode(job.fragment).scene;
     var sceneJSON = snakeKeys({
       bodies: s.bodies, hinges: s.hinges, springs: s.springs, xInput: s.xInput, yInput: s.yInput, invertYInput: s.invertYInput, output: s.output,
-      edgeMode: s.edgeMode, mutualGravity: s.mutualGravity, collisionsEnabled: s.collisionsEnabled, friction: s.friction,
+      edgeMode: s.edgeMode, mutualGravity: s.mutualGravity, collisionsEnabled: s.collisionsEnabled, adaptiveSubsteps: !!s.adaptiveSubsteps, friction: s.friction,
       simulationSteps: s.simulationSteps, frameWidth: s.frameWidth, frameHeight: s.frameHeight,
     });
     sceneJSON.view = exportViewJSON(job.view);
@@ -10441,13 +10491,7 @@
   function finishExport(job) {
     var blob = new Blob([exportHeaderText(job)].concat(job.blobs, job.parts, ["\n  ]\n}\n"]), { type: "application/json" });
     endExport(null);
-    var save = document.createElement("a");
-    save.href = URL.createObjectURL(blob);
-    save.download = "chaosaccelerator-raw-data.json";
-    document.body.appendChild(save);
-    save.click();
-    save.remove();
-    setTimeout(function () { URL.revokeObjectURL(save.href); }, 60000);
+    job.file.save(blob).catch(function (err) { global.AppMessage.alert("Saving failed: " + ((err && err.message) || err)); });
   }
 
   // Stops the export, finished or not, and frees what it held; `message` says why when it stopped early.
@@ -10492,9 +10536,11 @@
     stillJob = null;
     job.onDone(canvas);
   }
-  // spec: { center: { x, xLo, y, yLo }, scale, step, antialias, width, height, friction }; no width and height: the window's size.
-  // friction: a fraction; absent draws at the scene's.
+  // spec: { center: { x, xLo, y, yLo }, scale, step, antialias, width, height, friction, colorScale }; no width and height: the window's size.
+  // friction: a fraction; absent draws at the scene's. colorScale: a colorScale() to draw at; absent measures the view.
   global.FractalGrid.renderStill = function (spec, onDone) {
+    heldColorScale = spec.colorScale == null ? null : spec.colorScale;
+    if (heldColorScale !== null) bounceMaxValue = heldColorScale;
     stillFriction = spec.friction == null ? null : PhysicsEngine.frictionOf({ friction: spec.friction });
     if (stillFriction !== null && !frictionUniform && stillFriction !== PhysicsEngine.frictionOf(scene)) global.FractalGrid.useFrictionUniform();
     stillJob = { antialias: spec.antialias !== false, onDone: onDone };
