@@ -1570,7 +1570,7 @@
               out.push("        gk = dfDiv(DF_ONE, dfMul(gr2, dfSqrt(gr2)));");
               out.push("      } else {");
               out.push("        MF gu2 = dfDiv(gr2, gContact2);");
-              out.push("        MF gPoly = dfAdd(dfSub(" + dfnumG(35 / 8) + ", dfMul(" + dfnumG(21 / 4) + ", gu2)), dfMul(" + dfnumG(15 / 8) + ", dfSqr(gu2)));");
+              out.push("        MF gPoly = dfAdd(dfSub(" + dfnumG(15 / 4) + ", dfMul(" + dfnumG(27 / 8) + ", gu2)), dfMul(" + dfnumG(5 / 8) + ", dfMul(gu2, dfSqr(gu2))));");
               out.push("        gk = dfDiv(gPoly, dfMul(gContact2, gContact));");
               out.push("      }");
               applyLines.forEach(function (l) { out.push("      " + l); });
@@ -1626,7 +1626,7 @@
               out.push("    {");
               out.push("      float u2 = r2 / (contact * contact);");
               out.push("      bool outside = r2 >= contact * contact;");
-              out.push("      float poly = (35.0 / 8.0 - 21.0 / 4.0 * u2 + 15.0 / 8.0 * u2 * u2);");
+              out.push("      float poly = (15.0 / 4.0 - 27.0 / 8.0 * u2 + 5.0 / 8.0 * u2 * u2 * u2);");
               [[pa, pb, aMoves, "+="], [pb, pa, bMoves, "-="]].forEach(function (side) {
                 if (!side[2]) return;
                 out.push("      " + acc(side[0]) + " " + side[3] + " (outside");
@@ -1922,13 +1922,13 @@
           res.push("    { DVec2 gd = dv2(dfSub(" + pj + ".x, " + px + "), dfSub(" + pj + ".y, " + py + ")); MF gr2 = dv2LengthSq(gd);");
           res.push("      MF gContact = dfAdd(gravReach" + k + ", gravReach" + j + "); MF gContact2 = dfSqr(gContact); MF gk;");
           res.push("      if (!dfLess(gr2, gContact2)) gk = dfDiv(DF_ONE, dfMul(gr2, dfSqrt(gr2)));");
-          res.push("      else { MF gu2 = dfDiv(gr2, gContact2); gk = dfDiv(dfAdd(dfSub(" + PDF.num(35 / 8) + ", dfMul(" + PDF.num(21 / 4) + ", gu2)), dfMul(" + PDF.num(15 / 8) + ", dfSqr(gu2))), dfMul(gContact2, gContact)); }");
+          res.push("      else { MF gu2 = dfDiv(gr2, gContact2); gk = dfDiv(dfAdd(dfSub(" + PDF.num(15 / 4) + ", dfMul(" + PDF.num(27 / 8) + ", gu2)), dfMul(" + PDF.num(5 / 8) + ", dfMul(gu2, dfSqr(gu2)))), dfMul(gContact2, gContact)); }");
           res.push("      " + out + " = dv2Add(" + out + ", dv2Scale(gd, dfMul(gravGM" + j + ", gk))); }");
         } else {
           res.push("    { vec2 d = vec2(" + pj + ".x - (" + px + "), " + pj + ".y - (" + py + ")); float contact = " + reachExpr[k] + " + " + reachExpr[j] + "; float r2 = dot(d, d);");
           res.push("      float u2 = r2 / (contact * contact);");
           res.push("      " + out + " += (r2 >= contact * contact ? " + fnum(GRAV_G) + " * gravMass" + j + " / (r2 * sqrt(r2))");
-          res.push("        : " + fnum(GRAV_G) + " * gravMass" + j + " / (contact * contact * contact) * (35.0 / 8.0 - 21.0 / 4.0 * u2 + 15.0 / 8.0 * u2 * u2)) * d; }");
+          res.push("        : " + fnum(GRAV_G) + " * gravMass" + j + " / (contact * contact * contact) * (15.0 / 4.0 - 27.0 / 8.0 * u2 + 5.0 / 8.0 * u2 * u2 * u2)) * d; }");
         }
       }
       return res;
@@ -2567,7 +2567,7 @@
             if (collisionsOn) {
               out.push("        if (!dfLess(gr2, gContact2)) { MF gk = dfDiv(DF_ONE, dfMul(gr2, dfSqrt(gr2))); " + target + " = dv2Add(" + target + ", dv2Scale(gd, dfMul(gravGM" + j + ", gk))); } }");
             } else {
-              out.push("        MF gk; if (!dfLess(gr2, gContact2)) { gk = dfDiv(DF_ONE, dfMul(gr2, dfSqrt(gr2))); } else { MF gu2 = dfDiv(gr2, gContact2); MF gPoly = dfAdd(dfSub(" + dfnumG(35 / 8) + ", dfMul(" + dfnumG(21 / 4) + ", gu2)), dfMul(" + dfnumG(15 / 8) + ", dfSqr(gu2))); gk = dfDiv(gPoly, dfMul(gContact2, gContact)); }");
+              out.push("        MF gk; if (!dfLess(gr2, gContact2)) { gk = dfDiv(DF_ONE, dfMul(gr2, dfSqrt(gr2))); } else { MF gu2 = dfDiv(gr2, gContact2); MF gPoly = dfAdd(dfSub(" + dfnumG(15 / 4) + ", dfMul(" + dfnumG(27 / 8) + ", gu2)), dfMul(" + dfnumG(5 / 8) + ", dfMul(gu2, dfSqr(gu2)))); gk = dfDiv(gPoly, dfMul(gContact2, gContact)); }");
               out.push("        " + target + " = dv2Add(" + target + ", dv2Scale(gd, dfMul(gravGM" + j + ", gk))); }");
             }
           } else {
@@ -2575,7 +2575,7 @@
             if (collisionsOn) {
               out.push("        if (r2 >= contact * contact) " + target + " += (" + fnum(GRAV_G) + " * gravMass" + j + " / (r2 * sqrt(r2))) * d; }");
             } else {
-              out.push("        float u2 = r2 / (contact * contact); float poly = (35.0 / 8.0 - 21.0 / 4.0 * u2 + 15.0 / 8.0 * u2 * u2);");
+              out.push("        float u2 = r2 / (contact * contact); float poly = (15.0 / 4.0 - 27.0 / 8.0 * u2 + 5.0 / 8.0 * u2 * u2 * u2);");
               out.push("        " + target + " += (r2 >= contact * contact ? " + fnum(GRAV_G) + " * gravMass" + j + " / (r2 * sqrt(r2)) : " +
                 fnum(GRAV_G) + " * gravMass" + j + " / (contact * contact * contact) * poly) * d; }");
             }

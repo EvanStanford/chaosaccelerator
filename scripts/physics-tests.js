@@ -5572,7 +5572,7 @@
         PhysicsEngine.gravitationalMass(PhysicsEngine.createCircle(0, 0, 30, false));
       function expected(r) {
         var u2 = (r / C) * (r / C);
-        return GM * r / (C * C * C) * (35 / 8 - 21 / 4 * u2 + 15 / 8 * u2 * u2);
+        return GM * r / (C * C * C) * (15 / 4 - 27 / 8 * u2 + 5 / 8 * u2 * u2 * u2);
       }
       var lawErr = Math.max(Math.abs(pullAt(C / 2, false) / expected(C / 2) - 1),
                             Math.abs(pullAt(C / 4, false) / expected(C / 4) - 1));

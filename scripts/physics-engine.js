@@ -129,7 +129,7 @@
     } else {
       var u2 = r2 / (contact * contact);
       pull = MUTUAL_GRAVITY_CONSTANT * gravitationalMass(bodyJ) / (contact * contact * contact) *
-        (35 / 8 - 21 / 4 * u2 + 15 / 8 * u2 * u2);
+        (15 / 4 - 27 / 8 * u2 + 5 / 8 * u2 * u2 * u2);
     }
     return { x: pull * dx, y: pull * dy };
   }

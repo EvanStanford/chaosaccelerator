@@ -587,7 +587,6 @@
     setTargetShown(true);
     listPage.hidden = true;
     playPage.hidden = false;
-    document.title = c.title + ": Chaos Accelerator";
     // replace(): a frame load must not add a history entry of its own.
     engine.contentWindow.location.replace(frameAddress(c, link ? link.slice(link.indexOf("#")) : inheritedStart(c)));
   }
@@ -633,7 +632,6 @@
     listPage.hidden = false;
     engine.contentWindow.location.replace("about:blank");
     targetVideo.removeAttribute("src");
-    document.title = "Challenges: Chaos Accelerator";
     renderLists();
   }
 

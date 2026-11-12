@@ -36,15 +36,15 @@ and higher precisions, running millions of simulations can cause noticeable lag.
 ## Precision
 
 The web app lets you pan and zoom around the map. Once you zoom in far enough,
-neighboring pixels start from values so close together that 32-bit floats
-can't tell them apart. On top of that, the small rounding errors from each step
-grow quickly in a chaotic scene. Together these make the map blocky and
-inaccurate. WebGL2's shader language (GLSL ES 3.00) only has 32-bit floats, not 64
-or more. So to allow higher levels of zoom the app uses floating-point
-expansions (aka multi-float arithmetic). Each number is stored as the sum of
-two, three or four 32-bit floats, and the math is built from error-free
-transformations like TwoSum and TwoProduct. Up to quad-float (four 32-bit
-floats, around 28 significant digits) is supported.
+neighboring pixels start from values so close together that 32-bit floats can't
+tell them apart. On top of that, the small rounding errors from each step grow
+quickly in a chaotic scene. Together these make the map blocky and inaccurate.
+WebGL2's shader language (GLSL ES 3.00) only has 32-bit floats, not 64 or more.
+So to allow higher levels of zoom the app uses floating-point expansions (aka
+multi-float arithmetic). Each number is stored as the sum of two, three or four
+32-bit floats, and the math is built from error-free transformations like TwoSum
+and TwoProduct. Up to quad-float (four 32-bit floats, around 28 significant
+digits) is supported.
 
 Supporting double-float, triple-float and quad-float adds a lot of extra
 complication to the GLSL code and the code that generates it. But more
@@ -142,11 +142,10 @@ things can be done with WebGL.
 
 ## Keeping the map continuous
 
-The initial conditions map turns out to be an excellent tool for finding
-small inaccuracies in the physics simulation code, which usually show up as a sharp
-color edge that shouldn't be there. I have worked hard to get rid of these
-false discontinuities, so that the real structure from the physics is easier to
-see.
+The initial conditions map turns out to be an excellent tool for finding small
+inaccuracies in the physics simulation code, which usually show up as a sharp
+color edge that shouldn't be there. I have worked hard to get rid of these false
+discontinuities, so that the real structure from the physics is easier to see.
 
 For example, events that happen part way through a time step would cause false
 discontinuities if calculated naively. Let's say two objects collide 20% of the
@@ -171,14 +170,22 @@ Once the spring is shorter than its rest length, Hooke's law pushes the right
 circle to the right, harder and harder as it gets closer to the other circle.
 But once the circles pass each other, the force instantly flips to push this
 circle left. That instant jump causes an undesirable edge on the map. A real
-spring can't be squashed down to zero length, so real life doesn't say what
-should happen here anyway. I changed the force curves for springs and gravity
-so they smoothly go to 0 as the distance goes to 0. Gravity is normal
-inverse-square until objects touch, and springs follow Hooke's law until they
-are squashed to an eighth of their rest length. For gravity this is the same
-idea as gravitational softening in N-body simulations.
+spring can't be squashed down to zero length, so we can't look to real life to
+see what should happen here. I have decided to set the force curve for a spring
+to smoothly and without kinks drop to 0 force at 0 length. This removes the
+bifurcation that occurs in this unrealistic scenario.
 
-![Force vs distance curves](assets/force_laws.svg)
+![Spring force vs length](assets/spring_force.svg)
+
+Gravity has a similar issue. With collisions on, gravity acts exactly like it
+does in real life- the inverse square law. But if collisions are turned off,
+planets can get extremely close for which the inverse square would produce near
+infinite forces. To solve this, once overlapping I reduce the planet's gravity
+smoothly with a continuous slope. This is closest to Jupiter's internal gravity.
+If I instead used Earth's internal gravity, the discontinuous slope would cause
+a crease each time a planet passed each kink.
+
+![Gravity vs distance between planets](assets/planet_gravity.svg)
 
 ## No server
 
