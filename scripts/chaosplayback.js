@@ -998,12 +998,38 @@
   // straight from the picture on screen; Download puts the chunks in an MP4 (mp4-muxer.js), with the tone if sound is on.
   var DOWNLOAD_LABEL = "Download";
   var KEYFRAME_EVERY = FPS; // so players can seek
-  // H.264 plays everywhere, so it is tried at every size before VP9 or AV1. High profile, levels 4.0 to 5.2.
+  // H.264 plays everywhere, so it is tried at every size before VP9 or AV1. High profile, levels 4.0 to 5.2,
+  // narrowed to the levels that allow the frame and bitrate.
   var VIDEO_CODECS = [
     ["avc", ["avc1.640028", "avc1.64002a", "avc1.640032", "avc1.640033", "avc1.640034"]],
     ["vp9", ["vp09.00.51.08"]],
     ["av1", ["av01.0.13M.08"]],
   ];
+  // H.264 High levels: [codec, macroblocks per frame, macroblocks per second, bits per second].
+  var AVC_LEVELS = [
+    ["avc1.640028", 8192, 245760, 25e6],
+    ["avc1.64002a", 8704, 522240, 62.5e6],
+    ["avc1.640032", 22080, 589824, 168.75e6],
+    ["avc1.640033", 36864, 983040, 300e6],
+    ["avc1.640034", 36864, 2073600, 300e6],
+  ];
+  var MAX_BITRATE = 250e6;     // 300 fails mid-encode on busy 4K frames on Apple's encoder
+  var BITS_PER_PIXEL = 50;     // per second; detail stops improving past about this
+  var OVERSHOOT_BITS = 5;      // per pixel, spent once, mostly in the first second
+  var MAX_FILE_BYTES = 3e9;    // every chunk is held in memory until Download
+
+  function bitrateFor(width, height, seconds) {
+    var pixels = width * height;
+    var fits = (MAX_FILE_BYTES * 8 - pixels * OVERSHOOT_BITS) / Math.max(1, seconds);
+    return Math.round(Math.max(1e6, Math.min(MAX_BITRATE, pixels * BITS_PER_PIXEL, fits)));
+  }
+
+  function avcLevelsFor(width, height, bitrate) {
+    var blocks = Math.ceil(width / 16) * Math.ceil(height / 16);
+    return AVC_LEVELS.filter(function (level) {
+      return blocks <= level[1] && blocks * FPS <= level[2] && bitrate <= level[3];
+    }).map(function (level) { return level[0]; });
+  }
   // A frame no encoder takes whole is shrunk into these in turn (long side, short side).
   var FILE_BOXES = [[4096, 2304], [3840, 2160], [1920, 1080]];
   var SOUND_RATE = 48000;
@@ -1033,15 +1059,13 @@
       var s = Math.min(box[0] / Math.max(width, height), box[1] / Math.min(width, height));
       if (s < 1) sizes.push([4 * Math.floor(width * s / 4), 2 * Math.floor(height * s / 2)]);
     });
-    var tries = [];
+    var tries = [], seconds = frames.length / FPS;
     VIDEO_CODECS.forEach(function (family) {
       sizes.forEach(function (size) {
-        family[1].forEach(function (codec) {
-          tries.push({ mux: family[0], config: {
-            codec: codec, width: size[0], height: size[1], framerate: FPS,
-            // Generous: fine noise turns to mush at a default bitrate.
-            bitrate: Math.min(60e6, Math.max(8e6, size[0] * size[1] * 12)),
-          } });
+        var bitrate = bitrateFor(size[0], size[1], seconds);
+        var codecs = family[0] === "avc" ? avcLevelsFor(size[0], size[1], bitrate) : family[1];
+        codecs.forEach(function (codec) {
+          tries.push({ mux: family[0], config: { codec: codec, width: size[0], height: size[1], framerate: FPS, bitrate: bitrate } });
         });
       });
     });

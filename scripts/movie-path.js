@@ -77,12 +77,16 @@
 
   // The mean of the moves arriving and leaving, axis by axis, steps and friction included; zero on an axis where
   // they disagree in sign (the camera turns round there, so it rests), at a movie's ends, and beside a hold.
+  // At a movie's ends the steps keep their move's own rate, so a two-keyframe movie plays at one even speed.
   function keyframeVelocities(list, keyframes, loop) {
     return keyframes.map(function (key, i) {
       var arriving = i > 0 ? list[i - 1] : (loop && list.length ? list[list.length - 1] : null);
       var leaving = i < list.length ? list[i] : null;
       var out = { view: [0, 0, 0], steps: 0, friction: 0 };
-      if (!arriving || !leaving) return out;
+      if (!arriving || !leaving) {
+        if (arriving || leaving) out.steps = (arriving || leaving).stepRate;
+        return out;
+      }
       if (arriving.route.length > 0 && leaving.route.length > 0) {
         out.view = [0, 1, 2].map(function (c) {
           var a = arriving.end[c] / arriving.seconds, b = leaving.start[c] / leaving.seconds;

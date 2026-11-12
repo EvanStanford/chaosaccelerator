@@ -3003,13 +3003,13 @@
   }
 
   btnSampleDoublePendulum.addEventListener("click", function () {
-    loadSample("samples/double_pendulum.json?v=m245", "Double Pendulum");
+    loadSample("samples/double_pendulum.json?v=m247", "Double Pendulum");
   });
   btnSamplePinball.addEventListener("click", function () {
-    loadSample("samples/pinball.json?v=m245", "Pinball");
+    loadSample("samples/pinball.json?v=m247", "Pinball");
   });
   btnSampleBinaryStar.addEventListener("click", function () {
-    loadSample("samples/binary_star.json?v=m245", "Binary Star");
+    loadSample("samples/binary_star.json?v=m247", "Binary Star");
   });
   function clearScene() {
     sharedFrame = null;
